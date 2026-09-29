@@ -1,0 +1,19 @@
+[project]
+name = "portkit"
+version = "0.1.0"
+description = "Java -> Bedrock conversion engine: deterministic core, LLM only for the residue."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+portkit = "portkit.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

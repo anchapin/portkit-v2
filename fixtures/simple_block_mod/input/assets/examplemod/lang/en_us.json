@@ -1,0 +1,5 @@
+{
+  "block.examplemod.copper_block": "Copper Block",
+  "item.examplemod.copper_ingot": "Copper Ingot",
+  "itemGroup.examplemod.main": "Example Mod"
+}

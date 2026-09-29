@@ -1,0 +1,5 @@
+name = "residue_mod"
+description = "Deliberately contains what the deterministic path must refuse: a tag ingredient and a tag-typed recipe."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 2

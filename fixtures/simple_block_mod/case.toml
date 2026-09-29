@@ -1,0 +1,5 @@
+name = "simple_block_mod"
+description = "One block: texture, shaped recipe, lang entry. The happy path."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 0

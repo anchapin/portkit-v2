@@ -1,0 +1,49 @@
+# portkit v2 skeleton
+
+A from-scratch layout for the Java -> Bedrock converter. Three ideas:
+
+1. **The deterministic core is a library, not a service.** Textures, recipes, lang
+   files, sounds are schema-to-schema mapping. They run offline, with no API key,
+   no Postgres, no Docker. `portkit convert <mod> <out>` works on a laptop with
+   stdlib Python.
+
+2. **The validator is a hard oracle, not another model.** `portkit.validate`
+   checks generated packs against Bedrock's actual structural rules and returns a
+   machine-readable report. Nothing in the loop asks an LLM whether the output is
+   good.
+
+3. **The agent is a plain loop.** `portkit.agent.loop` is ~100 lines: send
+   messages, get a tool call, run it, append the result, repeat. It is given the
+   validator as a tool so it iterates against real signal. Swap providers by
+   implementing one method. No graph framework.
+
+## Run it
+
+```bash
+pip install -e ".[dev]"
+pytest -q                      # unit tests + golden-fixture parity
+portkit convert fixtures/simple_block_mod/input /tmp/out
+portkit validate /tmp/out
+portkit eval                   # run every fixture, print a coverage table
+```
+
+## Where the LLM goes
+
+Nowhere, until a converter says it cannot handle something. Each converter
+returns `Unhandled` items with the source file and a reason. Those, and only
+those, get handed to the agent loop with the validator attached. If the
+deterministic converters grow to cover a case, the agent stops seeing it. That
+is the direction you want the ratchet to run.
+
+## Layout
+
+```
+src/portkit/
+  converters/      one module per content type, all pure functions
+  validate/        the oracle: structural checks, returns ValidationReport
+  agent/           plain tool loop + tool definitions + fake client for tests
+  pack.py          assemble behavior/resource packs into an .mcaddon
+  cli.py
+fixtures/          golden corpus: input/ java mod, expected/ bedrock output
+tests/             unit tests + fixture parity harness
+```

@@ -1,0 +1,29 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "examplemod (behavior)",
+    "description": "Converted from Java by portkit",
+    "uuid": "0cfef7b8-594d-5df3-b885-0b713ab8be26",
+    "version": [
+      0,
+      1,
+      0
+    ],
+    "min_engine_version": [
+      1,
+      20,
+      10
+    ]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "uuid": "dcf7a721-f558-5839-9ca4-f6982da12810",
+      "version": [
+        0,
+        1,
+        0
+      ]
+    }
+  ]
+}

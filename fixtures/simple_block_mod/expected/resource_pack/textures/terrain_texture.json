@@ -1,0 +1,9 @@
+{
+  "resource_pack_name": "examplemod",
+  "texture_name": "atlas.terrain",
+  "texture_data": {
+    "examplemod:copper_block": {
+      "textures": "textures/blocks/copper_block"
+    }
+  }
+}
