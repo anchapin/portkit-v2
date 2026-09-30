@@ -1,0 +1,40 @@
+{
+  "format_version": "1.20.20",
+  "minecraft:block": {
+    "description": {
+      "identifier": "examplemod:beam",
+      "menu_category": {
+        "category": "construction"
+      },
+      "traits": {
+        "minecraft:placement_position": {
+          "enabled_states": [
+            "minecraft:block_face"
+          ]
+        }
+      }
+    },
+    "components": {
+      "minecraft:geometry": "geometry.examplemod.beam_y",
+      "minecraft:material_instances": {
+        "*": {
+          "texture": "examplemod:beam"
+        }
+      }
+    },
+    "permutations": [
+      {
+        "condition": "q.block_state('minecraft:block_face') == 'east' || q.block_state('minecraft:block_face') == 'west'",
+        "components": {
+          "minecraft:geometry": "geometry.examplemod.beam_x"
+        }
+      },
+      {
+        "condition": "q.block_state('minecraft:block_face') == 'north' || q.block_state('minecraft:block_face') == 'south'",
+        "components": {
+          "minecraft:geometry": "geometry.examplemod.beam_z"
+        }
+      }
+    ]
+  }
+}

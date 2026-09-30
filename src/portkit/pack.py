@@ -47,7 +47,9 @@ def manifest(
             "description": meta.header_description(),
             "uuid": _uuid(namespace, meta.header_name(namespace, kind), kind, "header"),
             "version": list(version),
-            "min_engine_version": [1, 20, 10],
+            # 1.20.20 is the first engine with custom block states and the placement
+            # traits that set them, which the axis pillars rely on.
+            "min_engine_version": [1, 20, 20],
         },
         "modules": [
             {
