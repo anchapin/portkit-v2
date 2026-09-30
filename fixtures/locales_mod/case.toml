@@ -1,0 +1,5 @@
+name = "locales_mod"
+description = "Five Java locales: three Bedrock supports directly, one it names differently, one it has no slot for."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 1
