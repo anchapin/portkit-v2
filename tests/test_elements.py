@@ -39,12 +39,13 @@ def test_uvs_become_offset_and_span():
     assert box["uv"]["up"] == {"uv": [0.0, 0.0], "uv_size": [8.0, 4.0]}
 
 
-def test_a_rotated_element_is_still_refused():
+def test_a_centre_rotation_is_no_longer_refused():
+    """Was refused until the signs were read in game on 2026-09-30."""
     box, why = models.cube(
         {"from": [0, 0, 0], "to": [4, 4, 4], "rotation": {"angle": 45, "axis": "y", "origin": [8, 8, 8]}}
     )
-    assert box is None
-    assert "rotated" in why
+    assert why == ""
+    assert box["rotation"] == [0.0, -45.0, 0.0]
 
 
 def test_elements_wearing_different_textures_are_refused():
@@ -80,11 +81,20 @@ def test_geometry_carries_every_element_as_a_cube():
 
 def test_one_bad_element_refuses_the_whole_model():
     geo, why = models.geometry(
-        {"elements": [{"from": [0, 0, 0], "to": [4, 4, 4]}, {"from": [0, 0, 0], "to": [1, 1, 1], "rotation": {"angle": 22.5, "axis": "x"}}]},
+        {
+            "elements": [
+                {"from": [0, 0, 0], "to": [4, 4, 4]},
+                {
+                    "from": [0, 0, 0],
+                    "to": [1, 1, 1],
+                    "rotation": {"angle": 22.5, "axis": "x", "origin": [0, 3.5, 8]},
+                },
+            ]
+        },
         "geometry.examplemod.thing",
     )
     assert geo is None
-    assert "rotated" in why
+    assert "off the block centre" in why
 
 
 def test_the_asymmetric_fixture_now_converts_whole(tmp_path):
@@ -100,3 +110,64 @@ def test_the_asymmetric_fixture_now_converts_whole(tmp_path):
     geo = json.loads((out / "resource_pack/models/blocks/probe.geo.json").read_text())
     cube = geo["minecraft:geometry"][0]["bones"][0]["cubes"][0]
     assert cube["origin"] == [2.0, 0.0, -8.0]
+
+
+def test_a_centre_rotation_carries_the_observed_sign_per_axis():
+    """Observed in game 2026-09-30: x and y negated, z as written."""
+    for axis, expected in (("x", -22.5), ("y", -22.5), ("z", 22.5)):
+        box, why = models.cube(
+            {
+                "from": [0, 7, 7],
+                "to": [16, 9, 9],
+                "rotation": {"origin": [8, 8, 8], "axis": axis, "angle": 22.5},
+            }
+        )
+        assert why == ""
+        assert box["pivot"] == [0.0, 8.0, 0.0]
+        assert box["rotation"][models._AXIS_INDEX[axis]] == expected
+        assert sum(abs(v) for v in box["rotation"]) == abs(expected)
+
+
+def test_the_sign_table_matches_the_probe_candidates_that_were_confirmed():
+    """The converter and the harness must read the same three answers."""
+    confirmed = {"x": "negated", "y": "negated", "z": "aswritten"}
+    for axis, sign in confirmed.items():
+        element = {
+            "from": [0, 7, 7],
+            "to": [16, 9, 9],
+            "rotation": {"origin": [8, 8, 8], "axis": axis, "angle": 22.5},
+        }
+        ours, _ = models.cube(element)
+        theirs = axis_probe.rotated_cube(element, sign)
+        assert ours["rotation"] == theirs["rotation"]
+        assert ours["pivot"] == theirs["pivot"]
+
+
+def test_an_off_centre_pivot_is_still_refused_with_the_open_question():
+    box, why = models.cube(
+        {
+            "from": [0, 7, 7],
+            "to": [16, 9, 9],
+            "rotation": {"origin": [0, 3.5, 8], "axis": "z", "angle": -22.5},
+        }
+    )
+    assert box is None
+    assert "off the block centre" in why and "#52" in why
+
+
+def test_an_angle_java_never_writes_is_refused():
+    box, why = models.cube(
+        {
+            "from": [0, 7, 7],
+            "to": [16, 9, 9],
+            "rotation": {"origin": [8, 8, 8], "axis": "z", "angle": 30},
+        }
+    )
+    assert box is None
+    assert "30" in why
+
+
+def test_an_unrotated_element_gains_no_rotation_keys():
+    box, why = models.cube({"from": [0, 0, 0], "to": [16, 16, 16]})
+    assert why == ""
+    assert "rotation" not in box and "pivot" not in box

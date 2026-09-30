@@ -65,6 +65,30 @@ X_AXIS_IS_FLIPPED = True
 # question the rotation probe answers.
 JAVA_ROTATION_IS_RIGHT_HANDED = True
 
+# How a Java element rotation has to be signed to look the same in Bedrock.
+# Java's own convention is the right-hand rule (above); what Bedrock does with
+# the same angle is a separate question no specification answers, so it was
+# settled by observation: the rotation probe (`portkit probe --kind rotation`)
+# puts both readings of each axis in one pack, and on 2026-09-30 Alex Chapin
+# placed them in Bedrock on Android and reported that x and y match Java only
+# when negated, while z matches as written. Re-run the probe before trusting
+# this on a new Bedrock version.
+#
+# Worth knowing: this is not the pattern a plain mirrored X axis would predict
+# (that would negate y and z and leave x alone), so the three axes are recorded
+# as three separate observations rather than derived from one rule. If a
+# converted mod ever leans wrong, suspect this table first.
+ROTATION_SIGN = {"x": -1.0, "y": -1.0, "z": 1.0}
+
+# Java only writes these; anything else is a model we have not seen.
+_ALLOWED_ANGLES = (-45.0, -22.5, 0.0, 22.5, 45.0)
+
+# The one pivot we have confirmed. Off-centre origins are issue #52: candidate
+# pivots A [8-ox, oy, oz-8] and B [ox-8, oy, oz-8] agree at the block centre and
+# nowhere else, so the probe that settled the signs said nothing about them.
+_CENTRE_ORIGIN = (8.0, 8.0, 8.0)
+_AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
+
 # A cube in Bedrock geometry is centred on the block: Java's 0..16 becomes
 # -8..8 on X and Z, while Y stays as-is.
 _HALF = 8.0
@@ -139,10 +163,47 @@ def faces(model: dict) -> tuple[dict[str, str] | None, str]:
     return None, f"model parent {parent!r} is not a full cube"
 
 
+def _rotation(element: dict) -> tuple[dict | None, str]:
+    """The Bedrock pivot and degrees for a Java element rotation, or why not."""
+    spec = element.get("rotation")
+    if not spec:
+        return {}, ""
+    if not isinstance(spec, dict):
+        return None, "element has an unreadable rotation"
+
+    axis = spec.get("axis")
+    if axis not in _AXIS_INDEX:
+        return None, f"element rotates about {axis!r}, which is not an axis"
+    try:
+        angle = float(spec.get("angle", 0))
+        origin = [float(v) for v in spec.get("origin", _CENTRE_ORIGIN)]
+    except (TypeError, ValueError):
+        return None, "element has an unreadable rotation angle or origin"
+    if len(origin) != 3:
+        return None, "element rotation origin is not three numbers"
+    if angle not in _ALLOWED_ANGLES:
+        return None, (
+            f"element rotates by {angle} degrees, which Java does not write and "
+            "we have not checked against Bedrock"
+        )
+    if tuple(origin) != _CENTRE_ORIGIN:
+        return None, (
+            f"element rotates about {origin}, off the block centre; the pivot "
+            "mapping for off-centre origins is unverified (issue #52), and the "
+            "two candidates differ everywhere except the centre"
+        )
+
+    degrees = [0.0, 0.0, 0.0]
+    degrees[_AXIS_INDEX[axis]] = angle * ROTATION_SIGN[axis]
+    pivot = [_HALF - origin[0], origin[1], origin[2] - _HALF]
+    return {"pivot": pivot, "rotation": degrees}, ""
+
+
 def cube(element: dict) -> tuple[dict | None, str]:
     """One Java element as a Bedrock geometry cube, or why it cannot be one."""
-    if element.get("rotation"):
-        return None, "element is rotated, which we have not verified a mapping for"
+    turn, reason = _rotation(element)
+    if turn is None:
+        return None, reason
 
     try:
         x1, y1, z1 = (float(v) for v in element["from"])
@@ -172,6 +233,7 @@ def cube(element: dict) -> tuple[dict | None, str]:
         uv[face] = {"uv": [u1, v1], "uv_size": [u2 - u1, v2 - v1]}
     if uv:
         box["uv"] = uv
+    box.update(turn)
     return box, ""
 
 

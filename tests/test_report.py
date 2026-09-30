@@ -30,11 +30,12 @@ def test_every_residue_item_names_its_source_file_and_reason(tmp_path):
         assert item.reason in text
 
 
-def test_the_refused_rotation_shows_up_with_its_reason(tmp_path):
+def test_the_rotated_fixture_now_converts_whole(tmp_path):
+    """Refused until the probe settled the signs; keep it converting."""
     result = _convert("rotated_model_mod", tmp_path)
     text = render(result.tree)
-    assert "## What did not, and why" in text
-    assert any(item.source in text for item in result.unhandled)
+    assert not result.unhandled, [u.reason for u in result.unhandled]
+    assert "Everything in the source was converted." in text
 
 
 def test_coverage_in_the_report_matches_what_the_pipeline_counted(tmp_path):
