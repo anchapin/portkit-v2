@@ -1,0 +1,5 @@
+name = "sounds_mod"
+description = "Custom sound events convert with their ogg files; a vanilla event override, an unknown category and a wav file are reported."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 3
