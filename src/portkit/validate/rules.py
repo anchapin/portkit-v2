@@ -117,6 +117,9 @@ def _check_flipbook(report: ValidationReport, path: Path, rel: str, pack_root: P
         return
 
     tiles: set[str] = set()
+    for path in sorted((pack_root / "loot_tables").rglob("*.json")):
+        _check_loot_table(report, path, f"{prefix}/{path.relative_to(pack_root).as_posix()}")
+
     for index in ("textures/terrain_texture.json", "textures/item_texture.json"):
         index_path = pack_root / index
         if index_path.is_file():
@@ -206,6 +209,52 @@ def _check_lang(report: ValidationReport, path: Path, rel: str) -> None:
             continue
         if "=" not in line:
             report.add(rel, "lang.syntax", f"line {lineno} has no '='")
+
+
+_LOOT_FUNCTIONS = {"set_count", "explosion_decay", "set_data", "looting_enchant"}
+
+
+def _check_loot_table(report: ValidationReport, path: Path, rel: str) -> None:
+    """A loot table Bedrock will actually load.
+
+    Bedrock fails quietly on a malformed table: the block simply drops nothing,
+    which is exactly the wrong-but-looks-fine outcome this project exists to
+    catch, so the shape is checked here rather than in the converter alone.
+    """
+    data = _load(report, path, rel)
+    if data is None:
+        return
+    pools = data.get("pools")
+    if not isinstance(pools, list) or not pools:
+        report.add(rel, "loot.pools", "table has no pools")
+        return
+    for i, pool in enumerate(pools):
+        rolls = pool.get("rolls")
+        if not isinstance(rolls, (int, float)):
+            report.add(rel, "loot.rolls", f"pools[{i}].rolls must be a number")
+        entries = pool.get("entries")
+        if not isinstance(entries, list) or not entries:
+            report.add(rel, "loot.entries", f"pools[{i}] has no entries")
+            continue
+        for j, entry in enumerate(entries):
+            where = f"pools[{i}].entries[{j}]"
+            if entry.get("type") != "item":
+                report.add(rel, "loot.entry_type", f"{where}.type must be 'item'")
+            name = entry.get("name")
+            if not isinstance(name, str) or not _IDENTIFIER.match(name):
+                report.add(rel, "loot.name", f"{where}.name {name!r} is not an identifier")
+            for k, function in enumerate(entry.get("functions") or []):
+                fname = function.get("function")
+                if fname not in _LOOT_FUNCTIONS:
+                    report.add(
+                        rel,
+                        "loot.function",
+                        f"{where}.functions[{k}] uses unsupported function {fname!r}",
+                    )
+                if fname == "set_count" and not isinstance(function.get("count"), (int, float)):
+                    report.add(
+                        rel, "loot.set_count", f"{where}.functions[{k}].count must be a number"
+                    )
 
 
 def validate_pack(pack_root: Path) -> ValidationReport:

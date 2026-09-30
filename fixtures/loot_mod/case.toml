@@ -1,0 +1,5 @@
+name = "loot_mod"
+description = "Plain block drops convert; fortune, silk touch alternatives and a random count are refused with the condition that defeated them."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 3
