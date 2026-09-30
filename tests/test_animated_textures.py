@@ -1,18 +1,35 @@
 """A .mcmeta sidecar becomes a flipbook entry, or becomes residue. Never a static smear."""
 import json
+import struct
+import zlib
 
 import pytest
-from PIL import Image
 
 from portkit.converters import textures
 from portkit.model import SourceMod
 from portkit.pipeline import convert
 
 
+def png_bytes(width: int, height: int) -> bytes:
+    """A real, minimal RGBA png. The converter copies bytes, so no image library needed."""
+    raw = b"".join(b"\x00" + b"\xc8\x5a\x14\xff" * width for _ in range(height))
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        body = kind + payload
+        return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body))
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
 def build(tmp_path, meta, name="bonfire", frames=2):
     block = tmp_path / "assets" / "examplemod" / "textures" / "block"
     block.mkdir(parents=True, exist_ok=True)
-    Image.new("RGBA", (16, 16 * frames), (200, 90, 20, 255)).save(block / f"{name}.png")
+    (block / f"{name}.png").write_bytes(png_bytes(16, 16 * frames))
     if meta is not None:
         (block / f"{name}.png.mcmeta").write_text(json.dumps(meta))
     return SourceMod(root=tmp_path, namespace="examplemod")
