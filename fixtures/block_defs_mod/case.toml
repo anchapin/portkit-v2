@@ -1,0 +1,5 @@
+name = "block_defs_mod"
+description = "Cube blocks convert to Bedrock block definitions; stairs, a cross model and a vanilla texture reference stay residue."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 4

@@ -12,7 +12,7 @@ from .model import ConversionResult
 # Deterministic UUIDs: same mod in, same manifest out, so fixture diffs are clean.
 _NS = uuid.UUID("6f0a7f1e-0a4a-4f2e-9a1b-6a5f0d1c2b3e")
 
-_BEHAVIOR_DIRS = ("recipes/", "entities/", "functions/", "loot_tables/")
+_BEHAVIOR_DIRS = ("recipes/", "entities/", "functions/", "loot_tables/", "blocks/")
 
 
 def _uuid(*parts: str) -> str:

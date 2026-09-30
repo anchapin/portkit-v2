@@ -1,0 +1,11 @@
+{
+  "variants": {
+    "facing=east,half=bottom,shape=straight": {
+      "model": "examplemod:block/steel_stairs"
+    },
+    "facing=north,half=bottom,shape=straight": {
+      "model": "examplemod:block/steel_stairs",
+      "y": 270
+    }
+  }
+}
