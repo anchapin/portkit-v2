@@ -22,6 +22,8 @@ import json
 from pathlib import Path
 
 CANDIDATES = ("direct", "mirrored")
+SIGNS = ("aswritten", "negated")
+AXES = ("x", "y", "z")
 
 _GEOMETRY_FORMAT = "1.16.0"
 _BLOCK_FORMAT = "1.20.10"
@@ -129,5 +131,94 @@ def pack_files(model_file: Path, texture_file: Path, namespace: str) -> dict[str
         "resource_pack_name": namespace,
         "texture_name": "atlas.terrain",
         "texture_data": {texture_key: {"textures": "textures/blocks/probe"}},
+    }
+    return files
+
+
+# ---------------------------------------------------------------- rotation --
+#
+# The X axis is settled (see converters/models.X_AXIS_IS_FLIPPED), and a mirror
+# on X should negate a rotation about Y and about Z while leaving one about X
+# alone. Should. That is a prediction from the mirror, not something anyone
+# documented, and a wrong sign gives you a model that loads, renders, and leans
+# the wrong way. So the same trick: both signs, side by side, one look.
+#
+# Pivot is deliberately not probed here. Every bar below turns about the block
+# centre, where the pivot transform is the identity, so the only thing these
+# blocks can disagree about is the sign. A Java rotation about any other origin
+# stays refused until it gets a probe of its own.
+
+_JAVA_AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
+
+
+def rotated_cube(element: dict, sign: str) -> dict:
+    """A Java rotated element as a Bedrock cube, under one reading of the sign."""
+    cube = _cube(element, "mirrored")
+    rotation = element.get("rotation") or {}
+    angle = float(rotation.get("angle", 0))
+    axis = str(rotation.get("axis", "y"))
+    origin = [float(v) for v in rotation.get("origin", [8, 8, 8])]
+
+    degrees = [0.0, 0.0, 0.0]
+    degrees[_JAVA_AXIS_INDEX[axis]] = -angle if sign == "negated" else angle
+    cube["pivot"] = [8 - origin[0], origin[1], origin[2] - 8]
+    cube["rotation"] = degrees
+    return cube
+
+
+def rotation_pack_files(
+    model_dir: Path, texture_file: Path, namespace: str
+) -> dict[str, object]:
+    """One block per axis per sign: six blocks, three questions, one look."""
+    files: dict[str, object] = {}
+    labels = []
+    for axis in AXES:
+        model_file = model_dir / f"rot_{axis}.json"
+        model = json.loads(model_file.read_text())
+        if not model.get("elements"):
+            raise ValueError(f"{model_file} has no elements to probe with")
+        for sign in SIGNS:
+            name = f"rot_{axis}_{sign}"
+            identifier = f"geometry.{namespace}.{name}"
+            files[f"models/blocks/{name}.geo.json"] = {
+                "format_version": _GEOMETRY_FORMAT,
+                "minecraft:geometry": [
+                    {
+                        "description": {
+                            "identifier": identifier,
+                            "texture_width": 16,
+                            "texture_height": 16,
+                            "visible_bounds_width": 3,
+                            "visible_bounds_height": 3,
+                            "visible_bounds_offset": [0, 0.75, 0],
+                        },
+                        "bones": [
+                            {
+                                "name": "root",
+                                "pivot": [0, 0, 0],
+                                "cubes": [
+                                    rotated_cube(e, sign) for e in model["elements"]
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+            files[f"blocks/{name}.json"] = block(
+                namespace, name, identifier, f"{namespace}:probe"
+            )
+            written = "as written" if sign == "aswritten" else "negated"
+            labels.append(
+                f"tile.{namespace}:{name}.name={axis.upper()} {written} (+22.5 about {axis.upper()})"
+                if sign == "aswritten"
+                else f"tile.{namespace}:{name}.name={axis.upper()} negated (-22.5 about {axis.upper()})"
+            )
+
+    files["texts/en_US.lang"] = "\n".join(labels + [""])
+    files["textures/blocks/probe.png"] = texture_file.read_bytes()
+    files["textures/terrain_texture.json"] = {
+        "resource_pack_name": namespace,
+        "texture_name": "atlas.terrain",
+        "texture_data": {f"{namespace}:probe": {"textures": "textures/blocks/probe"}},
     }
     return files

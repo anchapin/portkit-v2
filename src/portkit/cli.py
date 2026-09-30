@@ -62,25 +62,41 @@ def cmd_probe(args) -> int:
     from .model import ConversionResult
     from .pack import addon_name, write_mcaddon, write_tree
 
-    model = Path(args.model)
-    texture = Path(args.texture)
     out = Path(args.out)
+    texture = Path(args.texture)
     try:
-        files = axis_probe.pack_files(model, texture, args.namespace)
+        if args.kind == "rotation":
+            files = axis_probe.rotation_pack_files(
+                Path(args.models), texture, args.namespace
+            )
+        else:
+            files = axis_probe.pack_files(Path(args.model), texture, args.namespace)
     except (OSError, ValueError) as exc:
         print(f"cannot build the probe: {exc}", file=sys.stderr)
         return 2
 
-    meta = ModMetadata(mod_id="axis_probe", name="Axis Probe")
+    label = {"axis": ("axis_probe", "Axis Probe"), "rotation": ("rotation_probe", "Rotation Probe")}
+    mod_id, title = label[args.kind]
+    meta = ModMetadata(mod_id=mod_id, name=title)
     tree = write_tree(ConversionResult(files=files), args.namespace, out, meta)
     addon = write_mcaddon(tree, out / addon_name(args.namespace, meta))
     print(f"probe tree:  {tree}")
     print(f"install:     {addon} ({addon.stat().st_size:,} bytes)")
-    print(
-        "\nPlace both blocks, face north, and note which one matches the Java render:\n"
-        "  Probe A (axes agree)  -> origin.x = from.x - 8\n"
-        "  Probe B (X flipped)   -> origin.x = 8 - to.x"
-    )
+    if args.kind == "rotation":
+        print(
+            "\nSix blocks, one question per axis: which sign leans the way Java does?\n"
+            "  X as written / X negated   (Java rotates +22.5 about X)\n"
+            "  Y as written / Y negated\n"
+            "  Z as written / Z negated\n"
+            "Every bar turns about the block centre, so the sign is the only "
+            "thing they disagree about."
+        )
+    else:
+        print(
+            "\nPlace both blocks, face north, and note which one matches the Java render:\n"
+            "  Probe A (axes agree)  -> origin.x = from.x - 8\n"
+            "  Probe B (X flipped)   -> origin.x = 8 - to.x"
+        )
     return 0
 
 
@@ -128,8 +144,17 @@ def main(argv=None) -> int:
     p.add_argument("tree")
     p.set_defaults(func=cmd_validate)
 
-    p = sub.add_parser("probe", help="build the axis probe pack (dev harness)")
+    p = sub.add_parser("probe", help="build a verification probe pack (dev harness)")
     p.add_argument("out")
+    p.add_argument(
+        "--kind", choices=("axis", "rotation"), default="axis",
+        help="axis: is Bedrock's X flipped. rotation: which way a rotation leans.",
+    )
+    p.add_argument(
+        "--models",
+        default=str(FIXTURES / "rotated_model_mod/input/assets/examplemod/models/block"),
+        help="directory holding rot_x.json, rot_y.json, rot_z.json (rotation probe)",
+    )
     p.add_argument(
         "--model",
         default=str(FIXTURES / "asymmetric_model_mod/input/assets/examplemod/models/block/probe.json"),
