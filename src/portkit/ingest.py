@@ -4,7 +4,7 @@ A Java mod ships as a .jar, which is a zip of compiled classes plus the
 resource tree the converters actually care about (assets/ and data/). This
 module stages that tree onto disk and is honest about everything it drops.
 
-Nothing here guesses. Compiled code and extra namespaces are reported as
+Nothing here guesses. Compiled code and jar-in-jar dependencies are reported as
 residue rather than silently ignored.
 """
 from __future__ import annotations
@@ -74,14 +74,6 @@ class Ingested:
                     source=name,
                     kind="nested_jar",
                     reason="jar-in-jar dependency not unpacked; its resources are not converted",
-                )
-            )
-        for extra in self.namespaces[1:]:
-            items.append(
-                Unhandled(
-                    source=extra,
-                    kind="extra_namespace",
-                    reason="only the primary namespace is converted so far (see issue #4)",
                 )
             )
         return items
