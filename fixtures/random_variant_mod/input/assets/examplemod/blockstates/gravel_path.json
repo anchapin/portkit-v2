@@ -1,0 +1,21 @@
+{
+  "variants": {
+    "": [
+      {
+        "model": "examplemod:block/gravel_path"
+      },
+      {
+        "model": "examplemod:block/gravel_path",
+        "y": 90
+      },
+      {
+        "model": "examplemod:block/gravel_path",
+        "y": 180
+      },
+      {
+        "model": "examplemod:block/gravel_path",
+        "y": 270
+      }
+    ]
+  }
+}

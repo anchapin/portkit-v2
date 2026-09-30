@@ -74,6 +74,59 @@ def _axis_variants(blockstate: dict) -> tuple[dict[str, str] | None, str]:
     return models_by_axis, ""
 
 
+def _random_variant(entries: list) -> tuple[str | None, str]:
+    """The model to ship when Java picks between several at random.
+
+    Java varies a block's look per position: two whole models for a bonfire,
+    one model at four y rotations for rocky dirt. Bedrock has no equivalent for
+    a custom block below format 1.21.80's isotropic UVs, well above our engine
+    floor, so a converted block looks the same everywhere. That is a reduction,
+    not a wrong port, so it converts and the loss is recorded as a note.
+    """
+    picks = [e for e in entries if isinstance(e, dict) and isinstance(e.get("model"), str)]
+    if not picks:
+        return None, "blockstate picks randomly between entries that name no model"
+
+    first = picks[0]
+    if any(first.get(k) for k in ("x", "uvlock")):
+        return None, (
+            "blockstate picks randomly, and its first model is rotated, which the "
+            "full block geometry cannot express"
+        )
+    return first["model"], ""
+
+
+def _claim_alternates(
+    mod: SourceMod, result: ConversionResult, entries: list, chosen: str
+) -> None:
+    """Mark the random models we did not ship as seen."""
+    for entry in entries:
+        ref = entry.get("model") if isinstance(entry, dict) else None
+        if not isinstance(ref, str) or ref == chosen:
+            continue
+        path = models.model_path(mod, ref)
+        if path is not None and path.is_file():
+            result.claim(mod, path)
+
+
+def _random_note(name: str, entries: list) -> str:
+    """What was lost by shipping one of several random looks."""
+    picks = [e for e in entries if isinstance(e, dict) and isinstance(e.get("model"), str)]
+    named = {e["model"].split("/")[-1] for e in picks}
+    if len(named) == 1:
+        turns = sorted({int(e.get("y", 0)) for e in picks})
+        return (
+            f"{name}: Java turns this block to {len(turns)} random rotations "
+            f"({', '.join(f'{t} deg' for t in turns)}); every Bedrock one faces the "
+            "same way"
+        )
+    return (
+        f"{name}: Java picks at random between {len(named)} models "
+        f"({', '.join(sorted(named))}); Bedrock ships {picks[0]['model'].split('/')[-1]} "
+        "everywhere"
+    )
+
+
 def _single_model(blockstate: dict) -> tuple[str | None, str]:
     """The one model a stateless block uses, or why it has more than one."""
     if "multipart" in blockstate:
@@ -89,7 +142,7 @@ def _single_model(blockstate: dict) -> tuple[str | None, str]:
         )
     entry = variants[""]
     if isinstance(entry, list):
-        return None, "blockstate picks randomly between models"
+        return _random_variant(entry)
     model = entry.get("model") if isinstance(entry, dict) else None
     if not isinstance(model, str):
         return None, "variant names no model"
@@ -196,6 +249,12 @@ def convert(mod: SourceMod) -> ConversionResult:
         if model_ref is None:
             result.unhandled.append(Unhandled(rel, "block", why))
             continue
+        random_entry = (blockstate.get("variants") or {}).get("")
+        if isinstance(random_entry, list):
+            result.notes.append(_random_note(name, random_entry))
+            # The models we passed over were read and rejected on purpose, so
+            # they are accounted for rather than left looking unconverted.
+            _claim_alternates(mod, result, random_entry, model_ref)
 
         identifier, instances, geo, why = _model_block(mod, result, model_ref, name)
         if identifier is None:

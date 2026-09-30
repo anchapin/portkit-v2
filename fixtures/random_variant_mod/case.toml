@@ -1,0 +1,4 @@
+namespace = "examplemod"
+description = "Two blockstates that pick at random: two models for pebbles, four turns of one model for the path. Both ship one fixed look, with the loss recorded as a note."
+expect_valid = true
+expect_unhandled = 0

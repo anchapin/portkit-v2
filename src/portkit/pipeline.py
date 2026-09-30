@@ -97,6 +97,7 @@ def merge_namespaces(results: dict[str, "ConversionResult"]) -> "ConversionResul
     for namespace, result in results.items():
         merged.consumed |= result.consumed
         merged.unhandled.extend(result.unhandled)
+        merged.notes.extend(result.notes)
         for path, value in result.files.items():
             if path not in merged.files:
                 merged.files[path] = value
@@ -122,15 +123,20 @@ class PipelineResult:
     # Every namespace converted, primary first, with how many files each produced.
     namespaces: dict[str, int] = field(default_factory=dict)
 
+    # Reductions recorded by converters: something shipped, with a detail
+    # Bedrock cannot carry.
+    reductions: list[str] = field(default_factory=list)
+
     @property
     def notes(self) -> list[str]:
         """Things worth saying about the mod itself, not about its files.
 
         Kept out of the residue list on purpose: residue is source files an
         agent can work on, and coverage arithmetic counts files. A guessed
-        version is neither, but it still cannot go unsaid.
+        version is neither, and neither is a block that shipped without its
+        random variety, but neither can go unsaid.
         """
-        return self.meta.notes
+        return [*self.meta.notes, *self.reductions]
 
     @property
     def residue_count(self) -> int:
@@ -213,5 +219,13 @@ def convert(
                 json.dumps([u.__dict__ for u in unhandled], indent=2) + "\n"
             )
         return PipelineResult(
-            tree, namespace, report, unhandled, len(result.files), meta, addon, counts
+            tree,
+            namespace,
+            report,
+            unhandled,
+            len(result.files),
+            meta,
+            addon,
+            counts,
+            reductions=result.notes,
         )

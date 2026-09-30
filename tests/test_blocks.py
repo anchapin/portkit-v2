@@ -235,3 +235,70 @@ def test_a_pillar_names_the_axis_that_failed(tmp_path):
     mod = build_axis(tmp_path, textures={"z": "minecraft:block/stone"})
     result = blocks.convert(mod)
     assert any(item.reason.startswith("axis=z:") for item in result.unhandled)
+
+
+def test_random_models_ship_the_first_with_a_note(tmp_path):
+    """Java picks between two models; Bedrock gets the first and says so."""
+    blockstate = {
+        "variants": {
+            "": [
+                {"model": "examplemod:block/steel_block"},
+                {"model": "examplemod:block/steel_block_alt"},
+            ]
+        }
+    }
+    result = blocks.convert(build(tmp_path, blockstate, CUBE_ALL))
+
+    assert result.unhandled == []
+    components = result.files["blocks/steel_block.json"]["minecraft:block"]["components"]
+    assert components["minecraft:material_instances"]["*"]["texture"] == (
+        "examplemod:steel_block"
+    )
+    note = "".join(result.notes)
+    assert "steel_block_alt" in note
+    assert "at random" in note
+
+
+def test_random_turns_of_one_model_ship_one_facing(tmp_path):
+    """Four random y turns of a single model converge on the unturned one."""
+    blockstate = {
+        "variants": {
+            "": [
+                {"model": "examplemod:block/steel_block"},
+                {"model": "examplemod:block/steel_block", "y": 90},
+                {"model": "examplemod:block/steel_block", "y": 180},
+                {"model": "examplemod:block/steel_block", "y": 270},
+            ]
+        }
+    }
+    result = blocks.convert(build(tmp_path, blockstate, CUBE_ALL))
+
+    assert result.unhandled == []
+    assert "blocks/steel_block.json" in result.files
+    note = "".join(result.notes)
+    assert "4 random rotations" in note
+    assert "same way" in note
+
+
+def test_a_random_first_model_that_is_rotated_is_still_refused(tmp_path):
+    """Nothing here says which way the unrotated block should face."""
+    blockstate = {
+        "variants": {
+            "": [
+                {"model": "examplemod:block/steel_block", "x": 90},
+                {"model": "examplemod:block/steel_block"},
+            ]
+        }
+    }
+    result = blocks.convert(build(tmp_path, blockstate, CUBE_ALL))
+
+    assert result.files == {}
+    assert "rotated" in result.unhandled[0].reason
+
+
+def test_random_entries_naming_no_model_are_refused(tmp_path):
+    blockstate = {"variants": {"": [{"y": 90}, {"y": 180}]}}
+    result = blocks.convert(build(tmp_path, blockstate, CUBE_ALL))
+
+    assert result.files == {}
+    assert "name no model" in result.unhandled[0].reason

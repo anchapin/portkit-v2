@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "": [
+      {
+        "model": "examplemod:block/pebbles"
+      },
+      {
+        "model": "examplemod:block/pebbles_alt"
+      }
+    ]
+  }
+}
