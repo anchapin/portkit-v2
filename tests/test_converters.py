@@ -38,5 +38,7 @@ def test_tag_ingredients_become_residue_not_guesses(fixtures_dir):
     assert result.files == {}
     reasons = sorted(u.reason for u in result.unhandled)
     assert len(reasons) == 2
-    assert any("tag" in r for r in reasons)
-    assert any("unsupported recipe type" in r for r in reasons)
+    # a modded tag with no single vanilla item behind it
+    assert any("c:ingots/steel" in r for r in reasons)
+    # and a recipe type Bedrock models differently
+    assert any("smithing" in r for r in reasons)

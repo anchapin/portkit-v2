@@ -10,11 +10,78 @@ import json
 
 from ..model import ConversionResult, SourceMod, Unhandled
 
+# Java type -> (Bedrock body key, crafting tags).
+# Bedrock has no separate stonecutter recipe type: a stonecutter recipe is a
+# shapeless one tagged for that block, which is also how the vanilla packs do it.
 _SUPPORTED = {
-    "minecraft:crafting_shaped": "minecraft:recipe_shaped",
-    "minecraft:crafting_shapeless": "minecraft:recipe_shapeless",
-    "minecraft:smelting": "minecraft:recipe_furnace",
+    "minecraft:crafting_shaped": ("minecraft:recipe_shaped", ["crafting_table"]),
+    "minecraft:crafting_shapeless": ("minecraft:recipe_shapeless", ["crafting_table"]),
+    "minecraft:smelting": ("minecraft:recipe_furnace", ["furnace"]),
+    "minecraft:blasting": ("minecraft:recipe_furnace", ["blast_furnace"]),
+    "minecraft:smoking": ("minecraft:recipe_furnace", ["smoker"]),
+    "minecraft:campfire_cooking": ("minecraft:recipe_furnace", ["campfire", "soul_campfire"]),
+    "minecraft:stonecutting": ("minecraft:recipe_shapeless", ["stonecutter"]),
 }
+
+_FURNACE_TYPES = {
+    "minecraft:smelting",
+    "minecraft:blasting",
+    "minecraft:smoking",
+    "minecraft:campfire_cooking",
+}
+
+# Types with a real Bedrock equivalent we deliberately do not attempt yet, so the
+# residue says why instead of "unsupported".
+_KNOWN_UNSUPPORTED = {
+    "minecraft:smithing_transform": "smithing recipes need a template item Bedrock models differently",
+    "minecraft:smithing_trim": "armour trims have no Bedrock recipe form",
+    "minecraft:crafting_transmute": "transmute recipes have no Bedrock equivalent",
+}
+
+# Convention tags that name exactly one vanilla item. Both loaders ship these
+# (Forge under forge:, Fabric and NeoForge under c:) and a mod using one means
+# the single vanilla item in practice. Anything not here stays residue: a tag
+# covering several items is a choice, and guessing which one is how you ship a
+# recipe that crafts the wrong thing.
+_SINGLE_ITEM_TAGS = {
+    "ingots/iron": "minecraft:iron_ingot",
+    "ingots/gold": "minecraft:gold_ingot",
+    "ingots/copper": "minecraft:copper_ingot",
+    "ingots/netherite": "minecraft:netherite_ingot",
+    "ingots/brick": "minecraft:brick",
+    "gems/diamond": "minecraft:diamond",
+    "gems/emerald": "minecraft:emerald",
+    "gems/lapis": "minecraft:lapis_lazuli",
+    "gems/quartz": "minecraft:quartz",
+    "gems/amethyst": "minecraft:amethyst_shard",
+    "gems/prismarine": "minecraft:prismarine_shard",
+    "dusts/redstone": "minecraft:redstone",
+    "dusts/glowstone": "minecraft:glowstone_dust",
+    "rods/wooden": "minecraft:stick",
+    "rods/blaze": "minecraft:blaze_rod",
+    "nuggets/iron": "minecraft:iron_nugget",
+    "nuggets/gold": "minecraft:gold_nugget",
+    "leather": "minecraft:leather",
+    "string": "minecraft:string",
+    "gunpowder": "minecraft:gunpowder",
+    "obsidian": "minecraft:obsidian",
+    "ender_pearls": "minecraft:ender_pearl",
+    "slimeballs": "minecraft:slime_ball",
+    "feathers": "minecraft:feather",
+    "bones": "minecraft:bone",
+    "eggs": "minecraft:egg",
+    "netherrack": "minecraft:netherrack",
+    "glowstone": "minecraft:glowstone",
+}
+_TAG_NAMESPACES = ("forge:", "c:", "neoforge:")
+
+
+def resolve_tag(tag: str) -> str | None:
+    """A convention tag that unambiguously means one vanilla item, or None."""
+    for prefix in _TAG_NAMESPACES:
+        if tag.startswith(prefix):
+            return _SINGLE_ITEM_TAGS.get(tag[len(prefix):])
+    return None
 
 
 def _item(spec) -> dict | None:
@@ -26,8 +93,17 @@ def _item(spec) -> dict | None:
             return {"item": spec["item"]}
         if "id" in spec:
             return {"item": spec["id"]}
-    # tags and weighted lists have no clean 1:1 Bedrock form
+        if "tag" in spec:
+            resolved = resolve_tag(str(spec["tag"]))
+            return {"item": resolved} if resolved else None
+    # multi-item tags and weighted lists have no clean 1:1 Bedrock form
     return None
+
+
+def _tag_reason(spec) -> str:
+    if isinstance(spec, dict) and "tag" in spec:
+        return f"ingredient uses tag {spec['tag']!r}, which covers more than one item"
+    return "ingredient uses a tag or item list"
 
 
 def convert(mod: SourceMod) -> ConversionResult:
@@ -48,51 +124,59 @@ def convert(mod: SourceMod) -> ConversionResult:
             continue
 
         java_type = recipe.get("type")
-        bedrock_type = _SUPPORTED.get(java_type)
-        if bedrock_type is None:
-            result.unhandled.append(
-                Unhandled(rel, "recipe", f"unsupported recipe type {java_type!r}")
+        mapping = _SUPPORTED.get(java_type)
+        if mapping is None:
+            why = _KNOWN_UNSUPPORTED.get(
+                java_type, f"unsupported recipe type {java_type!r}"
             )
+            result.unhandled.append(Unhandled(rel, "recipe", why))
             continue
+        bedrock_type, tags = mapping
 
         identifier = f"{mod.namespace}:{path.stem}"
         body: dict = {
             "description": {"identifier": identifier},
-            "tags": ["crafting_table"],
+            "tags": list(tags),
         }
 
         if java_type == "minecraft:crafting_shaped":
             key = {}
-            unmapped = False
+            unmapped = ""
             for symbol, spec in (recipe.get("key") or {}).items():
                 mapped = _item(spec)
                 if mapped is None:
-                    unmapped = True
+                    unmapped = _tag_reason(spec)
                     break
                 key[symbol] = mapped
             if unmapped:
-                result.unhandled.append(
-                    Unhandled(rel, "recipe", "ingredient uses a tag or item list")
-                )
+                result.unhandled.append(Unhandled(rel, "recipe", unmapped))
                 continue
             body["pattern"] = recipe.get("pattern", [])
             body["key"] = key
         elif java_type == "minecraft:crafting_shapeless":
-            ingredients = [_item(i) for i in recipe.get("ingredients", [])]
+            specs = recipe.get("ingredients", [])
+            ingredients = [_item(i) for i in specs]
             if any(i is None for i in ingredients):
-                result.unhandled.append(
-                    Unhandled(rel, "recipe", "ingredient uses a tag or item list")
-                )
+                bad = next(s for s, i in zip(specs, ingredients) if i is None)
+                result.unhandled.append(Unhandled(rel, "recipe", _tag_reason(bad)))
                 continue
             body["ingredients"] = ingredients
-        else:  # smelting
+        elif java_type == "minecraft:stonecutting":
+            # One input, one output, expressed as a shapeless recipe on the stonecutter.
             ingredient = _item(recipe.get("ingredient"))
             if ingredient is None:
                 result.unhandled.append(
-                    Unhandled(rel, "recipe", "ingredient uses a tag or item list")
+                    Unhandled(rel, "recipe", _tag_reason(recipe.get("ingredient")))
                 )
                 continue
-            body["tags"] = ["furnace"]
+            body["ingredients"] = [ingredient]
+        else:  # the furnace family
+            ingredient = _item(recipe.get("ingredient"))
+            if ingredient is None:
+                result.unhandled.append(
+                    Unhandled(rel, "recipe", _tag_reason(recipe.get("ingredient")))
+                )
+                continue
             body["input"] = ingredient
 
         out = _item(recipe.get("result"))
@@ -102,6 +186,9 @@ def convert(mod: SourceMod) -> ConversionResult:
         count = 1
         if isinstance(recipe.get("result"), dict):
             count = recipe["result"].get("count", 1)
+        elif "count" in recipe:
+            # stonecutting keeps the count beside the result, not inside it
+            count = recipe["count"]
         body["result"] = {**out, "count": count} if count != 1 else out
 
         result.files[f"recipes/{path.stem}.json"] = {

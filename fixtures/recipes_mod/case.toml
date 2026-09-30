@@ -1,0 +1,5 @@
+name = "recipes_mod"
+description = "Every recipe type with a genuine Bedrock equivalent, plus convention tags that name one vanilla item."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 0

@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:campfire_cooking",
+  "ingredient": {
+    "item": "examplemod:root"
+  },
+  "result": {
+    "item": "examplemod:cooked_root"
+  }
+}
