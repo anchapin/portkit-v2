@@ -69,20 +69,38 @@ def cmd_probe(args) -> int:
             files = axis_probe.rotation_pack_files(
                 Path(args.models), texture, args.namespace
             )
+        elif args.kind == "pivot":
+            files = axis_probe.pivot_pack_files(
+                Path(args.model), texture, args.namespace
+            )
         else:
             files = axis_probe.pack_files(Path(args.model), texture, args.namespace)
     except (OSError, ValueError) as exc:
         print(f"cannot build the probe: {exc}", file=sys.stderr)
         return 2
 
-    label = {"axis": ("axis_probe", "Axis Probe"), "rotation": ("rotation_probe", "Rotation Probe")}
+    label = {
+        "axis": ("axis_probe", "Axis Probe"),
+        "rotation": ("rotation_probe", "Rotation Probe"),
+        "pivot": ("pivot_probe", "Pivot Probe"),
+    }
     mod_id, title = label[args.kind]
     meta = ModMetadata(mod_id=mod_id, name=title)
     tree = write_tree(ConversionResult(files=files), args.namespace, out, meta)
     addon = write_mcaddon(tree, out / addon_name(args.namespace, meta))
     print(f"probe tree:  {tree}")
     print(f"install:     {addon} ({addon.stat().st_size:,} bytes)")
-    if args.kind == "rotation":
+    if args.kind == "pivot":
+        print(
+            "\nTwo blocks, one question. Both turn the same cube +45 about Z "
+            "around an origin\neight blocks west of centre, and differ only in "
+            "where that pivot lands:\n"
+            "  A pivot mirrored    -> pivot.x = 8 - origin.x\n"
+            "  B pivot as written  -> pivot.x = origin.x - 8\n"
+            f"Java renders the cube {axis_probe.PIVOT_EXPECTED}. Whichever block "
+            "matches is the mapping."
+        )
+    elif args.kind == "rotation":
         print(
             "\nSix blocks, one question per axis: which sign leans the way Java does?\n"
             "  X as written / X negated   (Java rotates +22.5 about X)\n"
@@ -171,8 +189,11 @@ def main(argv=None) -> int:
     p = sub.add_parser("probe", help="build a verification probe pack (dev harness)")
     p.add_argument("out")
     p.add_argument(
-        "--kind", choices=("axis", "rotation"), default="axis",
-        help="axis: is Bedrock's X flipped. rotation: which way a rotation leans.",
+        "--kind", choices=("axis", "rotation", "pivot"), default="axis",
+        help=(
+            "axis: is Bedrock's X flipped. rotation: which way a rotation leans. "
+            "pivot: where an off-centre rotation origin lands."
+        ),
     )
     p.add_argument(
         "--models",

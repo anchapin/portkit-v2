@@ -231,3 +231,100 @@ def rotation_pack_files(
         "texture_data": {f"{namespace}:probe": {"textures": "textures/blocks/probe"}},
     }
     return files
+
+
+# ------------------------------------------------------------------- pivot --
+#
+# The rotation probe settled the sign with every bar turning about the block
+# centre, where both pivot mappings in issue #52 collapse to the same point. Off
+# centre they diverge, and they diverge in opposite directions, so one look
+# settles it. Both blocks below carry the same confirmed cube transform and the
+# same confirmed sign; the pivot mapping is the only thing they disagree about.
+#
+# Candidate A mirrors the pivot the way the cube origin is mirrored, on the
+# reading that pivot and cube live in one space.
+# Candidate B leaves the pivot in Java's unmirrored space.
+
+PIVOTS = ("mirrored", "unmirrored")
+
+# Where Java puts the probe cube: a 4x4x4 block centre cube turned +45 about z
+# around [0, 8, 8], which lifts it to about y 13.7 and slides it west to
+# about x 5.7. High and slightly west of centre, near the top face.
+PIVOT_EXPECTED = "high up, just west of centre"
+
+
+def pivot_cube(element: dict, mapping: str) -> dict:
+    """A rotated element as a Bedrock cube, under one reading of the pivot."""
+    cube = _cube(element, "mirrored")
+    rotation = element.get("rotation") or {}
+    angle = float(rotation.get("angle", 0))
+    axis = str(rotation.get("axis", "z"))
+    origin = [float(v) for v in rotation.get("origin", [8, 8, 8])]
+
+    degrees = [0.0, 0.0, 0.0]
+    # The signs are settled: x and y negate, z is as written.
+    sign = {"x": -1.0, "y": -1.0, "z": 1.0}[axis]
+    degrees[_JAVA_AXIS_INDEX[axis]] = angle * sign
+
+    x = 8 - origin[0] if mapping == "mirrored" else origin[0] - 8
+    cube["pivot"] = [x, origin[1], origin[2] - 8]
+    cube["rotation"] = degrees
+    return cube
+
+
+def pivot_pack_files(
+    model_file: Path, texture_file: Path, namespace: str
+) -> dict[str, object]:
+    """Two blocks, one question: which way does an off-centre pivot map?"""
+    model = json.loads(model_file.read_text())
+    if not model.get("elements"):
+        raise ValueError(f"{model_file} has no elements to probe with")
+    if not any((e.get("rotation") or {}).get("origin", [8, 8, 8]) != [8, 8, 8]
+               for e in model["elements"]):
+        raise ValueError(f"{model_file} turns about the centre, so it probes nothing")
+
+    files: dict[str, object] = {}
+    labels = []
+    for mapping in PIVOTS:
+        name = f"pivot_{mapping}"
+        identifier = f"geometry.{namespace}.{name}"
+        files[f"models/blocks/{name}.geo.json"] = {
+            "format_version": _GEOMETRY_FORMAT,
+            "minecraft:geometry": [
+                {
+                    "description": {
+                        "identifier": identifier,
+                        "texture_width": 16,
+                        "texture_height": 16,
+                        "visible_bounds_width": 3,
+                        "visible_bounds_height": 3,
+                        "visible_bounds_offset": [0, 0.75, 0],
+                    },
+                    "bones": [
+                        {
+                            "name": "root",
+                            "pivot": [0, 0, 0],
+                            "cubes": [
+                                pivot_cube(e, mapping) for e in model["elements"]
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        files[f"blocks/{name}.json"] = block(
+            namespace, name, identifier, f"{namespace}:probe"
+        )
+        title = "A pivot mirrored" if mapping == "mirrored" else "B pivot as written"
+        labels.append(
+            f"tile.{namespace}:{name}.name={title} (Java: {PIVOT_EXPECTED})"
+        )
+
+    files["texts/en_US.lang"] = "\n".join(labels + [""])
+    files["textures/blocks/probe.png"] = texture_file.read_bytes()
+    files["textures/terrain_texture.json"] = {
+        "resource_pack_name": namespace,
+        "texture_name": "atlas.terrain",
+        "texture_data": {f"{namespace}:probe": {"textures": "textures/blocks/probe"}},
+    }
+    return files
