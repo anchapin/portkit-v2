@@ -1,0 +1,5 @@
+name = "animated_block_mod"
+description = "An animated texture strip with a .mcmeta sidecar, next to a plain static texture."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 0

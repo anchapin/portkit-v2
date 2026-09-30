@@ -108,6 +108,43 @@ def _check_texture_index(report: ValidationReport, path: Path, rel: str, pack_ro
             report.add(rel, "texture_index.missing", f"{name}: {target}.png not in pack")
 
 
+def _check_flipbook(report: ValidationReport, path: Path, rel: str, pack_root: Path) -> None:
+    data = _load(report, path, rel)
+    if data is None:
+        return
+    if not isinstance(data, list):
+        report.add(rel, "flipbook.shape", "flipbook_textures.json must be a list")
+        return
+
+    tiles: set[str] = set()
+    for index in ("textures/terrain_texture.json", "textures/item_texture.json"):
+        index_path = pack_root / index
+        if index_path.is_file():
+            try:
+                tiles |= set((json.loads(index_path.read_text()).get("texture_data") or {}))
+            except json.JSONDecodeError:
+                pass  # the index check reports this itself
+
+    for i, entry in enumerate(data):
+        target = entry.get("flipbook_texture")
+        if not isinstance(target, str):
+            report.add(rel, "flipbook.texture", f"[{i}]: flipbook_texture must be a path")
+        elif not (pack_root / f"{target}.png").is_file():
+            report.add(rel, "flipbook.missing", f"[{i}]: {target}.png not in pack")
+
+        tile = entry.get("atlas_tile")
+        if not isinstance(tile, str):
+            report.add(rel, "flipbook.atlas_tile", f"[{i}]: atlas_tile must be a texture key")
+        elif tile not in tiles:
+            report.add(
+                rel, "flipbook.atlas_tile", f"[{i}]: atlas_tile {tile!r} is in no texture index"
+            )
+
+        ticks = entry.get("ticks_per_frame")
+        if not isinstance(ticks, int) or isinstance(ticks, bool) or ticks < 1:
+            report.add(rel, "flipbook.ticks", f"[{i}]: ticks_per_frame must be a positive integer")
+
+
 def _check_lang(report: ValidationReport, path: Path, rel: str) -> None:
     for lineno, line in enumerate(path.read_text().splitlines(), start=1):
         if not line.strip() or line.lstrip().startswith("#"):
@@ -134,6 +171,10 @@ def validate_pack(pack_root: Path) -> ValidationReport:
         path = pack_root / index
         if path.is_file():
             _check_texture_index(report, path, f"{prefix}/{index}", pack_root)
+
+    flipbook = pack_root / "textures" / "flipbook_textures.json"
+    if flipbook.is_file():
+        _check_flipbook(report, flipbook, f"{prefix}/textures/flipbook_textures.json", pack_root)
 
     lang = pack_root / "texts" / "en_US.lang"
     if lang.is_file():
