@@ -2,7 +2,11 @@
 
 Java: assets/<ns>/lang/en_us.json, keys like "block.<ns>.<name>".
 Bedrock: texts/en_US.lang, lines like "tile.<ns>:<name>.name=Value".
-Key shapes we do not recognise are reported, not mangled.
+
+Keys fall into three buckets: content we can translate, strings that belong to
+mod code and have no Bedrock text surface at all, and shapes we do not
+recognise. Only the third kind is worth reporting one at a time, because it is
+the only one where we might be wrong.
 """
 from __future__ import annotations
 
@@ -10,7 +14,42 @@ import json
 
 from ..model import ConversionResult, SourceMod, Unhandled
 
-_PREFIX = {"block": "tile", "item": "item", "itemGroup": "itemGroup"}
+# Java content domain -> Bedrock key prefix.
+_PREFIX = {
+    "block": "tile",
+    "item": "item",
+    "entity": "entity",
+    "itemGroup": "itemGroup",
+}
+
+# Domains the Java code looks up directly. Bedrock has nowhere to put these:
+# no wiki pages, no Forge fluid types, no modded keybind or command text.
+_CODE_DOMAINS = frozenset({
+    "advancement",
+    "advancements",
+    "argument",
+    "book",
+    "chat",
+    "commands",
+    "config",
+    "container",
+    "death",
+    "fluid_type",
+    "gui",
+    "jei",
+    "key",
+    "message",
+    "narrator",
+    "options",
+    "screen",
+    "selectWorld",
+    "sound",
+    "stat",
+    "subtitles",
+    "text",
+    "tooltip",
+    "wiki",
+})
 
 
 def _translate_key(key: str, namespace: str) -> str | None:
@@ -27,6 +66,10 @@ def _translate_key(key: str, namespace: str) -> str | None:
     return f"{prefix}.{namespace}:{name}.name"
 
 
+def _is_code_string(key: str) -> bool:
+    return key.split(".")[0] in _CODE_DOMAINS
+
+
 def convert(mod: SourceMod) -> ConversionResult:
     result = ConversionResult()
     src = mod.assets / "lang" / "en_us.json"
@@ -40,15 +83,31 @@ def convert(mod: SourceMod) -> ConversionResult:
         result.unhandled.append(Unhandled(rel, "lang", f"invalid JSON: {exc}"))
         return result
 
-    lines = []
+    lines: list[str] = []
+    code_strings: list[str] = []
     for key, value in entries.items():
         translated = _translate_key(key, mod.namespace)
-        if translated is None:
+        if translated is not None:
+            lines.append(f"{translated}={value}")
+        elif _is_code_string(key):
+            code_strings.append(key)
+        else:
             result.unhandled.append(
                 Unhandled(rel, "lang", f"unrecognised translation key {key!r}")
             )
-            continue
-        lines.append(f"{translated}={value}")
+
+    if code_strings:
+        sample = ", ".join(sorted(code_strings)[:3])
+        result.unhandled.append(
+            Unhandled(
+                source=rel,
+                kind="lang_code_string",
+                reason=(
+                    f"{len(code_strings)} string(s) belong to mod code with no Bedrock "
+                    f"text surface (e.g. {sample})"
+                ),
+            )
+        )
 
     if lines:
         result.files["texts/en_US.lang"] = "\n".join(sorted(lines)) + "\n"
