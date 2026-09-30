@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:block/stairs",
+  "textures": {
+    "all": "examplemod:block/steel_block"
+  }
+}

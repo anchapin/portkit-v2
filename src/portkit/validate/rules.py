@@ -145,6 +145,61 @@ def _check_flipbook(report: ValidationReport, path: Path, rel: str, pack_root: P
             report.add(rel, "flipbook.ticks", f"[{i}]: ticks_per_frame must be a positive integer")
 
 
+_MENU_CATEGORIES = {
+    "construction", "nature", "equipment", "items", "none",
+}
+
+
+def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path) -> None:
+    data = _load(report, path, rel)
+    if data is None:
+        return
+    if "format_version" not in data:
+        report.add(rel, "block.format_version", "missing format_version")
+    body = data.get("minecraft:block")
+    if not isinstance(body, dict):
+        report.add(rel, "block.body", "missing minecraft:block")
+        return
+    description = body.get("description") or {}
+    identifier = description.get("identifier")
+    if not identifier or not _IDENTIFIER.match(str(identifier)):
+        report.add(rel, "block.identifier", f"bad identifier {identifier!r}")
+    if str(identifier).startswith("minecraft:"):
+        report.add(rel, "block.identifier", "a custom block cannot claim the minecraft namespace")
+    category = (description.get("menu_category") or {}).get("category")
+    if category is not None and category not in _MENU_CATEGORIES:
+        report.add(rel, "block.menu_category", f"unknown creative category {category!r}")
+
+    components = body.get("components") or {}
+    if not components:
+        report.add(rel, "block.components", "block has no components")
+    instances = components.get("minecraft:material_instances")
+    if instances is None:
+        return
+    if not isinstance(instances, dict) or not instances:
+        report.add(rel, "block.material_instances", "material_instances must name at least one face")
+        return
+
+    tiles: set[str] = set()
+    index_path = pack_root.parent / "resource_pack" / "textures" / "terrain_texture.json"
+    if index_path.is_file():
+        try:
+            tiles = set((json.loads(index_path.read_text()).get("texture_data") or {}))
+        except json.JSONDecodeError:
+            pass  # the index check reports this itself
+    for face, instance in instances.items():
+        texture = instance.get("texture") if isinstance(instance, dict) else None
+        if not isinstance(texture, str):
+            report.add(rel, "block.material_instances", f"{face}: texture must be a shortname")
+            continue
+        if tiles and texture not in tiles:
+            report.add(
+                rel,
+                "block.texture",
+                f"{face}: texture {texture!r} is in no terrain_texture index",
+            )
+
+
 def _check_lang(report: ValidationReport, path: Path, rel: str) -> None:
     for lineno, line in enumerate(path.read_text().splitlines(), start=1):
         if not line.strip() or line.lstrip().startswith("#"):
@@ -166,6 +221,9 @@ def validate_pack(pack_root: Path) -> ValidationReport:
 
     for path in sorted((pack_root / "recipes").glob("*.json")):
         _check_recipe(report, path, f"{prefix}/recipes/{path.name}")
+
+    for path in sorted((pack_root / "blocks").glob("*.json")):
+        _check_block(report, path, f"{prefix}/blocks/{path.name}", pack_root)
 
     for index in ("textures/terrain_texture.json", "textures/item_texture.json"):
         path = pack_root / index

@@ -84,9 +84,10 @@ def test_summary_reports_files_not_entries(tmp_path, fixtures_dir):
             target = source / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(item.read_bytes())
-    (source / "assets" / "examplemod" / "blockstates").mkdir(parents=True)
+    # advancements: a lane no converter claims yet, so these group as unowned
+    (source / "data" / "examplemod" / "advancements").mkdir(parents=True)
     for i in range(3):
-        (source / "assets" / "examplemod" / "blockstates" / f"b{i}.json").write_text("{}")
+        (source / "data" / "examplemod" / "advancements" / f"a{i}.json").write_text("{}")
 
     summary = convert(source, tmp_path / "out").summary()
     assert summary["unhandled"] == 1
