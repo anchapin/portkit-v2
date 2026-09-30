@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from .ingest import IngestError
 from .pipeline import convert
 from .validate import validate_tree
 
@@ -18,7 +19,11 @@ def _print_findings(report) -> None:
 
 
 def cmd_convert(args) -> int:
-    result = convert(Path(args.source), Path(args.out), args.namespace)
+    try:
+        result = convert(Path(args.source), Path(args.out), args.namespace)
+    except IngestError as exc:
+        print(f"cannot read {args.source}: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(result.summary(), indent=2))
     if result.unhandled:
         print(f"\n{len(result.unhandled)} item(s) left for the agent:")
@@ -76,7 +81,7 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("convert", help="convert a Java mod to a Bedrock pack tree")
-    p.add_argument("source")
+    p.add_argument("source", help="a mod .jar, or an unpacked directory containing assets/ and data/")
     p.add_argument("out")
     p.add_argument("--namespace")
     p.set_defaults(func=cmd_convert)
