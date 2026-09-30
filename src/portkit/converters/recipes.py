@@ -40,7 +40,7 @@ def convert(mod: SourceMod) -> ConversionResult:
         return result
 
     for path in sorted(src.rglob("*.json")):
-        rel = str(path.relative_to(mod.root))
+        rel = result.claim(mod, path)
         try:
             recipe = json.loads(path.read_text())
         except json.JSONDecodeError as exc:

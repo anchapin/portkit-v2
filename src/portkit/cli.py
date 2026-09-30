@@ -26,7 +26,10 @@ def cmd_convert(args) -> int:
         return 2
     print(json.dumps(result.summary(), indent=2))
     if result.unhandled:
-        print(f"\n{len(result.unhandled)} item(s) left for the agent:")
+        print(
+            f"\n{len(result.unhandled)} item(s) covering "
+            f"{result.residue_count} file(s) left for the agent:"
+        )
         for item in result.unhandled:
             print(f"  {item.kind}: {item.source} ({item.reason})")
     if not result.report.ok:
@@ -61,13 +64,11 @@ def cmd_eval(args) -> int:
     for case in cases:
         with tempfile.TemporaryDirectory() as tmp:
             result = convert(case / "input", Path(tmp) / "out")
-            handled = result.file_count
-            residue = len(result.unhandled)
-            total = handled + residue
-            coverage = (handled / total * 100) if total else 100.0
             ok = result.report.ok
             failures += 0 if ok else 1
-            rows.append((case.name, handled, residue, coverage, ok))
+            rows.append(
+                (case.name, result.file_count, result.residue_count, result.coverage, ok)
+            )
 
     width = max(len(r[0]) for r in rows)
     print(f"{'fixture'.ljust(width)}  files  residue  coverage  valid")

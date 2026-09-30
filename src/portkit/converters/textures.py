@@ -24,12 +24,13 @@ def convert(mod: SourceMod) -> ConversionResult:
 
         index: dict[str, dict] = {}
         for png in sorted(src.rglob("*.png")):
+            rel = result.claim(mod, png)
             if png.parent != src:
                 # Nested dirs mean the mod is doing something structural we would
                 # be guessing about. Hand it to the residue instead of flattening.
                 result.unhandled.append(
                     Unhandled(
-                        source=str(png.relative_to(mod.root)),
+                        source=rel,
                         kind="texture",
                         reason="nested texture directory has no flat Bedrock equivalent",
                     )

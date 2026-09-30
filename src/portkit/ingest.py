@@ -63,6 +63,7 @@ class Ingested:
                         "mod behavior lives in JVM bytecode; there is no deterministic "
                         "mapping to the Bedrock scripting API"
                     ),
+                    count=self.class_count,
                 )
             )
         for name in self.nested_jars:
