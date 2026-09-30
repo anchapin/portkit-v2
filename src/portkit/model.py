@@ -49,6 +49,11 @@ class ConversionResult:
     # it converted them or refused them. Anything left over at the end of the
     # run was seen by nobody, which is the one outcome we never allow silently.
     consumed: set[str] = field(default_factory=set)
+    # Reductions: something converted, but with a detail Bedrock cannot carry.
+    # Deliberately not residue. Residue is a file an agent can go and work on;
+    # a note is a file that shipped with something lost, and it still cannot go
+    # unsaid.
+    notes: list[str] = field(default_factory=list)
 
     def claim(self, mod: "SourceMod", path: Path) -> str:
         """Record a source file as looked at and return its relative path."""
@@ -61,6 +66,7 @@ class ConversionResult:
         merged.files.update(other.files)
         merged.unhandled.extend(other.unhandled)
         merged.consumed |= other.consumed
+        merged.notes = [*self.notes, *other.notes]
         return merged
 
     @property
