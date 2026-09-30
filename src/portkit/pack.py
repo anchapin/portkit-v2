@@ -6,6 +6,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
+from .meta import ModMetadata
 from .model import ConversionResult
 
 # Deterministic UUIDs: same mod in, same manifest out, so fixture diffs are clean.
@@ -18,13 +19,15 @@ def _uuid(*parts: str) -> str:
     return str(uuid.uuid5(_NS, "/".join(parts)))
 
 
-def manifest(namespace: str, kind: str, version=(0, 1, 0)) -> dict:
+def manifest(namespace: str, kind: str, meta: ModMetadata | None = None) -> dict:
+    meta = meta or ModMetadata()
+    version = meta.version
     module_type = "data" if kind == "behavior" else "resources"
     return {
         "format_version": 2,
         "header": {
-            "name": f"{namespace} ({kind})",
-            "description": f"Converted from Java by portkit",
+            "name": meta.header_name(namespace, kind),
+            "description": meta.header_description(),
             "uuid": _uuid(namespace, kind, "header"),
             "version": list(version),
             "min_engine_version": [1, 20, 10],
@@ -43,7 +46,12 @@ def _is_behavior(relpath: str) -> bool:
     return relpath.startswith(_BEHAVIOR_DIRS)
 
 
-def write_tree(result: ConversionResult, namespace: str, out_dir: Path) -> Path:
+def write_tree(
+    result: ConversionResult,
+    namespace: str,
+    out_dir: Path,
+    meta: ModMetadata | None = None,
+) -> Path:
     """Write behavior_pack/ and resource_pack/ under out_dir. Returns out_dir."""
     out_dir.mkdir(parents=True, exist_ok=True)
     buckets = {"behavior": {}, "resource": {}}
@@ -56,7 +64,7 @@ def write_tree(result: ConversionResult, namespace: str, out_dir: Path) -> Path:
         base = out_dir / f"{kind}_pack"
         base.mkdir(parents=True, exist_ok=True)
         (base / "manifest.json").write_text(
-            json.dumps(manifest(namespace, kind), indent=2) + "\n"
+            json.dumps(manifest(namespace, kind, meta), indent=2) + "\n"
         )
         for relpath, content in files.items():
             target = base / relpath

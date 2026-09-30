@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import json
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .converters import convert_all
 from .ingest import ingest
+from .meta import ModMetadata, parse as parse_metadata
 from .model import SourceMod, Unhandled
 from .pack import write_tree
 from .validate import ValidationReport, validate_tree
@@ -57,6 +58,17 @@ class PipelineResult:
     report: ValidationReport
     unhandled: list[Unhandled]
     file_count: int
+    meta: ModMetadata = field(default_factory=ModMetadata)
+
+    @property
+    def notes(self) -> list[str]:
+        """Things worth saying about the mod itself, not about its files.
+
+        Kept out of the residue list on purpose: residue is source files an
+        agent can work on, and coverage arithmetic counts files. A guessed
+        version is neither, but it still cannot go unsaid.
+        """
+        return self.meta.notes
 
     @property
     def residue_count(self) -> int:
@@ -77,6 +89,13 @@ class PipelineResult:
             "unhandled": len(self.unhandled),
             "unhandled_files": self.residue_count,
             "coverage": round(self.coverage, 1),
+            "mod": {
+                "name": self.meta.name,
+                "id": self.meta.mod_id,
+                "version": ".".join(str(n) for n in self.meta.version),
+                "loader": self.meta.loader,
+            },
+            "notes": self.notes,
         }
 
 
@@ -86,6 +105,7 @@ def convert(source: Path, out_dir: Path, namespace: str | None = None) -> Pipeli
     with tempfile.TemporaryDirectory(prefix="portkit-ingest-") as staging:
         staged = ingest(Path(source), Path(staging))
         namespace = namespace or staged.namespace
+        meta = parse_metadata(staged.metadata, namespace)
         mod = SourceMod(root=staged.root, namespace=namespace)
         result = convert_all(mod)
         unhandled = (
@@ -94,10 +114,10 @@ def convert(source: Path, out_dir: Path, namespace: str | None = None) -> Pipeli
             + unowned(staged.root, result.consumed)
         )
 
-        tree = write_tree(result, namespace, out_dir)
+        tree = write_tree(result, namespace, out_dir, meta)
         report = validate_tree(tree)
         if unhandled:
             (out_dir / "unhandled.json").write_text(
                 json.dumps([u.__dict__ for u in unhandled], indent=2) + "\n"
             )
-        return PipelineResult(tree, namespace, report, unhandled, len(result.files))
+        return PipelineResult(tree, namespace, report, unhandled, len(result.files), meta)

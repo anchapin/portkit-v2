@@ -17,12 +17,14 @@ from .model import Unhandled
 
 RESOURCE_LANES = ("assets/", "data/")
 
-# Loader metadata. Parsed in #3; preserved here so that work needs no re-ingest.
+# Loader metadata, read by meta.parse(). MANIFEST.MF is here because Forge lets
+# version be "${file.jarVersion}", a placeholder only the jar manifest resolves.
 METADATA_NAMES = (
     "fabric.mod.json",
     "quilt.mod.json",
     "META-INF/mods.toml",
     "META-INF/neoforge.mods.toml",
+    "META-INF/MANIFEST.MF",
     "mcmod.info",
     "pack.mcmeta",
 )
