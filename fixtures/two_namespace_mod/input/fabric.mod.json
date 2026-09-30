@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "examplemod",
+  "name": "Example Mod",
+  "version": "1.2.0",
+  "description": "Ships compat blocks under a second namespace."
+}

@@ -1,0 +1,5 @@
+name = "two_namespace_mod"
+description = "A mod shipping compat content under a second namespace: both convert into one pack, with no identifier crossing over."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 0

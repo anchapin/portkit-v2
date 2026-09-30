@@ -58,7 +58,7 @@ def test_nested_jars_are_reported_not_silently_dropped(tmp_path, fixtures_dir):
     assert "nested_jar" in kinds
 
 
-def test_extra_namespaces_are_reported(tmp_path, fixtures_dir):
+def test_extra_namespaces_are_found_not_refused(tmp_path, fixtures_dir):
     source = tmp_path / "multi"
     for item in sorted((fixtures_dir / "simple_block_mod" / "input").rglob("*")):
         if item.is_file():
@@ -72,7 +72,9 @@ def test_extra_namespaces_are_reported(tmp_path, fixtures_dir):
     jar = build_jar(tmp_path / "multi.jar", source, classes=0)
     staged = from_jar(jar, tmp_path / "staging")
     assert staged.namespace == "examplemod"
-    assert [u.source for u in staged.residue() if u.kind == "extra_namespace"] == ["otherns"]
+    assert staged.namespaces == ["examplemod", "otherns"]
+    # they are converted now, so ingestion has nothing to refuse about them
+    assert [u.kind for u in staged.residue() if u.kind == "extra_namespace"] == []
 
 
 def test_zip_slip_members_are_refused(tmp_path, fixtures_dir):
