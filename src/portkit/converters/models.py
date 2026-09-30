@@ -237,6 +237,49 @@ def cube(element: dict) -> tuple[dict | None, str]:
     return box, ""
 
 
+_MIRRORED_FACES = {"west": "east", "east": "west"}
+
+
+def element_materials(model: dict) -> tuple[dict[str, str] | None, str]:
+    """Bedrock material-instance name -> Java texture key, for a custom shape.
+
+    Bedrock ships seven built-in material instances: "*" plus one per cube face
+    (down, up, north, south, west, east). They bind to cube faces on their own,
+    with no per-face uv block and no names invented in the geometry, so a beam
+    wearing "end" on its caps and "side" on its flanks needs nothing but the
+    right keys on the block definition.
+
+    The one conversion here is the X flip. cube() mirrors every box in X, so the
+    face Java calls west ends up on Bedrock's east side, and its texture has to
+    follow it across. Everything else keeps its name.
+    """
+    elements = model.get("elements") or []
+    if not elements:
+        return None, "model has no elements"
+
+    by_face: dict[str, set[str]] = {}
+    for element in elements:
+        for face, spec in (element.get("faces") or {}).items():
+            if not isinstance(spec, dict):
+                continue
+            reference = spec.get("texture")
+            if not isinstance(reference, str):
+                continue
+            target = _MIRRORED_FACES.get(face, face) if X_AXIS_IS_FLIPPED else face
+            by_face.setdefault(target, set()).add(reference.lstrip("#"))
+
+    if not by_face:
+        return None, "element faces name no texture"
+
+    disagreeing = sorted(face for face, keys in by_face.items() if len(keys) > 1)
+    if disagreeing:
+        return None, (
+            f"elements disagree about the texture on their {', '.join(disagreeing)} "
+            "face(s), and one block carries one material per face"
+        )
+    return {face: keys.pop() for face, keys in by_face.items()}, ""
+
+
 def element_texture(model: dict) -> tuple[str | None, str]:
     """The one texture key every element face wears, or why there isn't one."""
     references = set()

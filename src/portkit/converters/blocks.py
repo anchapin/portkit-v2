@@ -124,22 +124,34 @@ def _model_block(
     textures = flat.get("textures") or {}
 
     if flat.get("elements"):
-        # A custom shape: its own geometry file, one material for the lot.
-        texture_key, why = models.element_texture(flat)
-        if texture_key is None:
+        # A custom shape: its own geometry file, and one material instance per
+        # face it actually wears. Bedrock's built-in per-face instances bind
+        # themselves to cube faces, so nothing has to be named in the geometry.
+        by_face, why = models.element_materials(flat)
+        if by_face is None:
             return None, None, None, why
-        reference = textures.get(texture_key)
-        if not isinstance(reference, str):
-            return None, None, None, f"model has no {texture_key!r} texture"
-        shortname, why = models.texture_shortname(reference, mod.namespace)
-        if shortname is None:
-            return None, None, None, why
+
+        instances: dict[str, dict] = {}
+        for face, texture_key in sorted(by_face.items()):
+            reference = textures.get(texture_key)
+            if not isinstance(reference, str):
+                return None, None, None, f"model has no {texture_key!r} texture"
+            shortname, why = models.texture_shortname(reference, mod.namespace)
+            if shortname is None:
+                return None, None, None, why
+            instances[face] = {"texture": shortname}
+
+        # Every face the same texture is the common case, and "*" says so in one
+        # line instead of six.
+        distinct = {spec["texture"] for spec in instances.values()}
+        if len(distinct) == 1:
+            instances = {"*": {"texture": distinct.pop()}}
 
         identifier = f"geometry.{mod.namespace}.{geo_name}"
         geo, why = models.geometry(flat, identifier)
         if geo is None:
             return None, None, None, why
-        return identifier, {"*": {"texture": shortname}}, geo, ""
+        return identifier, instances, geo, ""
 
     faces, why = models.faces(flat)
     if faces is None:
@@ -215,24 +227,18 @@ def _convert_axis_block(
             return
         resolved[axis] = (identifier, instances or {}, geo)
 
-    materials = [instances for _, instances, _ in resolved.values()]
-    if any(other != materials[0] for other in materials[1:]):
-        result.unhandled.append(
-            Unhandled(
-                rel,
-                "block",
-                "the three axis models wear different textures, so one block cannot "
-                "carry them all",
-            )
-        )
-        return
-
+    # The three axis models wear their textures on different faces by design: a
+    # beam's caps face up and down when it stands, west and east when it lies
+    # along x. So materials travel with the geometry, permutation by permutation,
+    # rather than being forced to agree across the block.
     for axis, (_, _, geo) in resolved.items():
         if geo is not None:
             result.files[f"models/blocks/{name}_{axis}.geo.json"] = geo
 
     result.files[f"blocks/{name}.json"] = _axis_block_definition(
-        mod.namespace, name, {axis: ident for axis, (ident, _, _) in resolved.items()}, materials[0]
+        mod.namespace,
+        name,
+        {axis: (ident, instances) for axis, (ident, instances, _) in resolved.items()},
     )
 
 
@@ -242,14 +248,18 @@ def _face_condition(faces: tuple[str, ...]) -> str:
 
 
 def _axis_block_definition(
-    namespace: str, name: str, geometry_by_axis: dict[str, str], instances: dict[str, dict]
+    namespace: str, name: str, by_axis: dict[str, tuple[str, dict[str, dict]]]
 ) -> dict:
     # y is the default: Bedrock's block_face defaults to "down", which is a
     # vertical placement, and that is the axis Java calls y.
+    geometry, instances = by_axis["y"]
     permutations = [
         {
             "condition": _face_condition(_AXIS_FACES[axis]),
-            "components": {"minecraft:geometry": geometry_by_axis[axis]},
+            "components": {
+                "minecraft:geometry": by_axis[axis][0],
+                "minecraft:material_instances": by_axis[axis][1],
+            },
         }
         for axis in ("x", "z")
     ]
@@ -264,7 +274,7 @@ def _axis_block_definition(
                 },
             },
             "components": {
-                "minecraft:geometry": geometry_by_axis["y"],
+                "minecraft:geometry": geometry,
                 "minecraft:material_instances": instances,
             },
             "permutations": permutations,

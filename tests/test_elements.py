@@ -171,3 +171,56 @@ def test_an_unrotated_element_gains_no_rotation_keys():
     box, why = models.cube({"from": [0, 0, 0], "to": [16, 16, 16]})
     assert why == ""
     assert "rotation" not in box and "pivot" not in box
+
+
+BEAM = {
+    "textures": {"end": "examplemod:block/beam_end", "side": "examplemod:block/beam_side"},
+    "elements": [
+        {
+            "from": [0, 6, 6],
+            "to": [16, 10, 10],
+            "faces": {
+                "down": {"texture": "#side"},
+                "up": {"texture": "#side"},
+                "north": {"texture": "#side"},
+                "south": {"texture": "#side"},
+                "west": {"texture": "#end"},
+                "east": {"texture": "#end"},
+            },
+        }
+    ],
+}
+
+
+def test_each_face_keeps_its_own_texture_key():
+    by_face, why = models.element_materials(BEAM)
+    assert why == ""
+    assert by_face["up"] == "side"
+    assert by_face["north"] == "side"
+
+
+def test_the_x_faces_swap_because_the_box_is_mirrored():
+    # cube() mirrors every box in X, so Java's west face lands on Bedrock's east.
+    caps = dict(BEAM["elements"][0]["faces"])
+    caps["west"] = {"texture": "#end_west"}
+    caps["east"] = {"texture": "#end_east"}
+    model = {"textures": BEAM["textures"], "elements": [{**BEAM["elements"][0], "faces": caps}]}
+    by_face, why = models.element_materials(model)
+    assert why == ""
+    assert by_face["east"] == "end_west"
+    assert by_face["west"] == "end_east"
+
+
+def test_elements_disagreeing_on_one_face_are_refused():
+    second = {"from": [0, 0, 0], "to": [16, 4, 16], "faces": {"up": {"texture": "#end"}}}
+    model = {"textures": BEAM["textures"], "elements": [BEAM["elements"][0], second]}
+    by_face, why = models.element_materials(model)
+    assert by_face is None
+    assert "disagree about the texture on their up face" in why
+
+
+def test_a_model_with_no_elements_has_no_materials():
+    by_face, why = models.element_materials({"textures": {}})
+    assert by_face is None
+    assert why == "model has no elements"
+

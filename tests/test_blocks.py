@@ -212,11 +212,23 @@ def test_a_pillar_that_rotates_one_shared_model_is_refused(tmp_path):
     assert any("re-derived in Bedrock's own convention" in i.reason for i in result.unhandled)
 
 
-def test_axis_models_wearing_different_textures_are_refused(tmp_path):
+def test_each_axis_carries_its_own_materials(tmp_path):
+    # A beam's caps face up/down when it stands and west/east when it lies along
+    # x, so the three models legitimately differ and materials ride along with
+    # the geometry rather than having to agree.
     mod = build_axis(tmp_path, textures={"x": "examplemod:block/other"})
     result = blocks.convert(mod)
-    assert "blocks/beam.json" not in result.files
-    assert any("different textures" in item.reason for item in result.unhandled)
+    assert result.unhandled == []
+    body = result.files["blocks/beam.json"]["minecraft:block"]
+    assert body["components"]["minecraft:material_instances"] == {
+        "*": {"texture": "examplemod:beam"}
+    }
+    by_geometry = {
+        p["components"]["minecraft:geometry"]: p["components"]["minecraft:material_instances"]
+        for p in body["permutations"]
+    }
+    assert by_geometry["geometry.examplemod.beam_x"] == {"*": {"texture": "examplemod:other"}}
+    assert by_geometry["geometry.examplemod.beam_z"] == {"*": {"texture": "examplemod:beam"}}
 
 
 def test_a_pillar_names_the_axis_that_failed(tmp_path):
