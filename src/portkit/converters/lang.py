@@ -76,7 +76,7 @@ def convert(mod: SourceMod) -> ConversionResult:
     if not src.is_file():
         return result
 
-    rel = str(src.relative_to(mod.root))
+    rel = result.claim(mod, src)
     try:
         entries = json.loads(src.read_text())
     except json.JSONDecodeError as exc:
