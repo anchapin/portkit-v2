@@ -55,6 +55,35 @@ def cmd_validate(args) -> int:
     return 1
 
 
+def cmd_probe(args) -> int:
+    """Build the axis probe pack: one asymmetric model converted both ways."""
+    from .harness import axis_probe
+    from .meta import ModMetadata
+    from .model import ConversionResult
+    from .pack import addon_name, write_mcaddon, write_tree
+
+    model = Path(args.model)
+    texture = Path(args.texture)
+    out = Path(args.out)
+    try:
+        files = axis_probe.pack_files(model, texture, args.namespace)
+    except (OSError, ValueError) as exc:
+        print(f"cannot build the probe: {exc}", file=sys.stderr)
+        return 2
+
+    meta = ModMetadata(mod_id="axis_probe", name="Axis Probe")
+    tree = write_tree(ConversionResult(files=files), args.namespace, out, meta)
+    addon = write_mcaddon(tree, out / addon_name(args.namespace, meta))
+    print(f"probe tree:  {tree}")
+    print(f"install:     {addon} ({addon.stat().st_size:,} bytes)")
+    print(
+        "\nPlace both blocks, face north, and note which one matches the Java render:\n"
+        "  Probe A (axes agree)  -> origin.x = from.x - 8\n"
+        "  Probe B (X flipped)   -> origin.x = 8 - to.x"
+    )
+    return 0
+
+
 def cmd_eval(args) -> int:
     """Run every fixture and print the coverage table. This is the number that matters."""
     import tempfile
@@ -98,6 +127,19 @@ def main(argv=None) -> int:
     p = sub.add_parser("validate", help="validate a converted tree")
     p.add_argument("tree")
     p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("probe", help="build the axis probe pack (dev harness)")
+    p.add_argument("out")
+    p.add_argument(
+        "--model",
+        default=str(FIXTURES / "asymmetric_model_mod/input/assets/examplemod/models/block/probe.json"),
+    )
+    p.add_argument(
+        "--texture",
+        default=str(FIXTURES / "asymmetric_model_mod/input/assets/examplemod/textures/block/probe.png"),
+    )
+    p.add_argument("--namespace", default="examplemod")
+    p.set_defaults(func=cmd_probe)
 
     p = sub.add_parser("eval", help="run the whole fixture corpus")
     p.add_argument("--fixtures")
