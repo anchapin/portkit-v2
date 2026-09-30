@@ -7,11 +7,12 @@ fixture harness automatically.
 from __future__ import annotations
 
 from ..model import ConversionResult, SourceMod
-from . import blocks, lang, recipes, textures
+from . import blocks, items, lang, recipes, textures
 
 CONVERTERS = [
     textures.convert,
     blocks.convert,
+    items.convert,
     recipes.convert,
     lang.convert,
 ]
