@@ -11,6 +11,7 @@ import re
 import uuid
 from pathlib import Path
 
+from .collisions import check_collisions
 from .report import ValidationReport
 from .xrefs import check_cross_pack
 
@@ -325,5 +326,6 @@ def validate_tree(tree: Path) -> ValidationReport:
     for pack in packs:
         report.findings.extend(validate_pack(pack).findings)
     _check_dependencies(report, packs)
+    check_collisions(report, tree)
     check_cross_pack(report, tree)
     return report
