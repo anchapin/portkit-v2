@@ -224,3 +224,45 @@ def test_a_model_with_no_elements_has_no_materials():
     assert by_face is None
     assert why == "model has no elements"
 
+
+def _turned(axis: str, origin: list[float]) -> dict:
+    return {
+        "from": [0, 0, 0],
+        "to": [16, 4, 16],
+        "rotation": {"axis": axis, "angle": 22.5, "origin": origin},
+        "faces": {"up": {"texture": "#all"}},
+    }
+
+
+def test_a_pivot_slid_along_its_own_axis_is_the_centre_turn():
+    # Spinning about y, moving the pivot up or down y changes nothing, and both
+    # candidate mappings in #52 agree there, so no probe is needed.
+    box, why = models.cube(_turned("y", [8, 0, 8]))
+    assert why == ""
+    assert box["pivot"] == [0.0, 0.0, 0.0]
+    assert box["rotation"][1] == 22.5 * models.ROTATION_SIGN["y"]
+
+
+def test_the_same_holds_for_x_and_z():
+    for axis, origin, expected in (
+        ("x", [0, 8, 8], [8.0, 8.0, 0.0]),
+        ("z", [8, 8, 15], [0.0, 8.0, 7.0]),
+    ):
+        box, why = models.cube(_turned(axis, origin))
+        assert why == "", axis
+        assert box["pivot"] == expected, axis
+
+
+def test_a_pivot_off_centre_across_its_axis_still_waits_for_the_probe():
+    box, why = models.cube(_turned("z", [-3, 0, -8]))
+    assert box is None
+    assert "off the block centre in x and y" in why
+    assert "#52" in why
+
+
+def test_the_refusal_names_only_the_axes_that_are_off():
+    box, why = models.cube(_turned("y", [3, 0, 8]))
+    assert box is None
+    assert "off the block centre in x" in why
+    assert "x and z" not in why
+

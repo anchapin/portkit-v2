@@ -186,11 +186,21 @@ def _rotation(element: dict) -> tuple[dict | None, str]:
             f"element rotates by {angle} degrees, which Java does not write and "
             "we have not checked against Bedrock"
         )
-    if tuple(origin) != _CENTRE_ORIGIN:
+    # A pivot displaced along its own rotation axis describes the same turn as
+    # one at the centre: sliding a point up the axis you are spinning about
+    # changes nothing. Both candidate mappings in issue #52 agree there too, so
+    # these need no probe. Anywhere else off centre still does.
+    off_axis = [
+        name
+        for name, index in _AXIS_INDEX.items()
+        if name != axis and origin[index] != _CENTRE_ORIGIN[index]
+    ]
+    if off_axis:
         return None, (
-            f"element rotates about {origin}, off the block centre; the pivot "
-            "mapping for off-centre origins is unverified (issue #52), and the "
-            "two candidates differ everywhere except the centre"
+            f"element rotates about {origin}, off the block centre in "
+            f"{' and '.join(sorted(off_axis))}; the pivot mapping for off-centre "
+            "origins is unverified (issue #52), and the two candidates differ "
+            "everywhere except the centre"
         )
 
     degrees = [0.0, 0.0, 0.0]
