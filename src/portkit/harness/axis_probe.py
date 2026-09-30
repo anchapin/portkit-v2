@@ -150,6 +150,16 @@ def pack_files(model_file: Path, texture_file: Path, namespace: str) -> dict[str
 
 _JAVA_AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
+# What Java renders for each probe bar at +22.5, derived in
+# docs/rotation-convention.md from vanilla's wall torch. It belongs to the axis,
+# not to either candidate: both candidates for an axis carry the same line, and
+# whichever block actually looks like it is the one that matches Java.
+EXPECTED_LEAN = {
+    "x": "north end up",
+    "y": "east end swings north",
+    "z": "east end up",
+}
+
 
 def rotated_cube(element: dict, sign: str) -> dict:
     """A Java rotated element as a Bedrock cube, under one reading of the sign."""
@@ -209,9 +219,8 @@ def rotation_pack_files(
             )
             written = "as written" if sign == "aswritten" else "negated"
             labels.append(
-                f"tile.{namespace}:{name}.name={axis.upper()} {written} (+22.5 about {axis.upper()})"
-                if sign == "aswritten"
-                else f"tile.{namespace}:{name}.name={axis.upper()} negated (-22.5 about {axis.upper()})"
+                f"tile.{namespace}:{name}.name={axis.upper()} {written} "
+                f"(Java: {EXPECTED_LEAN[axis]})"
             )
 
     files["texts/en_US.lang"] = "\n".join(labels + [""])

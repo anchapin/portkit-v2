@@ -89,3 +89,36 @@ def test_a_model_with_nothing_to_rotate_is_refused_not_guessed(tmp_path):
         (tmp_path / f"rot_{axis}.json").write_text(json.dumps({"elements": []}))
     with pytest.raises(ValueError, match="no elements"):
         axis_probe.rotation_pack_files(tmp_path, TEXTURE, "probe")
+
+
+def test_java_lean_is_recorded_for_every_axis():
+    assert set(axis_probe.EXPECTED_LEAN) == set(axis_probe.AXES)
+    assert all(lean.strip() for lean in axis_probe.EXPECTED_LEAN.values())
+
+
+def test_both_candidates_for_an_axis_carry_the_same_java_expectation():
+    files = axis_probe.rotation_pack_files(MODELS, TEXTURE, "probe")
+    lines = dict(
+        line.split("=", 1) for line in files["texts/en_US.lang"].splitlines() if "=" in line
+    )
+    for axis in axis_probe.AXES:
+        lean = axis_probe.EXPECTED_LEAN[axis]
+        written = lines[f"tile.probe:rot_{axis}_aswritten.name"]
+        negated = lines[f"tile.probe:rot_{axis}_negated.name"]
+        assert lean in written and lean in negated
+        assert "as written" in written and "negated" in negated
+
+
+def test_the_java_convention_is_recorded_next_to_the_axis_constant():
+    from portkit.converters import models
+
+    assert models.JAVA_ROTATION_IS_RIGHT_HANDED is True
+
+
+def test_the_derivation_is_written_down_where_it_can_be_checked():
+    doc = Path(__file__).resolve().parents[1] / "docs/rotation-convention.md"
+    text = doc.read_text()
+    assert "template_torch_wall" in text
+    for lean in axis_probe.EXPECTED_LEAN.values():
+        head = lean.split(" swings")[0].split(" end")[0]
+        assert head in text
