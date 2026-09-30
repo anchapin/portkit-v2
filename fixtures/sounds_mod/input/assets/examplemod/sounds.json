@@ -1,0 +1,34 @@
+{
+  "block.brazier.crackle": {
+    "category": "block",
+    "sounds": [
+      "examplemod:block/brazier/crackle1",
+      {
+        "name": "examplemod:block/brazier/crackle2",
+        "volume": 0.6
+      }
+    ]
+  },
+  "block.brazier.light": {
+    "category": "block",
+    "sounds": [
+      {
+        "name": "examplemod:block/brazier/light",
+        "stream": true
+      }
+    ]
+  },
+  "block.stone.break": {
+    "replace": true,
+    "category": "block",
+    "sounds": [
+      "examplemod:block/brazier/crackle1"
+    ]
+  },
+  "music.brazier_theme": {
+    "category": "jukebox",
+    "sounds": [
+      "examplemod:block/brazier/light"
+    ]
+  }
+}
