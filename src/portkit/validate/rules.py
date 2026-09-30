@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 from .report import ValidationReport
+from .xrefs import check_cross_pack
 
 _IDENTIFIER = re.compile(r"^[a-z0-9_]+:[a-z0-9_/.]+$")
 _RECIPE_KEYS = {
@@ -180,24 +181,11 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
         report.add(rel, "block.material_instances", "material_instances must name at least one face")
         return
 
-    tiles: set[str] = set()
-    index_path = pack_root.parent / "resource_pack" / "textures" / "terrain_texture.json"
-    if index_path.is_file():
-        try:
-            tiles = set((json.loads(index_path.read_text()).get("texture_data") or {}))
-        except json.JSONDecodeError:
-            pass  # the index check reports this itself
     for face, instance in instances.items():
         texture = instance.get("texture") if isinstance(instance, dict) else None
         if not isinstance(texture, str):
             report.add(rel, "block.material_instances", f"{face}: texture must be a shortname")
-            continue
-        if tiles and texture not in tiles:
-            report.add(
-                rel,
-                "block.texture",
-                f"{face}: texture {texture!r} is in no terrain_texture index",
-            )
+        # Whether that shortname resolves is a cross-pack question: see validate.xrefs.
 
 
 def _check_lang(report: ValidationReport, path: Path, rel: str) -> None:
@@ -337,4 +325,5 @@ def validate_tree(tree: Path) -> ValidationReport:
     for pack in packs:
         report.findings.extend(validate_pack(pack).findings)
     _check_dependencies(report, packs)
+    check_cross_pack(report, tree)
     return report
