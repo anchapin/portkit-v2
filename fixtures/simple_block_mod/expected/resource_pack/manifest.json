@@ -3,7 +3,7 @@
   "header": {
     "name": "examplemod (resource)",
     "description": "Converted from Java by portkit",
-    "uuid": "3718a80c-a2c2-50ac-8b29-2abcb199e212",
+    "uuid": "8e545919-a92e-567e-9eec-7df5112b142e",
     "version": [
       0,
       1,
@@ -18,7 +18,7 @@
   "modules": [
     {
       "type": "resources",
-      "uuid": "02738e2c-b955-56f5-a1f6-b334845aa251",
+      "uuid": "2e7ea87d-57d5-5359-b2d2-9fdd36d326a8",
       "version": [
         0,
         1,

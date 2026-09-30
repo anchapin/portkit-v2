@@ -9,7 +9,12 @@ from pathlib import Path
 from .meta import ModMetadata
 from .model import ConversionResult
 
-# Deterministic UUIDs: same mod in, same manifest out, so fixture diffs are clean.
+# Deterministic UUIDs: same mod in, same manifest out, so fixture diffs are
+# clean. The seed includes the pack's header name, not just the namespace,
+# because Bedrock keys an installed pack by UUID alone: two packs sharing a
+# namespace (the axis probe and the rotation probe both used "probe") hashed to
+# the same UUID pair, so importing the second collided with the first instead
+# of installing beside it.
 _NS = uuid.UUID("6f0a7f1e-0a4a-4f2e-9a1b-6a5f0d1c2b3e")
 
 _BEHAVIOR_DIRS = ("recipes/", "entities/", "functions/", "loot_tables/", "blocks/", "items/")
@@ -40,21 +45,26 @@ def manifest(
         "header": {
             "name": meta.header_name(namespace, kind),
             "description": meta.header_description(),
-            "uuid": _uuid(namespace, kind, "header"),
+            "uuid": _uuid(namespace, meta.header_name(namespace, kind), kind, "header"),
             "version": list(version),
             "min_engine_version": [1, 20, 10],
         },
         "modules": [
             {
                 "type": module_type,
-                "uuid": _uuid(namespace, kind, "module"),
+                "uuid": _uuid(namespace, meta.header_name(namespace, kind), kind, "module"),
                 "version": list(version),
             }
         ],
     }
     if depends_on:
         data["dependencies"] = [
-            {"uuid": _uuid(namespace, other, "header"), "version": list(version)}
+            {
+                "uuid": _uuid(
+                    namespace, meta.header_name(namespace, other), other, "header"
+                ),
+                "version": list(version),
+            }
             for other in depends_on
         ]
     return data
