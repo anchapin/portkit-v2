@@ -56,6 +56,15 @@ _MAX_PARENT_DEPTH = 8
 # trusting this on a new Bedrock version.
 X_AXIS_IS_FLIPPED = True
 
+# Java element rotation is the plain right-hand rule about the named axis, with
+# x east, y up, z south. Anchored on vanilla's wall torch, which rotates -22.5
+# about z and leans east away from the west wall it hangs on: only a
+# right-handed reading puts it there. See docs/rotation-convention.md for the
+# arithmetic and the source files. This describes JAVA, so it does not need a
+# Bedrock probe to confirm; what Bedrock does with the sign is a separate
+# question the rotation probe answers.
+JAVA_ROTATION_IS_RIGHT_HANDED = True
+
 # A cube in Bedrock geometry is centred on the block: Java's 0..16 becomes
 # -8..8 on X and Z, while Y stays as-is.
 _HALF = 8.0
