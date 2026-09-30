@@ -20,7 +20,9 @@ def _print_findings(report) -> None:
 
 def cmd_convert(args) -> int:
     try:
-        result = convert(Path(args.source), Path(args.out), args.namespace)
+        result = convert(
+            Path(args.source), Path(args.out), args.namespace, emit_addon=not args.no_addon
+        )
     except IngestError as exc:
         print(f"cannot read {args.source}: {exc}", file=sys.stderr)
         return 2
@@ -32,6 +34,9 @@ def cmd_convert(args) -> int:
         )
         for item in result.unhandled:
             print(f"  {item.kind}: {item.source} ({item.reason})")
+    if result.addon:
+        size = result.addon.stat().st_size
+        print(f"\ninstallable addon: {result.addon} ({size:,} bytes)")
     if not result.report.ok:
         print("\nvalidation failed:")
         _print_findings(result.report)
@@ -85,6 +90,9 @@ def main(argv=None) -> int:
     p.add_argument("source", help="a mod .jar, or an unpacked directory containing assets/ and data/")
     p.add_argument("out")
     p.add_argument("--namespace")
+    p.add_argument(
+        "--no-addon", action="store_true", help="write the pack tree only, no .mcaddon"
+    )
     p.set_defaults(func=cmd_convert)
 
     p = sub.add_parser("validate", help="validate a converted tree")

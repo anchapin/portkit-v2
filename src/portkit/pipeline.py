@@ -10,7 +10,7 @@ from .converters import convert_all
 from .ingest import ingest
 from .meta import ModMetadata, parse as parse_metadata
 from .model import SourceMod, Unhandled
-from .pack import write_tree
+from .pack import addon_name, write_mcaddon, write_tree
 from .validate import ValidationReport, validate_tree
 
 
@@ -59,6 +59,7 @@ class PipelineResult:
     unhandled: list[Unhandled]
     file_count: int
     meta: ModMetadata = field(default_factory=ModMetadata)
+    addon: Path | None = None
 
     @property
     def notes(self) -> list[str]:
@@ -96,11 +97,21 @@ class PipelineResult:
                 "loader": self.meta.loader,
             },
             "notes": self.notes,
+            "mcaddon": self.addon.name if self.addon else None,
         }
 
 
-def convert(source: Path, out_dir: Path, namespace: str | None = None) -> PipelineResult:
-    """Convert a mod directory or .jar into a Bedrock pack tree under out_dir."""
+def convert(
+    source: Path,
+    out_dir: Path,
+    namespace: str | None = None,
+    emit_addon: bool = True,
+) -> PipelineResult:
+    """Convert a mod directory or .jar into a Bedrock pack tree under out_dir.
+
+    Unless ``emit_addon`` is off, the packaged <mod>.mcaddon lands next to the
+    tree, since that single file is the thing a player can actually install.
+    """
     out_dir = Path(out_dir)
     with tempfile.TemporaryDirectory(prefix="portkit-ingest-") as staging:
         staged = ingest(Path(source), Path(staging))
@@ -116,8 +127,16 @@ def convert(source: Path, out_dir: Path, namespace: str | None = None) -> Pipeli
 
         tree = write_tree(result, namespace, out_dir, meta)
         report = validate_tree(tree)
+
+        addon = None
+        # A tree that fails the oracle is not something to hand a player as an
+        # installable file, so the addon is only written for a valid one.
+        if emit_addon and report.ok:
+            addon = write_mcaddon(tree, out_dir / addon_name(namespace, meta))
         if unhandled:
             (out_dir / "unhandled.json").write_text(
                 json.dumps([u.__dict__ for u in unhandled], indent=2) + "\n"
             )
-        return PipelineResult(tree, namespace, report, unhandled, len(result.files), meta)
+        return PipelineResult(
+            tree, namespace, report, unhandled, len(result.files), meta, addon
+        )
