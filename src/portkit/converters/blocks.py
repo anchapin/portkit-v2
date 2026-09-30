@@ -89,12 +89,42 @@ def convert(mod: SourceMod) -> ConversionResult:
             result.unhandled.append(Unhandled(model_rel, "block", why))
             continue
 
+        textures = flat.get("textures") or {}
+
+        if flat.get("elements"):
+            # A custom shape: its own geometry file, one material for the lot.
+            texture_key, why = models.element_texture(flat)
+            if texture_key is None:
+                result.unhandled.append(Unhandled(model_rel, "block", why))
+                continue
+            reference = textures.get(texture_key)
+            if not isinstance(reference, str):
+                result.unhandled.append(
+                    Unhandled(model_rel, "block", f"model has no {texture_key!r} texture")
+                )
+                continue
+            shortname, why = models.texture_shortname(reference, mod.namespace)
+            if shortname is None:
+                result.unhandled.append(Unhandled(model_rel, "block", why))
+                continue
+
+            identifier = f"geometry.{mod.namespace}.{name}"
+            geo, why = models.geometry(flat, identifier)
+            if geo is None:
+                result.unhandled.append(Unhandled(model_rel, "block", why))
+                continue
+
+            result.files[f"models/blocks/{name}.geo.json"] = geo
+            result.files[f"blocks/{name}.json"] = _block_definition(
+                mod.namespace, name, identifier, {"*": {"texture": shortname}}
+            )
+            continue
+
         faces, why = models.faces(flat)
         if faces is None:
             result.unhandled.append(Unhandled(model_rel, "block", why))
             continue
 
-        textures = flat.get("textures") or {}
         instances: dict[str, dict] = {}
         failure = ""
         for face, texture_key in faces.items():
@@ -111,17 +141,25 @@ def convert(mod: SourceMod) -> ConversionResult:
             result.unhandled.append(Unhandled(model_rel, "block", failure))
             continue
 
-        result.files[f"blocks/{name}.json"] = {
-            "format_version": "1.20.10",
-            "minecraft:block": {
-                "description": {
-                    "identifier": f"{mod.namespace}:{name}",
-                    "menu_category": {"category": _MENU_CATEGORY},
-                },
-                "components": {
-                    "minecraft:geometry": "minecraft:geometry.full_block",
-                    "minecraft:material_instances": instances,
-                },
-            },
-        }
+        result.files[f"blocks/{name}.json"] = _block_definition(
+            mod.namespace, name, "minecraft:geometry.full_block", instances
+        )
     return result
+
+
+def _block_definition(
+    namespace: str, name: str, geometry: str, instances: dict[str, dict]
+) -> dict:
+    return {
+        "format_version": "1.20.10",
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{namespace}:{name}",
+                "menu_category": {"category": _MENU_CATEGORY},
+            },
+            "components": {
+                "minecraft:geometry": geometry,
+                "minecraft:material_instances": instances,
+            },
+        },
+    }
