@@ -30,7 +30,7 @@ def test_fixture(case, tmp_path):
     produced = {
         str(p.relative_to(tmp_path / "out")): p.read_bytes()
         for p in (tmp_path / "out").rglob("*")
-        if p.is_file() and p.name != "unhandled.json"
+        if p.is_file() and p.name != "unhandled.json" and p.suffix != ".mcaddon"
     }
     golden = {
         str(p.relative_to(expected)): p.read_bytes()

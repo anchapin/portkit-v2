@@ -183,6 +183,43 @@ def validate_pack(pack_root: Path) -> ValidationReport:
     return report
 
 
+def _check_dependencies(report: ValidationReport, packs: list[Path]) -> None:
+    """Every declared dependency has to resolve to a pack in this addon.
+
+    A behavior pack pointing at a UUID that ships nowhere imports as a broken
+    half: Bedrock enables it and the player never sees the textures.
+    """
+    headers: dict[str, str] = {}
+    manifests: list[tuple[Path, dict]] = []
+    for pack in packs:
+        path = pack / "manifest.json"
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            continue  # the manifest check reports this itself
+        manifests.append((pack, data))
+        uid = (data.get("header") or {}).get("uuid")
+        if uid:
+            headers[str(uid)] = pack.name
+
+    for pack, data in manifests:
+        rel = f"{pack.name}/manifest.json"
+        for i, dep in enumerate(data.get("dependencies") or []):
+            uid = str(dep.get("uuid"))
+            if uid == str((data.get("header") or {}).get("uuid")):
+                report.add(rel, "manifest.dependency", f"dependencies[{i}] points at this pack")
+            elif uid not in headers:
+                report.add(
+                    rel,
+                    "manifest.dependency",
+                    f"dependencies[{i}] uuid {uid} is not a pack in this addon",
+                )
+            if not isinstance(dep.get("version"), list):
+                report.add(rel, "manifest.dependency", f"dependencies[{i}] needs a version list")
+
+
 def validate_tree(tree: Path) -> ValidationReport:
     """Validate a converted output tree (behavior_pack/ + resource_pack/)."""
     report = ValidationReport()
@@ -192,4 +229,5 @@ def validate_tree(tree: Path) -> ValidationReport:
         return report
     for pack in packs:
         report.findings.extend(validate_pack(pack).findings)
+    _check_dependencies(report, packs)
     return report

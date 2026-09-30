@@ -19,11 +19,23 @@ def _uuid(*parts: str) -> str:
     return str(uuid.uuid5(_NS, "/".join(parts)))
 
 
-def manifest(namespace: str, kind: str, meta: ModMetadata | None = None) -> dict:
+def manifest(
+    namespace: str,
+    kind: str,
+    meta: ModMetadata | None = None,
+    depends_on: tuple[str, ...] = (),
+) -> dict:
+    """One Bedrock pack manifest.
+
+    ``depends_on`` names the other pack kinds this one requires. Bedrock treats
+    a behavior pack and a resource pack as separate installs unless the
+    behavior pack names the resource pack by UUID, so a two-pack addon without
+    this block imports as two halves the player has to enable by hand.
+    """
     meta = meta or ModMetadata()
     version = meta.version
     module_type = "data" if kind == "behavior" else "resources"
-    return {
+    data = {
         "format_version": 2,
         "header": {
             "name": meta.header_name(namespace, kind),
@@ -40,6 +52,12 @@ def manifest(namespace: str, kind: str, meta: ModMetadata | None = None) -> dict
             }
         ],
     }
+    if depends_on:
+        data["dependencies"] = [
+            {"uuid": _uuid(namespace, other, "header"), "version": list(version)}
+            for other in depends_on
+        ]
+    return data
 
 
 def _is_behavior(relpath: str) -> bool:
@@ -58,13 +76,18 @@ def write_tree(
     for relpath, content in result.files.items():
         buckets["behavior" if _is_behavior(relpath) else "resource"][relpath] = content
 
+    # The behavior pack points at the resource pack, never the other way round:
+    # Bedrock rejects a circular dependency, and the behavior pack is the half
+    # that carries the mod's actual content.
+    has_resource = bool(buckets["resource"])
     for kind, files in buckets.items():
         if not files:
             continue
         base = out_dir / f"{kind}_pack"
         base.mkdir(parents=True, exist_ok=True)
+        depends_on = ("resource",) if kind == "behavior" and has_resource else ()
         (base / "manifest.json").write_text(
-            json.dumps(manifest(namespace, kind, meta), indent=2) + "\n"
+            json.dumps(manifest(namespace, kind, meta, depends_on), indent=2) + "\n"
         )
         for relpath, content in files.items():
             target = base / relpath
@@ -76,10 +99,27 @@ def write_tree(
     return out_dir
 
 
+def addon_name(namespace: str, meta: ModMetadata | None = None) -> str:
+    """A filename the player will recognise in their downloads folder."""
+    stem = (meta.mod_id if meta and meta.mod_id else namespace) or namespace
+    safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in stem).strip("_")
+    return f"{safe or namespace}.mcaddon"
+
+
 def write_mcaddon(tree: Path, destination: Path) -> Path:
+    """Zip the pack folders into one installable file.
+
+    Only behavior_pack/ and resource_pack/ go in. The addon is written next to
+    the tree, so zipping everything under it would put the addon's own
+    neighbours (unhandled.json, a previous addon) inside the download.
+    """
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(tree.rglob("*")):
-            if path.is_file():
-                zf.write(path, path.relative_to(tree))
+        for pack in ("behavior_pack", "resource_pack"):
+            base = tree / pack
+            if not base.is_dir():
+                continue
+            for path in sorted(base.rglob("*")):
+                if path.is_file():
+                    zf.write(path, path.relative_to(tree))
     return destination
