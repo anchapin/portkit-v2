@@ -11,11 +11,10 @@ It does not follow a parent into vanilla. `minecraft:block/cube_all` is a name
 we know the meaning of; a mod model whose parent is some other vanilla model we
 have not tabulated is a refusal, not a guess.
 
-It does not convert `elements` into custom geometry yet. The box coordinates
-map cleanly, but the axis convention between the two editions is exactly the
-kind of detail that produces a model which loads, renders, and is quietly
-mirrored. Verifying it needs the in-game check issue #8 asks for, so until then
-an element model goes to the residue naming its element count.
+It does convert `elements` into custom geometry, but only the plain ones. A
+rotated element, or one whose faces wear different textures, still goes to the
+residue: each needs its own verification, and a model that loads while quietly
+wrong is the failure mode this project exists to avoid.
 """
 from __future__ import annotations
 
@@ -45,6 +44,21 @@ PARENTS: dict[str, dict[str, str]] = {
 }
 
 _MAX_PARENT_DEPTH = 8
+
+# Bedrock's X axis runs opposite Java's, so a box's origin is measured from the
+# far edge: origin.x = 8 - to.x, not from.x - 8. Both readings produce a model
+# that loads and renders, and on a symmetric shape they are indistinguishable,
+# which is how a mirrored port ships unnoticed. No specification states which
+# way round it is, so it was settled by observation: the axis probe harness
+# (`portkit probe`) puts both candidates in one pack, and on 2026-09-30 Alex
+# Chapin placed them in Bedrock on Android and reported that the mirrored
+# candidate is the one matching the Java render. Re-run the probe before
+# trusting this on a new Bedrock version.
+X_AXIS_IS_FLIPPED = True
+
+# A cube in Bedrock geometry is centred on the block: Java's 0..16 becomes
+# -8..8 on X and Z, while Y stays as-is.
+_HALF = 8.0
 
 
 def normalize(reference: str) -> str:
@@ -114,6 +128,91 @@ def faces(model: dict) -> tuple[dict[str, str] | None, str]:
     if parent is None:
         return None, "model has no parent and no elements"
     return None, f"model parent {parent!r} is not a full cube"
+
+
+def cube(element: dict) -> tuple[dict | None, str]:
+    """One Java element as a Bedrock geometry cube, or why it cannot be one."""
+    if element.get("rotation"):
+        return None, "element is rotated, which we have not verified a mapping for"
+
+    try:
+        x1, y1, z1 = (float(v) for v in element["from"])
+        x2, y2, z2 = (float(v) for v in element["to"])
+    except (KeyError, TypeError, ValueError):
+        return None, "element is missing usable from/to coordinates"
+    if x2 < x1 or y2 < y1 or z2 < z1:
+        return None, "element has a negative size"
+
+    origin_x = _HALF - x2 if X_AXIS_IS_FLIPPED else x1 - _HALF
+    box = {
+        "origin": [origin_x, y1, z1 - _HALF],
+        "size": [x2 - x1, y2 - y1, z2 - z1],
+    }
+
+    uv: dict[str, dict] = {}
+    for face, spec in (element.get("faces") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        corners = spec.get("uv")
+        if not (isinstance(corners, list) and len(corners) == 4):
+            continue
+        try:
+            u1, v1, u2, v2 = (float(v) for v in corners)
+        except (TypeError, ValueError):
+            return None, f"element has an unreadable uv on its {face} face"
+        uv[face] = {"uv": [u1, v1], "uv_size": [u2 - u1, v2 - v1]}
+    if uv:
+        box["uv"] = uv
+    return box, ""
+
+
+def element_texture(model: dict) -> tuple[str | None, str]:
+    """The one texture key every element face wears, or why there isn't one."""
+    references = set()
+    for element in model.get("elements") or []:
+        for spec in (element.get("faces") or {}).values():
+            if isinstance(spec, dict) and isinstance(spec.get("texture"), str):
+                references.add(spec["texture"].lstrip("#"))
+    if not references:
+        return None, "element faces name no texture"
+    if len(references) > 1:
+        names = ", ".join(sorted(references))
+        return None, (
+            f"element faces wear different textures ({names}); per-face geometry "
+            "materials are not mapped yet"
+        )
+    return references.pop(), ""
+
+
+def geometry(model: dict, identifier: str) -> tuple[dict | None, str]:
+    """A Bedrock geometry file for a model's elements, or why there is none."""
+    elements = model.get("elements") or []
+    if not elements:
+        return None, "model has no elements"
+
+    cubes = []
+    for element in elements:
+        box, why = cube(element)
+        if box is None:
+            return None, why
+        cubes.append(box)
+
+    return {
+        "format_version": "1.16.0",
+        "minecraft:geometry": [
+            {
+                "description": {
+                    "identifier": identifier,
+                    "texture_width": 16,
+                    "texture_height": 16,
+                    "visible_bounds_width": 2,
+                    "visible_bounds_height": 2.5,
+                    "visible_bounds_offset": [0, 0.75, 0],
+                },
+                "bones": [{"name": "root", "pivot": [0, 0, 0], "cubes": cubes}],
+            }
+        ],
+    }, ""
 
 
 def texture_shortname(reference: str, namespace: str) -> tuple[str | None, str]:
