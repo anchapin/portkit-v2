@@ -100,6 +100,25 @@ def cmd_probe(args) -> int:
     return 0
 
 
+def cmd_report(args) -> int:
+    """Markdown a modder can read, or paste into an issue, without the jar."""
+    from .report import render
+
+    tree = Path(args.tree)
+    if not tree.is_dir():
+        print(f"{tree} is not a directory", file=sys.stderr)
+        return 2
+    text = render(tree)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text)
+        print(f"report: {out} ({len(text):,} bytes)")
+    else:
+        print(text)
+    return 0
+
+
 def cmd_eval(args) -> int:
     """Run every fixture and print the coverage table. This is the number that matters."""
     import tempfile
@@ -143,6 +162,11 @@ def main(argv=None) -> int:
     p = sub.add_parser("validate", help="validate a converted tree")
     p.add_argument("tree")
     p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("report", help="Markdown report for a converted tree")
+    p.add_argument("tree")
+    p.add_argument("-o", "--out", help="write to a file instead of stdout")
+    p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("probe", help="build a verification probe pack (dev harness)")
     p.add_argument("out")
