@@ -20,41 +20,9 @@ from __future__ import annotations
 import json
 
 from ..model import ConversionResult, SourceMod, Unhandled
+from . import models
 
-# Java model parents we can place on a Bedrock full block, and which model
-# texture keys feed which Bedrock material instance faces.
-_CUBE_PARENTS = {
-    "minecraft:block/cube_all": {"*": "all"},
-    "minecraft:block/cube_column": {"up": "end", "down": "end", "*": "side"},
-    "minecraft:block/cube_column_horizontal": {"up": "end", "down": "end", "*": "side"},
-    "minecraft:block/cube_bottom_top": {"up": "top", "down": "bottom", "*": "side"},
-    "minecraft:block/cube": {
-        "up": "up", "down": "down", "north": "north",
-        "south": "south", "east": "east", "west": "west",
-    },
-}
-
-# Bedrock creative menu categories. Java gives no category in JSON, so every
-# converted block lands in construction, which is where a building block
-# belongs and is a placement, not a guess about the block itself.
 _MENU_CATEGORY = "construction"
-
-
-def _texture_key(reference: str, namespace: str) -> tuple[str | None, str]:
-    """Java texture reference -> the terrain_texture shortname the pack uses.
-
-    The textures converter keys its index as "<namespace>:<png stem>", so a
-    reference into this mod resolves. A reference into another namespace
-    (vanilla, or a sibling mod) does not: Bedrock's own shortnames are named
-    differently and picking one would be a guess.
-    """
-    if ":" in reference:
-        ref_ns, path = reference.split(":", 1)
-    else:
-        ref_ns, path = namespace, reference
-    if ref_ns != namespace:
-        return None, f"model points at {reference!r}, a texture from another namespace"
-    return f"{namespace}:{path.rsplit('/', 1)[-1]}", ""
 
 
 def _single_model(blockstate: dict) -> tuple[str | None, str]:
@@ -81,17 +49,6 @@ def _single_model(blockstate: dict) -> tuple[str | None, str]:
     return model, ""
 
 
-def _model_path(mod: SourceMod, model: str):
-    """Locate the model JSON this mod ships for a model reference."""
-    if ":" in model:
-        ref_ns, rel = model.split(":", 1)
-        if ref_ns != mod.namespace:
-            return None
-    else:
-        rel = model
-    return mod.assets / "models" / f"{rel}.json"
-
-
 def convert(mod: SourceMod) -> ConversionResult:
     result = ConversionResult()
     src = mod.assets / "blockstates"
@@ -112,7 +69,7 @@ def convert(mod: SourceMod) -> ConversionResult:
             result.unhandled.append(Unhandled(rel, "block", why))
             continue
 
-        model_file = _model_path(mod, model_ref)
+        model_file = models.model_path(mod, model_ref)
         if model_file is None or not model_file.is_file():
             result.unhandled.append(
                 Unhandled(rel, "block", f"model {model_ref!r} is not in this mod")
@@ -125,18 +82,19 @@ def convert(mod: SourceMod) -> ConversionResult:
             result.unhandled.append(Unhandled(model_rel, "block", f"invalid JSON: {exc}"))
             continue
 
-        faces = _CUBE_PARENTS.get(model.get("parent"))
-        if faces is None:
-            result.unhandled.append(
-                Unhandled(
-                    model_rel,
-                    "block",
-                    f"model parent {model.get('parent')!r} is not a full cube",
-                )
-            )
+        flat, parents, why = models.resolve(mod, model)
+        for parent_file in parents:
+            result.claim(mod, parent_file)
+        if why:
+            result.unhandled.append(Unhandled(model_rel, "block", why))
             continue
 
-        textures = model.get("textures") or {}
+        faces, why = models.faces(flat)
+        if faces is None:
+            result.unhandled.append(Unhandled(model_rel, "block", why))
+            continue
+
+        textures = flat.get("textures") or {}
         instances: dict[str, dict] = {}
         failure = ""
         for face, texture_key in faces.items():
@@ -144,7 +102,7 @@ def convert(mod: SourceMod) -> ConversionResult:
             if not isinstance(reference, str):
                 failure = f"model has no {texture_key!r} texture"
                 break
-            key, why = _texture_key(reference, mod.namespace)
+            key, why = models.texture_shortname(reference, mod.namespace)
             if key is None:
                 failure = why
                 break
