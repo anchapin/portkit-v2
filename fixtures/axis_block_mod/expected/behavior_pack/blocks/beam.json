@@ -26,13 +26,23 @@
       {
         "condition": "q.block_state('minecraft:block_face') == 'east' || q.block_state('minecraft:block_face') == 'west'",
         "components": {
-          "minecraft:geometry": "geometry.examplemod.beam_x"
+          "minecraft:geometry": "geometry.examplemod.beam_x",
+          "minecraft:material_instances": {
+            "*": {
+              "texture": "examplemod:beam"
+            }
+          }
         }
       },
       {
         "condition": "q.block_state('minecraft:block_face') == 'north' || q.block_state('minecraft:block_face') == 'south'",
         "components": {
-          "minecraft:geometry": "geometry.examplemod.beam_z"
+          "minecraft:geometry": "geometry.examplemod.beam_z",
+          "minecraft:material_instances": {
+            "*": {
+              "texture": "examplemod:beam"
+            }
+          }
         }
       }
     ]

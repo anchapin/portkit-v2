@@ -1,0 +1,5 @@
+name = "faced_model_mod"
+description = "A beam: end caps and flanks wear different textures, carried by Bedrock's per-face material instances."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 0

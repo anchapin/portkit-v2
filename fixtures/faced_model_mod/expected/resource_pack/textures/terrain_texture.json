@@ -1,0 +1,12 @@
+{
+  "resource_pack_name": "examplemod",
+  "texture_name": "atlas.terrain",
+  "texture_data": {
+    "examplemod:beam_end": {
+      "textures": "textures/blocks/beam_end"
+    },
+    "examplemod:beam_side": {
+      "textures": "textures/blocks/beam_side"
+    }
+  }
+}
