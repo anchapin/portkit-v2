@@ -1,0 +1,5 @@
+name = "item_defs_mod"
+description = "A plain icon item converts; a held tool and a two-layer armor icon are refused with reasons."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 2
