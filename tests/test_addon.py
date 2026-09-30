@@ -112,3 +112,24 @@ def test_manifest_dependency_version_follows_the_mod_version():
     data = manifest("x", "behavior", meta, depends_on=("resource",))
     assert data["dependencies"][0]["version"] == [4, 2, 1]
     assert data["header"]["version"] == [4, 2, 1]
+
+
+def test_two_packs_sharing_a_namespace_get_distinct_uuids():
+    """Bedrock keys an install by UUID, so same-namespace packs must not collide."""
+    from portkit.meta import ModMetadata
+    from portkit.pack import manifest
+
+    axis = manifest("probe", "resource", ModMetadata(name="Axis Probe"))
+    rotation = manifest("probe", "resource", ModMetadata(name="Rotation Probe"))
+    assert axis["header"]["uuid"] != rotation["header"]["uuid"]
+    assert axis["modules"][0]["uuid"] != rotation["modules"][0]["uuid"]
+
+
+def test_a_behavior_pack_depends_on_its_own_resource_uuid():
+    from portkit.meta import ModMetadata
+    from portkit.pack import manifest
+
+    meta = ModMetadata(name="Rotation Probe")
+    behavior = manifest("probe", "behavior", meta, depends_on=("resource",))
+    resource = manifest("probe", "resource", meta)
+    assert behavior["dependencies"][0]["uuid"] == resource["header"]["uuid"]
