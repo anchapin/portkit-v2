@@ -124,3 +124,102 @@ def test_the_fixture_converts_the_cubes_and_refuses_the_rest(tmp_path, fixtures_
     assert "blockstate variant" in reasons
     assert "not a full cube" in reasons
     assert "another namespace" in reasons
+
+
+AXIS = {
+    "variants": {
+        "axis=x": {"model": "examplemod:block/beam_x"},
+        "axis=y": {"model": "examplemod:block/beam_y"},
+        "axis=z": {"model": "examplemod:block/beam_z"},
+    }
+}
+
+
+def build_axis(tmp_path, blockstate=None, boxes=None, textures=None):
+    assets = tmp_path / "assets" / "examplemod"
+    (assets / "blockstates").mkdir(parents=True, exist_ok=True)
+    (assets / "models" / "block").mkdir(parents=True, exist_ok=True)
+    (assets / "textures" / "block").mkdir(parents=True, exist_ok=True)
+    (assets / "blockstates" / "beam.json").write_text(
+        json.dumps(blockstate if blockstate is not None else AXIS)
+    )
+    boxes = boxes or {
+        "y": ([6, 0, 6], [10, 16, 10]),
+        "x": ([0, 6, 6], [16, 10, 10]),
+        "z": ([6, 6, 0], [10, 10, 16]),
+    }
+    faces = {f: {"texture": "#all"} for f in ("down", "up", "north", "south", "west", "east")}
+    for axis, (start, stop) in boxes.items():
+        texture = (textures or {}).get(axis, "examplemod:block/beam")
+        (assets / "models" / "block" / f"beam_{axis}.json").write_text(
+            json.dumps(
+                {
+                    "textures": {"all": texture},
+                    "elements": [{"from": start, "to": stop, "faces": faces}],
+                }
+            )
+        )
+    for name in ("beam", "other"):
+        (assets / "textures" / "block" / f"{name}.png").write_bytes(b"png")
+    return SourceMod(root=tmp_path, namespace="examplemod")
+
+
+def test_a_pillar_converts_with_one_geometry_per_axis(tmp_path):
+    result = blocks.convert(build_axis(tmp_path))
+    assert result.unhandled == []
+    for axis in ("x", "y", "z"):
+        assert f"models/blocks/beam_{axis}.geo.json" in result.files
+    body = result.files["blocks/beam.json"]["minecraft:block"]
+    assert body["description"]["traits"] == {
+        "minecraft:placement_position": {"enabled_states": ["minecraft:block_face"]}
+    }
+    assert body["components"]["minecraft:geometry"] == "geometry.examplemod.beam_y"
+
+
+def test_the_pillar_permutations_cover_the_four_horizontal_faces(tmp_path):
+    result = blocks.convert(build_axis(tmp_path))
+    permutations = result.files["blocks/beam.json"]["minecraft:block"]["permutations"]
+    by_geometry = {
+        p["components"]["minecraft:geometry"]: p["condition"] for p in permutations
+    }
+    assert set(by_geometry) == {"geometry.examplemod.beam_x", "geometry.examplemod.beam_z"}
+    assert "'east'" in by_geometry["geometry.examplemod.beam_x"]
+    assert "'west'" in by_geometry["geometry.examplemod.beam_x"]
+    assert "'north'" in by_geometry["geometry.examplemod.beam_z"]
+    assert "'south'" in by_geometry["geometry.examplemod.beam_z"]
+    # Up and down stay with the default components, which carry the y geometry.
+    for condition in by_geometry.values():
+        assert "'up'" not in condition and "'down'" not in condition
+
+
+def test_a_pillar_missing_an_axis_is_refused(tmp_path):
+    partial = {"variants": {k: v for k, v in AXIS["variants"].items() if k != "axis=z"}}
+    result = blocks.convert(build_axis(tmp_path, blockstate=partial))
+    assert "blocks/beam.json" not in result.files
+    assert any("only ['x', 'y']" in item.reason for item in result.unhandled)
+
+
+def test_a_pillar_that_rotates_one_shared_model_is_refused(tmp_path):
+    shared = {
+        "variants": {
+            "axis=x": {"model": "examplemod:block/beam_y", "x": 90, "y": 90},
+            "axis=y": {"model": "examplemod:block/beam_y"},
+            "axis=z": {"model": "examplemod:block/beam_y", "x": 90},
+        }
+    }
+    result = blocks.convert(build_axis(tmp_path, blockstate=shared))
+    assert "blocks/beam.json" not in result.files
+    assert any("re-derived in Bedrock's own convention" in i.reason for i in result.unhandled)
+
+
+def test_axis_models_wearing_different_textures_are_refused(tmp_path):
+    mod = build_axis(tmp_path, textures={"x": "examplemod:block/other"})
+    result = blocks.convert(mod)
+    assert "blocks/beam.json" not in result.files
+    assert any("different textures" in item.reason for item in result.unhandled)
+
+
+def test_a_pillar_names_the_axis_that_failed(tmp_path):
+    mod = build_axis(tmp_path, textures={"z": "minecraft:block/stone"})
+    result = blocks.convert(mod)
+    assert any(item.reason.startswith("axis=z:") for item in result.unhandled)

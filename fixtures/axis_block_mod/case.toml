@@ -1,0 +1,5 @@
+name = "axis_block_mod"
+description = "A pillar: three axis variants, one model each, selected in Bedrock by the face it was built on."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 0
