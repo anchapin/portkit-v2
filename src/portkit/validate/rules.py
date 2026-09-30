@@ -117,9 +117,6 @@ def _check_flipbook(report: ValidationReport, path: Path, rel: str, pack_root: P
         return
 
     tiles: set[str] = set()
-    for path in sorted((pack_root / "loot_tables").rglob("*.json")):
-        _check_loot_table(report, path, f"{prefix}/{path.relative_to(pack_root).as_posix()}")
-
     for index in ("textures/terrain_texture.json", "textures/item_texture.json"):
         index_path = pack_root / index
         if index_path.is_file():
@@ -273,6 +270,9 @@ def validate_pack(pack_root: Path) -> ValidationReport:
 
     for path in sorted((pack_root / "blocks").glob("*.json")):
         _check_block(report, path, f"{prefix}/blocks/{path.name}", pack_root)
+
+    for path in sorted((pack_root / "loot_tables").rglob("*.json")):
+        _check_loot_table(report, path, f"{prefix}/{path.relative_to(pack_root).as_posix()}")
 
     for index in ("textures/terrain_texture.json", "textures/item_texture.json"):
         path = pack_root / index

@@ -114,3 +114,33 @@ def test_the_fixture_converts_the_plain_drops_and_reports_the_rest(tmp_path, fix
     reasons = " ".join(u.reason for u in out.unhandled)
     assert "fortune" in reasons
     assert "alternatives" in reasons
+
+
+def test_the_validator_actually_runs_on_loot_tables(tmp_path):
+    """The loot rules have to be reachable from validate_pack, not just exist."""
+    from portkit.validate.rules import validate_pack
+
+    pack = tmp_path / "behavior_pack"
+    (pack / "loot_tables" / "blocks").mkdir(parents=True)
+    (pack / "loot_tables" / "blocks" / "broken.json").write_text(
+        json.dumps({"pools": [{"rolls": 1, "entries": [{"type": "item", "name": "not an id"}]}]})
+    )
+    report = validate_pack(pack)
+    assert not report.ok
+    assert any(f.rule == "loot.name" for f in report.findings)
+    assert any("loot_tables/blocks/broken.json" in f.path for f in report.findings)
+
+
+def test_a_pack_with_both_a_flipbook_and_loot_tables_validates(tmp_path):
+    """Regression: the loot loop once sat inside the flipbook check."""
+    from portkit.validate.rules import validate_pack
+
+    pack = tmp_path / "resource_pack"
+    (pack / "textures").mkdir(parents=True)
+    (pack / "loot_tables" / "blocks").mkdir(parents=True)
+    (pack / "textures" / "flipbook_textures.json").write_text(json.dumps([]))
+    (pack / "loot_tables" / "blocks" / "ok.json").write_text(
+        json.dumps({"pools": [{"rolls": 1, "entries": [{"type": "item", "name": "ex:steel"}]}]})
+    )
+    report = validate_pack(pack)
+    assert [f for f in report.findings if f.rule.startswith("loot.")] == []
