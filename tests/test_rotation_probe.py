@@ -122,3 +122,68 @@ def test_the_derivation_is_written_down_where_it_can_be_checked():
     for lean in axis_probe.EXPECTED_LEAN.values():
         head = lean.split(" swings")[0].split(" end")[0]
         assert head in text
+
+
+def test_the_two_pivot_candidates_land_on_opposite_sides():
+    """Off centre, the mappings disagree, which is the whole point of the probe."""
+    element = {
+        "from": [6, 6, 6],
+        "to": [10, 10, 10],
+        "rotation": {"angle": 45, "axis": "z", "origin": [0, 8, 8]},
+    }
+    mirrored = axis_probe.pivot_cube(element, "mirrored")
+    unmirrored = axis_probe.pivot_cube(element, "unmirrored")
+
+    assert mirrored["pivot"] == [8, 8, 0]
+    assert unmirrored["pivot"] == [-8, 8, 0]
+    # Same cube, same turn: the pivot is the only disagreement.
+    assert mirrored["origin"] == unmirrored["origin"]
+    assert mirrored["rotation"] == unmirrored["rotation"] == [0, 0, 45]
+
+
+def test_a_centre_pivot_probes_nothing(tmp_path):
+    """Both candidates agree at the centre, so the harness refuses to pretend."""
+    model = tmp_path / "centre.json"
+    model.write_text(
+        json.dumps(
+            {
+                "elements": [
+                    {
+                        "from": [6, 6, 6],
+                        "to": [10, 10, 10],
+                        "rotation": {"angle": 45, "axis": "z", "origin": [8, 8, 8]},
+                    }
+                ]
+            }
+        )
+    )
+    texture = tmp_path / "probe.png"
+    texture.write_bytes(b"png")
+
+    with pytest.raises(ValueError, match="probes nothing"):
+        axis_probe.pivot_pack_files(model, texture, "examplemod")
+
+
+def test_the_pivot_pack_carries_both_blocks(tmp_path):
+    model = tmp_path / "pivot_z.json"
+    model.write_text(
+        json.dumps(
+            {
+                "elements": [
+                    {
+                        "from": [6, 6, 6],
+                        "to": [10, 10, 10],
+                        "rotation": {"angle": 45, "axis": "z", "origin": [0, 8, 8]},
+                    }
+                ]
+            }
+        )
+    )
+    texture = tmp_path / "probe.png"
+    texture.write_bytes(b"png")
+
+    files = axis_probe.pivot_pack_files(model, texture, "examplemod")
+
+    assert "blocks/pivot_mirrored.json" in files
+    assert "blocks/pivot_unmirrored.json" in files
+    assert axis_probe.PIVOT_EXPECTED in files["texts/en_US.lang"]
