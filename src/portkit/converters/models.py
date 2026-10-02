@@ -199,8 +199,13 @@ def _rotation(element: dict) -> tuple[dict | None, str]:
     return {"pivot": pivot, "rotation": degrees}, ""
 
 
-def cube(element: dict) -> tuple[dict | None, str]:
-    """One Java element as a Bedrock geometry cube, or why it cannot be one."""
+def cube(element: dict, tag_faces: bool = False) -> tuple[dict | None, str]:
+    """One Java element as a Bedrock geometry cube, or why it cannot be one.
+
+    With tag_faces, every face also names its material instance (see
+    tagged_materials), which is how one block wears different textures on
+    faces that point the same way.
+    """
     turn, reason = _rotation(element)
     if turn is None:
         return None, reason
@@ -225,12 +230,20 @@ def cube(element: dict) -> tuple[dict | None, str]:
             continue
         corners = spec.get("uv")
         if not (isinstance(corners, list) and len(corners) == 4):
+            if tag_faces and isinstance(spec.get("texture"), str):
+                return None, (
+                    f"element's {face} face has no uv, and naming its material "
+                    "in the geometry needs one"
+                )
             continue
         try:
             u1, v1, u2, v2 = (float(v) for v in corners)
         except (TypeError, ValueError):
             return None, f"element has an unreadable uv on its {face} face"
         uv[face] = {"uv": [u1, v1], "uv_size": [u2 - u1, v2 - v1]}
+        reference = spec.get("texture")
+        if tag_faces and isinstance(reference, str):
+            uv[face]["material_instance"] = instance_name(reference.lstrip("#"))
     if uv:
         box["uv"] = uv
     box.update(turn)
@@ -280,6 +293,37 @@ def element_materials(model: dict) -> tuple[dict[str, str] | None, str]:
     return {face: keys.pop() for face, keys in by_face.items()}, ""
 
 
+_BUILT_IN_INSTANCES = {"*", "up", "down", "north", "south", "east", "west"}
+
+
+def instance_name(texture_key: str) -> str:
+    """The material-instance name a Java texture key gets in the geometry.
+
+    The key itself, so a pack reads like its mod, unless it collides with one
+    of Bedrock's seven built-in instances, which bind to faces on their own.
+    """
+    return f"java_{texture_key}" if texture_key in _BUILT_IN_INSTANCES else texture_key
+
+
+def tagged_materials(model: dict) -> tuple[dict[str, str] | None, str]:
+    """Material-instance name -> Java texture key, for faces that disagree.
+
+    element_materials covers a model whose elements agree per face direction.
+    When they don't (a bonfire's logs and its flame cross both face east and
+    west), the built-in per-face instances cannot tell them apart, so each face
+    names its instance in the geometry instead: one per texture key, bound on
+    the block. Pair with geometry(..., tag_faces=True).
+    """
+    keys: set[str] = set()
+    for element in model.get("elements") or []:
+        for spec in (element.get("faces") or {}).values():
+            if isinstance(spec, dict) and isinstance(spec.get("texture"), str):
+                keys.add(spec["texture"].lstrip("#"))
+    if not keys:
+        return None, "element faces name no texture"
+    return {instance_name(key): key for key in sorted(keys)}, ""
+
+
 def element_texture(model: dict) -> tuple[str | None, str]:
     """The one texture key every element face wears, or why there isn't one."""
     references = set()
@@ -298,7 +342,7 @@ def element_texture(model: dict) -> tuple[str | None, str]:
     return references.pop(), ""
 
 
-def geometry(model: dict, identifier: str) -> tuple[dict | None, str]:
+def geometry(model: dict, identifier: str, tag_faces: bool = False) -> tuple[dict | None, str]:
     """A Bedrock geometry file for a model's elements, or why there is none."""
     elements = model.get("elements") or []
     if not elements:
@@ -306,7 +350,7 @@ def geometry(model: dict, identifier: str) -> tuple[dict | None, str]:
 
     cubes = []
     for element in elements:
-        box, why = cube(element)
+        box, why = cube(element, tag_faces)
         if box is None:
             return None, why
         cubes.append(box)

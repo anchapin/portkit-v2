@@ -11,22 +11,28 @@
       "minecraft:geometry": "geometry.examplemod.beam",
       "minecraft:material_instances": {
         "down": {
-          "texture": "examplemod:beam_side"
+          "texture": "examplemod:beam_side",
+          "render_method": "alpha_test"
         },
         "east": {
-          "texture": "examplemod:beam_end"
+          "texture": "examplemod:beam_end",
+          "render_method": "alpha_test"
         },
         "north": {
-          "texture": "examplemod:beam_side"
+          "texture": "examplemod:beam_side",
+          "render_method": "alpha_test"
         },
         "south": {
-          "texture": "examplemod:beam_side"
+          "texture": "examplemod:beam_side",
+          "render_method": "alpha_test"
         },
         "up": {
-          "texture": "examplemod:beam_side"
+          "texture": "examplemod:beam_side",
+          "render_method": "alpha_test"
         },
         "west": {
-          "texture": "examplemod:beam_end"
+          "texture": "examplemod:beam_end",
+          "render_method": "alpha_test"
         }
       }
     }

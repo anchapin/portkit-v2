@@ -273,3 +273,69 @@ def test_the_pivot_mirror_follows_the_named_constant(monkeypatch):
     assert why == ""
     assert box["pivot"][0] == -5.0
 
+
+
+# Faces that disagree about one direction: each names its instance (bonfire).
+_BONFIRE_LIKE = {
+    "textures": {"texture": "examplemod:block/logs", "cross": "examplemod:block/flame"},
+    "elements": [
+        {
+            "from": [-3, 0, -8],
+            "to": [-2.999, 32, 24],
+            "rotation": {"origin": [-3, 0, -8], "axis": "z", "angle": -22.5},
+            "faces": {"west": {"texture": "#texture", "uv": [0, 0, 16, 16]}},
+        },
+        {
+            "from": [8, 0, -8],
+            "to": [8.001, 32, 24],
+            "rotation": {"origin": [8, 0, 8], "axis": "y", "angle": 45},
+            "faces": {
+                "west": {"texture": "#cross", "uv": [0, 0, 16, 16]},
+                "east": {"texture": "#cross", "uv": [0, 0, 16, 16]},
+            },
+        },
+    ],
+}
+
+
+def test_disagreeing_faces_get_one_named_instance_per_texture_key():
+    by_face, why = models.element_materials(_BONFIRE_LIKE)
+    assert by_face is None and "disagree" in why
+    names, why = models.tagged_materials(_BONFIRE_LIKE)
+    assert why == ""
+    assert names == {"cross": "cross", "texture": "texture"}
+
+
+def test_tagged_geometry_names_the_instance_on_every_face():
+    geo, why = models.geometry(_BONFIRE_LIKE, "geometry.examplemod.bonfire", tag_faces=True)
+    assert why == ""
+    logs, flame = geo["minecraft:geometry"][0]["bones"][0]["cubes"]
+    assert logs["uv"]["west"]["material_instance"] == "texture"
+    assert {f["material_instance"] for f in flame["uv"].values()} == {"cross"}
+
+
+def test_untagged_geometry_is_unchanged():
+    geo, why = models.geometry(_BONFIRE_LIKE, "geometry.examplemod.bonfire")
+    cubes = geo["minecraft:geometry"][0]["bones"][0]["cubes"]
+    assert all("material_instance" not in f for c in cubes for f in c["uv"].values())
+
+
+def test_a_key_named_like_a_built_in_face_is_renamed():
+    model = {
+        "elements": [
+            {"from": [0, 0, 0], "to": [16, 1, 16],
+             "faces": {"up": {"texture": "#up", "uv": [0, 0, 16, 16]}}},
+            {"from": [0, 1, 0], "to": [16, 2, 16],
+             "faces": {"up": {"texture": "#side", "uv": [0, 0, 16, 16]}}},
+        ]
+    }
+    names, _ = models.tagged_materials(model)
+    assert names == {"java_up": "up", "side": "side"}
+
+
+def test_a_tagged_face_without_uv_is_refused():
+    model = {"elements": [{"from": [0, 0, 0], "to": [16, 16, 16],
+                           "faces": {"up": {"texture": "#top"}}}]}
+    geo, why = models.geometry(model, "geometry.examplemod.x", tag_faces=True)
+    assert geo is None
+    assert "up face has no uv" in why
