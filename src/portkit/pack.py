@@ -29,6 +29,7 @@ def manifest(
     kind: str,
     meta: ModMetadata | None = None,
     depends_on: tuple[str, ...] = (),
+    min_engine: tuple[int, int, int] = (1, 20, 20),
 ) -> dict:
     """One Bedrock pack manifest.
 
@@ -48,8 +49,9 @@ def manifest(
             "uuid": _uuid(namespace, meta.header_name(namespace, kind), kind, "header"),
             "version": list(version),
             # 1.20.20 is the first engine with custom block states and the placement
-            # traits that set them, which the axis pillars rely on.
-            "min_engine_version": [1, 20, 20],
+            # traits that set them, which the axis pillars rely on. A pack that
+            # uses something newer (palisades need 1.26.0) rises to match.
+            "min_engine_version": list(min_engine),
         },
         "modules": [
             {
@@ -72,6 +74,30 @@ def manifest(
     return data
 
 
+ENGINE_FLOOR = (1, 20, 20)
+
+
+def engine_floor(files: dict) -> tuple[int, int, int]:
+    """The oldest engine that loads every block in this pack.
+
+    The floor stays at ENGINE_FLOOR unless a block was written at a newer
+    format because it needs a newer feature, so a mod with only simple blocks
+    still loads on older versions.
+    """
+    floor = ENGINE_FLOOR
+    for relpath, content in files.items():
+        if not (relpath.startswith("blocks/") and isinstance(content, dict)):
+            continue
+        version = str(content.get("format_version", ""))
+        try:
+            parts = tuple(int(v) for v in version.split("."))
+        except ValueError:
+            continue
+        parts = (parts + (0, 0, 0))[:3]
+        floor = max(floor, parts)
+    return floor
+
+
 def _is_behavior(relpath: str) -> bool:
     return relpath.startswith(_BEHAVIOR_DIRS)
 
@@ -92,6 +118,7 @@ def write_tree(
     # Bedrock rejects a circular dependency, and the behavior pack is the half
     # that carries the mod's actual content.
     has_resource = bool(buckets["resource"])
+    floor = engine_floor(result.files)
     for kind, files in buckets.items():
         if not files:
             continue
@@ -99,7 +126,7 @@ def write_tree(
         base.mkdir(parents=True, exist_ok=True)
         depends_on = ("resource",) if kind == "behavior" and has_resource else ()
         (base / "manifest.json").write_text(
-            json.dumps(manifest(namespace, kind, meta, depends_on), indent=2) + "\n"
+            json.dumps(manifest(namespace, kind, meta, depends_on, floor), indent=2) + "\n"
         )
         for relpath, content in files.items():
             target = base / relpath

@@ -1,0 +1,5 @@
+name = "palisade_mod"
+description = "A palisade: a fence-shaped multipart (post plus four uvlocked side turns) carried by Bedrock's connection trait, which lifts this pack's floor to 1.26.0."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 0
