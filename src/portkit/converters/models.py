@@ -261,9 +261,12 @@ def cube(element: dict, tag_faces: bool = False) -> tuple[dict | None, str]:
 # anticlockwise from below), with nothing mirrored. So on the top and bottom
 # faces uv_rotation is clockwise seen from outside the face, which is how Java's
 # own per-face "rotation" is defined, and the number carries straight across.
-# Side faces were not probed, and the X mirror could reverse them, so a side
-# face rotation is still refused.
-_TURNABLE_FACES = ("up", "down")
+# Issue #71, read in game the same way on 2026-10-02 (`portkit probe --kind
+# sideturn`): uv_rotation 90 on a side face turned its texture a quarter turn
+# clockwise looking straight at that face, on all four sides (east and west
+# included, so the X mirror does not reverse them), with nothing mirrored. Side
+# faces follow the same rule, and every face's rotation carries straight across.
+_TURNABLE_FACES = ("up", "down", "north", "south", "east", "west")
 
 
 def _face_turn(face: str, rotation) -> tuple[int | None, str]:
