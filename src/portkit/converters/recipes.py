@@ -75,6 +75,25 @@ _SINGLE_ITEM_TAGS = {
 }
 _TAG_NAMESPACES = ("forge:", "c:", "neoforge:")
 
+# Vanilla tags Bedrock's own recipes take as ingredients, under the same name
+# and meaning as Java's. Read from Mojang/bedrock-samples behavior_pack/recipes
+# on 2026-10-02 (e.g. torch and campfire take {"tag": "minecraft:coals"}, soul
+# campfire takes minecraft:soul_fire_base_blocks). These pass through as tags,
+# so the recipe accepts the same set of items it does in Java. Bedrock tags with
+# no Java twin of the same name (is_pickaxe, mushrooms_for_stew, metal_nuggets,
+# trim_*) are left out on purpose.
+_BEDROCK_VANILLA_TAGS = frozenset({
+    "minecraft:coals",
+    "minecraft:logs",
+    "minecraft:logs_that_burn",
+    "minecraft:planks",
+    "minecraft:soul_fire_base_blocks",
+    "minecraft:stone_crafting_materials",
+    "minecraft:stone_tool_materials",
+    "minecraft:wooden_slabs",
+    "minecraft:wool",
+})
+
 
 def resolve_tag(tag: str) -> str | None:
     """A convention tag that unambiguously means one vanilla item, or None."""
@@ -94,6 +113,8 @@ def _item(spec) -> dict | None:
         if "id" in spec:
             return {"item": spec["id"]}
         if "tag" in spec:
+            if str(spec["tag"]) in _BEDROCK_VANILLA_TAGS:
+                return {"tag": str(spec["tag"])}
             resolved = resolve_tag(str(spec["tag"]))
             return {"item": resolved} if resolved else None
     # multi-item tags and weighted lists have no clean 1:1 Bedrock form
