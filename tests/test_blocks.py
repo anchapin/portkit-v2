@@ -199,7 +199,7 @@ def test_a_pillar_missing_an_axis_is_refused(tmp_path):
     assert any("only ['x', 'y']" in item.reason for item in result.unhandled)
 
 
-def test_a_pillar_that_rotates_one_shared_model_is_refused(tmp_path):
+def test_a_pillar_that_turns_one_shared_model_gets_a_geometry_per_axis(tmp_path):
     shared = {
         "variants": {
             "axis=x": {"model": "examplemod:block/beam_y", "x": 90, "y": 90},
@@ -208,8 +208,23 @@ def test_a_pillar_that_rotates_one_shared_model_is_refused(tmp_path):
         }
     }
     result = blocks.convert(build_axis(tmp_path, blockstate=shared))
+    assert "blocks/beam.json" in result.files
+    assert not [i for i in result.unhandled if "beam" in i.source]
+    for axis in ("x", "y", "z"):
+        assert f"models/blocks/beam_{axis}.geo.json" in result.files
+
+
+def test_a_shared_model_turned_with_uvlock_is_still_refused(tmp_path):
+    shared = {
+        "variants": {
+            "axis=x": {"model": "examplemod:block/beam_y", "x": 90, "y": 90, "uvlock": True},
+            "axis=y": {"model": "examplemod:block/beam_y"},
+            "axis=z": {"model": "examplemod:block/beam_y", "x": 90, "uvlock": True},
+        }
+    }
+    result = blocks.convert(build_axis(tmp_path, blockstate=shared))
     assert "blocks/beam.json" not in result.files
-    assert any("re-derived in Bedrock's own convention" in i.reason for i in result.unhandled)
+    assert any("uvlock" in i.reason for i in result.unhandled)
 
 
 def test_each_axis_carries_its_own_materials(tmp_path):

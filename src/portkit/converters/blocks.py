@@ -50,15 +50,18 @@ _CARDINAL_TURN = {"north": 0, "east": 90, "south": 180, "west": 270}
 _AXIS_FACES = {"y": ("up", "down"), "z": ("north", "south"), "x": ("east", "west")}
 
 
-def _axis_variants(blockstate: dict) -> tuple[dict[str, str] | None, str]:
-    """{axis: model} when this blockstate is a plain pillar, else why not."""
+def _axis_variants(blockstate: dict) -> tuple[dict[str, tuple[str, int, int]] | None, str]:
+    """{axis: (model, x, y)} when this blockstate is a pillar, else why not.
+
+    A pillar either names a model per axis or turns one shared model (x/y
+    without uvlock); the turn is baked in Java space by models.turn_rigid."""
     variants = blockstate.get("variants")
     if not isinstance(variants, dict) or not variants:
         return None, ""
     if not all(key.startswith("axis=") for key in variants):
         return None, ""
 
-    models_by_axis: dict[str, str] = {}
+    models_by_axis: dict[str, tuple[str, int, int]] = {}
     for key, entry in variants.items():
         axis = key[len("axis=") :]
         if axis not in _AXIS_FACES:
@@ -68,13 +71,18 @@ def _axis_variants(blockstate: dict) -> tuple[dict[str, str] | None, str]:
         model = entry.get("model") if isinstance(entry, dict) else None
         if not isinstance(model, str):
             return None, f"axis variant {key!r} names no model"
-        if any(entry.get(k) for k in ("x", "y", "uvlock")):
+        if entry.get("uvlock") and (entry.get("x") or entry.get("y")):
             return None, (
-                f"axis variant {key!r} rotates one shared model rather than naming a "
-                "model per axis; the rotation would have to be re-derived in Bedrock's "
-                "own convention first"
+                f"axis variant {key!r} turns a shared model with uvlock, which "
+                "re-derives its uvs in a way that is not mapped yet"
             )
-        models_by_axis[axis] = model
+        try:
+            x, y = int(entry.get("x") or 0), int(entry.get("y") or 0)
+        except (TypeError, ValueError):
+            return None, f"axis variant {key!r} has an unreadable turn"
+        if x % 90 or y % 90:
+            return None, f"axis variant {key!r} turns by x={x} y={y}, not quarter turns"
+        models_by_axis[axis] = (model, x % 360, y % 360)
 
     missing = sorted(set(_AXIS_FACES) - set(models_by_axis))
     if missing:
@@ -498,7 +506,8 @@ def _instances(
 
 
 def _model_block(
-    mod: SourceMod, result: ConversionResult, model_ref: str, geo_name: str
+    mod: SourceMod, result: ConversionResult, model_ref: str, geo_name: str,
+    turn: tuple[int, int] = (0, 0),
 ) -> tuple[str | None, dict | None, dict | None, str]:
     """Resolve one model into (geometry identifier, material instances, geometry).
 
@@ -521,6 +530,20 @@ def _model_block(
         return None, None, None, why
 
     textures = flat.get("textures") or {}
+
+    if any(turn):
+        if not flat.get("elements"):
+            return None, None, None, (
+                f"blockstate turns {model_ref!r} (x={turn[0]} y={turn[1]}), a plain "
+                "cube; turning its per-face textures is not mapped yet"
+            )
+        turned = []
+        for element in flat["elements"]:
+            moved, why = models.turn_rigid(element, turn[0], turn[1])
+            if moved is None:
+                return None, None, None, why
+            turned.append(moved)
+        flat = {**flat, "elements": turned}
 
     if flat.get("elements"):
         # A custom shape: its own geometry file, and one material instance per
@@ -622,13 +645,14 @@ def _convert_axis_block(
     result: ConversionResult,
     rel: str,
     name: str,
-    by_axis: dict[str, str],
+    by_axis: dict[str, tuple[str, int, int]],
 ) -> None:
     """A pillar: one geometry per axis, selected by the face it was built on."""
     resolved: dict[str, tuple[str, dict, dict | None]] = {}
     for axis in sorted(by_axis):
+        model_ref, x, y = by_axis[axis]
         identifier, instances, geo, why = _model_block(
-            mod, result, by_axis[axis], f"{name}_{axis}"
+            mod, result, model_ref, f"{name}_{axis}", (x, y)
         )
         if identifier is None:
             result.unhandled.append(Unhandled(rel, "block", f"axis={axis}: {why}"))
