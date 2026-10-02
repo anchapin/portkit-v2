@@ -18,6 +18,7 @@ project exists to prevent.
 from __future__ import annotations
 
 import json
+from portkit import png as png_reader
 
 from ..model import ConversionResult, SourceMod, Unhandled
 from . import models
@@ -179,8 +180,13 @@ def _model_block(
     if flat.get("elements"):
         # A custom shape: its own geometry file, and one material instance per
         # face it actually wears. Bedrock's built-in per-face instances bind
-        # themselves to cube faces, so nothing has to be named in the geometry.
+        # themselves to cube faces, so usually nothing is named in the geometry.
+        # When elements disagree about one direction, each face names its
+        # instance in the geometry instead, one per texture key.
         by_face, why = models.element_materials(flat)
+        tag_faces = by_face is None and "disagree" in why
+        if tag_faces:
+            by_face, why = models.tagged_materials(flat)
         if by_face is None:
             return None, None, None, why
 
@@ -193,15 +199,23 @@ def _model_block(
             if shortname is None:
                 return None, None, None, why
             instances[face] = {"texture": shortname}
+            if _see_through(mod, reference):
+                # Java's cutout layer is set in mod code; the texture's own
+                # holes are the evidence we can read.
+                instances[face]["render_method"] = "alpha_test"
 
-        # Every face the same texture is the common case, and "*" says so in one
-        # line instead of six.
-        distinct = {spec["texture"] for spec in instances.values()}
-        if len(distinct) == 1:
-            instances = {"*": {"texture": distinct.pop()}}
+        distinct = {json.dumps(spec, sort_keys=True) for spec in instances.values()}
+        if len(distinct) == 1 and not tag_faces:
+            # Every face the same texture is the common case, and "*" says so
+            # in one line instead of six.
+            instances = {"*": json.loads(distinct.pop())}
+        elif tag_faces:
+            # Every face names its own instance, so "*" is only a fallback;
+            # point it at the first one rather than leave it undefined.
+            instances = {"*": dict(instances[min(instances)]), **instances}
 
         identifier = f"geometry.{mod.namespace}.{geo_name}"
-        geo, why = models.geometry(flat, identifier)
+        geo, why = models.geometry(flat, identifier, tag_faces=tag_faces)
         if geo is None:
             return None, None, None, why
         return identifier, instances, geo, ""
@@ -339,6 +353,17 @@ def _axis_block_definition(
             "permutations": permutations,
         },
     }
+
+
+def _see_through(mod, reference: str) -> bool:
+    """Does this Java texture have holes? Unreadable counts as yes: alpha_test
+    on an opaque texture looks the same, opaque on a cutout one shows black."""
+    ns, _, path = reference.partition(":") if ":" in reference else (mod.namespace, "", reference)
+    png = mod.root / "assets" / ns / "textures" / f"{path}.png"
+    if not png.is_file():
+        return False
+    answer = png_reader.has_transparency(png.read_bytes())
+    return True if answer is None else answer
 
 
 def _block_definition(

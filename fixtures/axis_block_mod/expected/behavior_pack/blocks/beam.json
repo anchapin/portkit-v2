@@ -18,6 +18,7 @@
       "minecraft:geometry": "geometry.examplemod.beam_y",
       "minecraft:material_instances": {
         "*": {
+          "render_method": "alpha_test",
           "texture": "examplemod:beam"
         }
       }
@@ -29,6 +30,7 @@
           "minecraft:geometry": "geometry.examplemod.beam_x",
           "minecraft:material_instances": {
             "*": {
+              "render_method": "alpha_test",
               "texture": "examplemod:beam"
             }
           }
@@ -40,6 +42,7 @@
           "minecraft:geometry": "geometry.examplemod.beam_z",
           "minecraft:material_instances": {
             "*": {
+              "render_method": "alpha_test",
               "texture": "examplemod:beam"
             }
           }

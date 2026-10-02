@@ -220,15 +220,21 @@ def test_each_axis_carries_its_own_materials(tmp_path):
     result = blocks.convert(mod)
     assert result.unhandled == []
     body = result.files["blocks/beam.json"]["minecraft:block"]
-    assert body["components"]["minecraft:material_instances"] == {
-        "*": {"texture": "examplemod:beam"}
+
+    def textures(instances):
+        # Render method follows the png's own alpha (see portkit.png); this test
+        # is only about which texture rides with which axis.
+        return {face: spec["texture"] for face, spec in instances.items()}
+
+    assert textures(body["components"]["minecraft:material_instances"]) == {
+        "*": "examplemod:beam"
     }
     by_geometry = {
-        p["components"]["minecraft:geometry"]: p["components"]["minecraft:material_instances"]
+        p["components"]["minecraft:geometry"]: textures(p["components"]["minecraft:material_instances"])
         for p in body["permutations"]
     }
-    assert by_geometry["geometry.examplemod.beam_x"] == {"*": {"texture": "examplemod:other"}}
-    assert by_geometry["geometry.examplemod.beam_z"] == {"*": {"texture": "examplemod:beam"}}
+    assert by_geometry["geometry.examplemod.beam_x"] == {"*": "examplemod:other"}
+    assert by_geometry["geometry.examplemod.beam_z"] == {"*": "examplemod:beam"}
 
 
 def test_a_pillar_names_the_axis_that_failed(tmp_path):
