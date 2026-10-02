@@ -73,3 +73,15 @@ pivot mirrored**. Recorded as `models.PIVOT_IS_MIRRORED = True`.
 
 That was the hoped-for answer (pivot and cube living in one space) but it is now
 an observation, not a hope.
+
+## Face names
+
+Mirroring the box in X raised one more question (#64): does a face Java calls
+west need to be called east in Bedrock? The face probe (`portkit probe --kind
+face`) built a 2-pixel slab on one edge, drawn on one face only, with the uv
+entry keyed both ways. Read in game on Bedrock for Android, 2026-10-01: **B,
+face as written**. Recorded as `models.FACE_NAMES_FOLLOW_MIRROR = False`.
+
+The probe tested the per-face uv key. Built-in face material instances
+(`west`, `east`, ...) bind to those same named faces, so they follow the same
+rule; that part is inferred from the binding, not separately observed.

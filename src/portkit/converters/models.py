@@ -252,6 +252,15 @@ def cube(element: dict, tag_faces: bool = False) -> tuple[dict | None, str]:
 
 _MIRRORED_FACES = {"west": "east", "east": "west"}
 
+# Whether a face name has to swap west/east to follow the X mirror. Issue #64:
+# the face probe (`portkit probe --kind face`) built a slab on one edge, drawn
+# on one face only, keyed both ways. Read in game on Bedrock for Android by the
+# project owner, 2026-10-01: "B face as written". So once the box is mirrored,
+# the face Bedrock calls west is the one Java calls west, and names carry over.
+# The probe keyed the per-face uv entry; built-in face material instances bind
+# to those same named faces, so they follow the same rule.
+FACE_NAMES_FOLLOW_MIRROR = False
+
 
 def element_materials(model: dict) -> tuple[dict[str, str] | None, str]:
     """Bedrock material-instance name -> Java texture key, for a custom shape.
@@ -262,9 +271,8 @@ def element_materials(model: dict) -> tuple[dict[str, str] | None, str]:
     wearing "end" on its caps and "side" on its flanks needs nothing but the
     right keys on the block definition.
 
-    The one conversion here is the X flip. cube() mirrors every box in X, so the
-    face Java calls west ends up on Bedrock's east side, and its texture has to
-    follow it across. Everything else keeps its name.
+    Face names carry over unchanged: the face probe (#64) showed that after
+    cube() mirrors the box, Bedrock's west face is still Java's west face.
     """
     elements = model.get("elements") or []
     if not elements:
@@ -278,7 +286,7 @@ def element_materials(model: dict) -> tuple[dict[str, str] | None, str]:
             reference = spec.get("texture")
             if not isinstance(reference, str):
                 continue
-            target = _MIRRORED_FACES.get(face, face) if X_AXIS_IS_FLIPPED else face
+            target = _MIRRORED_FACES.get(face, face) if FACE_NAMES_FOLLOW_MIRROR else face
             by_face.setdefault(target, set()).add(reference.lstrip("#"))
 
     if not by_face:
