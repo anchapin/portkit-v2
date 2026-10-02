@@ -328,3 +328,92 @@ def pivot_pack_files(
         "texture_data": {f"{namespace}:probe": {"textures": "textures/blocks/probe"}},
     }
     return files
+
+
+# --- issue #64: which uv face key does a one-sided face need after the mirror?
+#
+# The cube origin is mirrored in X (settled by the axis probe) and so is a
+# rotation pivot (#52). Built-in face material instances follow the mirror too
+# (Java west -> Bedrock east), but cube() writes per-face uv entries under the
+# Java face name. A face only exists where a uv entry names it, so for a slab
+# textured on one side the key decides which way that face points.
+FACE_KEYS = ("mirrored", "aswritten")
+FACE_EXPECTED = (
+    "a slab on one edge, textured on its outer face only: you see the texture "
+    "from outside that edge, and nothing from the opposite side"
+)
+
+# Java: a 2-pixel slab against the west edge, drawn on its west face only.
+_FACE_ELEMENT = {
+    "from": [0, 0, 0],
+    "to": [2, 16, 16],
+    "faces": {"west": {"uv": [0, 0, 16, 16], "texture": "#probe"}},
+}
+
+
+def _probe_png() -> bytes:
+    """A 16x16 opaque texture: orange with a dark border, so the face reads at a glance."""
+    import struct
+    import zlib
+
+    rows = []
+    for y in range(16):
+        row = bytearray([0])
+        for x in range(16):
+            edge = x in (0, 15) or y in (0, 15)
+            row += bytes((40, 30, 20, 255) if edge else (235, 140, 30, 255))
+        rows.append(bytes(row))
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return (struct.pack(">I", len(body)) + kind + body
+                + struct.pack(">I", zlib.crc32(kind + body)))
+
+    header = struct.pack(">IIBBBBB", 16, 16, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
+def face_cube(keying: str) -> dict:
+    """The slab as a Bedrock cube, its one uv entry keyed one of two ways."""
+    cube = _cube(_FACE_ELEMENT, "mirrored")
+    if keying == "mirrored":
+        cube["uv"] = {"east": cube["uv"].pop("west")}
+    return cube
+
+
+def face_pack_files(namespace: str) -> dict[str, object]:
+    """Two blocks, one question: which face key points a one-sided face outward?"""
+    files: dict[str, object] = {}
+    labels = []
+    for keying in FACE_KEYS:
+        name = f"face_{keying}"
+        identifier = f"geometry.{namespace}.{name}"
+        files[f"models/blocks/{name}.geo.json"] = {
+            "format_version": _GEOMETRY_FORMAT,
+            "minecraft:geometry": [
+                {
+                    "description": {
+                        "identifier": identifier,
+                        "texture_width": 16,
+                        "texture_height": 16,
+                        "visible_bounds_width": 2,
+                        "visible_bounds_height": 2.5,
+                        "visible_bounds_offset": [0, 0.75, 0],
+                    },
+                    "bones": [{"name": "root", "pivot": [0, 0, 0],
+                               "cubes": [face_cube(keying)]}],
+                }
+            ],
+        }
+        files[f"blocks/{name}.json"] = block(namespace, name, identifier, f"{namespace}:probe")
+        title = "A face mirrored" if keying == "mirrored" else "B face as written"
+        labels.append(f"tile.{namespace}:{name}.name={title}")
+
+    files["texts/en_US.lang"] = "\n".join(labels + [""])
+    files["textures/blocks/probe.png"] = _probe_png()
+    files["textures/terrain_texture.json"] = {
+        "resource_pack_name": namespace,
+        "texture_name": "atlas.terrain",
+        "texture_data": {f"{namespace}:probe": {"textures": "textures/blocks/probe"}},
+    }
+    return files

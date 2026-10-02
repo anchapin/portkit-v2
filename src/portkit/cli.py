@@ -69,6 +69,8 @@ def cmd_probe(args) -> int:
             files = axis_probe.rotation_pack_files(
                 Path(args.models), texture, args.namespace
             )
+        elif args.kind == "face":
+            files = axis_probe.face_pack_files(args.namespace)
         elif args.kind == "pivot":
             files = axis_probe.pivot_pack_files(
                 Path(args.model), texture, args.namespace
@@ -83,6 +85,7 @@ def cmd_probe(args) -> int:
         "axis": ("axis_probe", "Axis Probe"),
         "rotation": ("rotation_probe", "Rotation Probe"),
         "pivot": ("pivot_probe", "Pivot Probe"),
+        "face": ("face_probe", "Face Probe"),
     }
     mod_id, title = label[args.kind]
     meta = ModMetadata(mod_id=mod_id, name=title)
@@ -90,7 +93,16 @@ def cmd_probe(args) -> int:
     addon = write_mcaddon(tree, out / addon_name(args.namespace, meta))
     print(f"probe tree:  {tree}")
     print(f"install:     {addon} ({addon.stat().st_size:,} bytes)")
-    if args.kind == "pivot":
+    if args.kind == "face":
+        print(
+            "\nTwo blocks, one question. Each is a thin slab on one edge, textured "
+            "on one side only.\n"
+            "  A face mirrored    -> uv key follows the X mirror (west -> east)\n"
+            "  B face as written  -> uv key keeps the Java face name\n"
+            f"Java renders {axis_probe.FACE_EXPECTED}. Walk around both; the one "
+            "that matches is the keying."
+        )
+    elif args.kind == "pivot":
         print(
             "\nTwo blocks, one question. Both turn the same cube +45 about Z "
             "around an origin\neight blocks west of centre, and differ only in "
@@ -189,10 +201,11 @@ def main(argv=None) -> int:
     p = sub.add_parser("probe", help="build a verification probe pack (dev harness)")
     p.add_argument("out")
     p.add_argument(
-        "--kind", choices=("axis", "rotation", "pivot"), default="axis",
+        "--kind", choices=("axis", "rotation", "pivot", "face"), default="axis",
         help=(
             "axis: is Bedrock's X flipped. rotation: which way a rotation leans. "
-            "pivot: where an off-centre rotation origin lands."
+            "pivot: where an off-centre rotation origin lands. "
+            "face: which uv key a one-sided face needs after the mirror."
         ),
     )
     p.add_argument(
