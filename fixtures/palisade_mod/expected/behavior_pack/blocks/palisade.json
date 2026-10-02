@@ -1,0 +1,55 @@
+{
+  "format_version": "1.26.0",
+  "minecraft:block": {
+    "description": {
+      "identifier": "examplemod:palisade",
+      "menu_category": {
+        "category": "construction"
+      },
+      "traits": {
+        "minecraft:connection": {
+          "enabled_states": [
+            "minecraft:cardinal_connections"
+          ]
+        }
+      }
+    },
+    "components": {
+      "minecraft:geometry": {
+        "identifier": "geometry.examplemod.palisade",
+        "bone_visibility": {
+          "north": "q.block_state('minecraft:connection_north')",
+          "east": "q.block_state('minecraft:connection_east')",
+          "south": "q.block_state('minecraft:connection_south')",
+          "west": "q.block_state('minecraft:connection_west')"
+        }
+      },
+      "minecraft:material_instances": {
+        "down": {
+          "texture": "examplemod:palisade_end",
+          "render_method": "alpha_test"
+        },
+        "east": {
+          "texture": "examplemod:palisade_side",
+          "render_method": "alpha_test"
+        },
+        "north": {
+          "texture": "examplemod:palisade_side",
+          "render_method": "alpha_test"
+        },
+        "south": {
+          "texture": "examplemod:palisade_side",
+          "render_method": "alpha_test"
+        },
+        "up": {
+          "texture": "examplemod:palisade_end",
+          "render_method": "alpha_test"
+        },
+        "west": {
+          "texture": "examplemod:palisade_side",
+          "render_method": "alpha_test"
+        }
+      }
+    }
+  }
+}

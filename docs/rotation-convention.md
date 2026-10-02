@@ -85,3 +85,12 @@ face as written**. Recorded as `models.FACE_NAMES_FOLLOW_MIRROR = False`.
 The probe tested the per-face uv key. Built-in face material instances
 (`west`, `east`, ...) bind to those same named faces, so they follow the same
 rule; that part is inferred from the binding, not separately observed.
+
+## Blockstate y turns
+
+A multipart part turned by `y` (a palisade side aimed at each neighbour) is
+turned in Java coordinates before conversion: each quarter turn sends (x, z) to
+(16 - z, x) and north to east. Only uvlocked turns of unrotated elements whose
+uvs are Java's position-derived ones are taken, because then the turned element
+simply wears the position-derived uvs of where it lands. See
+`models.turn_y`.

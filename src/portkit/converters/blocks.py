@@ -29,6 +29,16 @@ _MENU_CATEGORY = "construction"
 # pack manifest carries the matching floor.
 _BLOCK_FORMAT = "1.20.20"
 
+# The connection trait left experimental in Bedrock 1.26.0 ("can now be used
+# without the Upcoming Creator Features toggle", 1.26.0 creator update notes).
+# Only blocks that need it are written at this format, and the pack floor rises
+# to match only when one is present (see pack.engine_floor).
+_CONNECTION_FORMAT = "1.26.0"
+
+_CARDINALS = ("north", "east", "south", "west")
+# The y turn Java uses to aim one side part at each neighbour.
+_CARDINAL_TURN = {"north": 0, "east": 90, "south": 180, "west": 270}
+
 
 # Java writes a pillar as three variants, one per axis, and Bedrock has no axis
 # state of its own. What it does have is a placement trait: minecraft:block_face
@@ -131,7 +141,7 @@ def _random_note(name: str, entries: list) -> str:
 def _single_model(blockstate: dict) -> tuple[str | None, str]:
     """The one model a stateless block uses, or why it has more than one."""
     if "multipart" in blockstate:
-        return None, "block uses a multipart blockstate, which Bedrock models differently"
+        return None, _multipart_reason(blockstate)
     variants = blockstate.get("variants")
     if not isinstance(variants, dict) or not variants:
         return None, "blockstate has no variants we recognise"
@@ -150,6 +160,213 @@ def _single_model(blockstate: dict) -> tuple[str | None, str]:
     if any(entry.get(k) for k in ("x", "y", "uvlock")):
         return None, "variant rotates its model, which the full block geometry cannot express"
     return model, ""
+
+
+def _multipart_states(blockstate: dict) -> list[str]:
+    states: set[str] = set()
+    for part in blockstate.get("multipart") or []:
+        when = part.get("when") if isinstance(part, dict) else None
+        if isinstance(when, dict):
+            for key, value in when.items():
+                if key in ("OR", "AND") and isinstance(value, list):
+                    for clause in value:
+                        if isinstance(clause, dict):
+                            states.update(clause)
+                else:
+                    states.add(key)
+    return sorted(states)
+
+
+def _multipart_reason(blockstate: dict) -> str:
+    parts = blockstate.get("multipart") or []
+    states = _multipart_states(blockstate)
+    return (
+        f"multipart blockstate with {len(parts)} part(s) keyed on "
+        f"{', '.join(states) or 'nothing'}; Java computes those states in block "
+        "code and no Bedrock trait sets them, so the block would sit in its "
+        "default shape forever"
+    )
+
+
+def _palisade_parts(blockstate: dict) -> tuple[str | None, str | None, bool]:
+    """(post model, side model, uvlock) for a fence-shaped multipart, else Nones.
+
+    The shape: one unconditional part, plus one side part per cardinal neighbour
+    gated on that direction alone being "true" and turned to face it. Exactly
+    what Bedrock's connection trait reports, and nothing else.
+    """
+    parts = blockstate.get("multipart")
+    if not isinstance(parts, list) or len(parts) != 5:
+        return None, None, False
+    post = side = None
+    uvlocks: set[bool] = set()
+    seen: set[str] = set()
+    for part in parts:
+        if not isinstance(part, dict) or not isinstance(part.get("apply"), dict):
+            return None, None, False
+        apply = part["apply"]
+        model = apply.get("model")
+        if not isinstance(model, str) or apply.get("x"):
+            return None, None, False
+        when = part.get("when")
+        if when is None:
+            if post is not None or apply.get("y"):
+                return None, None, False
+            post = model
+            continue
+        if not isinstance(when, dict) or len(when) != 1:
+            return None, None, False
+        (direction, value), = when.items()
+        if direction not in _CARDINALS or str(value).lower() != "true":
+            return None, None, False
+        if (apply.get("y") or 0) != _CARDINAL_TURN[direction]:
+            return None, None, False
+        if side not in (None, model):
+            return None, None, False
+        side = model
+        seen.add(direction)
+        uvlocks.add(bool(apply.get("uvlock")))
+    if post is None or seen != set(_CARDINALS) or len(uvlocks) != 1:
+        return None, None, False
+    return post, side, uvlocks.pop()
+
+
+def _flat_model(mod: SourceMod, result: ConversionResult, model_ref: str) -> tuple[dict | None, str]:
+    model_file = models.model_path(mod, model_ref)
+    if model_file is None or not model_file.is_file():
+        return None, f"model {model_ref!r} is not in this mod"
+    model_rel = result.claim(mod, model_file)
+    try:
+        model = json.loads(model_file.read_text())
+    except json.JSONDecodeError as exc:
+        return None, f"{model_rel}: invalid JSON: {exc}"
+    flat, parents, why = models.resolve(mod, model)
+    for parent_file in parents:
+        result.claim(mod, parent_file)
+    return (None, why) if why else (flat, "")
+
+
+def _convert_palisade(
+    mod: SourceMod, result: ConversionResult, rel: str, name: str,
+    post_ref: str, side_ref: str, uvlock: bool,
+) -> None:
+    """A fence-shaped block: a post bone plus one side bone per neighbour,
+    each side shown while Bedrock's connection trait says that side joins."""
+    post, why = _flat_model(mod, result, post_ref)
+    side = None
+    if post is not None:
+        side, why = _flat_model(mod, result, side_ref)
+    if post is None or side is None:
+        result.unhandled.append(Unhandled(rel, "block", f"palisade: {why}"))
+        return
+
+    textures = dict(post.get("textures") or {})
+    for key, value in (side.get("textures") or {}).items():
+        if textures.setdefault(key, value) != value:
+            result.unhandled.append(Unhandled(
+                rel, "block",
+                f"palisade post and side models disagree about their {key!r} texture",
+            ))
+            return
+
+    parts = [("post", post.get("elements") or [])]
+    for direction in _CARDINALS:
+        turned = []
+        for element in side.get("elements") or []:
+            moved, why = models.turn_y(element, _CARDINAL_TURN[direction], uvlock)
+            if moved is None:
+                result.unhandled.append(Unhandled(rel, "block", f"palisade {direction} side: {why}"))
+                return
+            turned.append(moved)
+        parts.append((direction, turned))
+    if not parts[0][1] or not parts[1][1]:
+        result.unhandled.append(Unhandled(rel, "block", "palisade post or side model has no elements"))
+        return
+
+    combined = {"textures": textures, "elements": [e for _, els in parts for e in els]}
+    by_face, why = models.element_materials(combined)
+    tag_faces = by_face is None and "disagree" in why
+    if tag_faces:
+        by_face, why = models.tagged_materials(combined)
+    if by_face is None:
+        result.unhandled.append(Unhandled(rel, "block", f"palisade: {why}"))
+        return
+    instances, why = _instances(mod, by_face, textures, tag_faces)
+    if instances is None:
+        result.unhandled.append(Unhandled(rel, "block", f"palisade: {why}"))
+        return
+
+    identifier = f"geometry.{mod.namespace}.{name}"
+    geo, why = models.geometry_bones(parts, identifier, tag_faces=tag_faces)
+    if geo is None:
+        result.unhandled.append(Unhandled(rel, "block", f"palisade: {why}"))
+        return
+
+    result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = _palisade_definition(
+        mod.namespace, name, identifier, instances
+    )
+    result.notes.append(
+        f"{name}: sides join through Bedrock's connection trait, which decides on "
+        "its own which neighbours connect; Java's palisade code may join a "
+        "different set. Needs Bedrock 1.26.0 or newer."
+    )
+
+
+def _palisade_definition(namespace: str, name: str, geometry: str, instances: dict) -> dict:
+    return {
+        "format_version": _CONNECTION_FORMAT,
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{namespace}:{name}",
+                "menu_category": {"category": _MENU_CATEGORY},
+                "traits": {
+                    "minecraft:connection": {
+                        "enabled_states": ["minecraft:cardinal_connections"]
+                    }
+                },
+            },
+            "components": {
+                "minecraft:geometry": {
+                    "identifier": geometry,
+                    "bone_visibility": {
+                        d: f"q.block_state('minecraft:connection_{d}')" for d in _CARDINALS
+                    },
+                },
+                "minecraft:material_instances": instances,
+            },
+        },
+    }
+
+
+def _instances(
+    mod: SourceMod, by_face: dict[str, str], textures: dict, tag_faces: bool
+) -> tuple[dict | None, str]:
+    """Material instances for a custom shape, from its face -> texture-key map."""
+    instances: dict[str, dict] = {}
+    for face, texture_key in sorted(by_face.items()):
+        reference = textures.get(texture_key)
+        if not isinstance(reference, str):
+            return None, f"model has no {texture_key!r} texture"
+        shortname, why = models.texture_shortname(reference, mod.namespace)
+        if shortname is None:
+            return None, why
+        instances[face] = {"texture": shortname}
+        if _see_through(mod, reference):
+            # Java's cutout layer is set in mod code; the texture's own
+            # holes are the evidence we can read.
+            instances[face]["render_method"] = "alpha_test"
+
+    distinct = {json.dumps(spec, sort_keys=True) for spec in instances.values()}
+    if len(distinct) == 1 and not tag_faces:
+        # Every face the same texture is the common case, and "*" says so
+        # in one line instead of six.
+        instances = {"*": json.loads(distinct.pop())}
+    elif tag_faces:
+        # Every face names its own instance, so "*" is only a fallback;
+        # point it at the first one rather than leave it undefined.
+        instances = {"*": dict(instances[min(instances)]), **instances}
+    return instances, ""
 
 
 def _model_block(
@@ -190,29 +407,9 @@ def _model_block(
         if by_face is None:
             return None, None, None, why
 
-        instances: dict[str, dict] = {}
-        for face, texture_key in sorted(by_face.items()):
-            reference = textures.get(texture_key)
-            if not isinstance(reference, str):
-                return None, None, None, f"model has no {texture_key!r} texture"
-            shortname, why = models.texture_shortname(reference, mod.namespace)
-            if shortname is None:
-                return None, None, None, why
-            instances[face] = {"texture": shortname}
-            if _see_through(mod, reference):
-                # Java's cutout layer is set in mod code; the texture's own
-                # holes are the evidence we can read.
-                instances[face]["render_method"] = "alpha_test"
-
-        distinct = {json.dumps(spec, sort_keys=True) for spec in instances.values()}
-        if len(distinct) == 1 and not tag_faces:
-            # Every face the same texture is the common case, and "*" says so
-            # in one line instead of six.
-            instances = {"*": json.loads(distinct.pop())}
-        elif tag_faces:
-            # Every face names its own instance, so "*" is only a fallback;
-            # point it at the first one rather than leave it undefined.
-            instances = {"*": dict(instances[min(instances)]), **instances}
+        instances, why = _instances(mod, by_face, textures, tag_faces)
+        if instances is None:
+            return None, None, None, why
 
         identifier = f"geometry.{mod.namespace}.{geo_name}"
         geo, why = models.geometry(flat, identifier, tag_faces=tag_faces)
@@ -257,6 +454,11 @@ def convert(mod: SourceMod) -> ConversionResult:
             continue
         if why:
             result.unhandled.append(Unhandled(rel, "block", why))
+            continue
+
+        post_ref, side_ref, uvlock = _palisade_parts(blockstate)
+        if post_ref is not None:
+            _convert_palisade(mod, result, rel, name, post_ref, side_ref, uvlock)
             continue
 
         model_ref, why = _single_model(blockstate)

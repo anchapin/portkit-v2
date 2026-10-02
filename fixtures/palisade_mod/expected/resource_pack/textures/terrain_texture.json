@@ -1,0 +1,12 @@
+{
+  "resource_pack_name": "examplemod",
+  "texture_name": "atlas.terrain",
+  "texture_data": {
+    "examplemod:palisade_end": {
+      "textures": "textures/blocks/palisade_end"
+    },
+    "examplemod:palisade_side": {
+      "textures": "textures/blocks/palisade_side"
+    }
+  }
+}

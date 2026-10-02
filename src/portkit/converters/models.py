@@ -355,13 +355,23 @@ def geometry(model: dict, identifier: str, tag_faces: bool = False) -> tuple[dic
     elements = model.get("elements") or []
     if not elements:
         return None, "model has no elements"
+    return geometry_bones([("root", elements)], identifier, tag_faces)
 
-    cubes = []
-    for element in elements:
-        box, why = cube(element, tag_faces)
-        if box is None:
-            return None, why
-        cubes.append(box)
+
+def geometry_bones(
+    parts: list[tuple[str, list]], identifier: str, tag_faces: bool = False
+) -> tuple[dict | None, str]:
+    """A geometry file with one named bone per part, so bone_visibility can
+    switch parts on and off the way a Java multipart blockstate does."""
+    bones = []
+    for name, elements in parts:
+        cubes = []
+        for element in elements:
+            box, why = cube(element, tag_faces)
+            if box is None:
+                return None, f"{name}: {why}"
+            cubes.append(box)
+        bones.append({"name": name, "pivot": [0, 0, 0], "cubes": cubes})
 
     return {
         "format_version": "1.16.0",
@@ -375,7 +385,7 @@ def geometry(model: dict, identifier: str, tag_faces: bool = False) -> tuple[dic
                     "visible_bounds_height": 2.5,
                     "visible_bounds_offset": [0, 0.75, 0],
                 },
-                "bones": [{"name": "root", "pivot": [0, 0, 0], "cubes": cubes}],
+                "bones": bones,
             }
         ],
     }, ""
@@ -398,3 +408,72 @@ def texture_shortname(reference: str, namespace: str) -> tuple[str | None, str]:
     if ref_ns != namespace:
         return None, f"model points at {reference!r}, a texture from another namespace"
     return f"{namespace}:{path.rsplit('/', 1)[-1]}", ""
+
+
+# A Java blockstate y turn spins the model clockwise seen from above, in Java's
+# own coordinates, before any Bedrock conversion. Each quarter turn sends a
+# point (x, z) to (16 - z, x) and a north face to east.
+_Y_TURN_FACES = {"north": "east", "east": "south", "south": "west", "west": "north"}
+
+
+def auto_uv(face: str, start: list, end: list) -> list[float]:
+    """The uv Java derives from an element's position when a face names none.
+
+    This is also exactly what uvlock produces for an unrotated element: the
+    texture stays fixed to the world while the box moves through it.
+    """
+    x1, y1, z1 = (float(v) for v in start)
+    x2, y2, z2 = (float(v) for v in end)
+    return {
+        "down": [x1, 16 - z2, x2, 16 - z1],
+        "up": [x1, z1, x2, z2],
+        "north": [16 - x2, 16 - y2, 16 - x1, 16 - y1],
+        "south": [x1, 16 - y2, x2, 16 - y1],
+        "west": [z1, 16 - y2, z2, 16 - y1],
+        "east": [16 - z2, 16 - y2, 16 - z1, 16 - y1],
+    }[face]
+
+
+def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]:
+    """An element as a Java blockstate y turn leaves it, or why not.
+
+    Only the case we can state exactly is taken: uvlock on, an unrotated
+    element, and uvs that are Java's own position-derived ones (or absent).
+    Then the turned element simply wears the position-derived uvs of where it
+    lands. Without uvlock Java also spins the up/down textures, which is not
+    mapped yet.
+    """
+    if degrees % 90:
+        return None, f"y turn of {degrees} degrees is not a quarter turn"
+    quarters = (degrees // 90) % 4
+    if quarters == 0:
+        return element, ""
+    if not uvlock:
+        return None, "part turns its model without uvlock, which would also spin its top texture"
+    if element.get("rotation"):
+        return None, "part turns a model whose elements are themselves rotated"
+    try:
+        (x1, y1, z1), (x2, y2, z2) = element["from"], element["to"]
+    except (KeyError, TypeError, ValueError):
+        return None, "element is missing usable from/to coordinates"
+
+    faces = element.get("faces") or {}
+    for face, spec in faces.items():
+        corners = spec.get("uv") if isinstance(spec, dict) else None
+        if corners is not None and [float(v) for v in corners] != auto_uv(face, [x1, y1, z1], [x2, y2, z2]):
+            return None, (
+                f"part turns a model with a hand-set uv on its {face} face, and uvlock "
+                "would replace it in a way that is not mapped yet"
+            )
+
+    for _ in range(quarters):
+        x1, z1, x2, z2 = 16 - z2, x1, 16 - z1, x2
+        faces = {_Y_TURN_FACES.get(f, f): spec for f, spec in faces.items()}
+    start, end = [x1, y1, z1], [x2, y2, z2]
+    turned = {}
+    for face, spec in faces.items():
+        spec = dict(spec) if isinstance(spec, dict) else spec
+        if isinstance(spec, dict):
+            spec["uv"] = auto_uv(face, start, end)
+        turned[face] = spec
+    return {**element, "from": start, "to": end, "faces": turned}, ""

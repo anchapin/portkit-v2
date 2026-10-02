@@ -1,0 +1,8 @@
+{
+  "parent": "examplemod:custom/palisade_side",
+  "textures": {
+    "end": "examplemod:block/palisade_end",
+    "side": "examplemod:block/palisade_side",
+    "particle": "examplemod:block/palisade_side"
+  }
+}
