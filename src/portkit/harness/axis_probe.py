@@ -434,9 +434,9 @@ _TURN_GEOMETRY_FORMAT = "1.21.0"
 _TURN_ELEMENT = {"from": [0, 0, 0], "to": [16, 4, 16]}
 
 
-def _arrow_png() -> bytes:
-    """16x16: pale ground, a dark arrow pointing at the texture's top edge, and a
-    red mark in the top-left corner so a flip shows up as well as a turn."""
+def _arrow_png(ground: tuple = (230, 220, 190, 255)) -> bytes:
+    """16x16: a plain ground, a dark arrow pointing at the texture's top edge,
+    and a red mark in the top-left corner so a flip shows up as well as a turn."""
     import struct
     import zlib
 
@@ -445,7 +445,7 @@ def _arrow_png() -> bytes:
             return (200, 30, 30, 255)
         head = 1 <= y <= 6 and abs(x - 7.5) <= (y - 1) + 0.5
         shaft = 6 <= y <= 14 and x in (7, 8)
-        return (30, 30, 40, 255) if head or shaft else (230, 220, 190, 255)
+        return (30, 30, 40, 255) if head or shaft else ground
 
     rows = []
     for y in range(16):
@@ -508,5 +508,80 @@ def turn_pack_files(namespace: str) -> dict[str, object]:
         "resource_pack_name": namespace,
         "texture_name": "atlas.terrain",
         "texture_data": {f"{namespace}:arrow": {"textures": "textures/blocks/arrow"}},
+    }
+    return files
+
+
+# --------------------------------------------------------------------------
+# Side-face uv_rotation (#71). #68 settled up/down; side faces were never
+# looked at, and the X mirror could make east and west turn the other way. A
+# full cube with an arrow on every side, each side on its own colour so a
+# side that disagrees can be named: unturned (C) and turned each way (A, B).
+SIDE_FACES = ("north", "south", "east", "west")
+SIDE_GROUNDS = {
+    "north": ("blue", (120, 160, 230, 255)),
+    "south": ("yellow", (235, 215, 90, 255)),
+    "east": ("green", (120, 200, 120, 255)),
+    "west": ("pink", (235, 150, 190, 255)),
+}
+SIDE_TURN_EXPECTED = (
+    "looking straight at any side, the block whose arrow is a quarter turn "
+    "clockwise from C's, the same on all four colours"
+)
+
+
+def side_turn_cube(degrees: int) -> dict:
+    """A full cube with the whole arrow on every side; uv_rotation on sides only."""
+    cube = {"origin": [-8.0, 0.0, -8.0], "size": [16.0, 16.0, 16.0], "uv": {}}
+    for face in ("up", "down") + SIDE_FACES:
+        entry = {"uv": [0.0, 0.0], "uv_size": [16.0, 16.0]}
+        if degrees and face in SIDE_FACES:
+            entry["uv_rotation"] = degrees
+        cube["uv"][face] = entry
+    return cube
+
+
+def side_turn_pack_files(namespace: str) -> dict[str, object]:
+    """Three cubes: which uv_rotation turns a side texture the way a Java face
+    rotation does, and is it the same on every side?"""
+    files: dict[str, object] = {}
+    labels = []
+    titles = {"control": "C unturned", "cw90": "A uv_rotation 90", "cw270": "B uv_rotation 270"}
+    textures = {"arrow": {"textures": "textures/blocks/arrow"}}
+    files["textures/blocks/arrow.png"] = _arrow_png()
+    for face, (colour, rgba) in SIDE_GROUNDS.items():
+        textures[f"arrow_{colour}"] = {"textures": f"textures/blocks/arrow_{colour}"}
+        files[f"textures/blocks/arrow_{colour}.png"] = _arrow_png(rgba)
+    for key, degrees in TURNS.items():
+        name = f"side_turn_{key}"
+        identifier = f"geometry.{namespace}.{name}"
+        files[f"models/blocks/{name}.geo.json"] = {
+            "format_version": _TURN_GEOMETRY_FORMAT,
+            "minecraft:geometry": [
+                {
+                    "description": {
+                        "identifier": identifier,
+                        "texture_width": 16,
+                        "texture_height": 16,
+                        "visible_bounds_width": 2,
+                        "visible_bounds_height": 2.5,
+                        "visible_bounds_offset": [0, 0.75, 0],
+                    },
+                    "bones": [{"name": "root", "pivot": [0, 0, 0], "cubes": [side_turn_cube(degrees)]}],
+                }
+            ],
+        }
+        definition = block(namespace, name, identifier, f"{namespace}:arrow")
+        instances = definition["minecraft:block"]["components"]["minecraft:material_instances"]
+        for face, (colour, _) in SIDE_GROUNDS.items():
+            instances[face] = {"texture": f"{namespace}:arrow_{colour}", "render_method": "opaque"}
+        files[f"blocks/{name}.json"] = definition
+        labels.append(f"tile.{namespace}:{name}.name=Side {titles[key]}")
+
+    files["texts/en_US.lang"] = "\n".join(labels + [""])
+    files["textures/terrain_texture.json"] = {
+        "resource_pack_name": namespace,
+        "texture_name": "atlas.terrain",
+        "texture_data": {f"{namespace}:{k}": v for k, v in textures.items()},
     }
     return files
