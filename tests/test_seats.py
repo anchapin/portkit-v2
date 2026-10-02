@@ -48,11 +48,26 @@ def test_top_and_bottom_rotation_reach_bedrock_as_uv_rotation():
     assert box["uv"]["down"]["uv_rotation"] == 270
 
 
-def test_a_side_face_rotation_is_refused_not_dropped():
+def test_side_face_rotations_reach_bedrock_as_uv_rotation():
+    # #71: read in game, side faces turn clockwise from outside like up/down.
     element = {"from": [0, 0, 0], "to": [16, 16, 16], "faces": {
-        "north": {"uv": [0, 0, 16, 16], "texture": "#t", "rotation": 90}}}
+        "north": {"uv": [0, 0, 16, 16], "texture": "#t", "rotation": 90},
+        "east": {"uv": [0, 0, 16, 16], "texture": "#t", "rotation": 90},
+        "south": {"uv": [0, 0, 16, 16], "texture": "#t", "rotation": 180},
+        "west": {"uv": [0, 0, 16, 16], "texture": "#t", "rotation": 270}}}
     box, why = models.cube(element)
-    assert box is None and "side face" in why
+    assert why == ""
+    assert box["uv"]["north"]["uv_rotation"] == 90
+    assert box["uv"]["east"]["uv_rotation"] == 90
+    assert box["uv"]["south"]["uv_rotation"] == 180
+    assert box["uv"]["west"]["uv_rotation"] == 270
+
+
+def test_an_odd_face_rotation_is_still_refused_not_dropped():
+    element = {"from": [0, 0, 0], "to": [16, 16, 16], "faces": {
+        "north": {"uv": [0, 0, 16, 16], "texture": "#t", "rotation": 45}}}
+    box, why = models.cube(element)
+    assert box is None and "45" in why
 
 
 def test_turned_geometry_moves_to_the_newer_format_and_lifts_the_floor():
