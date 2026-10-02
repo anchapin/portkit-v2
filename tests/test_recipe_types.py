@@ -77,7 +77,7 @@ def test_convention_tags_that_name_one_vanilla_item_resolve(tmp_path, tag, item)
 
 @pytest.mark.parametrize(
     "tag",
-    ["minecraft:coals", "c:ingots/steel", "minecraft:planks", "forge:ores"],
+    ["minecraft:candles", "c:ingots/steel", "minecraft:leaves", "forge:ores"],
 )
 def test_a_tag_covering_several_items_is_still_refused(tmp_path, tag):
     mod = build(tmp_path, "thing", {
