@@ -93,8 +93,8 @@ def test_one_bad_element_refuses_the_whole_model():
         },
         "geometry.examplemod.thing",
     )
-    assert geo is None
-    assert "off the block centre" in why
+    assert why == ""
+    assert geo is not None
 
 
 def test_the_asymmetric_fixture_now_converts_whole(tmp_path):
@@ -143,7 +143,8 @@ def test_the_sign_table_matches_the_probe_candidates_that_were_confirmed():
         assert ours["pivot"] == theirs["pivot"]
 
 
-def test_an_off_centre_pivot_is_still_refused_with_the_open_question():
+def test_an_off_centre_pivot_is_mirrored_like_the_cube():
+    """Settled in game by the pivot probe (#52): the pivot shares the cube's space."""
     box, why = models.cube(
         {
             "from": [0, 7, 7],
@@ -151,8 +152,9 @@ def test_an_off_centre_pivot_is_still_refused_with_the_open_question():
             "rotation": {"origin": [0, 3.5, 8], "axis": "z", "angle": -22.5},
         }
     )
-    assert box is None
-    assert "off the block centre" in why and "#52" in why
+    assert why == ""
+    assert box["pivot"] == [8.0, 3.5, 0.0]
+    assert box["rotation"] == [0.0, 0.0, -22.5]
 
 
 def test_an_angle_java_never_writes_is_refused():
@@ -253,16 +255,21 @@ def test_the_same_holds_for_x_and_z():
         assert box["pivot"] == expected, axis
 
 
-def test_a_pivot_off_centre_across_its_axis_still_waits_for_the_probe():
-    box, why = models.cube(_turned("z", [-3, 0, -8]))
-    assert box is None
-    assert "off the block centre in x and y" in why
-    assert "#52" in why
+def test_bonfire_style_pivots_outside_the_block_convert():
+    """Decorative Blocks' bonfire logs turn about points beyond the block edge."""
+    for axis, origin, expected in (
+        ("z", [-3, 0, -8], [11.0, 0.0, -16.0]),
+        ("z", [19, 0, -8], [-11.0, 0.0, -16.0]),
+        ("x", [-8, 0, 19], [16.0, 0.0, 11.0]),
+    ):
+        box, why = models.cube(_turned(axis, origin))
+        assert why == "", axis
+        assert box["pivot"] == expected, axis
 
 
-def test_the_refusal_names_only_the_axes_that_are_off():
+def test_the_pivot_mirror_follows_the_named_constant(monkeypatch):
+    monkeypatch.setattr(models, "PIVOT_IS_MIRRORED", False)
     box, why = models.cube(_turned("y", [3, 0, 8]))
-    assert box is None
-    assert "off the block centre in x" in why
-    assert "x and z" not in why
+    assert why == ""
+    assert box["pivot"][0] == -5.0
 
