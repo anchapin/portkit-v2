@@ -241,6 +241,11 @@ def cube(element: dict, tag_faces: bool = False) -> tuple[dict | None, str]:
         except (TypeError, ValueError):
             return None, f"element has an unreadable uv on its {face} face"
         uv[face] = {"uv": [u1, v1], "uv_size": [u2 - u1, v2 - v1]}
+        face_turn, why = _face_turn(face, spec.get("rotation"))
+        if face_turn is None:
+            return None, why
+        if face_turn:
+            uv[face]["uv_rotation"] = face_turn
         reference = spec.get("texture")
         if tag_faces and isinstance(reference, str):
             uv[face]["material_instance"] = instance_name(reference.lstrip("#"))
@@ -248,6 +253,34 @@ def cube(element: dict, tag_faces: bool = False) -> tuple[dict | None, str]:
         box["uv"] = uv
     box.update(turn)
     return box, ""
+
+
+# Issue #68, read in game on Bedrock for Android, 2026-10-02 (`portkit probe
+# --kind turn`): uv_rotation 90 turned the top texture a quarter turn clockwise
+# seen from above, and the bottom texture clockwise seen from below (270 read as
+# anticlockwise from below), with nothing mirrored. So on the top and bottom
+# faces uv_rotation is clockwise seen from outside the face, which is how Java's
+# own per-face "rotation" is defined, and the number carries straight across.
+# Side faces were not probed, and the X mirror could reverse them, so a side
+# face rotation is still refused.
+_TURNABLE_FACES = ("up", "down")
+
+
+def _face_turn(face: str, rotation) -> tuple[int | None, str]:
+    if rotation in (None, 0):
+        return 0, ""
+    try:
+        degrees = int(rotation) % 360
+    except (TypeError, ValueError):
+        return None, f"element's {face} face has an unreadable texture rotation"
+    if degrees % 90:
+        return None, f"element's {face} face turns its texture {rotation} degrees"
+    if degrees and face not in _TURNABLE_FACES:
+        return None, (
+            f"element's {face} face turns its texture {degrees} degrees, and which "
+            "way Bedrock turns a side face has not been checked in game"
+        )
+    return degrees, ""
 
 
 _MIRRORED_FACES = {"west": "east", "east": "west"}
@@ -373,8 +406,14 @@ def geometry_bones(
             cubes.append(box)
         bones.append({"name": name, "pivot": [0, 0, 0], "cubes": cubes})
 
+    # Per-face uv_rotation arrived with geometry 1.21.0; everything else stays
+    # on 1.16.0 so existing output is unchanged.
+    turned = any(
+        "uv_rotation" in entry
+        for bone in bones for box in bone["cubes"] for entry in (box.get("uv") or {}).values()
+    )
     return {
-        "format_version": "1.16.0",
+        "format_version": "1.21.0" if turned else "1.16.0",
         "minecraft:geometry": [
             {
                 "description": {
@@ -448,14 +487,14 @@ def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]
     quarters = (degrees // 90) % 4
     if quarters == 0:
         return element, ""
-    if not uvlock:
-        return None, "part turns its model without uvlock, which would also spin its top texture"
     if element.get("rotation"):
         return None, "part turns a model whose elements are themselves rotated"
     try:
         (x1, y1, z1), (x2, y2, z2) = element["from"], element["to"]
     except (KeyError, TypeError, ValueError):
         return None, "element is missing usable from/to coordinates"
+    if not uvlock:
+        return _turn_with_textures(element, quarters, [x1, y1, z1], [x2, y2, z2])
 
     faces = element.get("faces") or {}
     for face, spec in faces.items():
@@ -477,3 +516,32 @@ def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]
             spec["uv"] = auto_uv(face, start, end)
         turned[face] = spec
     return {**element, "from": start, "to": end, "faces": turned}, ""
+
+
+
+def _turn_with_textures(element: dict, quarters: int, start: list, end: list) -> tuple[dict | None, str]:
+    """A y turn without uvlock: the textures ride along with the box.
+
+    Side faces keep their uv and move to the face they now point out of. The
+    top turns clockwise seen from above, which is a Java face rotation of +90
+    per quarter on "up" and, seen from below, -90 on "down" (see _face_turn for
+    how those reach Bedrock). A face with no uv gets the one Java would have
+    derived from where it started.
+    """
+    x1, y1, z1 = start
+    x2, y2, z2 = end
+    faces = {}
+    for face, spec in (element.get("faces") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        spec = dict(spec)
+        if spec.get("uv") is None:
+            spec["uv"] = auto_uv(face, start, end)
+        if face in ("up", "down"):
+            step = 90 if face == "up" else 270
+            spec["rotation"] = (int(spec.get("rotation") or 0) + step * quarters) % 360
+        faces[face] = spec
+    for _ in range(quarters):
+        x1, z1, x2, z2 = 16 - z2, x1, 16 - z1, x2
+        faces = {_Y_TURN_FACES.get(f, f): spec for f, spec in faces.items()}
+    return {**element, "from": [x1, y1, z1], "to": [x2, y2, z2], "faces": faces}, ""

@@ -1,0 +1,5 @@
+name = "seat_mod"
+description = "A seat: one model turned to each facing without uvlock (top and bottom textures turn via uv_rotation, geometry 1.21.0), plus a post part gated on a state the mod's code sets, which is dropped with a note."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 0

@@ -231,6 +231,134 @@ def _palisade_parts(blockstate: dict) -> tuple[str | None, str | None, bool]:
     return post, side, uvlocks.pop()
 
 
+def _facing_parts(blockstate: dict) -> tuple[str | None, bool, list[tuple[str, str]]]:
+    """(facing model, uvlock, dropped parts) for a seat-shaped multipart.
+
+    The shape: one model turned to each of the four facings, gated on facing
+    alone, plus optional extras each gated on one state being "true". Facing is
+    set when the block is placed, which Bedrock's placement_direction trait
+    does too. The extras' states are worked out by the mod's own code, so they
+    are dropped and named in a note: what ships is the block with every one of
+    those states false.
+    """
+    parts = blockstate.get("multipart")
+    if not isinstance(parts, list) or not parts:
+        return None, False, []
+    facing_model = None
+    uvlocks: set[bool] = set()
+    seen: set[str] = set()
+    dropped: list[tuple[str, str]] = []
+    for part in parts:
+        if not isinstance(part, dict) or not isinstance(part.get("apply"), dict):
+            return None, False, []
+        apply, when = part["apply"], part.get("when")
+        model = apply.get("model")
+        if not isinstance(model, str) or apply.get("x") or not isinstance(when, dict) or len(when) != 1:
+            return None, False, []
+        (state, value), = when.items()
+        value = str(value).lower()
+        if state == "facing":
+            if value not in _CARDINALS or (apply.get("y") or 0) != _CARDINAL_TURN[value]:
+                return None, False, []
+            if facing_model not in (None, model) or value in seen:
+                return None, False, []
+            facing_model = model
+            seen.add(value)
+            uvlocks.add(bool(apply.get("uvlock")))
+        elif value == "true" and "|" not in value:
+            dropped.append((state, model))
+        else:
+            return None, False, []
+    if facing_model is None or seen != set(_CARDINALS) or len(uvlocks) != 1:
+        return None, False, []
+    return facing_model, uvlocks.pop(), dropped
+
+
+def _convert_facing_block(
+    mod: SourceMod, result: ConversionResult, rel: str, name: str,
+    model_ref: str, uvlock: bool, dropped: list[tuple[str, str]],
+) -> None:
+    """One bone per facing, shown by the placement_direction state."""
+    flat, why = _flat_model(mod, result, model_ref)
+    if flat is None:
+        result.unhandled.append(Unhandled(rel, "block", f"facing model: {why}"))
+        return
+    textures = flat.get("textures") or {}
+    parts = []
+    for direction in _CARDINALS:
+        turned = []
+        for element in flat.get("elements") or []:
+            moved, why = models.turn_y(element, _CARDINAL_TURN[direction], uvlock)
+            if moved is None:
+                result.unhandled.append(Unhandled(rel, "block", f"facing={direction}: {why}"))
+                return
+            turned.append(moved)
+        parts.append((f"facing_{direction}", turned))
+    if not parts[0][1]:
+        result.unhandled.append(Unhandled(rel, "block", "facing model has no elements"))
+        return
+
+    combined = {"textures": textures, "elements": [e for _, els in parts for e in els]}
+    by_face, why = models.element_materials(combined)
+    tag_faces = by_face is None and "disagree" in why
+    if tag_faces:
+        by_face, why = models.tagged_materials(combined)
+    if by_face is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+    instances, why = _instances(mod, by_face, textures, tag_faces)
+    if instances is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+    identifier = f"geometry.{mod.namespace}.{name}"
+    geo, why = models.geometry_bones(parts, identifier, tag_faces=tag_faces)
+    if geo is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+
+    # The extras are accounted for: read and set aside on purpose.
+    for _, extra in dropped:
+        path = models.model_path(mod, extra)
+        if path is not None and path.is_file():
+            result.claim(mod, path)
+
+    result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = _facing_definition(mod.namespace, name, identifier, instances)
+    if dropped:
+        extras = ", ".join(f"{m.rsplit('/', 1)[-1]} when {st} is true" for st, m in dropped)
+        result.notes.append(
+            f"{name}: ships without {extras}; the mod's code sets those states, so "
+            "Bedrock always shows the block as if they were false."
+        )
+
+
+def _facing_definition(namespace: str, name: str, geometry: str, instances: dict) -> dict:
+    return {
+        "format_version": _BLOCK_FORMAT,
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{namespace}:{name}",
+                "menu_category": {"category": _MENU_CATEGORY},
+                "traits": {
+                    "minecraft:placement_direction": {
+                        "enabled_states": ["minecraft:cardinal_direction"]
+                    }
+                },
+            },
+            "components": {
+                "minecraft:geometry": {
+                    "identifier": geometry,
+                    "bone_visibility": {
+                        f"facing_{d}": f"q.block_state('minecraft:cardinal_direction') == '{d}'"
+                        for d in _CARDINALS
+                    },
+                },
+                "minecraft:material_instances": instances,
+            },
+        },
+    }
+
+
 def _flat_model(mod: SourceMod, result: ConversionResult, model_ref: str) -> tuple[dict | None, str]:
     model_file = models.model_path(mod, model_ref)
     if model_file is None or not model_file.is_file():
@@ -459,6 +587,11 @@ def convert(mod: SourceMod) -> ConversionResult:
         post_ref, side_ref, uvlock = _palisade_parts(blockstate)
         if post_ref is not None:
             _convert_palisade(mod, result, rel, name, post_ref, side_ref, uvlock)
+            continue
+
+        facing_ref, facing_uvlock, dropped = _facing_parts(blockstate)
+        if facing_ref is not None:
+            _convert_facing_block(mod, result, rel, name, facing_ref, facing_uvlock, dropped)
             continue
 
         model_ref, why = _single_model(blockstate)
