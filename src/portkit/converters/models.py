@@ -548,3 +548,96 @@ def _turn_with_textures(element: dict, quarters: int, start: list, end: list) ->
         x1, z1, x2, z2 = 16 - z2, x1, 16 - z1, x2
         faces = {_Y_TURN_FACES.get(f, f): spec for f, spec in faces.items()}
     return {**element, "from": [x1, y1, z1], "to": [x2, y2, z2], "faces": faces}, ""
+
+
+# --------------------------------------------------------------------------
+# Rigid blockstate turns in Java space. A blockstate's x and y turn a shared
+# model as a solid object (x first, then y, as Java applies them). Without
+# uvlock every face's texture rides along, so the turn is baked into the Java
+# element before conversion: the box moves, each face lands on the face its
+# normal now points out of, and its texture picks up whatever in-plane turn
+# the move gave it. Everything Bedrock-specific (the X mirror, uv_rotation)
+# then applies exactly as it does to a model Java baked by hand.
+_FACE_NORMAL = {
+    "up": (0, 1, 0), "down": (0, -1, 0), "north": (0, 0, -1),
+    "south": (0, 0, 1), "east": (1, 0, 0), "west": (-1, 0, 0),
+}
+# Java's own uv layout per face, seen from outside: where the texture's top
+# edge (-v) and its right edge (+u) point in the world.
+_FACE_TEX_UP = {
+    "up": (0, 0, -1), "down": (0, 0, 1), "north": (0, 1, 0),
+    "south": (0, 1, 0), "east": (0, 1, 0), "west": (0, 1, 0),
+}
+_FACE_TEX_RIGHT = {
+    "up": (1, 0, 0), "down": (1, 0, 0), "north": (-1, 0, 0),
+    "south": (1, 0, 0), "east": (0, 0, -1), "west": (0, 0, 1),
+}
+
+
+def _turn_vector(v: tuple, x_quarters: int, y_quarters: int) -> tuple:
+    """Java blockstate x then y, quarter turns. x=90 sends north to down; y=90
+    sends north to east (clockwise seen from above)."""
+    vx, vy, vz = v
+    for _ in range(x_quarters % 4):
+        vx, vy, vz = vx, vz, -vy
+    for _ in range(y_quarters % 4):
+        vx, vy, vz = -vz, vy, vx
+    return (vx, vy, vz)
+
+
+def _face_for(normal: tuple) -> str:
+    return next(f for f, n in _FACE_NORMAL.items() if n == normal)
+
+
+def _neg(v: tuple) -> tuple:
+    return tuple(-c for c in v)
+
+
+def turn_rigid(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | None, str]:
+    """An element as a Java blockstate x/y turn without uvlock leaves it, or why not."""
+    if x_degrees % 90 or y_degrees % 90:
+        return None, f"blockstate turn x={x_degrees} y={y_degrees} is not in quarter turns"
+    xq, yq = (x_degrees // 90) % 4, (y_degrees // 90) % 4
+    if not xq and not yq:
+        return element, ""
+    if element.get("rotation"):
+        return None, "blockstate turns a model whose elements are themselves rotated"
+    try:
+        start = [float(c) for c in element["from"]]
+        end = [float(c) for c in element["to"]]
+    except (KeyError, TypeError, ValueError):
+        return None, "element is missing usable from/to coordinates"
+
+    corners = []
+    for point in (start, end):
+        centred = tuple(c - _HALF for c in point)
+        corners.append([c + _HALF for c in _turn_vector(centred, xq, yq)])
+    new_start = [min(a, b) for a, b in zip(*corners)]
+    new_end = [max(a, b) for a, b in zip(*corners)]
+
+    faces = {}
+    for face, spec in (element.get("faces") or {}).items():
+        if not isinstance(spec, dict) or face not in _FACE_NORMAL:
+            return None, f"element has an unreadable {face} face"
+        spec = dict(spec)
+        if spec.get("uv") is None:
+            spec["uv"] = auto_uv(face, start, end)
+        target = _face_for(_turn_vector(_FACE_NORMAL[face], xq, yq))
+        up = _turn_vector(_FACE_TEX_UP[face], xq, yq)
+        turn = {
+            _FACE_TEX_UP[target]: 0,
+            _FACE_TEX_RIGHT[target]: 90,
+            _neg(_FACE_TEX_UP[target]): 180,
+            _neg(_FACE_TEX_RIGHT[target]): 270,
+        }[up]
+        try:
+            base = int(spec.get("rotation") or 0)
+        except (TypeError, ValueError):
+            return None, f"element's {face} face has an unreadable texture rotation"
+        if base or turn:
+            spec["rotation"] = (base + turn) % 360
+        cull = spec.get("cullface")
+        if cull in _FACE_NORMAL:
+            spec["cullface"] = _face_for(_turn_vector(_FACE_NORMAL[cull], xq, yq))
+        faces[target] = spec
+    return {**element, "from": new_start, "to": new_end, "faces": faces}, ""
