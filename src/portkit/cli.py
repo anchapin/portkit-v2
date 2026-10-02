@@ -71,6 +71,8 @@ def cmd_probe(args) -> int:
             )
         elif args.kind == "face":
             files = axis_probe.face_pack_files(args.namespace)
+        elif args.kind == "turn":
+            files = axis_probe.turn_pack_files(args.namespace)
         elif args.kind == "pivot":
             files = axis_probe.pivot_pack_files(
                 Path(args.model), texture, args.namespace
@@ -86,6 +88,7 @@ def cmd_probe(args) -> int:
         "rotation": ("rotation_probe", "Rotation Probe"),
         "pivot": ("pivot_probe", "Pivot Probe"),
         "face": ("face_probe", "Face Probe"),
+        "turn": ("turn_probe", "Turn Probe"),
     }
     mod_id, title = label[args.kind]
     meta = ModMetadata(mod_id=mod_id, name=title)
@@ -93,6 +96,14 @@ def cmd_probe(args) -> int:
     addon = write_mcaddon(tree, out / addon_name(args.namespace, meta))
     print(f"probe tree:  {tree}")
     print(f"install:     {addon} ({addon.stat().st_size:,} bytes)")
+    if args.kind == "turn":
+        print(
+            "\nPlace C, A and B in a row on a ledge you can stand under.\n"
+            "  From above: which of A or B has its arrow a quarter turn CLOCKWISE from C?\n"
+            "  From below: which of A or B has its arrow a quarter turn ANTICLOCKWISE from C?\n"
+            "Also say if any arrow looks mirrored (red corner on the wrong side).\n"
+        )
+        return 0
     if args.kind == "face":
         print(
             "\nTwo blocks, one question. Each is a thin slab on one edge, textured "
@@ -201,7 +212,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("probe", help="build a verification probe pack (dev harness)")
     p.add_argument("out")
     p.add_argument(
-        "--kind", choices=("axis", "rotation", "pivot", "face"), default="axis",
+        "--kind", choices=("axis", "rotation", "pivot", "face", "turn"), default="axis",
         help=(
             "axis: is Bedrock's X flipped. rotation: which way a rotation leans. "
             "pivot: where an off-centre rotation origin lands. "
