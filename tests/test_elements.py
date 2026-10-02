@@ -201,16 +201,24 @@ def test_each_face_keeps_its_own_texture_key():
     assert by_face["north"] == "side"
 
 
-def test_the_x_faces_swap_because_the_box_is_mirrored():
-    # cube() mirrors every box in X, so Java's west face lands on Bedrock's east.
+def test_the_x_faces_keep_their_java_names():
+    # Read in game (#64): after the box is mirrored, Bedrock's west is Java's west.
     caps = dict(BEAM["elements"][0]["faces"])
     caps["west"] = {"texture": "#end_west"}
     caps["east"] = {"texture": "#end_east"}
     model = {"textures": BEAM["textures"], "elements": [{**BEAM["elements"][0], "faces": caps}]}
     by_face, why = models.element_materials(model)
     assert why == ""
-    assert by_face["east"] == "end_west"
-    assert by_face["west"] == "end_east"
+    assert by_face["west"] == "end_west"
+    assert by_face["east"] == "end_east"
+
+
+def test_the_face_rule_follows_the_named_constant(monkeypatch):
+    monkeypatch.setattr(models, "FACE_NAMES_FOLLOW_MIRROR", True)
+    model = {"elements": [{"from": [0, 0, 0], "to": [16, 16, 16],
+                           "faces": {"west": {"texture": "#w"}, "east": {"texture": "#e"}}}]}
+    by_face, _ = models.element_materials(model)
+    assert by_face == {"east": "w", "west": "e"}
 
 
 def test_elements_disagreeing_on_one_face_are_refused():
