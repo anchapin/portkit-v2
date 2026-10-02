@@ -417,3 +417,96 @@ def face_pack_files(namespace: str) -> dict[str, object]:
         "texture_data": {f"{namespace}:probe": {"textures": "textures/blocks/probe"}},
     }
     return files
+
+
+
+# Issue #68: a seat turned by a blockstate y turn without uvlock carries its top
+# and bottom textures round with it, and Bedrock can only say that with a per-
+# face uv_rotation (geometry 1.21.0). The docs call uv_rotation clockwise but do
+# not say seen from where, and the down face is seen from below. So: a thin slab
+# with an arrow on its top and bottom, unturned (C) and turned each way (A, B).
+TURNS = {"control": 0, "cw90": 90, "cw270": 270}
+TURN_EXPECTED = (
+    "seen from above, the block whose arrow is a quarter turn clockwise from C's; "
+    "seen from below, the block whose arrow is a quarter turn anticlockwise from C's"
+)
+_TURN_GEOMETRY_FORMAT = "1.21.0"
+_TURN_ELEMENT = {"from": [0, 0, 0], "to": [16, 4, 16]}
+
+
+def _arrow_png() -> bytes:
+    """16x16: pale ground, a dark arrow pointing at the texture's top edge, and a
+    red mark in the top-left corner so a flip shows up as well as a turn."""
+    import struct
+    import zlib
+
+    def colour(x: int, y: int) -> tuple:
+        if x <= 2 and y <= 2:
+            return (200, 30, 30, 255)
+        head = 1 <= y <= 6 and abs(x - 7.5) <= (y - 1) + 0.5
+        shaft = 6 <= y <= 14 and x in (7, 8)
+        return (30, 30, 40, 255) if head or shaft else (230, 220, 190, 255)
+
+    rows = []
+    for y in range(16):
+        row = bytearray([0])
+        for x in range(16):
+            row += bytes(colour(x, y))
+        rows.append(bytes(row))
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return (struct.pack(">I", len(body)) + kind + body
+                + struct.pack(">I", zlib.crc32(kind + body)))
+
+    header = struct.pack(">IIBBBBB", 16, 16, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
+def turn_cube(degrees: int) -> dict:
+    """The slab with the whole arrow texture on its top and bottom faces."""
+    cube = {"origin": [-8.0, 0.0, -8.0], "size": [16.0, 4.0, 16.0], "uv": {}}
+    for face in ("up", "down"):
+        entry = {"uv": [0.0, 0.0], "uv_size": [16.0, 16.0]}
+        if degrees:
+            entry["uv_rotation"] = degrees
+        cube["uv"][face] = entry
+    return cube
+
+
+def turn_pack_files(namespace: str) -> dict[str, object]:
+    """Three blocks: which uv_rotation turns a top (and a bottom) texture the way
+    a Java y turn does?"""
+    files: dict[str, object] = {}
+    labels = []
+    titles = {"control": "C unturned", "cw90": "A uv_rotation 90", "cw270": "B uv_rotation 270"}
+    for key, degrees in TURNS.items():
+        name = f"turn_{key}"
+        identifier = f"geometry.{namespace}.{name}"
+        files[f"models/blocks/{name}.geo.json"] = {
+            "format_version": _TURN_GEOMETRY_FORMAT,
+            "minecraft:geometry": [
+                {
+                    "description": {
+                        "identifier": identifier,
+                        "texture_width": 16,
+                        "texture_height": 16,
+                        "visible_bounds_width": 2,
+                        "visible_bounds_height": 2.5,
+                        "visible_bounds_offset": [0, 0.75, 0],
+                    },
+                    "bones": [{"name": "root", "pivot": [0, 0, 0], "cubes": [turn_cube(degrees)]}],
+                }
+            ],
+        }
+        files[f"blocks/{name}.json"] = block(namespace, name, identifier, f"{namespace}:arrow")
+        labels.append(f"tile.{namespace}:{name}.name={titles[key]}")
+
+    files["texts/en_US.lang"] = "\n".join(labels + [""])
+    files["textures/blocks/arrow.png"] = _arrow_png()
+    files["textures/terrain_texture.json"] = {
+        "resource_pack_name": namespace,
+        "texture_name": "atlas.terrain",
+        "texture_data": {f"{namespace}:arrow": {"textures": "textures/blocks/arrow"}},
+    }
+    return files
