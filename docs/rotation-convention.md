@@ -56,3 +56,20 @@ treated as a second anchor here.
 
 If the probe disagrees with a row of that table in game, the game is right and
 this document is wrong. Say so in the issue and re-derive.
+
+## The pivot
+
+The rotation probe turned every bar about the block centre, where any sensible
+pivot mapping is the identity, so it settled the sign and nothing else. Issue
+#52 named two candidates for an origin anywhere else:
+
+- A, mirrored: `pivot = [8 - ox, oy, oz - 8]`, the same mirror the cube origin gets.
+- B, as written: `pivot = [ox - 8, oy, oz - 8]`.
+
+The pivot probe (`portkit probe --kind pivot`, model `tests/data/pivot_z.json`)
+turns one 4x4x4 cube +45 about z around `[0, 8, 8]`, which Java renders high up
+and just west of centre. Read in game on Bedrock for Android, 2026-10-01: **A,
+pivot mirrored**. Recorded as `models.PIVOT_IS_MIRRORED = True`.
+
+That was the hoped-for answer (pivot and cube living in one space) but it is now
+an observation, not a hope.

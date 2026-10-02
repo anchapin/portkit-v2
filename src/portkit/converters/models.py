@@ -83,9 +83,15 @@ ROTATION_SIGN = {"x": -1.0, "y": -1.0, "z": 1.0}
 # Java only writes these; anything else is a model we have not seen.
 _ALLOWED_ANGLES = (-45.0, -22.5, 0.0, 22.5, 45.0)
 
-# The one pivot we have confirmed. Off-centre origins are issue #52: candidate
-# pivots A [8-ox, oy, oz-8] and B [ox-8, oy, oz-8] agree at the block centre and
-# nowhere else, so the probe that settled the signs said nothing about them.
+# Where a Java rotation origin lands in Bedrock geometry. Issue #52 had two
+# candidates that agree at the block centre and nowhere else: A mirrors the
+# pivot the way the cube origin is mirrored, [8-ox, oy, oz-8]; B leaves it in
+# Java's space, [ox-8, oy, oz-8]. The pivot probe (`portkit probe --kind pivot`)
+# turned one cube +45 about z around [0, 8, 8] under both. Read in game on
+# Bedrock for Android by the project owner, 2026-10-01: "pivot mirrored".
+# So pivot and cube share one space, which is what you would hope.
+PIVOT_IS_MIRRORED = True
+
 _CENTRE_ORIGIN = (8.0, 8.0, 8.0)
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
@@ -186,26 +192,10 @@ def _rotation(element: dict) -> tuple[dict | None, str]:
             f"element rotates by {angle} degrees, which Java does not write and "
             "we have not checked against Bedrock"
         )
-    # A pivot displaced along its own rotation axis describes the same turn as
-    # one at the centre: sliding a point up the axis you are spinning about
-    # changes nothing. Both candidate mappings in issue #52 agree there too, so
-    # these need no probe. Anywhere else off centre still does.
-    off_axis = [
-        name
-        for name, index in _AXIS_INDEX.items()
-        if name != axis and origin[index] != _CENTRE_ORIGIN[index]
-    ]
-    if off_axis:
-        return None, (
-            f"element rotates about {origin}, off the block centre in "
-            f"{' and '.join(sorted(off_axis))}; the pivot mapping for off-centre "
-            "origins is unverified (issue #52), and the two candidates differ "
-            "everywhere except the centre"
-        )
-
     degrees = [0.0, 0.0, 0.0]
     degrees[_AXIS_INDEX[axis]] = angle * ROTATION_SIGN[axis]
-    pivot = [_HALF - origin[0], origin[1], origin[2] - _HALF]
+    pivot_x = _HALF - origin[0] if PIVOT_IS_MIRRORED else origin[0] - _HALF
+    pivot = [pivot_x, origin[1], origin[2] - _HALF]
     return {"pivot": pivot, "rotation": degrees}, ""
 
 
