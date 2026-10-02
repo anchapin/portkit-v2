@@ -135,6 +135,11 @@ def write_tree(
             target.parent.mkdir(parents=True, exist_ok=True)
             if isinstance(content, bytes):
                 target.write_bytes(content)
+            elif isinstance(content, str):
+                # .lang files are plain text. Encoding them as JSON wraps the
+                # whole file in quotes with literal \\n, which Bedrock reads as
+                # one garbage line, so every name shows as its raw key.
+                target.write_text(content, encoding="utf-8")
             else:
                 target.write_text(json.dumps(content, indent=2) + "\n")
     return out_dir
