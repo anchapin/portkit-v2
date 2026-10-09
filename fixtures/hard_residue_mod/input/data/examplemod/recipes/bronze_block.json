@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["###", "###", "###"],
+  "key": {
+    "#": {
+      "tag": "c:plates/bronze"
+    }
+  },
+  "result": {
+    "item": "examplemod:bronze_block"
+  }
+}

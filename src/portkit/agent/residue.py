@@ -16,6 +16,11 @@ A group counts as resolved only when its session ended on its own, it wrote at
 least one file, and the validator found no new error. Declaring victory in prose
 is not enough, and neither is a session that wrote nothing because the Java behaviour
 has no Bedrock form: that one stays residue, with the agent's reason attached.
+
+Every group's spend (steps, tokens, dollars when priced) is reported. Token and
+dollar ceilings are per run: once one is reached, the session in flight stops
+before its next call, keeping whatever it wrote that still validates, and the
+groups after it are skipped with the ceiling named.
 """
 from __future__ import annotations
 
@@ -29,6 +34,7 @@ from ..meta import ModMetadata
 from ..model import Unhandled
 from ..pack import ENGINE_FLOOR, manifest
 from ..validate import validate_tree
+from .budget import Budget, Spend
 from .loop import AgentSession, LLMClient
 from .tools import SYSTEM_PROMPT, ToolBox
 
@@ -186,19 +192,23 @@ class GroupOutcome:
     key: str
     kind: str
     source: str
-    status: str  # resolved | unresolved | rolled_back | skipped | error
+    status: str  # resolved | partial | unresolved | rolled_back | skipped | error
     stopped: str = ""  # the session's own stop reason: done | budget | error
     steps: int = 0
     written: list[str] = field(default_factory=list)
     note: str = ""
+    limit: str | None = None  # the ceiling that stopped it: steps | tokens | cost
+    spend: Spend = field(default_factory=Spend)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "group": self.key,
             "status": self.status,
             "stopped": self.stopped,
+            "limit": self.limit,
             "steps": self.steps,
             "written": self.written,
+            "spend": self.spend.to_dict(),
             "note": self.note,
         }
 
@@ -207,6 +217,20 @@ class GroupOutcome:
 class ResidueRun:
     outcomes: list[GroupOutcome]
     remaining: list[Unhandled]
+    spend: Spend = field(default_factory=Spend)
+    budget: Budget = field(default_factory=Budget)
+
+    @property
+    def limit(self) -> str | None:
+        """The run ceiling that cut work short, if one did: tokens | cost.
+
+        Read off the outcomes rather than the totals: a run whose last group
+        finished exactly at the ceiling lost nothing, and should not say it did.
+        """
+        for outcome in self.outcomes:
+            if outcome.limit in ("tokens", "cost"):
+                return outcome.limit
+        return None
 
     @property
     def resolved(self) -> list[GroupOutcome]:
@@ -214,13 +238,28 @@ class ResidueRun:
 
     @property
     def files_written(self) -> int:
-        return sum(len(o.written) for o in self.outcomes if o.status in ("resolved", "unresolved"))
+        """Files from resolved groups: the ones that count as converted."""
+        return sum(len(o.written) for o in self.outcomes if o.status == "resolved")
+
+    @property
+    def partial_files(self) -> int:
+        """Files kept from groups that did not resolve (out of budget, or a
+        provider error after valid writes); their residue stands."""
+        return sum(len(o.written) for o in self.outcomes if o.status != "resolved")
 
     def summary(self) -> dict[str, Any]:
         return {
             "groups": len(self.outcomes),
             "resolved": len(self.resolved),
             "files_written": self.files_written,
+            "partial_files": self.partial_files,
+            "spend": self.spend.to_dict(),
+            "budget": {
+                "max_steps_per_group": self.budget.max_steps,
+                "max_tokens": self.budget.max_tokens,
+                "max_cost_usd": self.budget.max_cost,
+            },
+            "stopped_by": self.limit,
             "outcomes": [o.to_dict() for o in self.outcomes],
         }
 
@@ -235,9 +274,15 @@ def _final_text(messages) -> str:
 class ResidueAgent:
     """Runs the residue through the loop, one session per group."""
 
-    def __init__(self, client: LLMClient, max_steps: int = 12, system: str = SYSTEM_PROMPT):
+    def __init__(
+        self,
+        client: LLMClient,
+        max_steps: int = 12,
+        system: str = SYSTEM_PROMPT,
+        budget: Budget | None = None,
+    ):
         self.client = client
-        self.max_steps = max_steps
+        self.budget = budget or Budget(max_steps=max_steps)
         self.system = system
 
     def run(
@@ -251,36 +296,52 @@ class ResidueAgent:
         scaffolded = _scaffold_manifests(out_tree, namespace, meta or ModMetadata())
         outcomes: list[GroupOutcome] = []
         remaining: list[Unhandled] = []
+        spent = Spend()
         try:
             for group in group_residue(unhandled):
-                outcome = self._run_group(group, source_root, out_tree, namespace)
+                outcome = self._run_group(group, source_root, out_tree, namespace, spent)
                 outcomes.append(outcome)
                 if outcome.status != "resolved":
                     remaining.extend(group.items)
         finally:
             _remove_empty_scaffolds(out_tree, scaffolded)
-        return ResidueRun(outcomes, remaining)
+        return ResidueRun(outcomes, remaining, spent, self.budget)
 
     def _run_group(
-        self, group: ResidueGroup, source_root: Path, out_tree: Path, namespace: str
+        self,
+        group: ResidueGroup,
+        source_root: Path,
+        out_tree: Path,
+        namespace: str,
+        spent: Spend,
     ) -> GroupOutcome:
         outcome = GroupOutcome(group.key, group.kind, group.source, "skipped")
         if group.kind in SKIP_KINDS:
             outcome.note = SKIP_KINDS[group.kind]
             return outcome
+        limit = self.budget.exhausted(spent)
+        if limit:
+            outcome.stopped, outcome.limit = "budget", limit
+            outcome.note = f"the run's {limit} ceiling was reached before this group started"
+            return outcome
 
         before = _error_set(out_tree)
         box = _TrackingToolBox(source_root, out_tree)
-        session = AgentSession(self.client, box, self.system, max_steps=self.max_steps)
+        session = AgentSession(
+            self.client, box, self.system, budget=self.budget, run_spend=spent
+        )
         task = build_task(group, source_root, out_tree, namespace)
         try:
             result = session.run(task)
-            outcome.stopped, outcome.steps = result.stopped, result.steps
+            outcome.stopped, outcome.steps, outcome.limit = result.stopped, result.steps, result.limit
             outcome.note = _final_text(result.messages)
+            if result.stopped == "budget" and not outcome.note:
+                outcome.note = f"stopped at the {result.limit} ceiling"
         except Exception as exc:  # a provider failure ends this group, not the run
             outcome.stopped = "error"
-            outcome.steps = sum(1 for m in session.messages if m.role == "assistant")
+            outcome.steps = session.spend.steps
             outcome.note = f"{type(exc).__name__}: {exc}"
+        outcome.spend = session.spend
 
         outcome.written = sorted(box.originals)
         # Judged against the tree as the session found it: a group is rolled back
@@ -291,6 +352,10 @@ class ResidueAgent:
             outcome.written = []
         elif outcome.stopped == "done" and box.originals:
             outcome.status = "resolved"
+        elif outcome.stopped == "budget" and box.originals:
+            # Out of budget mid-task: what it wrote validates, so it stays on
+            # disk for the next run or a human, but the residue is not cleared.
+            outcome.status = "partial"
         elif outcome.stopped == "error":
             outcome.status = "error"
         else:

@@ -25,6 +25,11 @@
       "files": 7,
       "residue": 0
     },
+    "hard_residue_mod": {
+      "coverage": 40.0,
+      "files": 2,
+      "residue": 3
+    },
     "item_defs_mod": {
       "coverage": 80.0,
       "files": 8,

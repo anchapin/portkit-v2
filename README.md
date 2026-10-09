@@ -64,6 +64,19 @@ stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Bytecode, nested jars and namespace collisions are skipped, since no tool
 can read them.
 
+Budgets: `--agent-max-steps` bounds each group's session; `--agent-max-tokens`
+and `--agent-max-cost` bound the whole run, shared across groups. The run stops
+before the next model call once a ceiling is reached, keeps whatever it wrote
+that still validates (the group shows as `partial`, its residue stands), and
+skips the remaining groups with the ceiling named. Spend is reported per group
+and in total. Dollars come from your prices, never from the provider:
+
+```bash
+export PORTKIT_LLM_INPUT_PRICE=3     # USD per million input tokens
+export PORTKIT_LLM_OUTPUT_PRICE=15   # USD per million output tokens
+portkit convert mod.jar /tmp/out --agent --agent-max-tokens 200000 --agent-max-cost 0.50
+```
+
 ## Layout
 
 ```

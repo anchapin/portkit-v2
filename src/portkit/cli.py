@@ -20,10 +20,16 @@ def _print_findings(report) -> None:
 
 def _residue_agent(args):
     """The agent for ``convert --agent``, with the provider from the environment."""
-    from .agent import make_client
+    from .agent import Budget, Pricing, make_client
     from .agent.residue import ResidueAgent
 
-    return ResidueAgent(make_client(), max_steps=args.agent_max_steps)
+    budget = Budget(
+        max_steps=args.agent_max_steps,
+        max_tokens=args.agent_max_tokens,
+        max_cost=args.agent_max_cost,
+        pricing=Pricing.from_env(),
+    )
+    return ResidueAgent(make_client(), budget=budget)
 
 
 def cmd_convert(args) -> int:
@@ -53,7 +59,12 @@ def cmd_convert(args) -> int:
         )
         for outcome in result.agent.outcomes:
             detail = f" ({outcome.note})" if outcome.note else ""
-            print(f"  {outcome.status}: {outcome.key}{detail}")
+            print(f"  {outcome.status}: {outcome.key} [{outcome.spend.describe()}]{detail}")
+        print(f"spent: {result.agent.spend.describe()}")
+        if result.agent.limit:
+            kept = result.agent.partial_files
+            tail = f"; {kept} partial file(s) kept" if kept else ""
+            print(f"stopped at the run's {result.agent.limit} ceiling{tail}")
     if result.unhandled:
         print(
             f"\n{len(result.unhandled)} item(s) covering "
@@ -292,6 +303,17 @@ def main(argv=None) -> int:
     p.add_argument(
         "--agent-max-steps", type=int, default=12, metavar="N",
         help="step budget per residue group (default 12)",
+    )
+    p.add_argument(
+        "--agent-max-tokens", type=int, metavar="N",
+        help="token ceiling for the whole agent run, input plus output",
+    )
+    p.add_argument(
+        "--agent-max-cost", type=float, metavar="USD",
+        help=(
+            "dollar ceiling for the whole agent run; needs PORTKIT_LLM_INPUT_PRICE "
+            "and PORTKIT_LLM_OUTPUT_PRICE (USD per million tokens)"
+        ),
     )
     p.set_defaults(func=cmd_convert)
 

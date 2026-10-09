@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .budget import Usage
 from .http import LLMError, Transport, post_json
 from .loop import Message, ToolCall
 
@@ -100,4 +101,13 @@ def from_openai_reply(reply: dict) -> Message:
         for c in message.get("tool_calls") or []
         if c.get("type", "function") == "function"
     ]
-    return Message("assistant", message.get("content") or "", tool_calls=calls)
+    return Message(
+        "assistant", message.get("content") or "", tool_calls=calls, usage=_usage(reply)
+    )
+
+
+def _usage(reply: dict) -> Usage | None:
+    usage = reply.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    return Usage(int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0))

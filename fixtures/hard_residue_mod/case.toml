@@ -1,0 +1,5 @@
+name = "hard_residue_mod"
+description = "Deliberately hard residue for budget tests: three recipes over multi-item convention tags, each a choice the deterministic path refuses to make. tests/test_budgets.py drives a scripted agent into its token and dollar ceilings here."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 3
