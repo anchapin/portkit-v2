@@ -35,6 +35,19 @@ those, get handed to the agent loop with the validator attached. If the
 deterministic converters grow to cover a case, the agent stops seeing it. That
 is the direction you want the ratchet to run.
 
+Pick a provider with `make_client()` from `portkit.agent`. It reads explicit
+arguments, then a config mapping, then the environment:
+
+```bash
+export PORTKIT_LLM_PROVIDER=anthropic   # or openai
+export PORTKIT_LLM_MODEL=<model name>
+export ANTHROPIC_API_KEY=...            # or OPENAI_API_KEY
+export PORTKIT_LLM_BASE_URL=...         # optional: OpenRouter, a local server, a gateway
+```
+
+Both clients are stdlib HTTP (no SDK dependency) and translate tool calls both
+ways, so the same `AgentSession` runs against either one unchanged.
+
 ## Layout
 
 ```
