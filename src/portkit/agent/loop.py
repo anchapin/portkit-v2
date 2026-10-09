@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass
@@ -28,6 +28,7 @@ class Message:
     tool_call_id: str | None = None
 
 
+@runtime_checkable
 class LLMClient(Protocol):
     """Implement this for OpenAI, Anthropic, OpenRouter, a local model, whatever."""
 
