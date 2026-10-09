@@ -77,6 +77,13 @@ export PORTKIT_LLM_OUTPUT_PRICE=15   # USD per million output tokens
 portkit convert mod.jar /tmp/out --agent --agent-max-tokens 200000 --agent-max-cost 0.50
 ```
 
+Transcripts: `--agent-record run.jsonl` writes every completion of a run to a
+JSON Lines transcript; `--agent-replay run.jsonl` runs the agent from one with
+no provider, key or network. Replay checks each request against the recording
+and fails at the first step that differs, so an agent regression is an ordinary
+failing test. Committed transcripts live in `fixtures/transcripts/` and replay
+in CI (`tests/test_transcripts.py`).
+
 ## Layout
 
 ```
