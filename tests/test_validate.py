@@ -82,3 +82,34 @@ def test_texture_index_pointing_at_nothing_is_caught(tmp_path):
     )
     report = validate_tree(tmp_path)
     assert any(f.rule == "texture_index.missing" for f in report.errors)
+
+
+def test_top_level_string_recipe_does_not_crash(tmp_path):
+    """A recipe file whose contents parse to a string at the top level (a model
+    wrote ``content="<json-string>"`` instead of a dict) must be reported as a
+    parse error and not raise ``AttributeError`` from ``.items()`` on a string.
+
+    Discovered by the model sweep: deepseek-v4.1-flash produced such a file and
+    the validator crashed, masking the real write from the residue report.
+    """
+    _write(tmp_path, "behavior_pack/manifest.json", _manifest())
+    # Write a JSON-encoded string at the top level — what a misbehaving tool
+    # call would produce.
+    target = tmp_path / "behavior_pack" / "recipes" / "broken.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('"oops"')
+    # Either flagged as json.parse by another rule, or skipped cleanly — never
+    # an exception.
+    report = validate_tree(tmp_path)
+    assert report is not None
+
+
+def test_top_level_string_item_does_not_crash(tmp_path):
+    """Same defense on the items xref path; a model could write a string there too."""
+    _write(tmp_path, "behavior_pack/manifest.json", _manifest())
+    target = tmp_path / "behavior_pack" / "items" / "broken.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('"oops"')
+    # Should not raise.
+    report = validate_tree(tmp_path)
+    assert report is not None

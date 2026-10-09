@@ -155,3 +155,37 @@ def test_cli_convert_agent_without_a_provider_says_so(tmp_path, monkeypatch, cap
     code = cli.main(["convert", str(RESIDUE), str(tmp_path / "out"), "--agent"])
     assert code == 2
     assert "PORTKIT_LLM_PROVIDER" in capsys.readouterr().err
+
+
+def test_write_output_rejects_string_content(tmp_path):
+    """A model that passes a JSON-string instead of a dict would otherwise
+    produce a JSON-encoded string file — valid JSON, useless as a Bedrock
+    file. The tool should return an error the loop can show the model.
+
+    Discovered by the model sweep: deepseek-v4.1-flash passed ``content`` as
+    a string and the resulting file made the validator crash later.
+    """
+    src = tmp_path / "src"
+    out = tmp_path / "out"
+    src.mkdir()
+    from portkit.agent.tools import ToolBox
+    box = ToolBox(src, out)
+    result = box.invoke("write_output", {"path": "behavior_pack/recipes/x.json", "content": "oops"})
+    assert "error" in result
+    assert "object" in result["error"].lower() or "dict" in result["error"].lower()
+    # The file must NOT have been written.
+    assert not (out / "behavior_pack" / "recipes" / "x.json").exists()
+
+
+def test_write_output_accepts_dict_content(tmp_path):
+    """Companion to the above — the happy path still works."""
+    src = tmp_path / "src"
+    out = tmp_path / "out"
+    src.mkdir()
+    from portkit.agent.tools import ToolBox
+    box = ToolBox(src, out)
+    payload = {"format_version": "1.20.10", "minecraft:item": {"description": {"identifier": "t:x"}}}
+    result = box.invoke("write_output", {"path": "behavior_pack/items/x.json", "content": payload})
+    assert result.get("written") == "behavior_pack/items/x.json"
+    assert (out / "behavior_pack" / "items" / "x.json").is_file()
+

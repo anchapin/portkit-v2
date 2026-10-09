@@ -66,12 +66,16 @@ class Index:
             return
         prefix = behavior.name
         for path in sorted((behavior / "blocks").glob("*.json")):
-            data = _load(path) or {}
+            data = _load(path)
+            if not isinstance(data, dict):
+                continue
             ident = ((data.get("minecraft:block") or {}).get("description") or {}).get("identifier")
             if isinstance(ident, str):
                 self.blocks[ident] = f"{prefix}/blocks/{path.name}"
         for path in sorted((behavior / "items").glob("*.json")):
-            data = _load(path) or {}
+            data = _load(path)
+            if not isinstance(data, dict):
+                continue
             ident = ((data.get("minecraft:item") or {}).get("description") or {}).get("identifier")
             if isinstance(ident, str):
                 self.items[ident] = f"{prefix}/items/{path.name}"
@@ -107,7 +111,9 @@ def _check_item_icons(report: ValidationReport, behavior: Path, index: Index) ->
     prefix = behavior.name
     for path in sorted((behavior / "items").glob("*.json")):
         rel = f"{prefix}/items/{path.name}"
-        data = _load(path) or {}
+        data = _load(path)
+        if not isinstance(data, dict):
+            continue
         icon = ((data.get("minecraft:item") or {}).get("components") or {}).get("minecraft:icon")
         if isinstance(icon, dict):  # 1.21 shape: {"texture": "..."}
             icon = icon.get("texture")
@@ -148,7 +154,11 @@ def _check_recipes(report: ValidationReport, behavior: Path, index: Index) -> No
     obtainable = index.obtainable
     for path in sorted((behavior / "recipes").glob("*.json")):
         rel = f"{prefix}/recipes/{path.name}"
-        data = _load(path) or {}
+        data = _load(path)
+        if not isinstance(data, dict):
+            # Earlier rules already flagged a bad file as json.parse; nothing
+            # to check here and ``.items()`` would AttributeError on a string.
+            continue
         for key, body in data.items():
             if not key.startswith("minecraft:recipe_") or not isinstance(body, dict):
                 continue

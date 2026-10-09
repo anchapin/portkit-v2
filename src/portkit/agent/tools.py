@@ -114,6 +114,20 @@ class ToolBox:
         }
 
     def write_output(self, path: str, content: dict) -> dict:
+        # ``content`` must be a JSON object. A model that hands us a string
+        # would write ``json.dumps("foo")`` = ``'"foo"'`` to disk, a valid JSON
+        # document but useless as a Bedrock file. Tell the loop the call was
+        # bad instead of producing one of those — the model can fix it on the
+        # next step.
+        if not isinstance(content, dict):
+            return {
+                "error": (
+                    f"content must be a JSON object, got {type(content).__name__}; "
+                    "pass Bedrock JSON like {\"minecraft:recipe_shapeless\": {...}}"
+                ),
+                "received_type": type(content).__name__,
+                "received_preview": repr(content)[:120],
+            }
         target = self._resolve(self.out_tree, path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(content, indent=2) + "\n")
