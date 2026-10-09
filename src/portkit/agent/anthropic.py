@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .budget import Usage
 from .http import LLMError, Transport, post_json
 from .loop import Message, ToolCall
 
@@ -97,4 +98,17 @@ def from_anthropic_reply(reply: dict) -> Message:
             text.append(block.get("text", ""))
         elif block.get("type") == "tool_use":
             calls.append(ToolCall(id=block["id"], name=block["name"], arguments=block.get("input") or {}))
-    return Message("assistant", "".join(text), tool_calls=calls)
+    return Message("assistant", "".join(text), tool_calls=calls, usage=_usage(reply))
+
+
+def _usage(reply: dict) -> Usage | None:
+    usage = reply.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    # Cache reads and writes are input the account pays for, at whatever rate;
+    # counting them as input keeps a token ceiling honest.
+    inputs = sum(
+        int(usage.get(k) or 0)
+        for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+    )
+    return Usage(inputs, int(usage.get("output_tokens") or 0))
