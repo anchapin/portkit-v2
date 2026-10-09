@@ -18,15 +18,42 @@ def _print_findings(report) -> None:
         print(f"  {mark} {f.path}: [{f.rule}] {f.message}")
 
 
+def _residue_agent(args):
+    """The agent for ``convert --agent``, with the provider from the environment."""
+    from .agent import make_client
+    from .agent.residue import ResidueAgent
+
+    return ResidueAgent(make_client(), max_steps=args.agent_max_steps)
+
+
 def cmd_convert(args) -> int:
+    agent = None
+    if args.agent:
+        try:
+            agent = _residue_agent(args)
+        except ValueError as exc:
+            print(f"cannot start the residue agent: {exc}", file=sys.stderr)
+            return 2
     try:
         result = convert(
-            Path(args.source), Path(args.out), args.namespace, emit_addon=not args.no_addon
+            Path(args.source),
+            Path(args.out),
+            args.namespace,
+            emit_addon=not args.no_addon,
+            agent=agent,
         )
     except IngestError as exc:
         print(f"cannot read {args.source}: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result.summary(), indent=2))
+    if result.agent:
+        print(
+            f"\nagent resolved {len(result.agent.resolved)} of "
+            f"{len(result.agent.outcomes)} residue group(s):"
+        )
+        for outcome in result.agent.outcomes:
+            detail = f" ({outcome.note})" if outcome.note else ""
+            print(f"  {outcome.status}: {outcome.key}{detail}")
     if result.unhandled:
         print(
             f"\n{len(result.unhandled)} item(s) covering "
@@ -254,6 +281,17 @@ def main(argv=None) -> int:
     p.add_argument("--namespace")
     p.add_argument(
         "--no-addon", action="store_true", help="write the pack tree only, no .mcaddon"
+    )
+    p.add_argument(
+        "--agent", action="store_true",
+        help=(
+            "send the residue through the agent loop, one session per group "
+            "(provider from PORTKIT_LLM_PROVIDER / PORTKIT_LLM_MODEL)"
+        ),
+    )
+    p.add_argument(
+        "--agent-max-steps", type=int, default=12, metavar="N",
+        help="step budget per residue group (default 12)",
     )
     p.set_defaults(func=cmd_convert)
 
