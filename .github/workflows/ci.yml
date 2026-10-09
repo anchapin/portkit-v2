@@ -26,5 +26,5 @@ jobs:
       - name: Unit tests and fixture parity
         run: pytest -q
 
-      - name: Fixture coverage
-        run: portkit eval
+      - name: Fixture coverage (fails on regression against the baseline)
+        run: portkit eval --baseline fixtures/coverage-baseline.json
