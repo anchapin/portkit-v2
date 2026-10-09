@@ -1,0 +1,10 @@
+name = "residue_mod_enriched"
+description = "Same residue as residue_mod but with the missing item, item-texture, blockstate, and block model files in place, so the deterministic path owns more. After the agent runs, only the smithing recipe should remain (the tag recipe becomes resolvable because steel_ingot/steel_block now exist)."
+namespace = "examplemod"
+expect_valid = true
+# Both recipes are still residue to the deterministic converter because it has
+# no tag-aware logic; the agent is what resolves the tag one. Test fixtures
+# check this deterministic count; the post-agent count is exercised separately
+# in tests/test_residue_agent.py / test_enriched_agent.py.
+expect_unhandled = 2
+

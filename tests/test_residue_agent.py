@@ -189,3 +189,29 @@ def test_write_output_accepts_dict_content(tmp_path):
     assert result.get("written") == "behavior_pack/items/x.json"
     assert (out / "behavior_pack" / "items" / "x.json").is_file()
 
+
+def test_convert_with_agent_on_enriched_fixture(tmp_path):
+    """The deterministic path emits items + blocks for ``residue_mod_enriched``
+    so the agent's residue list shortens. The tag recipe becomes resolvable
+    (steel_ingot / steel_block exist behind it); the smithing one still has
+    no template/addition and stays residue.
+
+    The deliverable is the same shape as ``test_convert_with_agent_resolves_residue_and_still_validates``
+    but against the enriched fixture.
+    """
+    enriched = ROOT / "fixtures" / "residue_mod_enriched" / "input"
+    client = FakeLLM(_good_script())
+    out = tmp_path / "out"
+    result = convert(enriched, out, agent=ResidueAgent(client))
+
+    assert result.report.ok, [f.message for f in result.report.errors]
+    assert (out / "behavior_pack" / "recipes" / "steel_block.json").is_file()
+    # The agent also sees a populated tree with steel_ingot and steel_block.
+    assert (out / "behavior_pack" / "items" / "steel_ingot.json").is_file()
+    assert (out / "behavior_pack" / "blocks" / "steel_block.json").is_file()
+
+    statuses = {o.source: o.status for o in result.agent.outcomes}
+    assert statuses == {TAG_RECIPE: "resolved", SMITHING: "unresolved"}
+    # smithing is the only remaining residue item post-agent.
+    assert [u.source for u in result.unhandled] == [SMITHING]
+
