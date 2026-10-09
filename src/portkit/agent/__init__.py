@@ -6,6 +6,7 @@ from .loop import AgentSession, LLMClient, Message, ToolCall
 from .openai import OpenAIClient
 from .residue import ResidueAgent, ResidueGroup, ResidueRun, build_task, group_residue
 from .tools import ToolBox
+from .transcript import RecordingClient, ReplayClient, ReplayMismatch
 
 __all__ = [
     "AgentSession",
@@ -16,6 +17,9 @@ __all__ = [
     "Message",
     "OpenAIClient",
     "Pricing",
+    "RecordingClient",
+    "ReplayClient",
+    "ReplayMismatch",
     "ResidueAgent",
     "ResidueGroup",
     "ResidueRun",
