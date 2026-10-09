@@ -5,21 +5,30 @@ exercised against a live model, you will not have tests for it.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
+from .budget import Usage
 from .loop import Message, ToolCall
 
 
 class FakeLLM:
-    """Replays a list of Messages, one per complete() call."""
+    """Replays a list of Messages, one per complete() call.
 
-    def __init__(self, script: list[Message]):
+    ``usage`` stamps every reply that does not carry its own, so budget tests
+    can spend tokens without a provider.
+    """
+
+    def __init__(self, script: list[Message], usage: Usage | None = None):
         self.script = list(script)
+        self.usage = usage
         self.seen: list[list[Message]] = []
 
     def complete(self, messages, tools):
         self.seen.append(list(messages))
-        if not self.script:
-            return Message("assistant", "out of script")
-        return self.script.pop(0)
+        reply = self.script.pop(0) if self.script else Message("assistant", "out of script")
+        if reply.usage is None and self.usage is not None:
+            reply = replace(reply, usage=self.usage)
+        return reply
 
 
 def tool_call(name: str, **arguments) -> Message:
