@@ -5,6 +5,7 @@ import json
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .converters import convert_all
 from .ingest import ingest
@@ -12,6 +13,9 @@ from .meta import ModMetadata, parse as parse_metadata
 from .model import ConversionResult, SourceMod, Unhandled
 from .pack import addon_name, write_mcaddon, write_tree
 from .validate import ValidationReport, validate_tree
+
+if TYPE_CHECKING:
+    from .agent.residue import ResidueAgent, ResidueRun
 
 
 # How deep a leftover path is grouped before reporting. assets/<ns>/models/block/x.json
@@ -127,6 +131,9 @@ class PipelineResult:
     # Bedrock cannot carry.
     reductions: list[str] = field(default_factory=list)
 
+    # What the residue agent did, when one ran (``convert(..., agent=...)``).
+    agent: "ResidueRun | None" = None
+
     @property
     def notes(self) -> list[str]:
         """Things worth saying about the mod itself, not about its files.
@@ -166,6 +173,7 @@ class PipelineResult:
             },
             "notes": self.notes,
             "mcaddon": self.addon.name if self.addon else None,
+            **({"agent": self.agent.summary()} if self.agent else {}),
         }
 
 
@@ -174,11 +182,17 @@ def convert(
     out_dir: Path,
     namespace: str | None = None,
     emit_addon: bool = True,
+    agent: "ResidueAgent | None" = None,
 ) -> PipelineResult:
     """Convert a mod directory or .jar into a Bedrock pack tree under out_dir.
 
     Unless ``emit_addon`` is off, the packaged <mod>.mcaddon lands next to the
     tree, since that single file is the thing a player can actually install.
+
+    With an ``agent``, the residue goes through it after the deterministic pass,
+    while the staged source is still on disk. Validation and the addon both run
+    on the tree as the agent left it; residue the agent resolved drops out of
+    ``unhandled`` and its files count as converted.
     """
     out_dir = Path(out_dir)
     with tempfile.TemporaryDirectory(prefix="portkit-ingest-") as staging:
@@ -207,6 +221,12 @@ def convert(
         )
 
         tree = write_tree(result, namespace, out_dir, meta)
+        file_count = len(result.files)
+        agent_run = None
+        if agent is not None and unhandled:
+            agent_run = agent.run(staged.root, tree, unhandled, namespace, meta)
+            unhandled = agent_run.remaining
+            file_count += agent_run.files_written
         report = validate_tree(tree)
 
         addon = None
@@ -223,9 +243,10 @@ def convert(
             namespace,
             report,
             unhandled,
-            len(result.files),
+            file_count,
             meta,
             addon,
             counts,
             reductions=result.notes,
+            agent=agent_run,
         )
