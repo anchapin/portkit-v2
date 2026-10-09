@@ -1,0 +1,89 @@
+{
+  "fixtures": {
+    "animated_block_mod": {
+      "coverage": 100.0,
+      "files": 6,
+      "residue": 0
+    },
+    "asymmetric_model_mod": {
+      "coverage": 100.0,
+      "files": 6,
+      "residue": 0
+    },
+    "axis_block_mod": {
+      "coverage": 100.0,
+      "files": 8,
+      "residue": 0
+    },
+    "block_defs_mod": {
+      "coverage": 69.2,
+      "files": 9,
+      "residue": 4
+    },
+    "faced_model_mod": {
+      "coverage": 100.0,
+      "files": 7,
+      "residue": 0
+    },
+    "item_defs_mod": {
+      "coverage": 80.0,
+      "files": 8,
+      "residue": 2
+    },
+    "locales_mod": {
+      "coverage": 87.5,
+      "files": 7,
+      "residue": 1
+    },
+    "loot_mod": {
+      "coverage": 57.1,
+      "files": 4,
+      "residue": 3
+    },
+    "palisade_mod": {
+      "coverage": 100.0,
+      "files": 7,
+      "residue": 0
+    },
+    "random_variant_mod": {
+      "coverage": 100.0,
+      "files": 8,
+      "residue": 0
+    },
+    "recipes_mod": {
+      "coverage": 100.0,
+      "files": 10,
+      "residue": 0
+    },
+    "residue_mod": {
+      "coverage": 66.7,
+      "files": 4,
+      "residue": 2
+    },
+    "rotated_model_mod": {
+      "coverage": 100.0,
+      "files": 10,
+      "residue": 0
+    },
+    "seat_mod": {
+      "coverage": 100.0,
+      "files": 6,
+      "residue": 0
+    },
+    "simple_block_mod": {
+      "coverage": 100.0,
+      "files": 7,
+      "residue": 0
+    },
+    "sounds_mod": {
+      "coverage": 85.7,
+      "files": 6,
+      "residue": 1
+    },
+    "two_namespace_mod": {
+      "coverage": 100.0,
+      "files": 7,
+      "residue": 0
+    }
+  }
+}
