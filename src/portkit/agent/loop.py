@@ -21,6 +21,9 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
+    # Opaque provider fields that must go back on the next request unchanged,
+    # e.g. Gemini's thought signature (``extra_content``). Empty for most.
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
