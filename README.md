@@ -49,6 +49,21 @@ export PORTKIT_LLM_BASE_URL=...         # optional: OpenRouter, a local server, 
 Both clients are stdlib HTTP (no SDK dependency) and translate tool calls both
 ways, so the same `AgentSession` runs against either one unchanged.
 
+Then send the residue through it:
+
+```bash
+portkit convert path/to/mod.jar /tmp/out --agent   # --agent-max-steps N per group, default 12
+```
+
+`portkit.agent.residue` groups the `Unhandled` items by kind and source file and
+runs one session per group. Each task carries the source content and the exact
+reason the deterministic path refused it. A group counts as resolved only when
+its session ends on its own, it wrote at least one file, and the validator finds
+no new error; a group that breaks the tree is rolled back. Anything unresolved
+stays in `unhandled.json`, and the summary's `agent` block says what each group
+did. Bytecode, nested jars and namespace collisions are skipped, since no tool
+can read them.
+
 ## Layout
 
 ```
