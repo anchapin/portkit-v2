@@ -19,9 +19,15 @@ def _print_findings(report) -> None:
 
 
 def _residue_agent(args):
-    """The agent for ``convert --agent``, with the provider from the environment."""
+    """The agent for ``convert --agent``.
+
+    The provider comes from the environment, unless ``--agent-replay`` names a
+    transcript, which needs no provider, key or network. ``--agent-record``
+    writes every completion of the run to a transcript.
+    """
     from .agent import Budget, Pricing, make_client
     from .agent.residue import ResidueAgent
+    from .agent.transcript import RecordingClient, ReplayClient
 
     budget = Budget(
         max_steps=args.agent_max_steps,
@@ -29,15 +35,21 @@ def _residue_agent(args):
         max_cost=args.agent_max_cost,
         pricing=Pricing.from_env(),
     )
-    return ResidueAgent(make_client(), budget=budget)
+    if args.agent_replay:
+        client = ReplayClient(Path(args.agent_replay))
+    else:
+        client = make_client()
+    if args.agent_record:
+        client = RecordingClient(client, Path(args.agent_record))
+    return ResidueAgent(client, budget=budget)
 
 
 def cmd_convert(args) -> int:
     agent = None
-    if args.agent:
+    if args.agent or args.agent_replay:
         try:
             agent = _residue_agent(args)
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             print(f"cannot start the residue agent: {exc}", file=sys.stderr)
             return 2
     try:
@@ -313,6 +325,17 @@ def main(argv=None) -> int:
         help=(
             "dollar ceiling for the whole agent run; needs PORTKIT_LLM_INPUT_PRICE "
             "and PORTKIT_LLM_OUTPUT_PRICE (USD per million tokens)"
+        ),
+    )
+    p.add_argument(
+        "--agent-record", metavar="PATH",
+        help="write every agent completion of this run to a JSONL transcript",
+    )
+    p.add_argument(
+        "--agent-replay", metavar="PATH",
+        help=(
+            "run the agent from a recorded transcript instead of a provider "
+            "(implies --agent; no API key or network)"
         ),
     )
     p.set_defaults(func=cmd_convert)
