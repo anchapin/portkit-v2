@@ -40,14 +40,28 @@ Pick a provider with `make_client()` from `portkit.agent`. It reads explicit
 arguments, then a config mapping, then the environment:
 
 ```bash
-export PORTKIT_LLM_PROVIDER=anthropic   # or openai
+export PORTKIT_LLM_PROVIDER=anthropic   # or openai, or gemini
 export PORTKIT_LLM_MODEL=<model name>
-export ANTHROPIC_API_KEY=...            # or OPENAI_API_KEY
+export ANTHROPIC_API_KEY=...            # or OPENAI_API_KEY, or GEMINI_API_KEY
 export PORTKIT_LLM_BASE_URL=...         # optional: OpenRouter, a local server, a gateway
 ```
 
 Both clients are stdlib HTTP (no SDK dependency) and translate tool calls both
 ways, so the same `AgentSession` runs against either one unchanged.
+
+`gemini` is the OpenAI client aimed at Google's OpenAI-compatible endpoint, so
+no base URL is needed. A cheap setup for trying the agent:
+
+```bash
+export PORTKIT_LLM_PROVIDER=gemini
+export PORTKIT_LLM_MODEL=gemini-3.8-flash
+export GEMINI_API_KEY=...               # from Google AI Studio
+export PORTKIT_LLM_INPUT_PRICE=0.75 PORTKIT_LLM_OUTPUT_PRICE=3.75   # list price through 2026-12-31
+```
+
+Gemini 3 attaches a thought signature to each tool call and refuses the next
+turn without it. The OpenAI client keeps any extra fields on a tool call and
+sends them back unchanged, and transcripts record them, so replay still matches.
 
 Then send the residue through it:
 

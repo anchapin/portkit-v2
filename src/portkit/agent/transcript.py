@@ -32,7 +32,8 @@ def message_to_dict(m: Message) -> dict[str, Any]:
     out: dict[str, Any] = {"role": m.role, "content": m.content}
     if m.tool_calls:
         out["tool_calls"] = [
-            {"id": c.id, "name": c.name, "arguments": c.arguments} for c in m.tool_calls
+            {"id": c.id, "name": c.name, "arguments": c.arguments, **({"extra": c.extra} if c.extra else {})}
+            for c in m.tool_calls
         ]
     if m.tool_call_id is not None:
         out["tool_call_id"] = m.tool_call_id
@@ -47,7 +48,9 @@ def message_from_dict(d: dict[str, Any]) -> Message:
         role=d["role"],
         content=d.get("content", ""),
         tool_calls=[
-            ToolCall(id=c["id"], name=c["name"], arguments=c.get("arguments") or {})
+            ToolCall(
+                id=c["id"], name=c["name"], arguments=c.get("arguments") or {}, extra=c.get("extra") or {}
+            )
             for c in d.get("tool_calls") or []
         ],
         tool_call_id=d.get("tool_call_id"),
