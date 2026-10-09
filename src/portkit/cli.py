@@ -172,8 +172,16 @@ def cmd_report(args) -> int:
 
 
 def cmd_eval(args) -> int:
-    """Run every fixture and print the coverage table. This is the number that matters."""
+    """Run every fixture and print the coverage table. This is the number that matters.
+
+    With a baseline (``fixtures/coverage-baseline.json`` by default, or
+    ``--baseline``), any fixture whose coverage or converted file count drops
+    below it fails the run, naming the fixture and the delta.
+    """
+    import os
     import tempfile
+
+    from . import baseline as bl
 
     root = Path(args.fixtures or FIXTURES)
     cases = sorted(p for p in root.iterdir() if (p / "input").is_dir())
@@ -181,7 +189,7 @@ def cmd_eval(args) -> int:
         print(f"no fixtures under {root}")
         return 1
 
-    rows, failures = [], 0
+    rows, measured, failures = [], [], 0
     for case in cases:
         with tempfile.TemporaryDirectory() as tmp:
             result = convert(case / "input", Path(tmp) / "out")
@@ -190,11 +198,49 @@ def cmd_eval(args) -> int:
             rows.append(
                 (case.name, result.file_count, result.residue_count, result.coverage, ok)
             )
+            measured.append(
+                bl.Measured(case.name, result.file_count, result.residue_count, result.coverage)
+            )
 
     width = max(len(r[0]) for r in rows)
     print(f"{'fixture'.ljust(width)}  files  residue  coverage  valid")
     for name, handled, residue, coverage, ok in rows:
         print(f"{name.ljust(width)}  {handled:5d}  {residue:7d}  {coverage:7.1f}%  {'yes' if ok else 'NO'}")
+
+    baseline_path = Path(args.baseline) if args.baseline else root / bl.BASELINE_NAME
+
+    if args.update_baseline:
+        baseline_path.write_text(bl.dump(measured))
+        print(f"\nbaseline written: {baseline_path}")
+        return 1 if failures else 0
+
+    if args.no_baseline:
+        return 1 if failures else 0
+    if not baseline_path.is_file():
+        if args.baseline:
+            print(f"\nbaseline not found: {baseline_path}", file=sys.stderr)
+            return 2
+        return 1 if failures else 0
+
+    try:
+        regressions, notes = bl.compare(measured, bl.load(baseline_path))
+    except (OSError, ValueError) as exc:
+        print(f"\ncannot read baseline: {exc}", file=sys.stderr)
+        return 2
+
+    annotate = os.environ.get("GITHUB_ACTIONS") == "true"
+    for note in notes:
+        print(f"note: {note.fixture}: {note.message}")
+        if annotate:
+            print(f"::notice title=coverage baseline::{note.fixture}: {note.message}")
+    if regressions:
+        print(f"\ncoverage regressed against {baseline_path}:")
+        for reg in regressions:
+            print(f"  REGRESSION {reg.fixture}: {reg.message}")
+            if annotate:
+                print(f"::error title=coverage regression::{reg.fixture}: {reg.message}")
+        return 1
+    print(f"\ncoverage at or above baseline for all {len(measured)} fixtures")
     return 1 if failures else 0
 
 
@@ -248,6 +294,16 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("eval", help="run the whole fixture corpus")
     p.add_argument("--fixtures")
+    p.add_argument(
+        "--baseline",
+        help="per-fixture coverage baseline to enforce (default: <fixtures>/coverage-baseline.json if present)",
+    )
+    g = p.add_mutually_exclusive_group()
+    g.add_argument(
+        "--update-baseline", action="store_true",
+        help="rewrite the baseline from this run instead of checking against it",
+    )
+    g.add_argument("--no-baseline", action="store_true", help="skip the baseline check")
     p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args(argv)
