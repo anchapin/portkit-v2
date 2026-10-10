@@ -121,6 +121,15 @@ portkit eval --agent --target anthropic:<model> --target gemini_native:<model> -
 portkit eval --agent --agent-replay fixtures/transcripts   # the offline row CI replays
 ```
 
+A target can name its own endpoint with `@BASE_URL`, so one run can mix
+gateways without touching the environment:
+
+```bash
+portkit eval --agent --fixture agent_mod \
+  --target openai:anthropic/claude-haiku-4.5@https://openrouter.ai/api/v1 \
+  --target gemini_native:gemini-flash-latest
+```
+
 Each task scores **pass** (resolved: the validator is the only judge), **fail**,
 or **unscored** (a provider error, or a ceiling hit before the validator ran).
 Unscored tasks stay out of the pass rate. **Format failures** count tool calls
