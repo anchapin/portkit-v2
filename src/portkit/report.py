@@ -79,7 +79,7 @@ def _converted(tree: Path) -> Counter:
         if not root.is_dir():
             continue
         for path in sorted(root.rglob("*")):
-            if not path.is_file() or path.name == "manifest.json":
+            if not path.is_file() or path.name in ("manifest.json", "pack_icon.png"):
                 continue
             counts[_content_type(path.relative_to(root).as_posix())] += 1
     return counts
