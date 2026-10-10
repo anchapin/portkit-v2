@@ -21,3 +21,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["realmods: needs the real-mod corpus jars in the cache (portkit corpus fetch); skipped when absent"]
