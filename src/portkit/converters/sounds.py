@@ -13,11 +13,19 @@ the event named.
 
 Bedrock only plays .ogg here too, so a mod shipping .wav is reported rather than
 copied into a pack where it stays silent.
+
+No entry may name audio the player won't have (#116). A Java sound name with
+no namespace is vanilla (``minecraft:``), not the mod's: it is kept only when
+Bedrock's own vanilla pack has a file at the same path, which then plays.
+Otherwise it is dropped, as is a mod-namespaced name whose audio the jar
+doesn't ship. An event that keeps at least one sound converts with a note
+naming what it lost; one left with none is withdrawn to the residue.
 """
 from __future__ import annotations
 
 import json
 
+from ..data import bedrock_vanilla_sounds
 from ..model import ConversionResult, SourceMod, Unhandled
 
 # Java category -> Bedrock category. Bedrock's set is smaller; anything not
@@ -40,8 +48,20 @@ _DEFAULT_CATEGORY = "neutral"
 _AUDIO_SUFFIXES = {".ogg"}
 
 
-def _sound_entry(sound, namespace: str) -> tuple[dict | str | None, str | None]:
-    """One entry of a Java event's "sounds" list -> a Bedrock sound path."""
+class _Drop(str):
+    """Why one sound in an event was dropped; the rest of the event survives."""
+
+
+def _sound_entry(
+    sound, namespace: str, shipped: frozenset[str] | set[str] = frozenset()
+) -> tuple[dict | None, str | None]:
+    """One entry of a Java event's "sounds" list -> a Bedrock sound path.
+
+    Returns (entry, None), or (None, reason). A reason that is a ``_Drop``
+    costs only this sound; any other reason refuses the whole event.
+    ``shipped`` is the mod's converted audio, as paths under sounds/ with no
+    extension.
+    """
     if isinstance(sound, str):
         name, volume, pitch, stream = sound, None, None, False
     elif isinstance(sound, dict):
@@ -57,8 +77,22 @@ def _sound_entry(sound, namespace: str) -> tuple[dict | str | None, str | None]:
         return None, f"sound entry {sound!r} is neither a path nor an object"
 
     ns, _, path = name.rpartition(":")
-    if ns and ns != namespace:
+    if ns in ("", "minecraft"):
+        # Java resolves a bare name to minecraft:, so this is vanilla audio.
+        # Bedrock files many vanilla sounds at the same path (random/bow,
+        # mob/slime/big1); those play from the vanilla pack. The rest are
+        # filed elsewhere or don't exist, and guessing the new path would be
+        # a guess.
+        if f"sounds/{path}" not in bedrock_vanilla_sounds():
+            return None, _Drop(
+                f"{name!r} is a vanilla Java sound with no Bedrock vanilla file at sounds/{path}"
+            )
+    elif ns != namespace:
         return None, f"sound {name!r} belongs to another namespace"
+    elif path not in shipped:
+        return None, _Drop(
+            f"{name!r} names assets/{namespace}/sounds/{path}.ogg, which the mod does not ship"
+        )
 
     entry: dict = {"name": f"sounds/{path}"}
     if isinstance(volume, (int, float)) and float(volume) != 1.0:
@@ -74,6 +108,7 @@ def convert(mod: SourceMod) -> ConversionResult:
     result = ConversionResult()
 
     audio_root = mod.assets / "sounds"
+    shipped: set[str] = set()
     if audio_root.is_dir():
         for path in sorted(audio_root.rglob("*")):
             if not path.is_file():
@@ -90,6 +125,7 @@ def convert(mod: SourceMod) -> ConversionResult:
                 continue
             inner = path.relative_to(audio_root).as_posix()
             result.files[f"sounds/{inner}"] = path.read_bytes()
+            shipped.add(inner[: -len(path.suffix)])
 
     index = mod.assets / "sounds.json"
     if not index.is_file():
@@ -144,18 +180,38 @@ def convert(mod: SourceMod) -> ConversionResult:
             continue
 
         entries = []
+        dropped: list[str] = []
         refused: str | None = None
         for sound in sounds:
-            entry, reason = _sound_entry(sound, mod.namespace)
-            if entry is None:
+            entry, reason = _sound_entry(sound, mod.namespace, shipped)
+            if entry is not None:
+                entries.append(entry)
+            elif isinstance(reason, _Drop):
+                if reason not in dropped:
+                    dropped.append(reason)
+            else:
                 refused = reason
                 break
-            entries.append(entry)
         if refused:
             result.unhandled.append(
                 Unhandled(rel, "sound", f"event {event!r}: {refused}", count=0)
             )
             continue
+        if not entries:
+            result.unhandled.append(
+                Unhandled(
+                    rel,
+                    "sound",
+                    f"event {event!r} has no sound Bedrock can play: {'; '.join(dropped)}",
+                    count=0,
+                )
+            )
+            continue
+        if dropped:
+            result.notes.append(
+                f"sound event {mod.namespace}:{event} dropped {len(dropped)} sound(s) "
+                f"with no audio in the pack: {'; '.join(dropped)}"
+            )
 
         definitions[f"{mod.namespace}:{event}"] = {"category": category, "sounds": entries}
 
