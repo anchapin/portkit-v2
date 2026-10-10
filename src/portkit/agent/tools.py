@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..validate import validate_tree
+from . import reference
 
 
 # Bedrock locale files: resource_pack/texts/en_US.lang, pt_BR.lang, ...
@@ -141,6 +142,39 @@ class ToolBox:
             },
             self.validate,
         )
+        self.register(
+            {
+                "name": "lookup_bedrock",
+                "description": (
+                    "Look up how something is written in Bedrock: a block or item component "
+                    "('minecraft:destructible_by_mining', 'item:minecraft:icon'), a recipe type "
+                    "('recipe_shaped', 'recipe_smithing_transform'), or a pack file "
+                    "('terrain_texture.json', 'item_texture.json', '.lang'). Returns the schema "
+                    "fragment, a short real example and a note on what the validator checks. "
+                    "An unknown topic returns the closest names."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {"topic": {"type": "string"}},
+                    "required": ["topic"],
+                },
+            },
+            self.lookup_bedrock,
+        )
+        self.register(
+            {
+                "name": "list_bedrock_topics",
+                "description": (
+                    "List the topics lookup_bedrock knows, grouped by kind, optionally only "
+                    "those starting with a prefix such as 'recipe' or 'minecraft:light'."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {"prefix": {"type": "string"}},
+                },
+            },
+            self.list_bedrock_topics,
+        )
 
     def _resolve(self, base: Path, path: str) -> Path:
         target = (base / path).resolve()
@@ -246,6 +280,13 @@ class ToolBox:
     def validate(self) -> dict:
         return validate_tree(self.out_tree).to_dict()
 
+    def lookup_bedrock(self, topic: str) -> dict:
+        """Deterministic reference lookup (#114): same topic, same answer."""
+        return reference.lookup(topic)
+
+    def list_bedrock_topics(self, prefix: str = "") -> dict:
+        return reference.list_topics(prefix)
+
 
 SYSTEM_PROMPT = """You convert leftover Minecraft Java mod content to Bedrock Edition.
 
@@ -257,6 +298,8 @@ Rules:
 - Write Bedrock JSON with write_output, then call validate.
 - Name new blocks and items with set_lang_entries, which adds lines to an
   existing .lang file instead of replacing it.
+- Unsure how a Bedrock component, recipe or file is spelled? Call
+  lookup_bedrock(topic) before writing; list_bedrock_topics shows what it knows.
 - Keep calling validate until it returns ok: true. Fix the exact findings it names.
 - If a piece of Java behaviour has no Bedrock equivalent, say so plainly in your
   final message instead of inventing a component that does not exist.
