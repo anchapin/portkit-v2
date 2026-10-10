@@ -18,6 +18,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.package-data]
 # Vendored Bedrock JSON schemas the validator reads at runtime (#15).
 "portkit.validate" = ["schemas/*/LICENSE", "schemas/*.md", "schemas/**/*.json"]
+# Reference set the agent's lookup_bedrock tool reads, with its attribution (#114).
+"portkit.agent.reference" = ["*.json", "*.md", "*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
