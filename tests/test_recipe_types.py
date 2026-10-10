@@ -37,7 +37,31 @@ def test_furnace_family_keeps_its_own_block_tag(tmp_path, java_type, tags):
     })
     body = only(recipes.convert(mod))["minecraft:recipe_furnace"]
     assert body["tags"] == tags
-    assert body["input"] == {"item": "examplemod:root"}
+    assert body["input"] == "examplemod:root"
+    assert body["output"] == "examplemod:cooked_root"  # #90: not "result"
+    assert "result" not in body
+
+
+def test_furnace_result_count_is_dropped_with_a_note(tmp_path):
+    mod = build(tmp_path, "cook", {
+        "type": "minecraft:smelting",
+        "ingredient": {"item": "examplemod:root"},
+        "result": {"id": "examplemod:cooked_root", "count": 2},
+    })
+    converted = recipes.convert(mod)
+    assert only(converted)["minecraft:recipe_furnace"]["output"] == "examplemod:cooked_root"
+    assert any("count 2 dropped" in n for n in converted.notes)
+
+
+def test_furnace_with_a_tag_input_is_residue(tmp_path):
+    mod = build(tmp_path, "cook", {
+        "type": "minecraft:smelting",
+        "ingredient": {"tag": "minecraft:logs"},
+        "result": {"item": "minecraft:charcoal"},
+    })
+    converted = recipes.convert(mod)
+    assert converted.files == {}
+    assert "single item id" in converted.unhandled[0].reason
 
 
 def test_stonecutting_becomes_a_shapeless_recipe_on_the_stonecutter(tmp_path):
