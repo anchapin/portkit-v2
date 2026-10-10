@@ -1,5 +1,5 @@
 name = "residue_mod"
-description = "Deliberately contains what the deterministic path must refuse: a tag ingredient and a tag-typed recipe."
+description = "Deliberately contains what the deterministic path must refuse: a tag ingredient and an armour-trim recipe Bedrock has no form for. (Until #87 the second was an incomplete smithing_transform; those now convert deterministically, see smithing_mod.)"
 namespace = "examplemod"
 expect_valid = true
 expect_unhandled = 2
