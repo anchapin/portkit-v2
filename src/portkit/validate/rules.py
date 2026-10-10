@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 from .collisions import check_collisions
+from . import schema
 from .report import ValidationReport
 from .xrefs import check_cross_pack
 
@@ -200,6 +201,7 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
     if not isinstance(body, dict):
         report.add(rel, "block.body", "missing minecraft:block")
         return
+    schema.check_block(report, data, rel)
     description = body.get("description") or {}
     identifier = description.get("identifier")
     if not identifier or not _IDENTIFIER.match(str(identifier)):

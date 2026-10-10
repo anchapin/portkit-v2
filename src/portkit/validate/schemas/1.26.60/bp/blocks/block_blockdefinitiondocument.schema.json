@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "BlockDefinitionDocument",
+  "description": "Is a block definition with description, components, and permutations.",
+  "properties": {
+    "permutations": {
+      "title": "Permutations",
+      "description": "Array of conditional component overrides. Each permutation has a Molang condition and components that override the base components when the condition is true.",
+      "type": "array",
+      "items": {
+        "$ref": "./block_permutation.schema.json"
+      }
+    },
+    "components": {
+      "title": "Components",
+      "description": "\n\nProperties:\n• minecraft:light_dampening (int)\n• minecraft:light_emission (int)\n• minecraft:map_color (string)\n• minecraft:block_entity (object)\n• minecraft:breathability (object)\n• minecraft:chest_obstruction (object)\n• minecraft:collision_box (boolean)\n• minecraft:connection_rule (object)\n• ... and 41 more properties",
+      "$ref": "./block_components.schema.json",
+      "defaultSnippets": [
+        {
+          "label": "Block Components",
+          "description": "Container for all components that define custom block behavior and properties. Components control collision, selection boxes, destruction time, light emission, flammability, placement rules, crafting table functionality, and more. Combine components to create unique blocks with specific gameplay characteristics.",
+          "body": {
+            "minecraft:light_dampening": 0,
+            "minecraft:light_emission": 0,
+            "minecraft:map_color": "",
+            "minecraft:collision_box": true,
+            "minecraft:destructible_by_explosion": true,
+            "minecraft:destructible_by_mining": true,
+            "minecraft:display_name": "",
+            "minecraft:flammable": true,
+            "minecraft:friction": 0,
+            "minecraft:geometry": "",
+            "minecraft:selection_box": true
+          }
+        }
+      ],
+      "x-runtime-constraint-description": "Block cannot have both a \"container\" in \"minecraft:block_entity\" and a \"minecraft:crafting_table\" component."
+    },
+    "description": {
+      "title": "Description",
+      "description": "Information about the block, must have at minimum an \"identifier\" and can have also the following optional field \"menu_category\", \"states\" and/or \"traits\"",
+      "$ref": "./block_description.schema.json",
+      "defaultSnippets": [
+        {
+          "label": "Block Description",
+          "description": "Information about the block, must have at minimum an \"identifier\" and can have also the following optional field \"menu_category\", \"states\" and/or \"traits\"",
+          "body": {
+            "identifier": "",
+            "menu_category": {
+              "category": "none",
+              "group": null,
+              "is_hidden_in_commands": false
+            },
+            "states": {},
+            "traits": {
+              "minecraft:connection": null,
+              "minecraft:multi_block": null,
+              "minecraft:placement_direction": null,
+              "minecraft:placement_position": null
+            }
+          }
+        }
+      ]
+    }
+  },
+  "required": [
+    "description"
+  ]
+}

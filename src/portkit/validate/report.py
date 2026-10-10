@@ -9,6 +9,7 @@ class Finding:
     rule: str
     message: str
     severity: str = "error"  # error | warning
+    pointer: str = ""  # RFC 6901 pointer into the file, when the rule knows one
 
 
 @dataclass
@@ -23,8 +24,8 @@ class ValidationReport:
     def ok(self) -> bool:
         return not self.errors
 
-    def add(self, path: str, rule: str, message: str, severity: str = "error") -> None:
-        self.findings.append(Finding(path, rule, message, severity))
+    def add(self, path: str, rule: str, message: str, severity: str = "error", pointer: str = "") -> None:
+        self.findings.append(Finding(path, rule, message, severity, pointer))
 
     def to_dict(self) -> dict:
         """What the agent loop actually sees. Keep it small and specific."""
@@ -37,6 +38,7 @@ class ValidationReport:
                     "rule": f.rule,
                     "message": f.message,
                     "severity": f.severity,
+                    **({"pointer": f.pointer} if f.pointer else {}),
                 }
                 for f in self.findings
             ],
