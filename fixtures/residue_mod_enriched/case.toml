@@ -1,9 +1,8 @@
 name = "residue_mod_enriched"
-description = "Same residue as residue_mod but with the missing item, item-texture, blockstate, and block model files in place, so the deterministic path owns more. The incomplete smithing recipe converts deterministically to a shapeless crafting recipe (#87), so only the tag recipe reaches the agent, and it becomes resolvable because steel_ingot/steel_block now exist."
+description = "Same residue as residue_mod but with the missing item, item-texture, blockstate, and block model files in place, so the deterministic path owns more. The incomplete smithing recipe converts deterministically to a shapeless crafting recipe (#87), and the c:ingots/steel tag recipe resolves deterministically to examplemod:steel_ingot, the only item in the addon with the conventional name (#88). Nothing is left for the agent."
 namespace = "examplemod"
 expect_valid = true
-# The tag recipe is still residue to the deterministic converter (no tag-aware
-# logic yet, #88); the agent is what resolves it. The smithing recipe is
-# downgraded deterministically (#87).
-expect_unhandled = 1
+# Both recipes resolve deterministically now: smithing by downgrade (#87),
+# the tag by convention name (#88).
+expect_unhandled = 0
 
