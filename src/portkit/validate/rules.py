@@ -11,6 +11,7 @@ import re
 import uuid
 from pathlib import Path
 
+from ..data import bedrock_vanilla_sounds
 from ..png import dimensions
 from .collisions import check_collisions
 from . import schema
@@ -231,6 +232,43 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
         # Whether that shortname resolves is a cross-pack question: see validate.xrefs.
 
 
+_AUDIO_EXTENSIONS = (".ogg", ".fsb", ".wav")
+
+
+def _check_sound_definitions(report: ValidationReport, path: Path, rel: str, pack_root: Path) -> None:
+    """Every sound a definition names has audio the player will have.
+
+    Bedrock loads a definition pointing at nothing and the sound is silent in
+    game, so this is a warning (mct reports it as UNLINK). A name resolves when
+    the pack ships it as .ogg/.fsb/.wav or Bedrock's vanilla pack has it.
+    """
+    data = _load(report, path, rel)
+    if data is None:
+        return
+    definitions = data.get("sound_definitions") if isinstance(data, dict) else None
+    if not isinstance(definitions, dict):
+        report.add(rel, "sound.shape", "sound_definitions.json needs a sound_definitions object")
+        return
+    vanilla = bedrock_vanilla_sounds()
+    for event, body in definitions.items():
+        sounds = body.get("sounds") if isinstance(body, dict) else None
+        for i, sound in enumerate(sounds if isinstance(sounds, list) else []):
+            name = sound.get("name") if isinstance(sound, dict) else sound
+            if not isinstance(name, str):
+                report.add(rel, "sound.name", f"{event}: sounds[{i}] has no name")
+                continue
+            if name in vanilla or any(
+                (pack_root / f"{name}{ext}").is_file() for ext in _AUDIO_EXTENSIONS
+            ):
+                continue
+            report.add(
+                rel,
+                "sound.missing",
+                f"{event}: sounds[{i}] {name!r} is not in the pack or Bedrock's vanilla audio",
+                "warning",
+            )
+
+
 def _check_lang(report: ValidationReport, path: Path, rel: str) -> None:
     for lineno, line in enumerate(path.read_text().splitlines(), start=1):
         if not line.strip() or line.lstrip().startswith("#"):
@@ -335,6 +373,12 @@ def validate_pack(pack_root: Path) -> ValidationReport:
     flipbook = pack_root / "textures" / "flipbook_textures.json"
     if flipbook.is_file():
         _check_flipbook(report, flipbook, f"{prefix}/textures/flipbook_textures.json", pack_root)
+
+    sound_definitions = pack_root / "sounds" / "sound_definitions.json"
+    if sound_definitions.is_file():
+        _check_sound_definitions(
+            report, sound_definitions, f"{prefix}/sounds/sound_definitions.json", pack_root
+        )
 
     lang = pack_root / "texts" / "en_US.lang"
     if lang.is_file():
