@@ -206,7 +206,7 @@ class ToolBox:
         updates: dict[str, str] = {}
         for i, line in enumerate(lines):
             if not isinstance(line, str) or "\n" in line or "\r" in line:
-                return {"error": f"lines[{i}] must be one line of text"}
+                return {"error": f"lines[{i}] must be one line of text; write a line break inside a value as ~LINEBREAK~"}
             key, sep, value = line.partition("=")
             key = key.strip()
             if not sep or not key or key.startswith("#") or any(c.isspace() for c in key):
