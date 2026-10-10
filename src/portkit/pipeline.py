@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .converters import convert_all
+from .icon import resolve as resolve_icon
 from .ingest import ingest
 from .meta import ModMetadata, parse as parse_metadata
 from .model import ConversionResult, SourceMod, Unhandled
@@ -292,13 +293,20 @@ def convert(
         result = merge_namespaces(per_namespace)
         drop_untextured(result, namespace)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}
+        icon, icon_source, icon_note = resolve_icon(staged.icons, namespace)
+        if icon_note:
+            meta.notes.append(icon_note)
+        if icon_source and icon_source.startswith(("assets/", "data/")):
+            # A logo kept under assets/ (Fabric's usual place) is a staged file
+            # like any other; it shipped, so it is no longer unowned residue.
+            result.consumed.add(icon_source)
         unhandled = (
             staged.residue()
             + result.unhandled
             + unowned(staged.root, result.consumed)
         )
 
-        tree = write_tree(result, namespace, out_dir, meta)
+        tree = write_tree(result, namespace, out_dir, meta, icon=icon)
         file_count = len(result.files)
         agent_run = None
         if agent is not None and unhandled:

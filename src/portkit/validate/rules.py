@@ -11,11 +11,13 @@ import re
 import uuid
 from pathlib import Path
 
+from ..png import dimensions
 from .collisions import check_collisions
 from . import schema
 from .report import ValidationReport
 from .xrefs import check_cross_pack
 
+_ICON_SIZES = {2, 4, 8, 16, 32, 64, 128, 256}
 _IDENTIFIER = re.compile(r"^[a-z0-9_]+:[a-z0-9_/.]+$")
 _RECIPE_KEYS = {
     "minecraft:recipe_shaped",
@@ -293,6 +295,28 @@ def validate_pack(pack_root: Path) -> ValidationReport:
         report.add(f"{prefix}/manifest.json", "manifest.missing", "pack has no manifest.json")
     else:
         _check_manifest(report, manifest, f"{prefix}/manifest.json")
+
+    # Bedrock loads a pack without an icon and shows a placeholder; Mojang's
+    # validator (mct CPACKICON) rejects it for distribution. A warning here, so
+    # our own oracle sees what theirs does without failing a loadable pack.
+    icon = pack_root / "pack_icon.png"
+    if not icon.is_file():
+        report.add(
+            f"{prefix}/pack_icon.png",
+            "pack.icon",
+            "pack has no pack_icon.png; Bedrock shows a placeholder in the pack list",
+            "warning",
+        )
+    else:
+        size = dimensions(icon.read_bytes())
+        if size is None or size[0] != size[1] or size[0] not in _ICON_SIZES:
+            found = "not a PNG" if size is None else f"{size[0]}x{size[1]}"
+            report.add(
+                f"{prefix}/pack_icon.png",
+                "pack.icon",
+                f"pack_icon.png must be a square PNG of 2-256 px, a power of two; found {found}",
+                "warning",
+            )
 
     for path in sorted((pack_root / "recipes").glob("*.json")):
         _check_recipe(report, path, f"{prefix}/recipes/{path.name}")

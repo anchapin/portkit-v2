@@ -3,7 +3,7 @@
     "betterend": {
       "coverage": 30.7,
       "files": 2960,
-      "residue": 6669,
+      "residue": 6668,
       "errors": 0
     },
     "create": {
@@ -31,9 +31,9 @@
       "errors": 0
     },
     "storage_drawers_1122": {
-      "coverage": 29.5,
+      "coverage": 29.6,
       "files": 172,
-      "residue": 411,
+      "residue": 410,
       "errors": 0
     },
     "storage_drawers_1192": {
