@@ -71,7 +71,7 @@ def test_an_event_referring_to_another_event_is_refused(tmp_path):
 
 
 def test_a_sound_from_another_namespace_is_refused(tmp_path):
-    event = {"category": "block", "sounds": ["minecraft:block/fire/fire1"]}
+    event = {"category": "block", "sounds": ["othermod:block/fire/fire1"]}
     result = sounds.convert(build(tmp_path, {"block.brazier.crackle": event}))
     assert "another namespace" in result.unhandled[0].reason
 
@@ -100,3 +100,83 @@ def test_the_fixture_converts_the_custom_events(tmp_path, fixtures_dir):
     assert "replaces a vanilla sound event" in reasons
     assert "jukebox" in reasons
     assert ".ogg only" in reasons
+
+
+# --- no dangling audio references (#116) ------------------------------------
+
+
+def _definitions(result):
+    return result.files["sounds/sound_definitions.json"]["sound_definitions"]
+
+
+def test_a_bare_name_is_vanilla_and_kept_when_bedrock_has_that_file(tmp_path):
+    # random/bow is sounds/random/bow in Bedrock's vanilla pack.
+    event = {"category": "neutral", "sounds": ["random/bow", "minecraft:mob/slime/big1"]}
+    result = sounds.convert(build(tmp_path, {"throw": event}))
+    assert _definitions(result)["examplemod:throw"]["sounds"] == [
+        {"name": "sounds/random/bow"}, {"name": "sounds/mob/slime/big1"}]
+    assert not result.unhandled and not result.notes
+
+
+def test_a_bare_name_bedrock_files_elsewhere_is_never_treated_as_the_mods_own(tmp_path):
+    # Java's item/armor/equip_chain1 is sounds/armor/equip_chain1 in Bedrock:
+    # no reliable mapping, and the mod doesn't ship it either.
+    event = {"category": "player", "sounds": ["item/armor/equip_chain1", "item/armor/equip_chain2"]}
+    result = sounds.convert(build(tmp_path, {"equip.travelers": event}))
+    assert "sounds/sound_definitions.json" not in result.files
+    [entry] = result.unhandled
+    assert entry.count == 0
+    assert "equip.travelers" in entry.reason and "no sound Bedrock can play" in entry.reason
+    assert "vanilla Java sound" in entry.reason and "item/armor/equip_chain1" in entry.reason
+
+
+def test_a_bare_name_that_happens_to_match_the_mods_own_audio_is_still_vanilla(tmp_path):
+    # Java would play minecraft:block/brazier/crackle1, which doesn't exist;
+    # the mod's file of the same path is not what that name means.
+    event = {"category": "block", "sounds": ["block/brazier/crackle1"]}
+    result = sounds.convert(build(tmp_path, {"crackle": event}))
+    assert "sounds/sound_definitions.json" not in result.files
+    assert "vanilla Java sound" in result.unhandled[0].reason
+
+
+def test_mod_audio_missing_from_the_jar_is_dropped_and_the_rest_of_the_event_kept(tmp_path):
+    event = {"category": "block", "sounds": [
+        "examplemod:block/brazier/crackle1", "examplemod:item/awning_bounce_1", "random/bow"]}
+    result = sounds.convert(build(tmp_path, {"bounce": event}))
+    assert _definitions(result)["examplemod:bounce"]["sounds"] == [
+        {"name": "sounds/block/brazier/crackle1"}, {"name": "sounds/random/bow"}]
+    assert not result.unhandled
+    [note] = result.notes
+    assert "examplemod:bounce" in note and "assets/examplemod/sounds/item/awning_bounce_1.ogg" in note
+
+
+def test_an_event_whose_mod_audio_is_all_missing_is_withdrawn(tmp_path):
+    event = {"category": "music", "sounds": [{"name": "examplemod:music/ender_hollow", "stream": True}]}
+    result = sounds.convert(build(tmp_path, {"music.ender_hollow": event}))
+    assert "sounds/sound_definitions.json" not in result.files
+    assert "does not ship" in result.unhandled[0].reason
+    assert result.residue_count == 0
+
+
+def test_a_wav_the_converter_refused_is_not_referenced(tmp_path):
+    event = {"category": "block", "sounds": ["examplemod:block/old_loop"]}
+    result = sounds.convert(build(tmp_path, {"loop": event}, audio=("block/old_loop.wav",)))
+    assert "sounds/sound_definitions.json" not in result.files
+    reasons = " ".join(u.reason for u in result.unhandled)
+    assert ".ogg only" in reasons and "does not ship" in reasons
+
+
+def test_the_validator_warns_about_a_dangling_sound(tmp_path):
+    from portkit.validate import validate_pack
+
+    pack = tmp_path / "resource_pack"
+    (pack / "sounds" / "block").mkdir(parents=True)
+    (pack / "sounds" / "block" / "here.ogg").write_bytes(OGG)
+    (pack / "sounds" / "sound_definitions.json").write_text(json.dumps({
+        "format_version": "1.14.0",
+        "sound_definitions": {"m:e": {"category": "block", "sounds": [
+            "sounds/block/here", {"name": "sounds/random/bow"}, {"name": "sounds/block/gone"}]}},
+    }))
+    found = [f for f in validate_pack(pack).findings if f.rule.startswith("sound.")]
+    assert [(f.rule, f.severity) for f in found] == [("sound.missing", "warning")]
+    assert "sounds/block/gone" in found[0].message
