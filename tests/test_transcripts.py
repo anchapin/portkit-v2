@@ -140,3 +140,12 @@ def test_cli_replay_of_a_missing_file_exits_cleanly(tmp_path, capsys):
     code = cli.main(["convert", str(RESIDUE), str(tmp_path / "out"), "--agent-replay", str(tmp_path / "nope.jsonl")])
     assert code == 2
     assert "cannot start the residue agent" in capsys.readouterr().err
+
+
+def test_finish_reason_round_trips_but_stays_out_of_the_digest():
+    from portkit.agent.transcript import request_digest
+
+    m = Message("assistant", "", finish_reason="length", refusal="nope", usage=Usage(1, 2))
+    assert message_from_dict(json.loads(json.dumps(message_to_dict(m)))) == m
+    bare = Message("assistant", "")
+    assert request_digest([m], []) == request_digest([bare], [])

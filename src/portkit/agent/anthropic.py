@@ -98,7 +98,13 @@ def from_anthropic_reply(reply: dict) -> Message:
             text.append(block.get("text", ""))
         elif block.get("type") == "tool_use":
             calls.append(ToolCall(id=block["id"], name=block["name"], arguments=block.get("input") or {}))
-    return Message("assistant", "".join(text), tool_calls=calls, usage=_usage(reply))
+    return Message(
+        "assistant",
+        "".join(text),
+        tool_calls=calls,
+        usage=_usage(reply),
+        finish_reason=reply.get("stop_reason"),
+    )
 
 
 def _usage(reply: dict) -> Usage | None:

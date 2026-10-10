@@ -39,6 +39,10 @@ def message_to_dict(m: Message) -> dict[str, Any]:
         out["tool_call_id"] = m.tool_call_id
     if m.usage is not None:
         out["usage"] = {"input_tokens": m.usage.input_tokens, "output_tokens": m.usage.output_tokens}
+    if m.finish_reason is not None:
+        out["finish_reason"] = m.finish_reason
+    if m.refusal:
+        out["refusal"] = m.refusal
     return out
 
 
@@ -55,14 +59,21 @@ def message_from_dict(d: dict[str, Any]) -> Message:
         ],
         tool_call_id=d.get("tool_call_id"),
         usage=Usage(usage["input_tokens"], usage["output_tokens"]) if usage else None,
+        finish_reason=d.get("finish_reason"),
+        refusal=d.get("refusal") or "",
     )
 
 
+_REPLY_METADATA = {"usage", "finish_reason", "refusal"}
+
+
 def request_digest(messages: list[Message], tools: list[dict]) -> str:
-    """What the model was asked, as one stable hash. Usage is not part of it."""
+    """What the model was asked, as one stable hash. Reply metadata (usage,
+    finish reason, refusal) is not part of it: none of it goes back to the model."""
     payload = {
         "messages": [
-            {k: v for k, v in message_to_dict(m).items() if k != "usage"} for m in messages
+            {k: v for k, v in message_to_dict(m).items() if k not in _REPLY_METADATA}
+            for m in messages
         ],
         "tools": sorted(t["name"] for t in tools),
     }
