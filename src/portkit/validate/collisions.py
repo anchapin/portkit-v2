@@ -29,6 +29,7 @@ _DEFINITION_KEYS = {
         "minecraft:recipe_brewing_mix",
         "minecraft:recipe_brewing_container",
         "minecraft:recipe_smithing_transform",
+        "minecraft:recipe_smithing_trim",
     ),
 }
 
