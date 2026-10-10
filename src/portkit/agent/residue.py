@@ -199,6 +199,8 @@ class GroupOutcome:
     note: str = ""
     limit: str | None = None  # the ceiling that stopped it: steps | tokens | cost
     spend: Spend = field(default_factory=Spend)
+    tool_calls: int = 0
+    format_failures: int = 0  # tool calls that didn't fit the toolbox (#77)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -209,6 +211,8 @@ class GroupOutcome:
             "steps": self.steps,
             "written": self.written,
             "spend": self.spend.to_dict(),
+            "tool_calls": self.tool_calls,
+            "format_failures": self.format_failures,
             "note": self.note,
         }
 
@@ -353,6 +357,7 @@ class ResidueAgent:
         try:
             result = session.run(task)
             outcome.stopped, outcome.steps, outcome.limit = result.stopped, result.steps, result.limit
+            outcome.tool_calls, outcome.format_failures = result.tool_calls, result.format_failures
             outcome.note = _final_text(result.messages)
             if result.stopped == "done" and not outcome.note:
                 outcome.note = _empty_reply_note(result.messages)
@@ -361,6 +366,7 @@ class ResidueAgent:
         except Exception as exc:  # a provider failure ends this group, not the run
             outcome.stopped = "error"
             outcome.steps = session.spend.steps
+            outcome.tool_calls, outcome.format_failures = session.tool_calls, session.format_failures
             outcome.note = f"{type(exc).__name__}: {exc}"
         outcome.spend = session.spend
 

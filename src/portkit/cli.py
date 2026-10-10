@@ -320,6 +320,81 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_eval_agent(args) -> int:
+    """``portkit eval --agent``: the per-provider eval matrix (#77)."""
+    import json as _json
+
+    from .agent import Budget, Pricing, make_client
+    from .agent.matrix import agent_fixtures, render, run_matrix
+    from .agent.transcript import ReplayClient
+
+    root = Path(args.fixtures or FIXTURES)
+    budget = Budget(
+        max_steps=args.agent_max_steps,
+        max_tokens=args.agent_max_tokens,
+        max_cost=args.agent_max_cost,
+        pricing=Pricing.from_env(),
+    )
+    specs = list(args.target or [])
+    if args.provider or args.model:
+        specs.append(f"{args.provider or ''}:{args.model or ''}")
+
+    if args.agent_replay:
+        if specs:
+            print("--agent-replay runs on its own; drop --target/--provider/--model", file=sys.stderr)
+            return 2
+        replay = Path(args.agent_replay)
+        cases = agent_fixtures(root, args.fixture or ())
+        if replay.is_dir():
+            # One transcript per fixture, named <fixture>.jsonl.
+            cases = [c for c in cases if (replay / f"{c.name}.jsonl").is_file()]
+
+            def factory(name):
+                return ReplayClient(replay / f"{name}.jsonl")
+        else:
+            if len(cases) != 1:
+                print("a single transcript replays one fixture: add --fixture NAME", file=sys.stderr)
+                return 2
+
+            def factory(name):
+                return ReplayClient(replay)
+        targets = [(f"replay:{replay.name}", factory)]
+    else:
+        if not specs:
+            print("eval --agent needs --target PROVIDER:MODEL (repeatable), "
+                  "--provider/--model, or --agent-replay", file=sys.stderr)
+            return 2
+        targets = []
+        for spec in specs:
+            provider, _, model = spec.partition(":")
+            label = spec if provider else f"(env):{model}"
+
+            try:  # a missing key or unknown provider is a setup error, not a score
+                make_client(provider or None, model or None)
+            except Exception as exc:
+                print(f"{label}: {exc}", file=sys.stderr)
+                return 2
+
+            def factory(name, provider=provider or None, model=model or None):
+                return make_client(provider, model)
+            targets.append((label, factory))
+        cases = agent_fixtures(root, args.fixture or ())
+
+    if not cases:
+        print(f"no agent fixtures under {root}", file=sys.stderr)
+        return 1
+    rows = run_matrix(targets, cases, budget)
+    print(f"fixtures: {', '.join(c.name for c in cases)}")
+    print(render(rows))
+    if args.json:
+        Path(args.json).write_text(_json.dumps([r.to_dict() for r in rows], indent=2) + "\n")
+    # A replay that comes back unscored drifted from its transcript; fail CI on it.
+    if args.agent_replay and any(r.unscored for r in rows):
+        print("\nreplay drifted: a task came back unscored", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_eval(args) -> int:
     """Run every fixture and print the coverage table. This is the number that matters.
 
@@ -331,6 +406,9 @@ def cmd_eval(args) -> int:
     import tempfile
 
     from . import baseline as bl
+
+    if getattr(args, "agent", False) or getattr(args, "agent_replay", None):
+        return cmd_eval_agent(args)
 
     root = Path(args.fixtures or FIXTURES)
     cases = sorted(p for p in root.iterdir() if (p / "input").is_dir())
@@ -496,6 +574,25 @@ def main(argv=None) -> int:
         help="rewrite the baseline from this run instead of checking against it",
     )
     g.add_argument("--no-baseline", action="store_true", help="skip the baseline check")
+    a = p.add_argument_group(
+        "agent matrix",
+        "with --agent, run the fixture residue through each provider/model instead and print "
+        "one row per target: pass/fail/unscored, pass rate, steps, tool calls per success, "
+        "format failures, tokens, stop reasons",
+    )
+    a.add_argument("--agent", action="store_true", help="run the agent eval matrix")
+    a.add_argument("--target", action="append", metavar="PROVIDER:MODEL",
+                   help="a provider and model to evaluate (repeatable)")
+    a.add_argument("--provider", help="shorthand for one --target")
+    a.add_argument("--model", help="shorthand for one --target")
+    a.add_argument("--fixture", action="append", metavar="NAME",
+                   help="limit to these fixtures (default: every fixture with residue)")
+    a.add_argument("--agent-replay", metavar="PATH",
+                   help="replay a transcript (one fixture) or a directory of <fixture>.jsonl; no network")
+    a.add_argument("--agent-max-steps", type=int, default=12, metavar="N", help="step budget per group (default 12)")
+    a.add_argument("--agent-max-tokens", type=int, metavar="N", help="token ceiling per target run, per fixture")
+    a.add_argument("--agent-max-cost", type=float, metavar="USD", help="dollar ceiling per target run, per fixture")
+    a.add_argument("--json", metavar="PATH", help="also write the rows, with per-task scores, as JSON")
     p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args(argv)

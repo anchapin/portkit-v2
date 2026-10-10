@@ -59,6 +59,10 @@ class AgentResult:
     # Which ceiling stopped a budget run: steps | tokens | cost.
     limit: str | None = None
     spend: Spend = field(default_factory=Spend)
+    # Tool calls the model made, and how many of them didn't fit the toolbox
+    # (unknown tool, bad arguments). See ToolBox.format_error and #77.
+    tool_calls: int = 0
+    format_failures: int = 0
 
 
 class AgentSession:
@@ -83,6 +87,13 @@ class AgentSession:
         self.messages: list[Message] = [Message("system", system)]
         self.spend = Spend()
         self.run_spend = run_spend
+        self.tool_calls = 0
+        self.format_failures = 0
+
+    def _result(self, steps: int, stopped: str, limit: str | None = None) -> AgentResult:
+        return AgentResult(
+            self.messages, steps, stopped, limit, self.spend, self.tool_calls, self.format_failures
+        )
 
     def _record(self, usage: Usage | None) -> None:
         pricing = self.budget.pricing if self.budget else None
@@ -100,7 +111,7 @@ class AgentSession:
                     self.run_spend if self.run_spend is not None else self.spend
                 )
                 if limit:
-                    return AgentResult(self.messages, step - 1, "budget", limit, self.spend)
+                    return self._result(step - 1, "budget", limit)
             reply = self.client.complete(self.messages, self.toolbox.schemas())
             self._record(reply.usage)
             self.messages.append(reply)
@@ -108,9 +119,13 @@ class AgentSession:
             if not reply.tool_calls:
                 if self.on_step:
                     self.on_step(step, None, reply.content)
-                return AgentResult(self.messages, step, "done", None, self.spend)
+                return self._result(step, "done")
 
             for call in reply.tool_calls:
+                self.tool_calls += 1
+                check = getattr(self.toolbox, "format_error", None)
+                if check is not None and check(call.name, call.arguments):
+                    self.format_failures += 1
                 try:
                     output = self.toolbox.invoke(call.name, call.arguments)
                 except Exception as exc:  # a tool error is data, not a crash
@@ -120,4 +135,4 @@ class AgentSession:
                 self.messages.append(
                     Message("tool", json.dumps(output, default=str), tool_call_id=call.id)
                 )
-        return AgentResult(self.messages, self.max_steps, "budget", "steps", self.spend)
+        return self._result(self.max_steps, "budget", "steps")

@@ -110,6 +110,24 @@ portkit convert fixtures/agent_mod/input /tmp/var --agent --repeat 3 \
   --agent-max-cost 0.25 --agent-record /tmp/var/run.jsonl
 ```
 
+## Comparing providers
+
+`portkit eval --agent` runs the fixture residue (every fixture with
+`expect_unhandled > 0`, or `--fixture NAME`) through each provider and model
+under the same budgets, and prints one row per target:
+
+```bash
+portkit eval --agent --target anthropic:<model> --target gemini_native:<model> --json /tmp/matrix.json
+portkit eval --agent --agent-replay fixtures/transcripts   # the offline row CI replays
+```
+
+Each task scores **pass** (resolved: the validator is the only judge), **fail**,
+or **unscored** (a provider error, or a ceiling hit before the validator ran).
+Unscored tasks stay out of the pass rate. **Format failures** count tool calls
+that don't fit the toolbox, such as an unknown tool name or bad arguments. A spike
+there points at the provider's tool-call translation, not the model. Each row
+also reports steps, tool calls per success, tokens, and stop reasons.
+
 ## Docs
 
 - [Getting started](docs/getting-started.md): convert your own mod and read the residue.
