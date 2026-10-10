@@ -91,6 +91,17 @@ _CODE_DOMAINS = frozenset({
 })
 
 
+# A .lang value is one line. Java lang JSON allows a newline inside a value
+# (multi-line tooltips); Bedrock spells it ~LINEBREAK~, the way the vanilla
+# en_US.lang does. Written raw, the tail of the value lands on a line of its own
+# with no '=', which the game cannot parse.
+_LINEBREAK = "~LINEBREAK~"
+
+
+def _one_line(value: str) -> str:
+    return value.replace("\r\n", _LINEBREAK).replace("\n", _LINEBREAK).replace("\r", _LINEBREAK)
+
+
 def _translate_key(key: str, namespace: str) -> str | None:
     parts = key.split(".")
     if len(parts) < 3:
@@ -117,7 +128,7 @@ def _lines(entries: dict, namespace: str) -> tuple[list[str], list[str], list[st
     for key, value in entries.items():
         translated = _translate_key(key, namespace)
         if translated is not None:
-            lines.append(f"{translated}={value}")
+            lines.append(f"{translated}={_one_line(str(value))}")
         elif _is_code_string(key):
             code_strings.append(key)
         else:
