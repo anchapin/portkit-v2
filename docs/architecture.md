@@ -75,6 +75,10 @@ a rule name and a message:
 - `xrefs.py`: cross-file references (a recipe naming an item no pack defines, an
   icon missing from `item_texture.json`).
 - `collisions.py`: two files claiming one identifier.
+- `schema.py`: shape checks against Mojang's own JSON schemas, vendored per
+  snapshot under `validate/schemas/` and picked by `format_version`. An unknown
+  `minecraft:` block component is an error, and other shape mismatches are
+  warnings. Every finding carries a JSON `pointer`.
 
 The validator is deterministic and fast, which is why the agent can call it in a
 loop and why CI can gate on it. Making it stricter is always welcome, but a rule
