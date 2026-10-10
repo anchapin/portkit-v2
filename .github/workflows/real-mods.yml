@@ -1,0 +1,38 @@
+name: real-mods
+
+# The real-mod corpus (#21). Jars are pinned in fixtures/real/mods.toml and
+# downloaded here, never committed. Nightly and on demand; the PR gate stays
+# the hand-built fixtures in ci.yml until this job has been stable a while.
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    env:
+      PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - uses: actions/cache@v4
+        with:
+          path: .corpus-cache
+          key: real-mods-${{ hashFiles('fixtures/real/mods.toml') }}
+
+      - name: Fetch pinned jars (sha512-checked)
+        run: portkit corpus fetch
+
+      - name: Corpus coverage (fails on regression against fixtures/real/coverage-baseline.json)
+        run: portkit eval --corpus
+
+      - name: Corpus tests
+        run: pytest -q -m realmods

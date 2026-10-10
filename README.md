@@ -137,6 +137,20 @@ that don't fit the toolbox, such as an unknown tool name or bad arguments. A spi
 there points at the provider's tool-call translation, not the model. Each row
 also reports steps, tool calls per success, tokens, and stop reasons.
 
+## Real mods
+
+The hand-built fixtures pin behaviour; the real-mod corpus shows where it breaks.
+Real mods are pinned by Modrinth version and sha512 in `fixtures/real/mods.toml`.
+They're downloaded, never committed:
+
+```bash
+portkit corpus fetch
+portkit eval --corpus
+```
+
+See [fixtures/real/README.md](fixtures/real/README.md). A nightly workflow runs
+the corpus against its own baseline.
+
 ## Docs
 
 - [Getting started](docs/getting-started.md): convert your own mod and read the residue.

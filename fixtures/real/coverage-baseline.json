@@ -1,0 +1,22 @@
+{
+  "fixtures": {
+    "betterend": {
+      "coverage": 30.8,
+      "files": 2962,
+      "residue": 6667,
+      "errors": 3
+    },
+    "farmers_delight_fabric": {
+      "coverage": 27.7,
+      "files": 720,
+      "residue": 1883,
+      "errors": 0
+    },
+    "farmers_delight_neoforge": {
+      "coverage": 29.4,
+      "files": 659,
+      "residue": 1585,
+      "errors": 0
+    }
+  }
+}
