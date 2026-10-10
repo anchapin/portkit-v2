@@ -110,6 +110,12 @@ portkit convert fixtures/agent_mod/input /tmp/var --agent --repeat 3 \
   --agent-max-cost 0.25 --agent-record /tmp/var/run.jsonl
 ```
 
+## Docs
+
+- [Getting started](docs/getting-started.md): convert your own mod and read the residue.
+- [Architecture](docs/architecture.md): the deterministic core, the oracle, the residue loop, and why there's no graph framework.
+- [Writing a converter](docs/converter-guide.md): a worked example, end to end.
+
 ## Layout
 
 ```
