@@ -7,10 +7,15 @@ deterministic check, not on the model declaring victory.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 
 from ..validate import validate_tree
+
+
+# Bedrock locale files: resource_pack/texts/en_US.lang, pt_BR.lang, ...
+_LANG_PATH = re.compile(r"resource_pack/texts/([a-z]{2}_[A-Z]{2})\.lang")
 
 
 class ToolBox:
@@ -101,6 +106,31 @@ class ToolBox:
         )
         self.register(
             {
+                "name": "set_lang_entries",
+                "description": (
+                    "Add or replace display names in a Bedrock .lang file, e.g. "
+                    "path 'resource_pack/texts/en_US.lang' with lines "
+                    "['tile.examplemod:steel_block.name=Steel Block']. Existing keys are "
+                    "replaced in place, new ones appended; every other line is kept, so "
+                    "send only the entries you are adding."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "resource_pack/texts/<Locale>.lang"},
+                        "lines": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "key=value lines",
+                        },
+                    },
+                    "required": ["path", "lines"],
+                },
+            },
+            self.set_lang_entries,
+        )
+        self.register(
+            {
                 "name": "validate",
                 "description": (
                     "Run the Bedrock structural validator over the whole output tree. "
@@ -136,6 +166,9 @@ class ToolBox:
             )
         }
 
+    def _before_write(self, target: Path) -> None:
+        """Hook called before any file in the output tree changes."""
+
     def write_output(self, path: str, content: dict) -> dict:
         # ``content`` must be a JSON object. A model that hands us a string
         # would write ``json.dumps("foo")`` = ``'"foo"'`` to disk, a valid JSON
@@ -152,9 +185,63 @@ class ToolBox:
                 "received_preview": repr(content)[:120],
             }
         target = self._resolve(self.out_tree, path)
+        self._before_write(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(content, indent=2) + "\n")
         return {"written": path, "bytes": target.stat().st_size}
+
+    def set_lang_entries(self, path: str, lines: list) -> dict:
+        """Upsert ``key=value`` lines into a resource pack .lang file (#105).
+
+        A merge rather than a write: the deterministic converter already filled
+        the file, and a model asked to resend it whole would drop lines. A bad
+        line rejects the whole call, so nothing half-applies.
+        """
+        path = path.replace("\\", "/")
+        match = _LANG_PATH.fullmatch(path)
+        if not match:
+            return {"error": f"path must be resource_pack/texts/<Locale>.lang, got {path!r}"}
+        if not isinstance(lines, list) or not lines:
+            return {"error": "lines must be a non-empty list of 'key=value' strings"}
+        updates: dict[str, str] = {}
+        for i, line in enumerate(lines):
+            if not isinstance(line, str) or "\n" in line or "\r" in line:
+                return {"error": f"lines[{i}] must be one line of text"}
+            key, sep, value = line.partition("=")
+            key = key.strip()
+            if not sep or not key or key.startswith("#") or any(c.isspace() for c in key):
+                return {"error": f"lines[{i}] is not 'key=value': {line!r}"}
+            updates[key] = value.strip()
+
+        target = self._resolve(self.out_tree, path)
+        existing = target.read_text(encoding="utf-8-sig").splitlines() if target.is_file() else []
+        out, replaced = [], set()
+        for old in existing:
+            key = old.split("=", 1)[0].strip()
+            if "=" in old and key in updates and not old.lstrip().startswith("#"):
+                if key not in replaced:
+                    out.append(f"{key}={updates[key]}")
+                    replaced.add(key)
+                continue
+            out.append(old)
+        added = [k for k in updates if k not in replaced]
+        out.extend(f"{k}={updates[k]}" for k in added)
+
+        self._before_write(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+        locale = match.group(1)
+        index = target.parent / "languages.json"
+        try:
+            listed = json.loads(index.read_text()) if index.is_file() else []
+        except json.JSONDecodeError:
+            listed = None  # leave a broken index for the validator to report
+        if isinstance(listed, list) and locale not in listed:
+            self._before_write(index)
+            listed.append(locale)
+            index.write_text(json.dumps(listed, indent=2) + "\n")
+        return {"written": path, "added": added, "replaced": sorted(replaced)}
 
     def validate(self) -> dict:
         return validate_tree(self.out_tree).to_dict()
@@ -168,6 +255,8 @@ You only see what they refused to guess at.
 Rules:
 - Read the source file before writing anything.
 - Write Bedrock JSON with write_output, then call validate.
+- Name new blocks and items with set_lang_entries, which adds lines to an
+  existing .lang file instead of replacing it.
 - Keep calling validate until it returns ok: true. Fix the exact findings it names.
 - If a piece of Java behaviour has no Bedrock equivalent, say so plainly in your
   final message instead of inventing a component that does not exist.
