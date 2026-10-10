@@ -35,7 +35,7 @@ def _opener(body, calls):
 
 def test_the_committed_manifest_pins_every_mod():
     mods = corpus.load()
-    assert len(mods) >= 3
+    assert len(mods) >= 10  # #21's done-when
     for mod in mods:
         assert mod.url.startswith("https://cdn.modrinth.com/data/")
         assert mod.version_id in mod.url
