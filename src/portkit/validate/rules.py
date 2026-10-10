@@ -27,13 +27,13 @@ _RECIPE_KEYS = {
 # The fields each recipe body needs non-empty. Bedrock loads a recipe with an
 # empty one as a silent no-op, so a probe file the agent writes to poke the
 # validator would otherwise ship in the addon as if it were a real recipe.
-# A tuple entry is a set of alternatives: furnace and brewing recipes name
-# their product "output", but the converter writes "result" for the furnace
-# family today, so either one satisfies the rule.
+# A tuple entry is a set of alternatives. Furnace recipes name their product
+# "output" (#90). Brewing recipes do too; "result" stays accepted there until
+# a brewing converter exists to settle it.
 _RECIPE_REQUIRED: dict[str, tuple] = {
     "minecraft:recipe_shaped": ("result",),
     "minecraft:recipe_shapeless": ("ingredients", "result"),
-    "minecraft:recipe_furnace": ("input", ("output", "result")),
+    "minecraft:recipe_furnace": ("input", "output"),
     "minecraft:recipe_brewing_mix": ("input", "reagent", ("output", "result")),
     "minecraft:recipe_smithing_transform": ("template", "base", "addition", "result"),
     # A trim keeps its base item, so it names no result.
