@@ -188,3 +188,12 @@ def test_furnace_recipe_with_result_key_is_accepted(tmp_path):
         _recipe("minecraft:recipe_furnace", input={"item": "m:ore"}, result={"item": "m:ingot"}),
     )
     assert empty == []
+
+
+def test_smithing_transform_needs_all_four_slots(tmp_path):
+    """#87: Bedrock's smithing recipe takes template, base, addition and result."""
+    empty, _ = _recipe_findings(
+        tmp_path,
+        _recipe("minecraft:recipe_smithing_transform", base="m:a", result="m:b"),
+    )
+    assert {f.message.split()[0] for f in empty} == {"template", "addition"}

@@ -9,7 +9,7 @@ first step that differs.
 
 | transcript | mod | what it pins |
 | --- | --- | --- |
-| `residue_mod.jsonl` | `fixtures/residue_mod` | the tag recipe is converted and validates; the smithing recipe is declined and stays residue |
+| `residue_mod.jsonl` | `fixtures/residue_mod` | the tag recipe is converted and validates; the armour-trim recipe is declined and stays residue |
 
 `residue_mod.jsonl` was recorded from the scripted client in
 `tests/test_residue_agent.py`, not a live model. To replace it with a real run:

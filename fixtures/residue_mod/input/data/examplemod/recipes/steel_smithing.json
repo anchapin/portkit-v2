@@ -1,9 +1,0 @@
-{
-  "type": "minecraft:smithing_transform",
-  "base": {
-    "item": "examplemod:steel_ingot"
-  },
-  "result": {
-    "item": "examplemod:steel_tool"
-  }
-}

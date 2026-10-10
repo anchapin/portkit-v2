@@ -15,7 +15,7 @@ from portkit.pipeline import convert
 ROOT = Path(__file__).resolve().parents[1]
 RESIDUE = ROOT / "fixtures" / "residue_mod" / "input"
 TAG_RECIPE = "data/examplemod/recipes/steel_block.json"
-SMITHING = "data/examplemod/recipes/steel_smithing.json"
+SMITHING = "data/examplemod/recipes/steel_trim.json"
 
 # What a model should write for the tag recipe: the tag names one modded item.
 BEDROCK_RECIPE = {
@@ -30,13 +30,13 @@ BEDROCK_RECIPE = {
 
 
 def _good_script():
-    """Session 1 converts the tag recipe; session 2 declines the smithing one."""
+    """Session 1 converts the tag recipe; session 2 declines the armour trim."""
     return [
         tool_call("read_source", path=TAG_RECIPE),
         tool_call("write_output", path="behavior_pack/recipes/steel_block.json", content=BEDROCK_RECIPE),
         tool_call("validate"),
         Message("assistant", "Converted the tag recipe; the validator is clean."),
-        Message("assistant", "Bedrock smithing needs a template item this recipe does not name."),
+        Message("assistant", "Bedrock has no recipe form for armour trims."),
     ]
 
 
@@ -193,8 +193,9 @@ def test_write_output_accepts_dict_content(tmp_path):
 def test_convert_with_agent_on_enriched_fixture(tmp_path):
     """The deterministic path emits items + blocks for ``residue_mod_enriched``
     so the agent's residue list shortens. The tag recipe becomes resolvable
-    (steel_ingot / steel_block exist behind it); the smithing one still has
-    no template/addition and stays residue.
+    (steel_ingot / steel_block exist behind it). The smithing one has no
+    template or addition, so since #87 the converter downgrades it to a
+    shapeless crafting recipe and it never reaches the agent.
 
     The deliverable is the same shape as ``test_convert_with_agent_resolves_residue_and_still_validates``
     but against the enriched fixture.
@@ -211,9 +212,11 @@ def test_convert_with_agent_on_enriched_fixture(tmp_path):
     assert (out / "behavior_pack" / "blocks" / "steel_block.json").is_file()
 
     statuses = {o.source: o.status for o in result.agent.outcomes}
-    assert statuses == {TAG_RECIPE: "resolved", SMITHING: "unresolved"}
-    # smithing is the only remaining residue item post-agent.
-    assert [u.source for u in result.unhandled] == [SMITHING]
+    assert statuses == {TAG_RECIPE: "resolved"}
+    assert result.unhandled == []
+    smithing = json.loads((out / "behavior_pack" / "recipes" / "steel_smithing.json").read_text())
+    assert smithing["minecraft:recipe_shapeless"]["ingredients"] == [{"item": "examplemod:steel_ingot"}]
+    assert any("steel_smithing.json" in n and "shapeless" in n for n in result.reductions)
 
 
 

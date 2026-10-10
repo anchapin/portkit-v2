@@ -1,0 +1,5 @@
+name = "smithing_mod"
+description = "One smithing_transform per #87 branch: complete (becomes Bedrock's recipe_smithing_transform), missing template and addition (downgraded to a shapeless crafting recipe, with a note), and a multi-item tag base (stays residue)."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 1

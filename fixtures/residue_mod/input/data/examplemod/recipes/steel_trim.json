@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:smithing_trim",
+  "template": {
+    "item": "minecraft:coast_armor_trim_smithing_template"
+  },
+  "base": {
+    "tag": "minecraft:trimmable_armor"
+  },
+  "addition": {
+    "item": "examplemod:steel_ingot"
+  }
+}

@@ -28,7 +28,7 @@ def _writes():
     return [
         tool_call("write_output", path="behavior_pack/recipes/steel_block.json", content=RECIPE),
         Message("assistant", "done"),
-        Message("assistant", "smithing declined"),
+        Message("assistant", "trim declined"),
     ]
 
 

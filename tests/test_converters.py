@@ -40,5 +40,5 @@ def test_tag_ingredients_become_residue_not_guesses(fixtures_dir):
     assert len(reasons) == 2
     # a modded tag with no single vanilla item behind it
     assert any("c:ingots/steel" in r for r in reasons)
-    # and a recipe type Bedrock models differently
-    assert any("smithing" in r for r in reasons)
+    # and a recipe type Bedrock has no form for
+    assert any("trim" in r for r in reasons)
