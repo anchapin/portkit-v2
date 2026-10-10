@@ -22,3 +22,14 @@ portkit convert fixtures/residue_mod/input /tmp/out --agent \
 then update the expectations in `tests/test_transcripts.py` if the model chose
 differently. When a deliberate change breaks a replay, re-record the same way
 and commit the new transcript with the change, so the diff shows in review.
+
+When a change only alters what the model is *sent* (a new tool, a reworded
+prompt) and the recorded replies should stand, re-record with the old replies
+kept and the request digests refreshed:
+
+```python
+RecordingClient(ReplayClient(old_path, strict=False), new_path)
+```
+
+run through the same `convert(..., agent=ResidueAgent(client))` the replay test
+uses. `residue_mod.jsonl` was last refreshed this way for `lookup_bedrock` (#114).
