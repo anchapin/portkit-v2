@@ -333,3 +333,64 @@ def test_gemini_native_extra_fields_kept_on_tool_call_round_trip(tmp_path):
     from portkit.agent.gemini import from_gemini_reply
     msg = from_gemini_reply(reply)
     assert msg.tool_calls[0].extra.get("thoughtSignature") == "abc"
+
+
+# --- review fixes -------------------------------------------------------------
+
+from portkit.agent.gemini import GeminiClient, from_gemini_reply, to_gemini_messages  # noqa: E402
+
+NATIVE_ENV = {"PORTKIT_LLM_PROVIDER": "gemini_native", "PORTKIT_LLM_MODEL": "gemini-x", "GEMINI_API_KEY": "g-key"}
+
+
+def test_gemini_native_ignores_a_global_gateway_base_url():
+    rec = Recorder([native_text("hi")])
+    env = {**NATIVE_ENV, "PORTKIT_LLM_BASE_URL": "https://openrouter.ai/api/v1"}
+    make_client(env=env, transport=rec).complete([Message("user", "go")], [])
+    assert rec.requests[0]["url"] == f"{NATIVE_BASE_URL}/gemini-x:generateContent"
+
+
+def test_gemini_native_config_base_url_still_applies():
+    rec = Recorder([native_text("hi")])
+    client = make_client(config={"base_url": "https://proxy.example/v1beta/models/"}, env=NATIVE_ENV, transport=rec)
+    client.complete([Message("user", "go")], [])
+    assert rec.requests[0]["url"] == "https://proxy.example/v1beta/models/gemini-x:generateContent"
+
+
+def test_gemini_native_temperature_goes_under_generation_config():
+    rec = Recorder([native_text("hi")])
+    make_client(env={**NATIVE_ENV, "PORTKIT_LLM_TEMPERATURE": "0.2"}, transport=rec).complete([Message("user", "go")], [])
+    body = rec.requests[0]["body"]
+    assert "temperature" not in body
+    assert body["generationConfig"] == {"temperature": 0.2}
+    rec2 = Recorder([native_text("hi")])
+    GeminiClient("m", transport=rec2, extra={"max_tokens": 64, "stop": "END", "safetySettings": []}).complete(
+        [Message("user", "go")], [])
+    assert rec2.requests[0]["body"]["generationConfig"] == {"maxOutputTokens": 64, "stopSequences": ["END"]}
+    assert rec2.requests[0]["body"]["safetySettings"] == []
+
+
+def test_gemini_native_function_response_carries_the_function_name():
+    _, contents = to_gemini_messages([
+        Message("user", "go"),
+        Message("assistant", tool_calls=[ToolCall("gemini_call_0", "read_source", {"path": "a"}),
+                                         ToolCall("gemini_call_1", "validate", {})]),
+        Message("tool", json.dumps({"text": "x"}), tool_call_id="gemini_call_0"),
+        Message("tool", json.dumps(["not", "an", "object"]), tool_call_id="gemini_call_1"),
+    ])
+    responses = [p["functionResponse"] for p in contents[-1]["parts"]]
+    assert [r["name"] for r in responses] == ["read_source", "validate"]
+    assert responses[0]["response"] == {"text": "x"}
+    assert responses[1]["response"] == {"result": ["not", "an", "object"]}
+
+
+def test_gemini_native_blocked_or_contentless_replies_report_why():
+    blocked = from_gemini_reply({"promptFeedback": {"blockReason": "SAFETY"}, "usageMetadata": {"promptTokenCount": 7}})
+    assert blocked.content == "" and blocked.finish_reason == "SAFETY" and blocked.tool_calls == []
+    no_content = from_gemini_reply({"candidates": [{"finishReason": "RECITATION", "index": 0}]})
+    assert no_content.content == "" and no_content.finish_reason == "RECITATION"
+
+
+def test_gemini_native_thought_parts_are_not_reply_text():
+    reply = {"candidates": [{"content": {"role": "model", "parts": [
+        {"text": "thinking about it", "thought": True}, {"text": "answer"}]}, "finishReason": "STOP"}]}
+    assert from_gemini_reply(reply).content == "answer"
