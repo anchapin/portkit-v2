@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 from pathlib import Path
 
@@ -44,14 +45,112 @@ def _residue_agent(args):
     return ResidueAgent(client, budget=budget)
 
 
+def _numbered(path: str, run: int) -> str:
+    """``rec.jsonl`` -> ``rec-2.jsonl``: one transcript per repeated run."""
+    p = Path(path)
+    suffix = p.suffix or ".jsonl"
+    return str(p.with_name(f"{p.stem if p.suffix else p.name}-{run}{suffix}"))
+
+
 def cmd_convert(args) -> int:
+    repeat = getattr(args, "repeat", 1) or 1
+    if repeat < 1:
+        print("--repeat must be at least 1", file=sys.stderr)
+        return 2
+    if repeat == 1:
+        code, _ = _convert_once(args)
+        return code
+    if not (args.agent or args.agent_replay):
+        print("--repeat only makes sense with --agent", file=sys.stderr)
+        return 2
+
+    rows: list[dict] = []
+    worst = 0
+    for run in range(1, repeat + 1):
+        run_args = argparse.Namespace(**vars(args))
+        run_args.out = str(Path(args.out) / f"run-{run}")
+        if args.agent_record:
+            run_args.agent_record = _numbered(args.agent_record, run)
+        print(f"\n=== run {run} of {repeat} -> {run_args.out} ===")
+        code, result = _convert_once(run_args)
+        if code == 2 and result is None:
+            return 2  # could not start at all: repeating will not help
+        worst = max(worst, code)
+        if result is not None and result.agent is not None:
+            rows.append(_run_row(run, result))
+    summary = _repeat_summary(rows)
+    print("\n" + _format_repeat(summary))
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "repeat-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    return worst
+
+
+def _run_row(run: int, result) -> dict:
+    agent = result.agent
+    return {
+        "run": run,
+        "groups": len(agent.outcomes),
+        "resolved": len(agent.resolved),
+        "statuses": {o.key: o.status for o in agent.outcomes},
+        "steps": agent.spend.steps,
+        "tokens": agent.spend.tokens,
+        "cost_usd": None if agent.spend.cost is None else round(agent.spend.cost, 6),
+        "ok": result.report.ok,
+    }
+
+
+def _stats(values: list[float]) -> dict:
+    if not values:
+        return {"mean": None, "stdev": None, "min": None, "max": None}
+    return {
+        "mean": round(statistics.fmean(values), 6),
+        "stdev": round(statistics.stdev(values), 6) if len(values) > 1 else 0.0,
+        "min": min(values),
+        "max": max(values),
+    }
+
+
+def _repeat_summary(rows: list[dict]) -> dict:
+    """Mean and sample stdev across runs, plus how often each group resolved."""
+    costs = [r["cost_usd"] for r in rows if r["cost_usd"] is not None]
+    per_group: dict[str, int] = {}
+    for r in rows:
+        for key, status in r["statuses"].items():
+            per_group[key] = per_group.get(key, 0) + (status == "resolved")
+    return {
+        "runs": len(rows),
+        "resolved": _stats([r["resolved"] for r in rows]),
+        "steps": _stats([r["steps"] for r in rows]),
+        "tokens": _stats([r["tokens"] for r in rows]),
+        "cost_usd": _stats(costs) if len(costs) == len(rows) else None,
+        "group_resolved_in": per_group,
+        "per_run": rows,
+    }
+
+
+def _format_repeat(summary: dict) -> str:
+    n = summary["runs"]
+    lines = [f"across {n} run(s), mean ± stdev [min..max]:"]
+    for name in ("resolved", "steps", "tokens", "cost_usd"):
+        s = summary[name]
+        if s is None or s["mean"] is None:
+            continue
+        lines.append(f"  {name:<9} {s['mean']:g} ± {s['stdev']:g} [{s['min']:g}..{s['max']:g}]")
+    for key, hits in summary["group_resolved_in"].items():
+        lines.append(f"  {key}: resolved in {hits} of {n}")
+    return "\n".join(lines)
+
+
+def _convert_once(args):
+    """One conversion. Returns (exit code, result or None if it never ran)."""
     agent = None
     if args.agent or args.agent_replay:
         try:
             agent = _residue_agent(args)
         except (OSError, ValueError) as exc:
             print(f"cannot start the residue agent: {exc}", file=sys.stderr)
-            return 2
+            return 2, None
     try:
         result = convert(
             Path(args.source),
@@ -62,7 +161,7 @@ def cmd_convert(args) -> int:
         )
     except IngestError as exc:
         print(f"cannot read {args.source}: {exc}", file=sys.stderr)
-        return 2
+        return 2, None
     print(json.dumps(result.summary(), indent=2))
     if result.agent:
         print(
@@ -90,8 +189,8 @@ def cmd_convert(args) -> int:
     if not result.report.ok:
         print("\nvalidation failed:")
         _print_findings(result.report)
-        return 1
-    return 0
+        return 1, result
+    return 0, result
 
 
 def cmd_validate(args) -> int:
@@ -336,6 +435,16 @@ def main(argv=None) -> int:
         help=(
             "run the agent from a recorded transcript instead of a provider "
             "(implies --agent; no API key or network)"
+        ),
+    )
+    p.add_argument(
+        "--repeat", type=int, default=1, metavar="N",
+        help=(
+            "run the agent conversion N times (default 1) into OUT/run-1..N, "
+            "recording PATH-1..N.jsonl with --agent-record, and print the mean "
+            "and stdev of resolved groups, steps, tokens and cost "
+            "(also written to OUT/repeat-summary.json). "
+            "Set PORTKIT_LLM_TEMPERATURE to fix sampling across runs"
         ),
     )
     p.set_defaults(func=cmd_convert)
