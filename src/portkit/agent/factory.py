@@ -20,6 +20,8 @@ Two Gemini paths are available:
   ``X-goog-api-key``. Use this for any post-May-2026 AI Studio key, or when
   the OpenAI-compat path produces ``finish_reason=error`` against a Gemini
   model. See :mod:`portkit.agent.gemini`.
+  It ignores ``PORTKIT_LLM_BASE_URL`` (a gateway can't speak generateContent);
+  only a ``base_url`` in ``config`` overrides its endpoint.
 
 Config keys mirror those names: provider, model, base_url, api_key, and
 api_key_env to read the key from a differently named variable.
@@ -75,7 +77,13 @@ def make_client(
     cls, default_key_env = PROVIDERS[name]
     api_key = config.get("api_key") or env.get(config.get("api_key_env") or default_key_env)
     kwargs: dict[str, Any] = {"model": chosen_model, "api_key": api_key, "transport": transport}
-    base_url = pick(None, "base_url") or DEFAULT_BASE_URLS.get(name)
+    if name == "gemini_native":
+        # Only an explicit config base_url applies here. A global
+        # PORTKIT_LLM_BASE_URL points at an OpenAI-style gateway, which can't
+        # speak generateContent, so honouring it would only misroute the key.
+        base_url = config.get("base_url")
+    else:
+        base_url = pick(None, "base_url") or DEFAULT_BASE_URLS.get(name)
     if base_url:
         kwargs["base_url"] = base_url
     temperature = pick(None, "temperature")
