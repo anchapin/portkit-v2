@@ -24,11 +24,13 @@ and the model disagree, not that the model is weaker.
 """
 from __future__ import annotations
 
+import re
 import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
+from urllib.parse import urlparse
 
 from .budget import Budget
 from .loop import LLMClient
@@ -94,6 +96,14 @@ class MatrixRow:
                            "status": outcome.status, "stopped": outcome.stopped,
                            "format_failures": outcome.format_failures})
 
+    def by_fixture(self) -> dict[str, dict[str, int]]:
+        """pass / fail / unscored per fixture, for a row spanning several."""
+        out: dict[str, dict[str, int]] = {}
+        for t in self.tasks:
+            counts = out.setdefault(t["fixture"], {"pass": 0, "fail": 0, "unscored": 0})
+            counts[t["score"]] += 1
+        return out
+
     def to_dict(self) -> dict:
         return {
             "target": self.target,
@@ -108,8 +118,37 @@ class MatrixRow:
             "tokens": self.tokens,
             "cost_usd": self.cost,
             "stops": dict(sorted(self.stops.items())),
+            "fixtures": self.by_fixture(),
             "tasks": self.tasks,
         }
+
+
+def parse_target(spec: str) -> tuple[str | None, str | None, str | None]:
+    """``PROVIDER:MODEL[@BASE_URL]`` -> (provider, model, base_url).
+
+    The optional ``@BASE_URL`` keeps a row self-contained, so one run can send
+    ``openai:anthropic/claude-haiku-4.5@https://openrouter.ai/api/v1`` to
+    OpenRouter and ``gemini_native:gemini-flash-latest`` to Google without
+    touching the environment. Only an ``@`` followed by ``http://`` or
+    ``https://`` starts a URL, so model names that contain ``@`` (Vertex-style
+    ``claude-x@20250101``) still parse. Empty parts come back as None and fall
+    through to the environment, the same as ``make_client``.
+    """
+    head, base_url = spec, None
+    m = re.search(r"@(https?://\S+)$", spec)
+    if m:
+        head, base_url = spec[: m.start()], m.group(1)
+    provider, _, model = head.partition(":")
+    return provider.strip() or None, model.strip() or None, base_url
+
+
+def target_label(provider: str | None, model: str | None, base_url: str | None) -> str:
+    """The row name: ``provider:model``, plus ``@host`` when a URL was given, so
+    two endpoints serving the same model don't share a row."""
+    label = f"{provider or '(env)'}:{model or '(env)'}"
+    if base_url:
+        label += "@" + (urlparse(base_url).netloc or base_url)
+    return label
 
 
 def agent_fixtures(root: Path, names: Iterable[str] = ()) -> list[Path]:
