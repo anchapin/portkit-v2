@@ -41,18 +41,20 @@ class GeminiClient:
         api_key: str | None = None,
         transport: Transport = post_json,
         extra: dict[str, Any] | None = None,
+        base_url: str | None = None,
     ):
         self.model = model
+        self.models_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key
         self.transport = transport
         self.extra = dict(extra or {})  # temperature, max_tokens, ...
 
     @property
     def base_url(self) -> str:
-        return f"{DEFAULT_BASE_URL}/{self.model}:generateContent"
+        return f"{self.models_url}/{self.model}:generateContent"
 
     def complete(self, messages: list[Message], tools: list[dict]) -> Message:
-        body: dict[str, Any] = {**self.extra}
+        body: dict[str, Any] = _with_generation_config(self.extra)
         system, contents = to_gemini_messages(messages)
         body["contents"] = contents
         if system:
@@ -65,6 +67,37 @@ class GeminiClient:
 
 
 # --- request-side translations ------------------------------------------------
+
+# Sampling knobs the rest of portkit names the OpenAI way. The native endpoint
+# rejects them at the top level ("Unknown name") and wants them, camelCased,
+# under generationConfig.
+_GENERATION_KEYS = {
+    "temperature": "temperature",
+    "top_p": "topP",
+    "top_k": "topK",
+    "max_tokens": "maxOutputTokens",
+    "max_output_tokens": "maxOutputTokens",
+    "stop": "stopSequences",
+    "seed": "seed",
+}
+
+
+def _with_generation_config(extra: dict[str, Any]) -> dict[str, Any]:
+    body: dict[str, Any] = {}
+    config: dict[str, Any] = dict(extra.get("generationConfig") or {})
+    for key, value in extra.items():
+        if key == "generationConfig":
+            continue
+        if key in _GENERATION_KEYS:
+            if key == "stop" and isinstance(value, str):
+                value = [value]
+            config[_GENERATION_KEYS[key]] = value
+        else:
+            body[key] = value
+    if config:
+        body["generationConfig"] = config
+    return body
+
 
 def to_gemini_tool(schema: dict) -> dict:
     """OpenAI function schema -> native functionDeclarations entry.
@@ -97,6 +130,7 @@ def to_gemini_messages(messages: list[Message]) -> tuple[str, list[dict]]:
     """
     system_parts: list[str] = []
     contents: list[dict] = []
+    names: dict[str, str] = {}  # local tool-call id -> function name
     for m in messages:
         if m.role == "system":
             if m.content:
@@ -105,11 +139,13 @@ def to_gemini_messages(messages: list[Message]) -> tuple[str, list[dict]]:
         role = "user" if m.role in ("user", "tool") else "model"
         parts: list[dict] = []
         if m.role == "tool":
-            parts.append({"functionResponse": {"name": _function_name_from_id(m.tool_call_id), "response": _parse_tool_payload(m.content)}})
+            name = names.get(m.tool_call_id or "") or m.tool_call_id or "tool"
+            parts.append({"functionResponse": {"name": name, "response": _parse_tool_payload(m.content)}})
         else:
             if m.content:
                 parts.append({"text": m.content})
             for c in m.tool_calls:
+                names[c.id] = c.name
                 part: dict[str, Any] = {"functionCall": {"name": c.name, "args": c.arguments}}
                 if c.extra:
                     part.update(c.extra)  # thoughtSignature and any other provider bookkeeping
@@ -123,16 +159,6 @@ def to_gemini_messages(messages: list[Message]) -> tuple[str, list[dict]]:
     return "\n\n".join(system_parts), contents
 
 
-def _function_name_from_id(tool_call_id: str | None) -> str:
-    """The native endpoint takes the *function name* on a functionResponse,
-    not the call id we generated locally. We don't have a name here; tests
-    keep the id-name correspondence out-of-band, so any sentinel works at
-    this layer. The model's reply will pair results with the matching
-    functionCall by order on its side.
-    """
-    return tool_call_id or "tool"
-
-
 def _parse_tool_payload(raw: str) -> Any:
     """Tool payloads are JSON-encoded (see AgentSession.run). If the parse
     fails we send the raw string under response.result so the model can at
@@ -140,9 +166,11 @@ def _parse_tool_payload(raw: str) -> Any:
     """
     import json
     try:
-        return json.loads(raw)
+        value = json.loads(raw)
     except (TypeError, ValueError):
         return {"result": raw}
+    # functionResponse.response is a protobuf Struct: it has to be an object.
+    return value if isinstance(value, dict) else {"result": value}
 
 
 # --- reply-side translation ---------------------------------------------------
@@ -159,15 +187,29 @@ def from_gemini_reply(reply: dict) -> Message:
             ]},
              "finishReason": "STOP" | "MAX_TOKENS" | "SAFETY" | "RECITATION" | "OTHER" | ...}]}
     """
-    try:
-        candidate = reply["candidates"][0]
-        parts = candidate["content"]["parts"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LLMError(f"unexpected Gemini reply: {str(reply)[:300]}") from exc
+    if not isinstance(reply, dict):
+        raise LLMError(f"unexpected Gemini reply: {str(reply)[:300]}")
+    candidates = reply.get("candidates")
+    if not candidates:
+        # A blocked prompt comes back with no candidates and a blockReason.
+        # Report it as an empty reply with a reason (#85), not a crash.
+        feedback = reply.get("promptFeedback") or {}
+        if "promptFeedback" in reply or "usageMetadata" in reply:
+            return Message(
+                "assistant", "", usage=_usage(reply),
+                finish_reason=feedback.get("blockReason") or "BLOCKED",
+                refusal=feedback.get("blockReasonMessage") or "",
+            )
+        raise LLMError(f"unexpected Gemini reply: {str(reply)[:300]}")
+    candidate = candidates[0] if isinstance(candidates[0], dict) else {}
+    # SAFETY / RECITATION / MAX_TOKENS can arrive with no content or no parts.
+    parts = (candidate.get("content") or {}).get("parts") or []
 
     text: list[str] = []
     calls: list[ToolCall] = []
     for n, part in enumerate(parts):
+        if part.get("thought"):
+            continue  # a thought summary, not reply text
         if "text" in part:
             text.append(part.get("text") or "")
         if "functionCall" in part:
