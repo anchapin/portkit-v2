@@ -259,3 +259,25 @@ def test_post_json_surfaces_unreachable_and_non_json(monkeypatch):
     monkeypatch.setattr(http.urllib.request, "urlopen", lambda r, timeout: _Resp(b"<html>"))
     with pytest.raises(LLMError, match="non-JSON"):
         http.post_json("http://x/y", {}, {})
+
+
+def test_openai_keeps_finish_reason_and_refusal():
+    """#85: an empty reply has to say why it was empty."""
+    reply = {"choices": [{"finish_reason": "length", "message": {"content": None}}]}
+    msg = OpenAIClient("m", transport=Recorder([reply])).complete([Message("user", "x")], [])
+    assert (msg.content, msg.tool_calls, msg.finish_reason, msg.refusal) == ("", [], "length", "")
+
+    refused = {"choices": [{"finish_reason": "stop", "message": {"content": "", "refusal": "no"}}]}
+    msg = OpenAIClient("m", transport=Recorder([refused])).complete([Message("user", "x")], [])
+    assert msg.refusal == "no"
+
+
+def test_finish_reason_is_never_sent_back_to_the_model():
+    m = Message("assistant", "ok", finish_reason="stop", refusal="r")
+    assert to_openai_message(m) == {"role": "assistant", "content": "ok"}
+
+
+def test_anthropic_keeps_stop_reason():
+    reply = {"content": [], "stop_reason": "max_tokens"}
+    msg = AnthropicClient("m", transport=Recorder([reply])).complete([Message("user", "x")], [])
+    assert msg.finish_reason == "max_tokens"
