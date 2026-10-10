@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 from ..data import bedrock_vanilla_sounds
+from ..paths import MAX_PATH, MAX_SEGMENTS, too_long
 from ..png import dimensions
 from .collisions import check_collisions
 from . import schema
@@ -354,6 +355,19 @@ def validate_pack(pack_root: Path) -> ValidationReport:
                 "pack.icon",
                 f"pack_icon.png must be a square PNG of 2-256 px, a power of two; found {found}",
                 "warning",
+            )
+
+    # Some devices (consoles, mobile) cannot load a file whose pack-relative
+    # path is over 100 characters or more than eight directories deep; mct
+    # PATHLENGTH is an error for both, and so is this.
+    for path in sorted(pack_root.rglob("*")):
+        rel = path.relative_to(pack_root).as_posix()
+        if path.is_file() and too_long(rel):
+            report.add(
+                f"{prefix}/{rel}",
+                "pack.path_length",
+                f"path inside the pack is {len(rel)} characters / {len(rel.split('/'))} segments; "
+                f"keep it to {MAX_PATH} characters and {MAX_SEGMENTS} segments",
             )
 
     for path in sorted((pack_root / "recipes").glob("*.json")):

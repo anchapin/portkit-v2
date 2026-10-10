@@ -13,6 +13,7 @@ from .ingest import ingest
 from .meta import ModMetadata, parse as parse_metadata
 from .model import ConversionResult, SourceMod, Unhandled
 from .pack import addon_name, write_mcaddon, write_tree
+from .paths import shorten_paths
 from .validate import ValidationReport, validate_tree
 
 if TYPE_CHECKING:
@@ -292,6 +293,7 @@ def convert(
         }
         result = merge_namespaces(per_namespace)
         drop_untextured(result, namespace)
+        shorten_paths(result)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}
         icon, icon_source, icon_note = resolve_icon(staged.icons, namespace)
         if icon_note:
