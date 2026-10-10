@@ -54,9 +54,31 @@ def test_factory_gemini_defaults_endpoint_and_key():
 
 def test_factory_gemini_base_url_override_wins():
     client = make_client(
-        env={"PORTKIT_LLM_PROVIDER": "gemini", "PORTKIT_LLM_MODEL": "m", "PORTKIT_LLM_BASE_URL": "http://proxy/v1"},
+        env={"PORTKIT_LLM_PROVIDER": "gemini", "PORTKIT_LLM_MODEL": "m", "PORTKIT_LLM_GEMINI_BASE_URL": "http://proxy/v1"},
     )
     assert client.base_url == "http://proxy/v1"
+    client = make_client(config={"base_url": "http://cfg/v1"}, env={"PORTKIT_LLM_PROVIDER": "gemini", "PORTKIT_LLM_MODEL": "m"})
+    assert client.base_url == "http://cfg/v1"
+
+
+def test_a_global_gateway_url_does_not_capture_the_gemini_key():
+    """#95: PORTKIT_LLM_BASE_URL saved for OpenRouter must not reroute gemini."""
+    env = {"PORTKIT_LLM_PROVIDER": "gemini", "PORTKIT_LLM_MODEL": "m", "GEMINI_API_KEY": "g",
+           "PORTKIT_LLM_BASE_URL": "https://openrouter.ai/api/v1"}
+    assert make_client(env=env).base_url == GEMINI_BASE_URL
+
+
+def test_the_global_base_url_still_serves_providers_without_a_default():
+    env = {"PORTKIT_LLM_PROVIDER": "openai", "PORTKIT_LLM_MODEL": "m", "PORTKIT_LLM_BASE_URL": "https://openrouter.ai/api/v1"}
+    assert make_client(env=env).base_url == "https://openrouter.ai/api/v1"
+    env["PORTKIT_LLM_OPENAI_BASE_URL"] = "http://local:8080/v1"
+    assert make_client(env=env).base_url == "http://local:8080/v1"
+
+
+def test_gemini_native_has_its_own_base_url_variable():
+    env = {"PORTKIT_LLM_PROVIDER": "gemini_native", "PORTKIT_LLM_MODEL": "m",
+           "PORTKIT_LLM_GEMINI_NATIVE_BASE_URL": "https://proxy.example/v1beta/models"}
+    assert make_client(env=env).base_url == "https://proxy.example/v1beta/models/m:generateContent"
 
 
 def test_openai_provider_still_defaults_to_openai():
