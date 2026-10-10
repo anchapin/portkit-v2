@@ -191,14 +191,10 @@ def test_write_output_accepts_dict_content(tmp_path):
 
 
 def test_convert_with_agent_on_enriched_fixture(tmp_path):
-    """The deterministic path emits items + blocks for ``residue_mod_enriched``
-    so the agent's residue list shortens. The tag recipe becomes resolvable
-    (steel_ingot / steel_block exist behind it). The smithing one has no
-    template or addition, so since #87 the converter downgrades it to a
-    shapeless crafting recipe and it never reaches the agent.
-
-    The deliverable is the same shape as ``test_convert_with_agent_resolves_residue_and_still_validates``
-    but against the enriched fixture.
+    """On ``residue_mod_enriched`` the deterministic path now owns both recipes:
+    the c:ingots/steel tag resolves to examplemod:steel_ingot by convention name
+    (#88) and the incomplete smithing recipe is downgraded (#87). The agent is
+    handed nothing, and the tree still validates.
     """
     enriched = ROOT / "fixtures" / "residue_mod_enriched" / "input"
     client = FakeLLM(_good_script())
@@ -206,18 +202,12 @@ def test_convert_with_agent_on_enriched_fixture(tmp_path):
     result = convert(enriched, out, agent=ResidueAgent(client))
 
     assert result.report.ok, [f.message for f in result.report.errors]
-    assert (out / "behavior_pack" / "recipes" / "steel_block.json").is_file()
-    # The agent also sees a populated tree with steel_ingot and steel_block.
-    assert (out / "behavior_pack" / "items" / "steel_ingot.json").is_file()
-    assert (out / "behavior_pack" / "blocks" / "steel_block.json").is_file()
-
-    statuses = {o.source: o.status for o in result.agent.outcomes}
-    assert statuses == {TAG_RECIPE: "resolved"}
     assert result.unhandled == []
-    smithing = json.loads((out / "behavior_pack" / "recipes" / "steel_smithing.json").read_text())
-    assert smithing["minecraft:recipe_shapeless"]["ingredients"] == [{"item": "examplemod:steel_ingot"}]
-    assert any("steel_smithing.json" in n and "shapeless" in n for n in result.reductions)
-
+    assert client.seen == []  # no session was started
+    recipe = json.loads((out / "behavior_pack" / "recipes" / "steel_block.json").read_text())
+    assert recipe["minecraft:recipe_shapeless"]["ingredients"] == [{"item": "examplemod:steel_ingot"}]
+    assert (out / "behavior_pack" / "items" / "steel_ingot.json").is_file()
+    assert any("c:ingots/steel" in n and "conventional name" in n for n in result.reductions)
 
 
 def _empty_reply_outcomes(tmp_path, reply):
