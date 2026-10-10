@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 
 from ..model import ConversionResult, SourceMod, Unhandled
+from . import models
 
 # The only Java item model parents whose meaning is fully in the JSON.
 _FLAT_PARENTS = ("minecraft:item/generated", "item/generated")
@@ -107,7 +108,10 @@ def convert(mod: SourceMod) -> ConversionResult:
             )
             continue
 
-        icon = f"{mod.namespace}:{rel_path.rsplit('/', 1)[-1]}"
+        icon, why = models.texture_shortname(reference, mod.namespace)
+        if icon is None:
+            result.unhandled.append(Unhandled(rel, "item", why))
+            continue
         result.files[f"items/{name}.json"] = {
             "format_version": "1.20.10",
             "minecraft:item": {
