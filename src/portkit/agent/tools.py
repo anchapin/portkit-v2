@@ -27,6 +27,29 @@ class ToolBox:
     def schemas(self) -> list[dict]:
         return [schema for schema, _ in self._tools.values()]
 
+    def format_error(self, name: str, arguments: Any) -> str | None:
+        """Why a call doesn't fit the toolbox, or None when it does (#77).
+
+        A format failure is a call no tool can take as made: an unknown name,
+        arguments that aren't an object, a required argument missing, or one
+        the tool doesn't declare. It says the harness and the model disagree on
+        the tool-call format, which reads differently from a model that is
+        merely weaker, so the eval matrix counts it on its own.
+        """
+        if name not in self._tools:
+            return f"unknown tool {name!r}"
+        if not isinstance(arguments, dict):
+            return f"{name}: arguments are {type(arguments).__name__}, not an object"
+        params = self._tools[name][0].get("parameters") or {}
+        declared = set(params.get("properties") or {})
+        missing = [a for a in params.get("required") or [] if a not in arguments]
+        if missing:
+            return f"{name}: missing required argument(s) {', '.join(missing)}"
+        unknown = sorted(set(arguments) - declared)
+        if unknown:
+            return f"{name}: unknown argument(s) {', '.join(unknown)}"
+        return None
+
     def invoke(self, name: str, arguments: dict) -> Any:
         if name not in self._tools:
             return {"error": f"unknown tool {name!r}", "available": sorted(self._tools)}
