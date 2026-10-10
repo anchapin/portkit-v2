@@ -271,6 +271,25 @@ def _final_text(messages) -> str:
     return ""
 
 
+def _empty_reply_note(messages) -> str:
+    """Say why a session ended on a reply with no text and no tool calls.
+
+    Without this the group's note is just "", which reads like a silent
+    refusal (#85). The finish reason tells a token cutoff ("length") from a
+    content filter or an explicit refusal, and the output token count shows
+    whether the model spent its budget thinking without answering.
+    """
+    last = next((m for m in reversed(messages) if m.role == "assistant"), None)
+    if last is None:
+        return ""
+    if last.refusal:
+        return f"model refused: {last.refusal.strip()}"
+    details = [f"finish_reason={last.finish_reason or 'unknown'}"]
+    if last.usage is not None:
+        details.append(f"{last.usage.output_tokens} output tokens")
+    return f"model ended with an empty reply ({', '.join(details)})"
+
+
 class ResidueAgent:
     """Runs the residue through the loop, one session per group."""
 
@@ -335,6 +354,8 @@ class ResidueAgent:
             result = session.run(task)
             outcome.stopped, outcome.steps, outcome.limit = result.stopped, result.steps, result.limit
             outcome.note = _final_text(result.messages)
+            if result.stopped == "done" and not outcome.note:
+                outcome.note = _empty_reply_note(result.messages)
             if result.stopped == "budget" and not outcome.note:
                 outcome.note = f"stopped at the {result.limit} ceiling"
         except Exception as exc:  # a provider failure ends this group, not the run
