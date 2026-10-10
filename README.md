@@ -44,6 +44,7 @@ export PORTKIT_LLM_PROVIDER=anthropic   # or openai, or gemini
 export PORTKIT_LLM_MODEL=<model name>
 export ANTHROPIC_API_KEY=...            # or OPENAI_API_KEY, or GEMINI_API_KEY
 export PORTKIT_LLM_BASE_URL=...         # optional: OpenRouter, a local server, a gateway
+export PORTKIT_LLM_TEMPERATURE=...      # optional: sampling temperature
 ```
 
 Both clients are stdlib HTTP (no SDK dependency) and translate tool calls both
@@ -97,6 +98,16 @@ no provider, key or network. Replay checks each request against the recording
 and fails at the first step that differs, so an agent regression is an ordinary
 failing test. Committed transcripts live in `fixtures/transcripts/` and replay
 in CI (`tests/test_transcripts.py`).
+
+Variance: one run is one sample. `--repeat 3` converts into `OUT/run-1..3`,
+records `run-1..3.jsonl` when `--agent-record run.jsonl` is set, and prints the
+mean, stdev and range of resolved groups, steps, tokens and cost, plus how many
+runs resolved each group. The same numbers land in `OUT/repeat-summary.json`.
+
+```bash
+portkit convert fixtures/residue_mod_enriched/input /tmp/var --agent --repeat 3 \
+  --agent-max-cost 0.25 --agent-record /tmp/var/run.jsonl
+```
 
 ## Layout
 
