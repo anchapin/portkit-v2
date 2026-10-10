@@ -215,3 +215,27 @@ def test_convert_with_agent_on_enriched_fixture(tmp_path):
     # smithing is the only remaining residue item post-agent.
     assert [u.source for u in result.unhandled] == [SMITHING]
 
+
+
+def _empty_reply_outcomes(tmp_path, reply):
+    from portkit.agent.budget import Usage
+
+    reply.usage = Usage(729, 273)
+    client = FakeLLM([reply, Message("assistant", "Smithing needs a template item.")])
+    result = convert(RESIDUE, tmp_path / "out", agent=ResidueAgent(client))
+    return {o.key: o for o in result.agent.outcomes}
+
+
+def test_an_empty_final_reply_says_why_in_the_note(tmp_path):
+    """#85: gemini-pro-latest ended both groups on an empty reply and the note was ""."""
+    outcomes = _empty_reply_outcomes(tmp_path, Message("assistant", "", finish_reason="length"))
+    note = outcomes[f"recipe:{TAG_RECIPE}"].note
+    assert note == "model ended with an empty reply (finish_reason=length, 273 output tokens)"
+    assert outcomes[f"recipe:{TAG_RECIPE}"].status != "resolved"
+
+
+def test_a_refusal_lands_in_the_note(tmp_path):
+    outcomes = _empty_reply_outcomes(
+        tmp_path, Message("assistant", "", finish_reason="stop", refusal="I can't help with that.")
+    )
+    assert outcomes[f"recipe:{TAG_RECIPE}"].note == "model refused: I can't help with that."
