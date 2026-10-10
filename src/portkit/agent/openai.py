@@ -111,7 +111,12 @@ def from_openai_reply(reply: dict) -> Message:
         if c.get("type", "function") == "function"
     ]
     return Message(
-        "assistant", message.get("content") or "", tool_calls=calls, usage=_usage(reply)
+        "assistant",
+        message.get("content") or "",
+        tool_calls=calls,
+        usage=_usage(reply),
+        finish_reason=reply["choices"][0].get("finish_reason"),
+        refusal=message.get("refusal") or "",
     )
 
 
