@@ -121,3 +121,215 @@ def test_usage_openai_style_is_unchanged():
     no_total = {"prompt_tokens": 7, "completion_tokens": 3}
     msg = from_openai_reply({"choices": [{"message": {"content": "x"}}], "usage": no_total})
     assert (msg.usage.input_tokens, msg.usage.output_tokens) == (7, 3)
+
+
+# === native-endpoint tests ======================================================
+# The native Gemini endpoint at /v1beta/models/<id>:generateContent is what
+# AI Studio auth-keys actually authorize (issue #95, OpenAI-compat path rejects
+# auth keys with HTTP 400 "Please pass a valid API key"). URL and header per
+# https://aistudio.google.com/docs/api-key.
+NATIVE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+def native_text(text, finish_reason="STOP", usage=None):
+    body = {"candidates": [{"content": {"role": "model", "parts": [{"text": text}]}, "finishReason": finish_reason, "index": 0}]}
+    if usage:
+        body["usageMetadata"] = usage
+    return body
+
+
+def native_call(name, args, *, sig=None, finish_reason="STOP", usage=None):
+    """A native reply that includes a functionCall part, optionally with a
+    thought signature that must round-trip via ToolCall.extra."""
+    part = {"functionCall": {"name": name, "args": args}}
+    if sig is not None:
+        part["thoughtSignature"] = sig
+    body = {"candidates": [{"content": {"role": "model", "parts": [part]}, "finishReason": finish_reason, "index": 0}]}
+    if usage:
+        body["usageMetadata"] = usage
+    return body
+
+
+# --- 1. URL + headers ---------------------------------------------------------
+
+def test_gemini_native_url_and_headers():
+    rec = Recorder([native_text("hi")])
+    client = make_client(
+        env={"PORTKIT_LLM_PROVIDER": "gemini_native", "PORTKIT_LLM_MODEL": "gemini-3.1-pro-preview", "GEMINI_API_KEY": "g-key"},
+        transport=rec,
+    )
+    from portkit.agent.gemini import GeminiClient
+    assert isinstance(client, GeminiClient)
+    client.complete([Message("user", "hi")], [])
+    req = rec.requests[0]
+    assert req["url"] == f"{NATIVE_BASE_URL}/gemini-3.1-pro-preview:generateContent"
+    assert req["headers"]["x-goog-api-key"] == "g-key"
+    assert req["headers"].get("authorization") is None
+    # Model goes in the URL path on the native endpoint; never in the body.
+    assert "model" not in req["body"]
+
+
+# --- 2,3,4. Request body: messages, system, tools ------------------------------
+
+def test_gemini_native_request_shape_no_system():
+    rec = Recorder([native_text("ok")])
+    client = make_client(
+        env={"PORTKIT_LLM_PROVIDER": "gemini_native", "PORTKIT_LLM_MODEL": "m", "GEMINI_API_KEY": "k"},
+        transport=rec,
+    )
+    client.complete([Message("user", "u1"), Message("assistant", "a1"), Message("user", "u2")], [])
+    body = rec.requests[0]["body"]
+    assert "systemInstruction" not in body
+    assert body["contents"] == [
+        {"role": "user", "parts": [{"text": "u1"}]},
+        {"role": "model", "parts": [{"text": "a1"}]},
+        {"role": "user", "parts": [{"text": "u2"}]},
+    ]
+
+
+def test_gemini_native_system_becomes_system_instruction():
+    rec = Recorder([native_text("ok")])
+    client = make_client(
+        env={"PORTKIT_LLM_PROVIDER": "gemini_native", "PORTKIT_LLM_MODEL": "m", "GEMINI_API_KEY": "k"},
+        transport=rec,
+    )
+    client.complete(
+        [Message("system", "rules"), Message("user", "u1")],
+        [],
+    )
+    body = rec.requests[0]["body"]
+    assert body["systemInstruction"] == {"parts": [{"text": "rules"}]}
+    assert body["contents"] == [{"role": "user", "parts": [{"text": "u1"}]}]
+
+
+def test_gemini_native_tool_definitions():
+    rec = Recorder([native_text("ok")])
+    client = make_client(
+        env={"PORTKIT_LLM_PROVIDER": "gemini_native", "PORTKIT_LLM_MODEL": "m", "GEMINI_API_KEY": "k"},
+        transport=rec,
+    )
+    schemas = [
+        {
+            "name": "read_source",
+            "description": "Read a file from the Java mod being converted.",
+            "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+        },
+        {
+            "name": "validate",
+            "description": "Run the Bedrock structural validator over the whole output tree.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    ]
+    client.complete([Message("user", "u")], schemas)
+    body = rec.requests[0]["body"]
+    decls = {d["name"]: d for d in body["tools"][0]["functionDeclarations"]}
+    assert decls["read_source"]["description"].startswith("Read a file")
+    assert decls["read_source"]["parameters"]["required"] == ["path"]
+    assert "validate" in decls
+
+
+# --- 5,6,7. Reply parsing + round-trips ---------------------------------------
+
+def test_gemini_native_text_reply_round_trip():
+    rec = Recorder([native_text("done", finish_reason="STOP",
+                                usage={"promptTokenCount": 10, "candidatesTokenCount": 5, "thoughtsTokenCount": 100})])
+    client = make_client(
+        env={"PORTKIT_LLM_PROVIDER": "gemini_native", "PORTKIT_LLM_MODEL": "m", "GEMINI_API_KEY": "k"},
+        transport=rec,
+    )
+    msg = client.complete([Message("user", "hi")], [])
+    assert msg.role == "assistant"
+    assert msg.content == "done"
+    assert msg.tool_calls == []
+    assert msg.finish_reason == "STOP"
+    assert msg.usage.input_tokens == 10
+    assert msg.usage.output_tokens == 105  # candidates + thoughts, for budget honesty
+
+
+def test_gemini_native_tool_call_round_trip_preserves_thought_signature(tmp_path):
+    """A thoughtSignature on the functionCall part must land in ToolCall.extra
+    and be sent back on the next request, otherwise Gemini 3 rejects the turn
+    (see test_thought_signature_is_kept_and_sent_back above for the
+    OpenAI-compat equivalent)."""
+    sig = "Eq8LCqwLAWkUfRMNwB3ww7a1TY9O/DnJZdrIW0zpyP1qzu2tetux4ocBvesU3CHJOgDL5Gk2g"
+    out = tmp_path / "out"
+    rec = Recorder([
+        native_call("read_source", {"path": "x"}, sig=sig),
+        native_text("done"),
+    ])
+    from portkit.agent.gemini import GeminiClient
+    client = GeminiClient("m", api_key="k", transport=rec)
+    session = AgentSession(client, ToolBox(SOURCE, out), SYSTEM_PROMPT)
+    session.run("go")
+    assert len(rec.requests) == 2
+    # messages: [system, user("go"), assistant(reply1), tool(read_source), ...]
+    first_reply = session.messages[2]
+    assert first_reply.role == "assistant"
+    assert first_reply.tool_calls
+    assert first_reply.tool_calls[0].name == "read_source"
+    assert first_reply.tool_calls[0].extra.get("thoughtSignature") == sig
+    # On the 2nd request, the model message in contents must carry the signature back
+    second = rec.requests[1]["body"]["contents"]
+    model_msg = next(c for c in second if c["role"] == "model")
+    parts = model_msg["parts"]
+    assert any(p.get("thoughtSignature") == sig for p in parts)
+
+
+def test_gemini_native_tool_results_folded_into_user_turn():
+    """A Message('assistant', tool_calls=[...]) followed by Message('tool', ...)
+    must collapse into one user turn with a functionResponse part — Gemini
+    requires tool results inside a user-role content."""
+    rec = Recorder([native_text("done")])
+    from portkit.agent.gemini import GeminiClient
+    client = GeminiClient("m", api_key="k", transport=rec)
+    client.complete([
+        Message("user", "u"),
+        Message("assistant", "", tool_calls=[ToolCall("c1", "fn", {"a": 1})]),
+        Message("tool", '{"ok": true}', tool_call_id="c1"),
+        Message("user", "next"),
+    ], [])
+    body = rec.requests[0]["body"]
+    contents = body["contents"]
+    # Expect: user(u), model(tool_call), user(tool_result + "next"), or some valid
+    # alternation that puts functionResponse inside a user-role content with no
+    # consecutive user-role entries.
+    roles = [c["role"] for c in contents]
+    assert "user" in roles and "model" in roles
+    # No two user-role contents in a row
+    for a, b in zip(roles, roles[1:]):
+        assert not (a == "user" and b == "user")
+    # The functionResponse lives inside a user-role entry
+    user_entries = [c for c in contents if c["role"] == "user"]
+    fr_parts = [p for c in user_entries for p in c["parts"] if "functionResponse" in p]
+    assert fr_parts, "functionResponse must appear inside a user-role content"
+
+
+def test_gemini_native_factory_uses_gemini_api_key():
+    """gemini_native reads GEMINI_API_KEY, not OPENAI_API_KEY, and registers as
+    a distinct provider (additive — does not change the existing `gemini` entry)."""
+    rec = Recorder([native_text("hi")])
+    client = make_client(
+        env={
+            "PORTKIT_LLM_PROVIDER": "gemini_native",
+            "PORTKIT_LLM_MODEL": "m",
+            "GEMINI_API_KEY": "g-key",
+            "OPENAI_API_KEY": "o-key",  # must be ignored
+        },
+        transport=rec,
+    )
+    from portkit.agent.gemini import GeminiClient
+    assert isinstance(client, GeminiClient)
+    assert client.api_key == "g-key"
+    client.complete([Message("user", "hi")], [])
+    assert rec.requests[0]["headers"]["x-goog-api-key"] == "g-key"
+
+
+def test_gemini_native_extra_fields_kept_on_tool_call_round_trip(tmp_path):
+    """Extra fields on a functionCall part that aren't part of {name, args}
+    (e.g. provider-specific bookkeeping) must be carried in ToolCall.extra
+    so the next request's contents include them under the model part."""
+    part = {"functionCall": {"name": "fn", "args": {}}, "thoughtSignature": "abc"}
+    reply = {"candidates": [{"content": {"role": "model", "parts": [part]}, "finishReason": "STOP", "index": 0}]}
+    from portkit.agent.gemini import from_gemini_reply
+    msg = from_gemini_reply(reply)
+    assert msg.tool_calls[0].extra.get("thoughtSignature") == "abc"
