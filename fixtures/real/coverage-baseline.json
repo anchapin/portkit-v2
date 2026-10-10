@@ -6,6 +6,12 @@
       "residue": 6667,
       "errors": 3
     },
+    "create": {
+      "coverage": 15.1,
+      "files": 2003,
+      "residue": 11251,
+      "errors": 287
+    },
     "farmers_delight_fabric": {
       "coverage": 27.7,
       "files": 720,
@@ -16,6 +22,42 @@
       "coverage": 29.4,
       "files": 659,
       "residue": 1585,
+      "errors": 0
+    },
+    "silent_gear_1165": {
+      "coverage": 16.3,
+      "files": 566,
+      "residue": 2897,
+      "errors": 3
+    },
+    "storage_drawers_1122": {
+      "coverage": 3.6,
+      "files": 21,
+      "residue": 560,
+      "errors": 0
+    },
+    "storage_drawers_1192": {
+      "coverage": 9.8,
+      "files": 74,
+      "residue": 679,
+      "errors": 37
+    },
+    "supplementaries": {
+      "coverage": 18.1,
+      "files": 1003,
+      "residue": 4546,
+      "errors": 37
+    },
+    "tinkers_construct": {
+      "coverage": 2.4,
+      "files": 768,
+      "residue": 31040,
+      "errors": 267
+    },
+    "waystones": {
+      "coverage": 9.1,
+      "files": 89,
+      "residue": 889,
       "errors": 0
     }
   }
