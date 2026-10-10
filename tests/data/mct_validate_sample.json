@@ -1,0 +1,992 @@
+{
+ "schemaVersion": "1.0.0",
+ "command": "validate",
+ "projects": [
+  {
+   "name": "simple_block_mod",
+   "path": "/",
+   "items": [
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Base Game Version (BASEGAMEVER)",
+     "generatorId": "BASEGAMEVER"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Blocks Catalog (BLOCKSCAT)",
+     "generatorId": "BLOCKSCAT"
+    },
+    {
+     "type": "testPass",
+     "message": "Beta Features completed successfully",
+     "generatorId": "CBFG"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Custom Dimension World Data Validation (CDWORLDDATA)",
+     "generatorId": "CDWORLDDATA"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Feature Deprecation (CHECKFEATUREDEPRECATION)",
+     "generatorId": "CHECKFEATUREDEPRECATION"
+    },
+    {
+     "type": "testPass",
+     "message": "Manifest Validation completed successfully",
+     "generatorId": "CHKMANIF"
+    },
+    {
+     "type": "testPass",
+     "message": "Community JSON Schema Validation completed successfully",
+     "generatorId": "COMJSON"
+    },
+    {
+     "type": "testFail",
+     "message": "Found 4 errors in Pack Icon check",
+     "generatorId": "CPACKICON"
+    },
+    {
+     "type": "error",
+     "message": "pack_icon image file not found for behavior_pack. It must use the .png extension.",
+     "generatorId": "CPACKICON"
+    },
+    {
+     "type": "error",
+     "message": "pack_icon image file not found for behavior_pack. It must use the .png extension.",
+     "generatorId": "CPACKICON"
+    },
+    {
+     "type": "error",
+     "message": "pack_icon image file not found for resource_pack. It must use the .png extension.",
+     "generatorId": "CPACKICON"
+    },
+    {
+     "type": "error",
+     "message": "pack_icon image file not found for resource_pack. It must use the .png extension.",
+     "generatorId": "CPACKICON"
+    },
+    {
+     "type": "testPass",
+     "message": "Particle Identifiers completed successfully",
+     "generatorId": "CPARTI"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Cross-Reference Index (CROSSREFINDEX)",
+     "generatorId": "CROSSREFINDEX"
+    },
+    {
+     "type": "testPass",
+     "message": "Skin Pack Validation completed successfully",
+     "generatorId": "CSPJ"
+    },
+    {
+     "type": "testPass",
+     "message": "World Icons completed successfully",
+     "generatorId": "CWI"
+    },
+    {
+     "type": "testPass",
+     "message": "Entity Type completed successfully",
+     "generatorId": "ENTITYTYPE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Entity Type Runtime Identifier",
+     "generatorId": "ENTITYTYPE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Entity Type Identifier",
+     "generatorId": "ENTITYTYPE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Entity Type Metadata",
+     "generatorId": "ENTITYTYPE"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Experimental Flags (EXPFLAG)",
+     "generatorId": "EXPFLAG"
+    },
+    {
+     "type": "testPass",
+     "message": "Forbidden Files completed successfully",
+     "generatorId": "FORBFILE"
+    },
+    {
+     "type": "testPass",
+     "message": "Format Version completed successfully",
+     "generatorId": "FORMATVER"
+    },
+    {
+     "type": "recommendation",
+     "message": "Recipe version (1.20.10) has a lower minor version number compared to the expected version (1.26.50) or its previous minor version",
+     "path": "/behavior_pack/recipes/copper_block.json",
+     "generatorId": "FORMATVER"
+    },
+    {
+     "type": "recommendation",
+     "message": "Recipe version (1.20.10) has a lower minor version number compared to the expected version (1.26.50) or its previous minor version",
+     "path": "/examplemod.mcaddon#/behavior_pack/recipes/copper_block.json",
+     "generatorId": "FORMATVER"
+    },
+    {
+     "type": "info",
+     "message": "Recipe format_version",
+     "data": [
+      1,
+      20,
+      10
+     ],
+     "path": "/behavior_pack/recipes/copper_block.json",
+     "generatorId": "FORMATVER"
+    },
+    {
+     "type": "info",
+     "message": "Recipe format_version",
+     "data": [
+      1,
+      20,
+      10
+     ],
+     "path": "/examplemod.mcaddon#/behavior_pack/recipes/copper_block.json",
+     "generatorId": "FORMATVER"
+    },
+    {
+     "type": "testPass",
+     "message": "Geometry Format completed successfully",
+     "generatorId": "GEOFMT"
+    },
+    {
+     "type": "testPass",
+     "message": "Model Geometry Validation completed successfully",
+     "generatorId": "GEOMETRY"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "",
+     "generatorId": "GEOMETRY"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "",
+     "generatorId": "GEOMETRY"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Items Geometry",
+     "generatorId": "GEOMETRY"
+    },
+    {
+     "type": "testPass",
+     "message": "Minimum Definition of a Pack completed successfully",
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Behavior pack manifest found",
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Behavior pack manifest found",
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Resource pack manifest found",
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Resource pack manifest found",
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Behavior pack manifest item count",
+     "data": 2,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Resource pack manifest item count",
+     "data": 2,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Language catalog item count",
+     "data": 2,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Recipe item count",
+     "data": 2,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Minecraft addon item count",
+     "data": 1,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Language translations item count",
+     "data": 2,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Item texture item count",
+     "data": 2,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Terrain texture item count",
+     "data": 2,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Texture item count",
+     "data": 4,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Behavior pack folder item count",
+     "data": 2,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "info",
+     "message": "Resource pack folder item count",
+     "data": 2,
+     "generatorId": "ITEMS"
+    },
+    {
+     "type": "testPass",
+     "message": "Item Type completed successfully",
+     "generatorId": "ITEMTYPE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Item Type Identifier",
+     "generatorId": "ITEMTYPE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Item Type Category",
+     "generatorId": "ITEMTYPE"
+    },
+    {
+     "type": "testPass",
+     "message": "JSON Schema Validation completed successfully",
+     "generatorId": "JSON"
+    },
+    {
+     "type": "warning",
+     "message": "Structure issue",
+     "data": "In \"texture_data.examplemod:copper_ingot.textures\": textures/items/copper_ingot - string value found, but a array is required",
+     "path": "/examplemod.mcaddon#/resource_pack/textures/item_texture.json",
+     "generatorId": "JSON"
+    },
+    {
+     "type": "warning",
+     "message": "Structure issue",
+     "data": "In \"texture_data.examplemod:copper_ingot.textures\": textures/items/copper_ingot - string value found, but a array is required",
+     "path": "/resource_pack/textures/item_texture.json",
+     "generatorId": "JSON"
+    },
+    {
+     "type": "warning",
+     "message": "Structure issue",
+     "data": "In \"texture_data.examplemod:copper_block.textures\": textures/blocks/copper_block - string value found, but a array is required",
+     "path": "/examplemod.mcaddon#/resource_pack/textures/terrain_texture.json",
+     "generatorId": "JSON"
+    },
+    {
+     "type": "warning",
+     "message": "Structure issue",
+     "data": "In \"texture_data.examplemod:copper_block.textures\": textures/blocks/copper_block - string value found, but a array is required",
+     "path": "/resource_pack/textures/terrain_texture.json",
+     "generatorId": "JSON"
+    },
+    {
+     "type": "testPass",
+     "message": "JSON Structure completed successfully",
+     "generatorId": "JSONF"
+    },
+    {
+     "type": "testPass",
+     "message": "JSON Tags completed successfully",
+     "generatorId": "JSONTAGS"
+    },
+    {
+     "type": "info",
+     "message": "Terrrain texture file",
+     "data": "/resource_pack/textures/terrain_texture.json",
+     "path": "/resource_pack/textures/terrain_texture.json",
+     "generatorId": "JSONTAGS"
+    },
+    {
+     "type": "info",
+     "message": "Terrrain texture file",
+     "data": "/resource_pack/textures/terrain_texture.json",
+     "path": "/resource_pack/textures/terrain_texture.json",
+     "generatorId": "JSONTAGS"
+    },
+    {
+     "type": "info",
+     "message": "Item texture file",
+     "data": "/resource_pack/textures/item_texture.json",
+     "path": "/resource_pack/textures/item_texture.json",
+     "generatorId": "JSONTAGS"
+    },
+    {
+     "type": "info",
+     "message": "Item texture file",
+     "data": "/resource_pack/textures/item_texture.json",
+     "path": "/resource_pack/textures/item_texture.json",
+     "generatorId": "JSONTAGS"
+    },
+    {
+     "type": "testPass",
+     "message": "File Line/Size Information completed successfully",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Behavior pack manifest file lines",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Resource pack manifest file lines",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Language catalog file lines",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Recipe file lines",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Minecraft addon file size",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Language translations file lines",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Item texture file lines",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Terrain texture file lines",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Texture file size",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Behavior pack folder file lines",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Resource pack folder file lines",
+     "generatorId": "LINESIZE"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test MC Function Validation (MCFUNCTION)",
+     "generatorId": "MCFUNCTION"
+    },
+    {
+     "type": "testPass",
+     "message": "Min Engine Version completed successfully",
+     "generatorId": "MINENGINEVER"
+    },
+    {
+     "type": "recommendation",
+     "message": "Behavior pack manifest (1.20.20) has a lower minor version number compared to the expected version (1.26.50) or its previous minor version",
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "MINENGINEVER"
+    },
+    {
+     "type": "recommendation",
+     "message": "Behavior pack manifest (1.20.20) has a lower minor version number compared to the expected version (1.26.50) or its previous minor version",
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "MINENGINEVER"
+    },
+    {
+     "type": "recommendation",
+     "message": "Resource pack manifest (1.20.20) has a lower minor version number compared to the expected version (1.26.50) or its previous minor version",
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "MINENGINEVER"
+    },
+    {
+     "type": "recommendation",
+     "message": "Resource pack manifest (1.20.20) has a lower minor version number compared to the expected version (1.26.50) or its previous minor version",
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "MINENGINEVER"
+    },
+    {
+     "type": "info",
+     "message": "Behavior pack manifest min_engine_version",
+     "data": [
+      1,
+      20,
+      20
+     ],
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "MINENGINEVER"
+    },
+    {
+     "type": "info",
+     "message": "Behavior pack manifest min_engine_version",
+     "data": [
+      1,
+      20,
+      20
+     ],
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "MINENGINEVER"
+    },
+    {
+     "type": "info",
+     "message": "Resource pack manifest format_version",
+     "data": [
+      1,
+      20,
+      20
+     ],
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "MINENGINEVER"
+    },
+    {
+     "type": "info",
+     "message": "Resource pack manifest format_version",
+     "data": [
+      1,
+      20,
+      20
+     ],
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "MINENGINEVER"
+    },
+    {
+     "type": "testPass",
+     "message": "No Byte Order Mark allowed in json file. completed successfully",
+     "generatorId": "NOBOM"
+    },
+    {
+     "type": "testPass",
+     "message": "General info completed successfully",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Name",
+     "data": "examplemod (behavior)",
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Name",
+     "data": "examplemod (behavior)",
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Description",
+     "data": "Converted from Java by portkit",
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Description",
+     "data": "Converted from Java by portkit",
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Id",
+     "data": "9e148230-50d9-5119-975e-0ae40488a5db|0.1.0",
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Id",
+     "data": "9e148230-50d9-5119-975e-0ae40488a5db|0.1.0",
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Min Engine Version",
+     "data": 2,
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Min Engine Version",
+     "data": [
+      1,
+      20,
+      20
+     ],
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Min Engine Version",
+     "data": 2,
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Min Engine Version",
+     "data": [
+      1,
+      20,
+      20
+     ],
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Uuid",
+     "data": "9e148230-50d9-5119-975e-0ae40488a5db",
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Uuid",
+     "data": "9e148230-50d9-5119-975e-0ae40488a5db",
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Manifest",
+     "path": "/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Behavior Pack Manifest",
+     "path": "/examplemod.mcaddon#/behavior_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Min Engine Version",
+     "data": [
+      1,
+      20,
+      20
+     ],
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Min Engine Version",
+     "data": [
+      1,
+      20,
+      20
+     ],
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Uuid",
+     "data": "8e545919-a92e-567e-9eec-7df5112b142e",
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Uuid",
+     "data": "8e545919-a92e-567e-9eec-7df5112b142e",
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Manifest",
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Manifest",
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Name",
+     "data": "examplemod (resource)",
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Name",
+     "data": "examplemod (resource)",
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Description",
+     "data": "Converted from Java by portkit",
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Description",
+     "data": "Converted from Java by portkit",
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Id",
+     "data": "8e545919-a92e-567e-9eec-7df5112b142e|0.1.0",
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Id",
+     "data": "8e545919-a92e-567e-9eec-7df5112b142e|0.1.0",
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Format Version",
+     "data": 2,
+     "path": "/examplemod.mcaddon#/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "info",
+     "message": "Resource Pack Format Version",
+     "data": 2,
+     "path": "/resource_pack/manifest.json",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Entity Geometry",
+     "generatorId": "PACK"
+    },
+    {
+     "type": "testPass",
+     "message": "Pack File Count completed successfully",
+     "generatorId": "PACKFILECOUNT"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "File Count",
+     "data": 19,
+     "generatorId": "PACKFILECOUNT"
+    },
+    {
+     "type": "testPass",
+     "message": "General info completed successfully",
+     "generatorId": "PACKMETADATA"
+    },
+    {
+     "type": "testPass",
+     "message": "Pack Size Information completed successfully",
+     "generatorId": "PACKSIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Overall Size",
+     "data": 3000,
+     "generatorId": "PACKSIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "",
+     "data": 19,
+     "generatorId": "PACKSIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "",
+     "data": 14,
+     "generatorId": "PACKSIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "",
+     "data": 3000,
+     "generatorId": "PACKSIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Content File Count",
+     "data": 18,
+     "generatorId": "PACKSIZE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Content Folder Count",
+     "data": 10,
+     "generatorId": "PACKSIZE"
+    },
+    {
+     "type": "testPass",
+     "message": "Path Length completed successfully",
+     "generatorId": "PATHLENGTH"
+    },
+    {
+     "type": "testPass",
+     "message": "Project Integrity completed successfully",
+     "generatorId": "PRJINT"
+    },
+    {
+     "type": "testPass",
+     "message": "Resource Animation completed successfully",
+     "generatorId": "RESOURCEANIMATION"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Animations",
+     "generatorId": "RESOURCEANIMATION"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Bones",
+     "generatorId": "RESOURCEANIMATION"
+    },
+    {
+     "type": "testPass",
+     "message": "Resource Pack Dependencies completed successfully",
+     "generatorId": "RPDEPENDS"
+    },
+    {
+     "type": "testPass",
+     "message": "Script completed successfully",
+     "generatorId": "SCRIPT"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "",
+     "generatorId": "SCRIPT"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Script Modules (SCRIPTMODULE)",
+     "generatorId": "SCRIPTMODULE"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Sound Definitions (SNDSDEF)",
+     "generatorId": "SNDSDEF"
+    },
+    {
+     "type": "testPass",
+     "message": "Strict Platform completed successfully",
+     "generatorId": "STRICT"
+    },
+    {
+     "type": "testPass",
+     "message": "Summary Information completed successfully",
+     "generatorId": "SUMMARY"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Resource Manifests",
+     "generatorId": "SUMMARY"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Behavior Manifests",
+     "generatorId": "SUMMARY"
+    },
+    {
+     "type": "testPass",
+     "message": "Texture Validation completed successfully",
+     "generatorId": "TEXTURE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "",
+     "generatorId": "TEXTURE"
+    },
+    {
+     "type": "testPass",
+     "message": "Texture Image Validation completed successfully",
+     "generatorId": "TEXTUREIMAGE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "",
+     "generatorId": "TEXTUREIMAGE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Texture Images Tier 0",
+     "generatorId": "TEXTUREIMAGE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Texture Images Tier 1",
+     "generatorId": "TEXTUREIMAGE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Texture Images Tier 2",
+     "generatorId": "TEXTUREIMAGE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Texture Images Tier 3",
+     "generatorId": "TEXTUREIMAGE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Texture Images Tier 4",
+     "generatorId": "TEXTUREIMAGE"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Texture Images Tier 5",
+     "generatorId": "TEXTUREIMAGE"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Texture List Validation (TEXTURELIST)",
+     "generatorId": "TEXTURELIST"
+    },
+    {
+     "type": "testPass",
+     "message": "Texture References completed successfully",
+     "generatorId": "TEXTUREREF"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Texture References",
+     "generatorId": "TEXTUREREF"
+    },
+    {
+     "type": "testPass",
+     "message": "Types Info Aggregation completed successfully",
+     "generatorId": "TYPES"
+    },
+    {
+     "type": "featureAggregate",
+     "message": "Types",
+     "generatorId": "TYPES"
+    },
+    {
+     "type": "testPass",
+     "message": "Unknown files completed successfully",
+     "generatorId": "UNKFILE"
+    },
+    {
+     "type": "testPass",
+     "message": "Unknown JSON completed successfully",
+     "generatorId": "UNKJSON"
+    },
+    {
+     "type": "testPass",
+     "message": "Unlinked Items completed successfully",
+     "generatorId": "UNLINK"
+    },
+    {
+     "type": "warning",
+     "message": "Link to item type is not found in this pack",
+     "data": "/behavior_pack/recipes/copper_block.json to `examplemod:copper_ingot`",
+     "path": "/behavior_pack/recipes/copper_block.json",
+     "generatorId": "UNLINK"
+    },
+    {
+     "type": "warning",
+     "message": "Link to item type is not found in this pack",
+     "data": "/examplemod.mcaddon#/behavior_pack/recipes/copper_block.json to `examplemod:copper_ingot`",
+     "path": "/examplemod.mcaddon#/behavior_pack/recipes/copper_block.json",
+     "generatorId": "UNLINK"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test Valid files (VALFILE)",
+     "generatorId": "VALFILE"
+    },
+    {
+     "type": "testPass",
+     "message": "Vanilla Protected Assets completed successfully",
+     "generatorId": "VANPRO"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test VSCode Files (VSCODEFILE)",
+     "generatorId": "VSCODEFILE"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test World Validation (WORLD)",
+     "generatorId": "WORLD"
+    },
+    {
+     "type": "unknown",
+     "message": "No applicable items found for test World Data Validation (WORLDDATA)",
+     "generatorId": "WORLDDATA"
+    },
+    {
+     "type": "testPass",
+     "message": "World Pack References completed successfully",
+     "generatorId": "WPACKREFS"
+    }
+   ]
+  }
+ ],
+ "errors": 5,
+ "warnings": 6,
+ "recommendations": 6
+}

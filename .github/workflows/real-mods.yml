@@ -31,8 +31,31 @@ jobs:
       - name: Fetch pinned jars (sha512-checked)
         run: portkit corpus fetch
 
-      - name: Corpus coverage (fails on regression against fixtures/real/coverage-baseline.json)
-        run: portkit eval --corpus
+      # Mojang's Minecraft Creator Tools as a second, report-only oracle (#113).
+      # Pinned so a new mct release can't move the numbers unannounced.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Report-only: if the install breaks, eval --mct skips with a note
+      # instead of failing the corpus gate.
+      - name: Install Minecraft Creator Tools (mct)
+        continue-on-error: true
+        run: |
+          npm install -g @minecraft/creator-tools@0.20.0
+          mct eula --accept
+          mct --version
+
+      - name: Corpus coverage (fails on regression against fixtures/real/coverage-baseline.json; mct findings are report-only)
+        run: portkit eval --corpus --mct --json corpus-eval.json
+
+      - name: Upload corpus eval (coverage rows + mct findings)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-eval
+          path: corpus-eval.json
+          if-no-files-found: ignore
 
       - name: Corpus tests
         run: pytest -q -m realmods

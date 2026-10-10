@@ -425,10 +425,14 @@ def cmd_eval(args) -> int:
         print(f"no fixtures under {root}")
         return 1
 
+    mct_exe, mct_runs, mct_failed = _mct_setup(args)
+
     rows, measured, failures, error_counts = [], [], 0, {}
     for name, source in cases:
         with tempfile.TemporaryDirectory() as tmp:
             result = convert(source, Path(tmp) / "out", emit_addon=not corpus_mode)
+            if mct_exe:
+                _mct_one(mct_exe, name, Path(tmp) / "out", mct_runs, mct_failed)
             ok = result.report.ok
             failures += 0 if ok else 1
             error_counts[name] = len(result.report.errors)
@@ -443,6 +447,19 @@ def cmd_eval(args) -> int:
     print(f"{'fixture'.ljust(width)}  files  residue  coverage  valid")
     for name, handled, residue, coverage, ok in rows:
         print(f"{name.ljust(width)}  {handled:5d}  {residue:7d}  {coverage:7.1f}%  {'yes' if ok else 'NO'}")
+
+    if mct_runs or mct_failed:
+        from .validate import mct
+
+        print()
+        if mct_runs:
+            print(mct.render(mct_runs))
+        for name, err in mct_failed.items():
+            print(f"note: {name}: mct validate failed: {err}")
+        print("(mct findings are report-only: they do not fail the gate)")
+    if getattr(args, "json", None):
+        _write_eval_json(Path(args.json), corpus_mode, rows, error_counts,
+                         mct_exe, mct_runs, mct_failed, getattr(args, "mct", False))
 
     baseline_path = Path(args.baseline) if args.baseline else root / bl.BASELINE_NAME
 
@@ -482,6 +499,58 @@ def cmd_eval(args) -> int:
         return 1
     print(f"\ncoverage at or above baseline for all {len(measured)} fixtures")
     return 1 if failures else 0
+
+
+def _mct_setup(args):
+    """(mct executable or None, results by tree, failures by tree) for ``--mct``."""
+    if not getattr(args, "mct", False):
+        return None, {}, {}
+    from .validate import mct
+
+    exe = mct.find_mct()
+    if exe is None:
+        print("note: --mct asked for, but `mct` is not on PATH; skipping Mojang's validator "
+              "(npm install -g @minecraft/creator-tools, Node 22+)")
+    return exe, {}, {}
+
+
+def _mct_one(exe, name, tree, runs, failed) -> None:
+    """Run mct over one converted tree; a failure is a note, never a verdict."""
+    from .validate import mct
+
+    try:
+        summary = mct.run(tree, exe=exe)
+    except mct.MctError as exc:
+        failed[name] = str(exc)
+        return
+    if summary is not None:
+        runs[name] = summary
+
+
+def _write_eval_json(path: Path, corpus_mode, rows, error_counts, mct_exe, mct_runs,
+                     mct_failed, mct_asked) -> None:
+    """The eval as JSON: one row per fixture or mod, plus the mct block when asked."""
+    from .validate import mct
+
+    data: dict = {
+        "mode": "corpus" if corpus_mode else "fixtures",
+        "rows": [
+            {"name": name, "files": files, "residue": residue,
+             "coverage": round(coverage, 2), "valid": ok, "errors": error_counts.get(name, 0)}
+            for name, files, residue, coverage, ok in rows
+        ],
+    }
+    if mct_asked:
+        data["mct"] = {
+            "available": mct_exe is not None,
+            "report_only": True,
+            "trees": {name: s.to_dict() for name, s in mct_runs.items()},
+            "failed": dict(mct_failed),
+            "total": mct.aggregate(mct_runs).to_dict(top=20) if mct_runs else None,
+        }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    print(f"eval written: {path}")
 
 
 def _corpus_cases(args):
@@ -708,6 +777,12 @@ def main(argv=None) -> int:
     c.add_argument("--corpus", action="store_true", help="evaluate the real-mod corpus")
     c.add_argument("--manifest", metavar="PATH", help="corpus manifest (default fixtures/real/mods.toml)")
     c.add_argument("--fetch", action="store_true", help="with --corpus, download missing jars first")
+    c.add_argument(
+        "--mct", action="store_true",
+        help="also run Mojang's `mct validate` (@minecraft/creator-tools) on each converted tree "
+             "and report its findings by severity and rule; report-only, never fails the run, "
+             "skipped with a note when mct is not on PATH (#113)",
+    )
     a = p.add_argument_group(
         "agent matrix",
         "with --agent, run the fixture residue through each provider/model instead and print "
@@ -730,7 +805,8 @@ def main(argv=None) -> int:
     a.add_argument("--agent-max-tokens", type=int, metavar="N", help="token ceiling per target run, per fixture")
     a.add_argument("--agent-max-cost", type=float, metavar="USD", help="dollar ceiling per target run, per fixture")
     a.add_argument("--json", "--matrix-out", dest="json", metavar="PATH",
-                   help="also write the rows, with per-fixture and per-task scores, as JSON")
+                   help="also write the rows, with per-fixture and per-task scores, as JSON "
+                        "(without --agent: the coverage rows, plus the mct block with --mct)")
     p.set_defaults(func=cmd_eval)
 
     p = sub.add_parser("corpus", help="fetch or list the pinned real-mod jars (#21)")

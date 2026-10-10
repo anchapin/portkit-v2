@@ -19,6 +19,29 @@ per-mod validator `errors` count. A real mod is allowed to be invalid today,
 but it can't get worse unnoticed. Bank an improvement with
 `portkit eval --corpus --update-baseline`.
 
+## A second oracle: Mojang's mct
+
+`portkit eval --corpus --mct` also runs Mojang's
+[Minecraft Creator Tools](https://www.npmjs.com/package/@minecraft/creator-tools)
+(`mct validate`, Node 22+) over each converted mod and prints its findings by
+severity and rule. Our validator is otherwise the only judge; mct is a
+differential check that catches what ours misses (#113). It's report-only: mct
+findings never fail the run. With `--json PATH` they're written alongside the
+coverage rows. Without `mct` on PATH the flag is skipped with a note.
+
+```bash
+npm install -g @minecraft/creator-tools@0.20.0
+mct eula --accept              # once; Mojang's EULA + privacy statement
+portkit eval --corpus --mct --json /tmp/corpus-eval.json
+```
+
+Known mct noise on our output, as of mct 0.20.0: `JSON` "string value found,
+but a array is required" on `texture_data.*.textures` (vanilla packs use the
+string form), `UNLINK` on `minecraft:` items in recipes (mct doesn't index
+vanilla items there), and `UNLINK` on recipes and loot naming our own *blocks*
+(mct only counts `items/` as item types). `FORMATVER`/`MINENGINEVER`
+recommendations say our format versions trail the current release.
+
 CI: `.github/workflows/real-mods.yml` runs nightly and on demand, with the jars
 cached on the manifest's hash. `pytest -q` skips the `realmods` test when the
 jars aren't cached, so the normal suite stays offline.
