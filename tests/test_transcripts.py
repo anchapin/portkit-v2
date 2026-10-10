@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RESIDUE = ROOT / "fixtures" / "residue_mod" / "input"
 TRANSCRIPT = ROOT / "fixtures" / "transcripts" / "residue_mod.jsonl"
 TAG = "recipe:data/examplemod/recipes/steel_block.json"
-SMITHING = "recipe:data/examplemod/recipes/steel_smithing.json"
+SMITHING = "recipe:data/examplemod/recipes/steel_trim.json"
 
 
 def _replay(tmp_path, client):
@@ -65,7 +65,7 @@ def test_recording_then_replaying_round_trips(tmp_path):
     script = [
         tool_call("validate"),
         Message("assistant", "Nothing to convert faithfully."),
-        Message("assistant", "Same for the smithing recipe."),
+        Message("assistant", "Same for the armour trim."),
     ]
     path = tmp_path / "run.jsonl"
     recorder = RecordingClient(FakeLLM(script, usage=Usage(10, 2)), path)
