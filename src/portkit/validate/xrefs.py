@@ -143,9 +143,12 @@ def _recipe_item_refs(body: dict) -> list[tuple[str, object]]:
     for i, ingredient in enumerate(ingredients if isinstance(ingredients, list) else []):
         if isinstance(ingredient, dict):
             refs.append((f"ingredients[{i}]", ingredient.get("item")))
-    single = body.get("input")
-    if isinstance(single, dict):
-        refs.append(("input", single.get("item")))
+    for slot in ("input", "output", "reagent"):  # furnace/brewing: a bare id or {"item"}
+        value = body.get(slot)
+        if isinstance(value, dict):
+            refs.append((slot, value.get("item")))
+        elif isinstance(value, str):
+            refs.append((slot, value))
     for slot in ("template", "base", "addition"):  # smithing: a bare id or {"item"}/{"tag"}
         value = body.get(slot)
         if isinstance(value, str):

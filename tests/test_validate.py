@@ -181,12 +181,14 @@ def test_non_object_recipe_body_is_flagged_not_crashing(tmp_path):
     assert any(f.rule == "recipe.shape" for f in report.errors)
 
 
-def test_furnace_recipe_with_result_key_is_accepted(tmp_path):
-    """The converter emits the furnace family's product as "result"; keep it passing."""
+def test_furnace_recipe_needs_output_not_result(tmp_path):
+    """#90: Bedrock's furnace recipe names its product "output"."""
     empty, _ = _recipe_findings(
-        tmp_path,
-        _recipe("minecraft:recipe_furnace", input={"item": "m:ore"}, result={"item": "m:ingot"}),
+        tmp_path / "result",
+        _recipe("minecraft:recipe_furnace", input="m:ore", result={"item": "m:ingot"}),
     )
+    assert [f.message.split()[0] for f in empty] == ["output"]
+    empty, _ = _recipe_findings(tmp_path / "output", _recipe("minecraft:recipe_furnace", input="m:ore", output="m:ingot"))
     assert empty == []
 
 

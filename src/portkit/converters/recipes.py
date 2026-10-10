@@ -277,7 +277,15 @@ def convert(mod: SourceMod) -> ConversionResult:
                     Unhandled(rel, "recipe", _tag_reason(recipe.get("ingredient"), tag_resolver))
                 )
                 continue
-            body["input"] = ingredient
+            if "item" not in ingredient:
+                # Bedrock's furnace input is one item id; a tag has no place there.
+                result.unhandled.append(Unhandled(
+                    rel, "recipe",
+                    f"furnace input is tag {ingredient.get('tag')!r}; Bedrock's furnace "
+                    "recipe takes a single item id, not a tag",
+                ))
+                continue
+            body["input"] = ingredient["item"]
 
         out = _item(recipe.get("result"), tag_resolver)
         if out is None:
@@ -289,7 +297,20 @@ def convert(mod: SourceMod) -> ConversionResult:
         elif "count" in recipe:
             # stonecutting keeps the count beside the result, not inside it
             count = recipe["count"]
-        body["result"] = {**out, "count": count} if count != 1 else out
+        if bedrock_type == "minecraft:recipe_furnace":
+            # Bedrock names the product "output", a bare item id with no count
+            # (learn.microsoft.com recipe_furnace reference). See #90.
+            if "item" not in out:
+                result.unhandled.append(Unhandled(rel, "recipe", "furnace result is a tag, not an item"))
+                continue
+            body["output"] = out["item"]
+            if count != 1:
+                result.notes.append(
+                    f"{rel}: furnace result count {count} dropped; Bedrock's furnace "
+                    "recipe output is a single item id and always yields one"
+                )
+        else:
+            body["result"] = {**out, "count": count} if count != 1 else out
 
         result.files[f"recipes/{path.stem}.json"] = {
             "format_version": "1.20.10",
