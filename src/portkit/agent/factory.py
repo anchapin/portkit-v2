@@ -3,13 +3,25 @@
 Precedence, highest first: explicit arguments, the ``config`` mapping (e.g. an
 ``[agent]`` table you loaded from TOML), then environment variables:
 
-    PORTKIT_LLM_PROVIDER   openai | anthropic | gemini
+    PORTKIT_LLM_PROVIDER   openai | anthropic | gemini | gemini_native
     PORTKIT_LLM_MODEL      model name, required
     PORTKIT_LLM_BASE_URL   optional, for gateways and local servers
     PORTKIT_LLM_TEMPERATURE optional sampling temperature, sent as ``temperature``
     OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY   the provider's usual key variable
 
-``gemini`` is the OpenAI client pointed at Google's OpenAI-compatible endpoint.
+Two Gemini paths are available:
+
+- ``gemini``: OpenAI-compatible endpoint at ``/v1beta/openai/chat/completions``.
+  Same wire format as ``openai``. Rejects AI Studio **auth keys** with HTTP 400
+  (aistudio.google.com/docs/api-key — auth keys became the default on May 28,
+  2026).
+- ``gemini_native``: Native ``generateContent`` endpoint at
+  ``/v1beta/models/<model>:generateContent``, authenticated with
+  ``X-goog-api-key``. Use this for any post-May-2026 AI Studio key, or when
+  the OpenAI-compat path produces ``finish_reason=error`` against a Gemini
+  model. See :mod:`portkit.agent.gemini`.
+  It ignores ``PORTKIT_LLM_BASE_URL`` (a gateway can't speak generateContent);
+  only a ``base_url`` in ``config`` overrides its endpoint.
 
 Config keys mirror those names: provider, model, base_url, api_key, and
 api_key_env to read the key from a differently named variable.
@@ -20,6 +32,7 @@ import os
 from typing import Any, Mapping
 
 from .anthropic import AnthropicClient
+from .gemini import GeminiClient
 from .http import Transport, post_json
 from .loop import LLMClient
 from .openai import GEMINI_BASE_URL, OpenAIClient
@@ -27,7 +40,13 @@ from .openai import GEMINI_BASE_URL, OpenAIClient
 PROVIDERS = {
     "openai": (OpenAIClient, "OPENAI_API_KEY"),
     "anthropic": (AnthropicClient, "ANTHROPIC_API_KEY"),
+    # OpenAI-compat endpoint. Rejects AI Studio auth keys with HTTP 400
+    # (aistudio.google.com/docs/api-key). Prefer ``gemini_native`` for any
+    # post-May-2026 AI Studio key.
     "gemini": (OpenAIClient, "GEMINI_API_KEY"),
+    # Native ``generateContent`` endpoint. Accepts AI Studio auth keys via
+    # the ``X-goog-api-key`` header. See :mod:`portkit.agent.gemini`.
+    "gemini_native": (GeminiClient, "GEMINI_API_KEY"),
 }
 DEFAULT_BASE_URLS = {"gemini": GEMINI_BASE_URL}
 
@@ -58,7 +77,13 @@ def make_client(
     cls, default_key_env = PROVIDERS[name]
     api_key = config.get("api_key") or env.get(config.get("api_key_env") or default_key_env)
     kwargs: dict[str, Any] = {"model": chosen_model, "api_key": api_key, "transport": transport}
-    base_url = pick(None, "base_url") or DEFAULT_BASE_URLS.get(name)
+    if name == "gemini_native":
+        # Only an explicit config base_url applies here. A global
+        # PORTKIT_LLM_BASE_URL points at an OpenAI-style gateway, which can't
+        # speak generateContent, so honouring it would only misroute the key.
+        base_url = config.get("base_url")
+    else:
+        base_url = pick(None, "base_url") or DEFAULT_BASE_URLS.get(name)
     if base_url:
         kwargs["base_url"] = base_url
     temperature = pick(None, "temperature")
