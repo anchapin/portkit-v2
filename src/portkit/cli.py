@@ -325,7 +325,7 @@ def cmd_eval_agent(args) -> int:
     import json as _json
 
     from .agent import Budget, Pricing, make_client
-    from .agent.matrix import agent_fixtures, render, run_matrix
+    from .agent.matrix import agent_fixtures, parse_target, render, run_matrix, target_label
     from .agent.transcript import ReplayClient
 
     root = Path(args.fixtures or FIXTURES)
@@ -366,17 +366,18 @@ def cmd_eval_agent(args) -> int:
             return 2
         targets = []
         for spec in specs:
-            provider, _, model = spec.partition(":")
-            label = spec if provider else f"(env):{model}"
+            provider, model, base_url = parse_target(spec)
+            label = target_label(provider, model, base_url)
+            config = {"base_url": base_url} if base_url else None
 
             try:  # a missing key or unknown provider is a setup error, not a score
-                make_client(provider or None, model or None)
+                make_client(provider, model, config=config)
             except Exception as exc:
                 print(f"{label}: {exc}", file=sys.stderr)
                 return 2
 
-            def factory(name, provider=provider or None, model=model or None):
-                return make_client(provider, model)
+            def factory(name, provider=provider, model=model, config=config):
+                return make_client(provider, model, config=config)
             targets.append((label, factory))
         cases = agent_fixtures(root, args.fixture or ())
 
@@ -387,6 +388,7 @@ def cmd_eval_agent(args) -> int:
     print(f"fixtures: {', '.join(c.name for c in cases)}")
     print(render(rows))
     if args.json:
+        Path(args.json).parent.mkdir(parents=True, exist_ok=True)
         Path(args.json).write_text(_json.dumps([r.to_dict() for r in rows], indent=2) + "\n")
     # A replay that comes back unscored drifted from its transcript; fail CI on it.
     if args.agent_replay and any(r.unscored for r in rows):
@@ -581,18 +583,21 @@ def main(argv=None) -> int:
         "format failures, tokens, stop reasons",
     )
     a.add_argument("--agent", action="store_true", help="run the agent eval matrix")
-    a.add_argument("--target", action="append", metavar="PROVIDER:MODEL",
-                   help="a provider and model to evaluate (repeatable)")
+    a.add_argument("--target", action="append", metavar="PROVIDER:MODEL[@BASE_URL]",
+                   help="a provider and model to evaluate (repeatable); an optional @BASE_URL "
+                        "points that row at its own endpoint, e.g. "
+                        "openai:anthropic/claude-haiku-4.5@https://openrouter.ai/api/v1")
     a.add_argument("--provider", help="shorthand for one --target")
     a.add_argument("--model", help="shorthand for one --target")
-    a.add_argument("--fixture", action="append", metavar="NAME",
+    a.add_argument("--fixture", "--agent-fixture", action="append", metavar="NAME",
                    help="limit to these fixtures (default: every fixture with residue)")
     a.add_argument("--agent-replay", metavar="PATH",
                    help="replay a transcript (one fixture) or a directory of <fixture>.jsonl; no network")
     a.add_argument("--agent-max-steps", type=int, default=12, metavar="N", help="step budget per group (default 12)")
     a.add_argument("--agent-max-tokens", type=int, metavar="N", help="token ceiling per target run, per fixture")
     a.add_argument("--agent-max-cost", type=float, metavar="USD", help="dollar ceiling per target run, per fixture")
-    a.add_argument("--json", metavar="PATH", help="also write the rows, with per-task scores, as JSON")
+    a.add_argument("--json", "--matrix-out", dest="json", metavar="PATH",
+                   help="also write the rows, with per-fixture and per-task scores, as JSON")
     p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args(argv)
