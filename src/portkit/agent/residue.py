@@ -61,6 +61,7 @@ _OUTPUT_HINTS = {
     "sound": "Bedrock sounds are declared in resource_pack/sounds/sound_definitions.json.",
     "texture": "Bedrock textures live under resource_pack/textures/.",
     "texture_animation": "Bedrock flipbooks go in resource_pack/textures/flipbook_textures.json.",
+    "lang": "Bedrock names go in resource_pack/texts/<Locale>.lang; add them with set_lang_entries.",
 }
 
 _BINARY_SUFFIXES = {".png", ".ogg", ".wav", ".class", ".jar", ".nbt"}
@@ -171,12 +172,10 @@ class _TrackingToolBox(ToolBox):
         super().__init__(source, out_tree)
         self.originals: dict[str, bytes | None] = {}
 
-    def write_output(self, path: str, content: dict) -> dict:
-        target = self._resolve(self.out_tree, path)
-        rel = str(target.relative_to(self.out_tree.resolve()))
+    def _before_write(self, target: Path) -> None:
+        rel = str(target.resolve().relative_to(self.out_tree.resolve()))
         if rel not in self.originals:
             self.originals[rel] = target.read_bytes() if target.is_file() else None
-        return super().write_output(path, content)
 
     def rollback(self) -> None:
         for rel, original in self.originals.items():
