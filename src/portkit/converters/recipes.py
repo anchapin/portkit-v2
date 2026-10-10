@@ -34,7 +34,12 @@ _FURNACE_TYPES = {
 # Types with a real Bedrock equivalent we deliberately do not attempt yet, so the
 # residue says why instead of "unsupported".
 _KNOWN_UNSUPPORTED = {
-    "minecraft:smithing_trim": "armour trims have no Bedrock recipe form",
+    "minecraft:smithing_trim": (
+        "an armour trim; Bedrock has minecraft:recipe_smithing_trim, but its slots only "
+        "accept items carrying the trim_templates, trimmable_armors and trim_materials "
+        "tags, and a custom item tagged trim_materials has no effect, so whether this "
+        "trim can work on Bedrock is a judgment call"
+    ),
     "minecraft:crafting_transmute": "transmute recipes have no Bedrock equivalent",
 }
 

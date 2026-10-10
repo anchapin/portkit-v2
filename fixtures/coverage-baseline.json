@@ -1,5 +1,10 @@
 {
   "fixtures": {
+    "agent_mod": {
+      "coverage": 80.0,
+      "files": 12,
+      "residue": 3
+    },
     "animated_block_mod": {
       "coverage": 100.0,
       "files": 6,

@@ -105,7 +105,7 @@ mean, stdev and range of resolved groups, steps, tokens and cost, plus how many
 runs resolved each group. The same numbers land in `OUT/repeat-summary.json`.
 
 ```bash
-portkit convert fixtures/residue_mod_enriched/input /tmp/var --agent --repeat 3 \
+portkit convert fixtures/agent_mod/input /tmp/var --agent --repeat 3 \
   --agent-max-cost 0.25 --agent-record /tmp/var/run.jsonl
 ```
 
