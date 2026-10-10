@@ -33,7 +33,6 @@ _FURNACE_TYPES = {
 # Types with a real Bedrock equivalent we deliberately do not attempt yet, so the
 # residue says why instead of "unsupported".
 _KNOWN_UNSUPPORTED = {
-    "minecraft:smithing_transform": "smithing recipes need a template item Bedrock models differently",
     "minecraft:smithing_trim": "armour trims have no Bedrock recipe form",
     "minecraft:crafting_transmute": "transmute recipes have no Bedrock equivalent",
 }
@@ -127,6 +126,63 @@ def _tag_reason(spec) -> str:
     return "ingredient uses a tag or item list"
 
 
+def _smithing_item(spec) -> str | None:
+    """Bedrock smithing slots take a bare item id; a multi-item tag has no form."""
+    mapped = _item(spec)
+    return mapped.get("item") if mapped else None
+
+
+def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult):
+    """A Java smithing_transform, as Bedrock's smithing or (when incomplete) crafting.
+
+    Complete (template, base and addition all name an item): Bedrock has the
+    same recipe, ``minecraft:recipe_smithing_transform`` on the smithing table.
+
+    Incomplete (template or addition missing): Bedrock's smithing recipe needs
+    all three, and inventing the missing ones changes what the player has to
+    gather (#87). So it becomes a shapeless crafting recipe from the inputs the
+    source does name to its result, and the downgrade is said in the notes.
+    Returns (body key, body) or None when the recipe went to residue.
+    """
+    slots = {}
+    for slot in ("template", "base", "addition"):
+        spec = recipe.get(slot)
+        if spec in (None, "", {}, []):
+            continue
+        item = _smithing_item(spec)
+        if item is None:
+            result.unhandled.append(Unhandled(rel, "recipe", f"smithing {slot}: {_tag_reason(spec)}"))
+            return None
+        slots[slot] = item
+    out = _smithing_item(recipe.get("result"))
+    if out is None or "base" not in slots:
+        result.unhandled.append(
+            Unhandled(rel, "recipe", "smithing recipe has no readable base or result item")
+        )
+        return None
+    description = {"identifier": identifier}
+    if len(slots) == 3:
+        return "minecraft:recipe_smithing_transform", {
+            "description": description,
+            "tags": ["smithing_table"],
+            "template": slots["template"],
+            "base": slots["base"],
+            "addition": slots["addition"],
+            "result": out,
+        }
+    missing = [s for s in ("template", "addition") if s not in slots]
+    result.notes.append(
+        f"{rel}: smithing recipe has no {' or '.join(missing)}, which Bedrock's smithing "
+        "table requires; converted to a shapeless crafting recipe from the inputs it names"
+    )
+    return "minecraft:recipe_shapeless", {
+        "description": description,
+        "tags": ["crafting_table"],
+        "ingredients": [{"item": slots[s]} for s in ("template", "base", "addition") if s in slots],
+        "result": {"item": out},
+    }
+
+
 def convert(mod: SourceMod) -> ConversionResult:
     result = ConversionResult()
     for lane in ("recipes", "recipe"):
@@ -145,6 +201,15 @@ def convert(mod: SourceMod) -> ConversionResult:
             continue
 
         java_type = recipe.get("type")
+        if java_type == "minecraft:smithing_transform":
+            converted = _smithing(recipe, f"{mod.namespace}:{path.stem}", rel, result)
+            if converted is not None:
+                body_key, body = converted
+                result.files[f"recipes/{path.stem}.json"] = {
+                    "format_version": "1.20.10",
+                    body_key: body,
+                }
+            continue
         mapping = _SUPPORTED.get(java_type)
         if mapping is None:
             why = _KNOWN_UNSUPPORTED.get(
