@@ -63,3 +63,16 @@ def test_other_namespace_is_not_swallowed_as_code(tmp_path):
     mod = build(tmp_path, {"block.someothermod.thing": "Thing"})
     result = lang.convert(mod)
     assert [u.kind for u in result.unhandled] == ["lang"]
+
+
+@pytest.mark.parametrize("sep", ["\n", "\r\n", "\r"])
+def test_newlines_in_a_value_become_linebreak_tokens(tmp_path, sep):
+    # Storage Drawers and Tinkers' Construct ship multi-line names (#108).
+    mod = build(tmp_path, {
+        "block.examplemod.drawer": f"Drawer{sep}Hold in off-hand to lock",
+        "item.examplemod.key": "Key",
+    })
+    text = lang.convert(mod).files["texts/en_US.lang"]
+    lines = text.splitlines()
+    assert "tile.examplemod:drawer.name=Drawer~LINEBREAK~Hold in off-hand to lock" in lines
+    assert all("=" in line for line in lines)
