@@ -36,7 +36,7 @@ def _good_script():
         tool_call("write_output", path="behavior_pack/recipes/steel_block.json", content=BEDROCK_RECIPE),
         tool_call("validate"),
         Message("assistant", "Converted the tag recipe; the validator is clean."),
-        Message("assistant", "Bedrock has no recipe form for armour trims."),
+        Message("assistant", "Declined: Bedrock ignores trim_materials on a custom item, so a steel trim cannot work."),
     ]
 
 
