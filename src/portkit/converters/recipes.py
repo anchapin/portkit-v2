@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 from ..model import ConversionResult, SourceMod, Unhandled
+from .tags import TagResolver
 
 # Java type -> (Bedrock body key, crafting tags).
 # Bedrock has no separate stonecutter recipe type: a stonecutter recipe is a
@@ -102,7 +103,7 @@ def resolve_tag(tag: str) -> str | None:
     return None
 
 
-def _item(spec) -> dict | None:
+def _item(spec, tags: TagResolver | None = None) -> dict | None:
     """Java item specs come in several shapes. Only translate the unambiguous ones."""
     if isinstance(spec, str):
         return {"item": spec}
@@ -115,24 +116,31 @@ def _item(spec) -> dict | None:
             if str(spec["tag"]) in _BEDROCK_VANILLA_TAGS:
                 return {"tag": str(spec["tag"])}
             resolved = resolve_tag(str(spec["tag"]))
-            return {"item": resolved} if resolved else None
+            if resolved:
+                return {"item": resolved}
+            if tags is not None:
+                found = tags.resolve(str(spec["tag"])).item
+                return {"item": found} if found else None
+            return None
     # multi-item tags and weighted lists have no clean 1:1 Bedrock form
     return None
 
 
-def _tag_reason(spec) -> str:
+def _tag_reason(spec, tags: TagResolver | None = None) -> str:
+    if isinstance(spec, dict) and "tag" in spec and tags is not None:
+        return tags.resolve(str(spec["tag"])).reason
     if isinstance(spec, dict) and "tag" in spec:
         return f"ingredient uses tag {spec['tag']!r}, which covers more than one item"
     return "ingredient uses a tag or item list"
 
 
-def _smithing_item(spec) -> str | None:
+def _smithing_item(spec, tags: TagResolver | None = None) -> str | None:
     """Bedrock smithing slots take a bare item id; a multi-item tag has no form."""
-    mapped = _item(spec)
+    mapped = _item(spec, tags)
     return mapped.get("item") if mapped else None
 
 
-def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult):
+def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult, tags=None):
     """A Java smithing_transform, as Bedrock's smithing or (when incomplete) crafting.
 
     Complete (template, base and addition all name an item): Bedrock has the
@@ -149,12 +157,12 @@ def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult)
         spec = recipe.get(slot)
         if spec in (None, "", {}, []):
             continue
-        item = _smithing_item(spec)
+        item = _smithing_item(spec, tags)
         if item is None:
-            result.unhandled.append(Unhandled(rel, "recipe", f"smithing {slot}: {_tag_reason(spec)}"))
+            result.unhandled.append(Unhandled(rel, "recipe", f"smithing {slot}: {_tag_reason(spec, tags)}"))
             return None
         slots[slot] = item
-    out = _smithing_item(recipe.get("result"))
+    out = _smithing_item(recipe.get("result"), tags)
     if out is None or "base" not in slots:
         result.unhandled.append(
             Unhandled(rel, "recipe", "smithing recipe has no readable base or result item")
@@ -192,6 +200,7 @@ def convert(mod: SourceMod) -> ConversionResult:
     else:
         return result
 
+    tag_resolver = TagResolver(mod)
     for path in sorted(src.rglob("*.json")):
         rel = result.claim(mod, path)
         try:
@@ -202,7 +211,7 @@ def convert(mod: SourceMod) -> ConversionResult:
 
         java_type = recipe.get("type")
         if java_type == "minecraft:smithing_transform":
-            converted = _smithing(recipe, f"{mod.namespace}:{path.stem}", rel, result)
+            converted = _smithing(recipe, f"{mod.namespace}:{path.stem}", rel, result, tag_resolver)
             if converted is not None:
                 body_key, body = converted
                 result.files[f"recipes/{path.stem}.json"] = {
@@ -229,9 +238,9 @@ def convert(mod: SourceMod) -> ConversionResult:
             key = {}
             unmapped = ""
             for symbol, spec in (recipe.get("key") or {}).items():
-                mapped = _item(spec)
+                mapped = _item(spec, tag_resolver)
                 if mapped is None:
-                    unmapped = _tag_reason(spec)
+                    unmapped = _tag_reason(spec, tag_resolver)
                     break
                 key[symbol] = mapped
             if unmapped:
@@ -241,31 +250,31 @@ def convert(mod: SourceMod) -> ConversionResult:
             body["key"] = key
         elif java_type == "minecraft:crafting_shapeless":
             specs = recipe.get("ingredients", [])
-            ingredients = [_item(i) for i in specs]
+            ingredients = [_item(i, tag_resolver) for i in specs]
             if any(i is None for i in ingredients):
                 bad = next(s for s, i in zip(specs, ingredients) if i is None)
-                result.unhandled.append(Unhandled(rel, "recipe", _tag_reason(bad)))
+                result.unhandled.append(Unhandled(rel, "recipe", _tag_reason(bad, tag_resolver)))
                 continue
             body["ingredients"] = ingredients
         elif java_type == "minecraft:stonecutting":
             # One input, one output, expressed as a shapeless recipe on the stonecutter.
-            ingredient = _item(recipe.get("ingredient"))
+            ingredient = _item(recipe.get("ingredient"), tag_resolver)
             if ingredient is None:
                 result.unhandled.append(
-                    Unhandled(rel, "recipe", _tag_reason(recipe.get("ingredient")))
+                    Unhandled(rel, "recipe", _tag_reason(recipe.get("ingredient"), tag_resolver))
                 )
                 continue
             body["ingredients"] = [ingredient]
         else:  # the furnace family
-            ingredient = _item(recipe.get("ingredient"))
+            ingredient = _item(recipe.get("ingredient"), tag_resolver)
             if ingredient is None:
                 result.unhandled.append(
-                    Unhandled(rel, "recipe", _tag_reason(recipe.get("ingredient")))
+                    Unhandled(rel, "recipe", _tag_reason(recipe.get("ingredient"), tag_resolver))
                 )
                 continue
             body["input"] = ingredient
 
-        out = _item(recipe.get("result"))
+        out = _item(recipe.get("result"), tag_resolver)
         if out is None:
             result.unhandled.append(Unhandled(rel, "recipe", "unreadable result item"))
             continue
@@ -281,4 +290,9 @@ def convert(mod: SourceMod) -> ConversionResult:
             "format_version": "1.20.10",
             bedrock_type: body,
         }
+    for tag, found in sorted(tag_resolver.resolved().items()):
+        for source in found.sources:
+            result.consumed.add(source)  # the tag files were read, so they are owned
+        if found.note:
+            result.notes.append(found.note)
     return result
