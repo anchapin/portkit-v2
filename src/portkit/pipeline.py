@@ -115,6 +115,83 @@ def merge_namespaces(results: dict[str, "ConversionResult"]) -> "ConversionResul
     return merged
 
 
+def _texture_keys(files: dict, index_path: str) -> dict[str, dict]:
+    index = files.get(index_path)
+    if not isinstance(index, dict):
+        return {}
+    return dict(index.get("texture_data") or {})
+
+
+def drop_untextured(result: ConversionResult, namespace: str) -> None:
+    """Withdraw blocks and items whose textures never made it into the pack.
+
+    A texture can be refused on its own terms (an animation Bedrock can't
+    express, two files that flatten to one key) while the block or item that
+    uses it converts fine. Shipping that block is a wrong answer that only the
+    validator would catch: it renders untextured. So it goes back to the residue
+    with the texture named, the same as if the block converter had refused it.
+
+    One case is fixable rather than refused: an item whose icon is a block
+    texture. Bedrock's item_texture.json may point anywhere under textures/, so
+    the icon gets an entry pointing at the block's file.
+    """
+    terrain = _texture_keys(result.files, "textures/terrain_texture.json")
+    atlas = _texture_keys(result.files, "textures/item_texture.json")
+    borrowed: dict[str, dict] = {}
+
+    for path in sorted(result.files):
+        body = result.files[path]
+        if not isinstance(body, dict):
+            continue
+        # Name the source in the namespace that declared it, not the pack's.
+        root = body.get("minecraft:block") or body.get("minecraft:item") or {}
+        ident = (root.get("description") or {}).get("identifier")
+        ns = ident.split(":", 1)[0] if isinstance(ident, str) and ":" in ident else namespace
+        if path.startswith("blocks/"):
+            components = (body.get("minecraft:block") or {}).get("components") or {}
+            instances = components.get("minecraft:material_instances") or {}
+            missing = sorted({
+                inst["texture"] for inst in instances.values()
+                if isinstance(inst, dict) and isinstance(inst.get("texture"), str)
+                and inst["texture"] not in terrain
+            })
+            kind, source = "block", f"assets/{ns}/blockstates/{Path(path).name}"
+        elif path.startswith("items/"):
+            icon = ((body.get("minecraft:item") or {}).get("components") or {}).get("minecraft:icon")
+            if isinstance(icon, dict):
+                icon = icon.get("texture")
+            if not isinstance(icon, str) or icon in atlas:
+                continue
+            if icon in terrain:
+                borrowed[icon] = terrain[icon]
+                continue
+            missing = [icon]
+            kind, source = "item", f"assets/{ns}/models/item/{Path(path).name}"
+        else:
+            continue
+        if not missing:
+            continue
+        del result.files[path]
+        result.unhandled.append(
+            Unhandled(
+                source=source,
+                kind=kind,
+                reason=(
+                    f"uses texture {', '.join(missing)}, which did not convert "
+                    "(see that texture's own residue entry)"
+                ),
+            )
+        )
+
+    if borrowed:
+        index = dict(result.files.get("textures/item_texture.json") or {
+            "resource_pack_name": namespace,
+            "texture_name": "atlas.items",
+        })
+        index["texture_data"] = {**atlas, **borrowed}
+        result.files["textures/item_texture.json"] = index
+
+
 @dataclass
 class PipelineResult:
     tree: Path
@@ -213,6 +290,7 @@ def convert(
             ns: convert_all(SourceMod(root=staged.root, namespace=ns)) for ns in selected
         }
         result = merge_namespaces(per_namespace)
+        drop_untextured(result, namespace)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}
         unhandled = (
             staged.residue()

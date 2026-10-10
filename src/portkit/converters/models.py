@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 
 from ..model import SourceMod
+from .textures import JAVA_DIRS, shortname as texture_key
 
 # Java model parent -> which Bedrock material instance face wears which of the
 # model's texture keys. "*" is every face the more specific keys do not name.
@@ -436,20 +437,25 @@ def geometry_bones(
 def texture_shortname(reference: str, namespace: str) -> tuple[str | None, str]:
     """Java texture reference -> the terrain_texture shortname the pack uses.
 
-    The textures converter keys its index as "<namespace>:<png stem>", so a
-    reference into this mod resolves. A reference into another namespace
+    The textures converter keys its index as "<namespace>:<subpath>", the path
+    below block/ or item/ with "/" flattened to "_", so a reference into this
+    mod resolves. A reference into another namespace
     (vanilla, or a sibling mod) does not: Bedrock's own shortnames are named
     differently and picking one would be a guess.
     """
     if reference.startswith("#"):
         return None, f"model leaves {reference!r} for a child model to fill in"
-    if ":" in reference:
-        ref_ns, path = reference.split(":", 1)
-    else:
-        ref_ns, path = namespace, reference
+    # A bare reference is minecraft:'s, as Java resolves it, not the mod's own.
+    ref_ns, _, path = reference.rpartition(":")
+    ref_ns = ref_ns or "minecraft"
     if ref_ns != namespace:
         return None, f"model points at {reference!r}, a texture from another namespace"
-    return f"{namespace}:{path.rsplit('/', 1)[-1]}", ""
+    lane, _, subpath = path.partition("/")
+    if lane not in JAVA_DIRS or not subpath:
+        # Not a texture the textures converter places (entity/, gui/, a
+        # pre-1.13 blocks/ dir); keep the old stem key so the miss is reported.
+        subpath = path.rsplit("/", 1)[-1]
+    return texture_key(subpath, namespace), ""
 
 
 # A Java blockstate y turn spins the model clockwise seen from above, in Java's
