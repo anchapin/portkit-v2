@@ -21,6 +21,7 @@ _RECIPE_KEYS = {
     "minecraft:recipe_shapeless",
     "minecraft:recipe_furnace",
     "minecraft:recipe_brewing_mix",
+    "minecraft:recipe_smithing_transform",
 }
 # The fields each recipe body needs non-empty. Bedrock loads a recipe with an
 # empty one as a silent no-op, so a probe file the agent writes to poke the
@@ -33,6 +34,7 @@ _RECIPE_REQUIRED: dict[str, tuple] = {
     "minecraft:recipe_shapeless": ("ingredients", "result"),
     "minecraft:recipe_furnace": ("input", ("output", "result")),
     "minecraft:recipe_brewing_mix": ("input", "reagent", ("output", "result")),
+    "minecraft:recipe_smithing_transform": ("template", "base", "addition", "result"),
 }
 
 
