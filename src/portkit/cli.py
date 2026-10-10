@@ -412,23 +412,31 @@ def cmd_eval(args) -> int:
     if getattr(args, "agent", False) or getattr(args, "agent_replay", None):
         return cmd_eval_agent(args)
 
-    root = Path(args.fixtures or FIXTURES)
-    cases = sorted(p for p in root.iterdir() if (p / "input").is_dir())
+    corpus_mode = getattr(args, "corpus", False)
+    if corpus_mode:
+        loaded = _corpus_cases(args)
+        if isinstance(loaded, int):
+            return loaded
+        root, cases = loaded
+    else:
+        root = Path(args.fixtures or FIXTURES)
+        cases = [(p.name, p / "input") for p in sorted(root.iterdir()) if (p / "input").is_dir()]
     if not cases:
         print(f"no fixtures under {root}")
         return 1
 
-    rows, measured, failures = [], [], 0
-    for case in cases:
+    rows, measured, failures, error_counts = [], [], 0, {}
+    for name, source in cases:
         with tempfile.TemporaryDirectory() as tmp:
-            result = convert(case / "input", Path(tmp) / "out")
+            result = convert(source, Path(tmp) / "out", emit_addon=not corpus_mode)
             ok = result.report.ok
             failures += 0 if ok else 1
+            error_counts[name] = len(result.report.errors)
             rows.append(
-                (case.name, result.file_count, result.residue_count, result.coverage, ok)
+                (name, result.file_count, result.residue_count, result.coverage, ok)
             )
             measured.append(
-                bl.Measured(case.name, result.file_count, result.residue_count, result.coverage)
+                bl.Measured(name, result.file_count, result.residue_count, result.coverage)
             )
 
     width = max(len(r[0]) for r in rows)
@@ -437,6 +445,9 @@ def cmd_eval(args) -> int:
         print(f"{name.ljust(width)}  {handled:5d}  {residue:7d}  {coverage:7.1f}%  {'yes' if ok else 'NO'}")
 
     baseline_path = Path(args.baseline) if args.baseline else root / bl.BASELINE_NAME
+
+    if corpus_mode:
+        return _corpus_verdict(args, baseline_path, measured, error_counts)
 
     if args.update_baseline:
         baseline_path.write_text(bl.dump(measured))
@@ -471,6 +482,119 @@ def cmd_eval(args) -> int:
         return 1
     print(f"\ncoverage at or above baseline for all {len(measured)} fixtures")
     return 1 if failures else 0
+
+
+def _corpus_cases(args):
+    """(root, [(name, jar)]) for ``eval --corpus``, or an exit code."""
+    from . import corpus
+
+    manifest = Path(args.manifest) if args.manifest else corpus.MANIFEST
+    try:
+        mods = corpus.load(manifest)
+    except (OSError, corpus.CorpusError) as exc:
+        print(f"cannot read corpus manifest: {exc}", file=sys.stderr)
+        return 2
+    if args.fixture:
+        wanted = set(args.fixture)
+        mods = [m for m in mods if m.name in wanted]
+    cases, missing = [], []
+    for mod in mods:
+        try:
+            jar = corpus.fetch(mod)[0] if args.fetch else corpus.cached(mod)
+        except corpus.CorpusError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        if jar is None:
+            missing.append(mod.name)
+        else:
+            cases.append((mod.name, jar))
+    if missing:
+        print(f"not in the corpus cache: {', '.join(missing)}; run `portkit corpus fetch` "
+              "or add --fetch", file=sys.stderr)
+        return 2
+    return manifest.parent, cases
+
+
+def _corpus_verdict(args, baseline_path: Path, measured, error_counts: dict[str, int]) -> int:
+    """The corpus ratchet: coverage and file counts as for fixtures, plus the
+    validator error count per mod, which may not rise. A real mod is allowed to
+    be invalid today; it is not allowed to get worse unnoticed."""
+    import json as _json
+    import os
+
+    from . import baseline as bl
+
+    if args.update_baseline:
+        if args.fixture:
+            print("--update-baseline rewrites every mod; drop --fixture", file=sys.stderr)
+            return 2
+        data = _json.loads(bl.dump(measured))
+        for name, entry in data["fixtures"].items():
+            entry["errors"] = error_counts[name]
+        baseline_path.write_text(_json.dumps(data, indent=2) + "\n")
+        print(f"\nbaseline written: {baseline_path}")
+        return 0
+    if args.no_baseline or not baseline_path.is_file():
+        if args.baseline and not baseline_path.is_file():
+            print(f"\nbaseline not found: {baseline_path}", file=sys.stderr)
+            return 2
+        return 0
+    try:
+        base = bl.load(baseline_path)
+        regressions, notes = bl.compare(measured, base)
+    except (OSError, ValueError) as exc:
+        print(f"\ncannot read baseline: {exc}", file=sys.stderr)
+        return 2
+    if args.fixture:  # a subset run: mods left out are not "dropped"
+        regressions = [r for r in regressions if r.fixture in error_counts]
+    for name, count in sorted(error_counts.items()):
+        before = (base.get(name) or {}).get("errors")
+        if before is not None and count > int(before):
+            regressions.append(bl.Delta(name, f"validator errors {before} -> {count}"))
+        elif before is not None and count < int(before):
+            notes.append(bl.Delta(name, f"validator errors {before} -> {count}; bank it with --update-baseline"))
+    annotate = os.environ.get("GITHUB_ACTIONS") == "true"
+    for note in notes:
+        print(f"note: {note.fixture}: {note.message}")
+        if annotate:
+            print(f"::notice title=corpus baseline::{note.fixture}: {note.message}")
+    if regressions:
+        print(f"\ncorpus regressed against {baseline_path}:")
+        for reg in regressions:
+            print(f"  REGRESSION {reg.fixture}: {reg.message}")
+            if annotate:
+                print(f"::error title=corpus regression::{reg.fixture}: {reg.message}")
+        return 1
+    print(f"\ncorpus at or above baseline for all {len(measured)} mods")
+    return 0
+
+
+def cmd_corpus(args) -> int:
+    """``portkit corpus fetch|list``: the pinned real-mod jars (#21)."""
+    from . import corpus
+
+    manifest = Path(args.manifest) if args.manifest else corpus.MANIFEST
+    try:
+        mods = corpus.load(manifest)
+    except (OSError, corpus.CorpusError) as exc:
+        print(f"cannot read corpus manifest: {exc}", file=sys.stderr)
+        return 2
+    cache = corpus.cache_dir()
+    if args.action == "list":
+        for mod in mods:
+            state = "cached" if corpus.cached(mod, cache) else "missing"
+            print(f"{mod.name:28} {mod.loader:9} {mod.minecraft:8} {mod.license:6} {state}")
+        return 0
+    failed = 0
+    for mod in mods:
+        try:
+            path, downloaded = corpus.fetch(mod, cache)
+        except corpus.CorpusError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} {mod.name} -> {path}")
+    return 1 if failed else 0
 
 
 def main(argv=None) -> int:
@@ -576,6 +700,14 @@ def main(argv=None) -> int:
         help="rewrite the baseline from this run instead of checking against it",
     )
     g.add_argument("--no-baseline", action="store_true", help="skip the baseline check")
+    c = p.add_argument_group(
+        "real-mod corpus",
+        "with --corpus, run the pinned real mods from fixtures/real/mods.toml instead of "
+        "the hand-built fixtures; jars come from the local cache (portkit corpus fetch)",
+    )
+    c.add_argument("--corpus", action="store_true", help="evaluate the real-mod corpus")
+    c.add_argument("--manifest", metavar="PATH", help="corpus manifest (default fixtures/real/mods.toml)")
+    c.add_argument("--fetch", action="store_true", help="with --corpus, download missing jars first")
     a = p.add_argument_group(
         "agent matrix",
         "with --agent, run the fixture residue through each provider/model instead and print "
@@ -590,7 +722,8 @@ def main(argv=None) -> int:
     a.add_argument("--provider", help="shorthand for one --target")
     a.add_argument("--model", help="shorthand for one --target")
     a.add_argument("--fixture", "--agent-fixture", action="append", metavar="NAME",
-                   help="limit to these fixtures (default: every fixture with residue)")
+                   help="limit to these fixtures, or with --corpus these mods "
+                        "(default: every fixture with residue, or every mod)")
     a.add_argument("--agent-replay", metavar="PATH",
                    help="replay a transcript (one fixture) or a directory of <fixture>.jsonl; no network")
     a.add_argument("--agent-max-steps", type=int, default=12, metavar="N", help="step budget per group (default 12)")
@@ -599,6 +732,11 @@ def main(argv=None) -> int:
     a.add_argument("--json", "--matrix-out", dest="json", metavar="PATH",
                    help="also write the rows, with per-fixture and per-task scores, as JSON")
     p.set_defaults(func=cmd_eval)
+
+    p = sub.add_parser("corpus", help="fetch or list the pinned real-mod jars (#21)")
+    p.add_argument("action", choices=["fetch", "list"])
+    p.add_argument("--manifest", metavar="PATH", help="corpus manifest (default fixtures/real/mods.toml)")
+    p.set_defaults(func=cmd_corpus)
 
     args = parser.parse_args(argv)
     return args.func(args)
