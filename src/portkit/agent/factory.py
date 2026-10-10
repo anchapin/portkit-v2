@@ -6,6 +6,7 @@ Precedence, highest first: explicit arguments, the ``config`` mapping (e.g. an
     PORTKIT_LLM_PROVIDER   openai | anthropic | gemini
     PORTKIT_LLM_MODEL      model name, required
     PORTKIT_LLM_BASE_URL   optional, for gateways and local servers
+    PORTKIT_LLM_TEMPERATURE optional sampling temperature, sent as ``temperature``
     OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY   the provider's usual key variable
 
 ``gemini`` is the OpenAI client pointed at Google's OpenAI-compatible endpoint.
@@ -60,4 +61,10 @@ def make_client(
     base_url = pick(None, "base_url") or DEFAULT_BASE_URLS.get(name)
     if base_url:
         kwargs["base_url"] = base_url
+    temperature = pick(None, "temperature")
+    if temperature not in (None, ""):
+        try:
+            kwargs["extra"] = {"temperature": float(temperature)}
+        except (TypeError, ValueError):
+            raise ValueError(f"PORTKIT_LLM_TEMPERATURE must be a number, got {temperature!r}") from None
     return cls(**kwargs)
