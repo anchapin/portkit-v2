@@ -113,3 +113,78 @@ def test_top_level_string_item_does_not_crash(tmp_path):
     # Should not raise.
     report = validate_tree(tmp_path)
     assert report is not None
+
+
+def _recipe(body_key, **fields):
+    body = {"description": {"identifier": "examplemod:probe"}, "tags": ["crafting_table"]}
+    body.update(fields)
+    return {"format_version": "1.20.10", body_key: body}
+
+
+def _recipe_findings(tmp_path, recipe):
+    _write(tmp_path, "behavior_pack/manifest.json", _manifest())
+    _write(tmp_path, "behavior_pack/recipes/probe.json", recipe)
+    report = validate_tree(tmp_path)
+    return [f for f in report.errors if f.rule == "recipe.empty"], report
+
+
+def test_empty_shapeless_recipe_is_flagged(tmp_path):
+    """#84: the probe file a model wrote to poke the validator must not pass."""
+    empty, report = _recipe_findings(
+        tmp_path, _recipe("minecraft:recipe_shapeless", ingredients=[], result=[])
+    )
+    assert not report.ok
+    assert {f.message.split()[0] for f in empty} == {"ingredients", "result"}
+
+
+def test_missing_result_on_shaped_recipe_is_flagged(tmp_path):
+    empty, _ = _recipe_findings(
+        tmp_path,
+        _recipe("minecraft:recipe_shaped", pattern=["#"], key={"#": {"item": "m:b"}}),
+    )
+    assert [f.message.split()[0] for f in empty] == ["result"]
+
+
+def test_list_of_empty_ingredients_is_flagged(tmp_path):
+    empty, _ = _recipe_findings(
+        tmp_path,
+        _recipe("minecraft:recipe_shapeless", ingredients=[{}], result={"item": "m:a"}),
+    )
+    assert [f.message.split()[0] for f in empty] == ["ingredients"]
+
+
+def test_empty_furnace_recipe_is_flagged(tmp_path):
+    empty, _ = _recipe_findings(
+        tmp_path, _recipe("minecraft:recipe_furnace", input="", output="")
+    )
+    assert {f.message.split()[0] for f in empty} == {"input", "output"}
+
+
+def test_filled_shapeless_recipe_has_no_empty_finding(tmp_path):
+    empty, report = _recipe_findings(
+        tmp_path,
+        _recipe(
+            "minecraft:recipe_shapeless",
+            ingredients=[{"item": "minecraft:iron_ingot"}],
+            result={"item": "minecraft:iron_nugget", "count": 9},
+        ),
+    )
+    assert empty == []
+    assert report.ok
+
+
+def test_non_object_recipe_body_is_flagged_not_crashing(tmp_path):
+    _write(tmp_path, "behavior_pack/manifest.json", _manifest())
+    _write(tmp_path, "behavior_pack/recipes/probe.json",
+           {"format_version": "1.20.10", "minecraft:recipe_shapeless": "oops"})
+    report = validate_tree(tmp_path)
+    assert any(f.rule == "recipe.shape" for f in report.errors)
+
+
+def test_furnace_recipe_with_result_key_is_accepted(tmp_path):
+    """The converter emits the furnace family's product as "result"; keep it passing."""
+    empty, _ = _recipe_findings(
+        tmp_path,
+        _recipe("minecraft:recipe_furnace", input={"item": "m:ore"}, result={"item": "m:ingot"}),
+    )
+    assert empty == []
