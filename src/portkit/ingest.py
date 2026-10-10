@@ -13,6 +13,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .icon import declared_paths
 from .model import Unhandled
 
 RESOURCE_LANES = ("assets/", "data/")
@@ -31,6 +32,7 @@ METADATA_NAMES = (
 
 _MAX_MEMBERS = 50_000
 _MAX_TOTAL_BYTES = 512 * 1024 * 1024
+_MAX_ICON_BYTES = 8 * 1024 * 1024
 
 
 class IngestError(Exception):
@@ -46,6 +48,10 @@ class Ingested:
     metadata: dict[str, bytes] = field(default_factory=dict)
     class_count: int = 0
     nested_jars: list[str] = field(default_factory=list)
+    # Icon files the mod declares (see icon.declared_paths) that it actually
+    # ships, path -> bytes, in declaration order. Most live outside assets/, so
+    # they are read here rather than staged.
+    icons: dict[str, bytes] = field(default_factory=dict)
 
     @property
     def namespace(self) -> str:
@@ -107,11 +113,21 @@ def from_directory(root: Path) -> Ingested:
         candidate = root / name
         if candidate.is_file():
             metadata[name] = candidate.read_bytes()
+    icons = {}
+    for rel in declared_paths(metadata):
+        candidate = root / rel
+        if (
+            _safe_member(rel)
+            and candidate.is_file()
+            and candidate.stat().st_size <= _MAX_ICON_BYTES
+        ):
+            icons[rel] = candidate.read_bytes()
     return Ingested(
         root=root,
         namespaces=_namespaces(root),
         metadata=metadata,
         class_count=sum(1 for _ in root.rglob("*.class")),
+        icons=icons,
     )
 
 
@@ -157,6 +173,13 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
             with zf.open(info) as src, open(target, "wb") as dst:
                 dst.write(src.read())
 
+        icons = {}
+        names = {info.filename: info for info in members}
+        for rel in declared_paths(metadata):
+            info = names.get(rel)
+            if info is not None and _safe_member(rel) and info.file_size <= _MAX_ICON_BYTES:
+                icons[rel] = zf.read(info)
+
     found = _namespaces(workdir)
     if not found:
         raise IngestError(
@@ -169,6 +192,7 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
         metadata=metadata,
         class_count=class_count,
         nested_jars=nested,
+        icons=icons,
     )
 
 
