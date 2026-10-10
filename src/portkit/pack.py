@@ -6,6 +6,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
+from .icon import ICON_NAME, default_icon
 from .meta import ModMetadata
 from .model import ConversionResult
 
@@ -109,8 +110,15 @@ def write_tree(
     namespace: str,
     out_dir: Path,
     meta: ModMetadata | None = None,
+    icon: bytes | None = None,
 ) -> Path:
-    """Write behavior_pack/ and resource_pack/ under out_dir. Returns out_dir."""
+    """Write behavior_pack/ and resource_pack/ under out_dir. Returns out_dir.
+
+    Each pack gets ``icon`` as its pack_icon.png, or a generated one when none
+    is given (#115): Bedrock shows a placeholder without it, and Mojang's
+    validator rejects the pack.
+    """
+    icon = icon if icon is not None else default_icon(namespace)
     out_dir.mkdir(parents=True, exist_ok=True)
     buckets = {"behavior": {}, "resource": {}}
     for relpath, content in result.files.items():
@@ -130,6 +138,7 @@ def write_tree(
         (base / "manifest.json").write_text(
             json.dumps(manifest(namespace, kind, meta, depends_on, floor), indent=2) + "\n"
         )
+        (base / ICON_NAME).write_bytes(icon)
         for relpath, content in files.items():
             target = base / relpath
             target.parent.mkdir(parents=True, exist_ok=True)
