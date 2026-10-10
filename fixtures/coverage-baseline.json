@@ -66,9 +66,9 @@
       "residue": 2
     },
     "residue_mod_enriched": {
-      "coverage": 81.8,
-      "files": 9,
-      "residue": 2
+      "coverage": 90.9,
+      "files": 10,
+      "residue": 1
     },
     "rotated_model_mod": {
       "coverage": 100.0,
@@ -84,6 +84,11 @@
       "coverage": 100.0,
       "files": 7,
       "residue": 0
+    },
+    "smithing_mod": {
+      "coverage": 80.0,
+      "files": 4,
+      "residue": 1
     },
     "sounds_mod": {
       "coverage": 85.7,
