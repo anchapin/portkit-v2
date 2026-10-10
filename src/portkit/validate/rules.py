@@ -22,6 +22,18 @@ _RECIPE_KEYS = {
     "minecraft:recipe_furnace",
     "minecraft:recipe_brewing_mix",
 }
+# The fields each recipe body needs non-empty. Bedrock loads a recipe with an
+# empty one as a silent no-op, so a probe file the agent writes to poke the
+# validator would otherwise ship in the addon as if it were a real recipe.
+# A tuple entry is a set of alternatives: furnace and brewing recipes name
+# their product "output", but the converter writes "result" for the furnace
+# family today, so either one satisfies the rule.
+_RECIPE_REQUIRED: dict[str, tuple] = {
+    "minecraft:recipe_shaped": ("result",),
+    "minecraft:recipe_shapeless": ("ingredients", "result"),
+    "minecraft:recipe_furnace": ("input", ("output", "result")),
+    "minecraft:recipe_brewing_mix": ("input", "reagent", ("output", "result")),
+}
 
 
 def _load(report: ValidationReport, path: Path, rel: str):
@@ -61,9 +73,23 @@ def _check_manifest(report: ValidationReport, path: Path, rel: str) -> None:
         seen.add(mid)
 
 
+def _is_empty(value) -> bool:
+    """None, "", [], {} and a list of only empty entries all count as empty."""
+    if value is None:
+        return True
+    if isinstance(value, (str, dict)):
+        return not value
+    if isinstance(value, list):
+        return all(_is_empty(v) for v in value)
+    return False
+
+
 def _check_recipe(report: ValidationReport, path: Path, rel: str) -> None:
     data = _load(report, path, rel)
     if data is None:
+        return
+    if not isinstance(data, dict):
+        report.add(rel, "recipe.shape", "recipe file must be a JSON object")
         return
     if "format_version" not in data:
         report.add(rel, "recipe.format_version", "missing format_version")
@@ -72,6 +98,13 @@ def _check_recipe(report: ValidationReport, path: Path, rel: str) -> None:
         report.add(rel, "recipe.type", "exactly one recipe body key is required")
         return
     body = data[body_keys[0]]
+    if not isinstance(body, dict):
+        report.add(rel, "recipe.shape", f"{body_keys[0]} must be a JSON object")
+        return
+    for required in _RECIPE_REQUIRED[body_keys[0]]:
+        names = required if isinstance(required, tuple) else (required,)
+        if all(_is_empty(body.get(name)) for name in names):
+            report.add(rel, "recipe.empty", f"{names[0]} is missing or empty")
     identifier = (body.get("description") or {}).get("identifier")
     if not identifier or not _IDENTIFIER.match(str(identifier)):
         report.add(rel, "recipe.identifier", f"bad identifier {identifier!r}")
