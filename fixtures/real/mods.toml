@@ -1,0 +1,44 @@
+# The real-mod corpus (#21). Jars are downloaded, never committed:
+#   portkit corpus fetch      # into ~/.cache/portkit/mods (PORTKIT_CORPUS_CACHE overrides)
+#   portkit eval --corpus     # coverage per mod, ratcheted by fixtures/real/coverage-baseline.json
+# To add or bump a mod, pin its Modrinth version id, primary file url and sha512
+# (api.modrinth.com/v2/version/<id>), then re-run eval --corpus --update-baseline.
+
+[[mod]]
+name = "farmers_delight_neoforge"
+project = "farmers-delight"
+version_id = "XTVZDOol"
+version = "1.21.1-1.3.4"
+loader = "neoforge"
+minecraft = "1.21.1"
+license = "MIT"
+source = "https://github.com/vectorwing/FarmersDelight"
+url = "https://cdn.modrinth.com/data/R2OftAxM/versions/XTVZDOol/FarmersDelight-1.21.1-1.3.4.jar"
+sha512 = "1f6f8796469f747cff36f477b4f589a3d69613882399f9ee7f86db36c7bca9aa4828731f43db15dc6c7f5a4c1bbe3d4092a232e8cef010b09cec0581848fda90"
+notes = "NeoForge 1.21.1: crops, cooking pot and cutting board recipes, food items"
+
+[[mod]]
+name = "farmers_delight_fabric"
+project = "farmers-delight-refabricated"
+version_id = "DDCRIV2Z"
+version = "26.1-3.6.28"
+loader = "fabric"
+minecraft = "26.1"
+license = "MIT"
+source = "https://github.com/MehVahdJukaar/FarmersDelightRefabricated"
+url = "https://cdn.modrinth.com/data/7vxePowz/versions/DDCRIV2Z/FarmersDelight-26.1-3.6.28%2Brefabricated.jar"
+sha512 = "7f9ce58272f71b02dcf01bb071c79fc47d59e4523fb4fcde8c39634006f59814ee3f9649587d7c30651a82ff5354858c0f2d572c535dd195b9e55df6bc2d79b7"
+notes = "Fabric port of the same content on a newer game version: same mod, different loader and data layout"
+
+[[mod]]
+name = "betterend"
+project = "betterend"
+version_id = "4WU5MfzY"
+version = "21.800.2"
+loader = "fabric"
+minecraft = "1.21.8"
+license = "MIT"
+source = "https://github.com/quiqueck/BetterEnd"
+url = "https://cdn.modrinth.com/data/gc8OEnCC/versions/4WU5MfzY/better-end-21.800.2.jar"
+sha512 = "ab53a920d5d7818fb525879b520a7dd484a9c8b5c5ad6c65787ba1da070e68fa2fa3189d8971ac0e5f839b55785221ad1df8cd702778dd20bb70ff9aa1511bb8"
+notes = "Fabric 1.21.8: large block, item and worldgen set (~94 MB jar)"
