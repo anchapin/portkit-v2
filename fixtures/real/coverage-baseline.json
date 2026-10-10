@@ -40,7 +40,7 @@
       "coverage": 9.8,
       "files": 74,
       "residue": 679,
-      "errors": 37
+      "errors": 34
     },
     "supplementaries": {
       "coverage": 18.1,
@@ -52,7 +52,7 @@
       "coverage": 2.4,
       "files": 768,
       "residue": 31040,
-      "errors": 267
+      "errors": 227
     },
     "waystones": {
       "coverage": 9.1,
