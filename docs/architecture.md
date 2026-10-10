@@ -16,7 +16,8 @@ model whether output is good.
 mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶ validate ─▶ .mcaddon
                           │                              ▲
                           └─ Unhandled ─▶ residue agent ─┘ (optional; tools: read_source,
-                                                            write_output, validate)
+                                                            write_output, set_lang_entries,
+                                                            validate)
 ```
 
 ## The pipeline (`portkit/pipeline.py`)
@@ -89,8 +90,9 @@ never a guess.
 
 - `loop.py`: about 100 lines. Send messages, receive a tool call, run it, append
   the result, repeat until the model stops or a budget runs out.
-- `tools.py`: `read_source`, `list_source`, `write_output` and `validate`, plus
-  the system prompt.
+- `tools.py`: `read_source`, `list_source`, `write_output` (JSON only),
+  `set_lang_entries` (upserts `key=value` lines into a resource pack `.lang`
+  file) and `validate`, plus the system prompt.
 - `residue.py`: groups `Unhandled` by `(kind, source)`, builds one task per group
   (the source content plus the exact refusal reason), and runs one session each.
   A group counts as resolved only if the session ends on its own, writes at least
