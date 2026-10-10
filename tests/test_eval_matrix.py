@@ -126,3 +126,39 @@ def test_replay_and_live_targets_do_not_mix(capsys):
 def test_a_target_that_cannot_build_a_client_is_a_setup_error(capsys):
     assert cli.main(["eval", "--agent", "--target", "nosuchprovider:m"]) == 2
     assert "nosuchprovider:m" in capsys.readouterr().err
+
+
+def test_a_target_can_carry_its_own_base_url():
+    from portkit.agent.matrix import parse_target, target_label
+
+    assert parse_target("anthropic:claude-haiku-4.5") == ("anthropic", "claude-haiku-4.5", None)
+    spec = "openai:anthropic/claude-haiku-4.5@https://openrouter.ai/api/v1"
+    assert parse_target(spec) == ("openai", "anthropic/claude-haiku-4.5", "https://openrouter.ai/api/v1")
+    # An @ inside a model name is not a URL.
+    assert parse_target("anthropic:claude-x@20250101") == ("anthropic", "claude-x@20250101", None)
+    assert parse_target(":m") == (None, "m", None)
+    assert target_label(*parse_target(spec)) == "openai:anthropic/claude-haiku-4.5@openrouter.ai"
+    assert target_label("gemini_native", "g", None) == "gemini_native:g"
+
+
+def test_the_base_url_reaches_the_client_and_not_the_environment(monkeypatch, tmp_path, capsys):
+    built = []
+
+    def fake_make_client(provider, model, *, config=None, **_):
+        built.append((provider, model, config))
+        return FakeLLM([Message("assistant", "cannot")] * 20)
+
+    monkeypatch.setattr("portkit.agent.make_client", fake_make_client)
+    monkeypatch.setenv("PORTKIT_LLM_BASE_URL", "https://shell.example/v1")
+    out = tmp_path / "nested" / "matrix.json"
+    code = cli.main(["eval", "--agent", "--agent-fixture", "residue_mod", "--matrix-out", str(out),
+                     "--target", "openai:a/b@https://openrouter.ai/api/v1",
+                     "--target", "gemini_native:g"])
+    assert code == 0
+    assert ("openai", "a/b", {"base_url": "https://openrouter.ai/api/v1"}) in built
+    assert ("gemini_native", "g", None) in built
+    import os
+    assert os.environ["PORTKIT_LLM_BASE_URL"] == "https://shell.example/v1"  # untouched
+    rows = json.loads(out.read_text())
+    assert [r["target"] for r in rows] == ["openai:a/b@openrouter.ai", "gemini_native:g"]
+    assert rows[0]["fixtures"] == {"residue_mod": {"pass": 0, "fail": 2, "unscored": 0}}
