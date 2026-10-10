@@ -5,7 +5,12 @@ Precedence, highest first: explicit arguments, the ``config`` mapping (e.g. an
 
     PORTKIT_LLM_PROVIDER   openai | anthropic | gemini | gemini_native
     PORTKIT_LLM_MODEL      model name, required
-    PORTKIT_LLM_BASE_URL   optional, for gateways and local servers
+    PORTKIT_LLM_<PROVIDER>_BASE_URL  optional per-provider endpoint, e.g.
+                           PORTKIT_LLM_GEMINI_BASE_URL, PORTKIT_LLM_OPENAI_BASE_URL
+    PORTKIT_LLM_BASE_URL   optional fallback, for gateways and local servers; only
+                           used by providers with no built-in endpoint (openai,
+                           anthropic), so a gateway URL saved for OpenAI never
+                           captures a Gemini key (#95)
     PORTKIT_LLM_TEMPERATURE optional sampling temperature, sent as ``temperature``
     OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY   the provider's usual key variable
 
@@ -20,8 +25,8 @@ Two Gemini paths are available:
   ``X-goog-api-key``. Use this for any post-May-2026 AI Studio key, or when
   the OpenAI-compat path produces ``finish_reason=error`` against a Gemini
   model. See :mod:`portkit.agent.gemini`.
-  It ignores ``PORTKIT_LLM_BASE_URL`` (a gateway can't speak generateContent);
-  only a ``base_url`` in ``config`` overrides its endpoint.
+  Like ``gemini``, it ignores the global ``PORTKIT_LLM_BASE_URL``; override it
+  with ``PORTKIT_LLM_GEMINI_NATIVE_BASE_URL`` or ``base_url`` in ``config``.
 
 Config keys mirror those names: provider, model, base_url, api_key, and
 api_key_env to read the key from a differently named variable.
@@ -32,6 +37,7 @@ import os
 from typing import Any, Mapping
 
 from .anthropic import AnthropicClient
+from .gemini import DEFAULT_BASE_URL as GEMINI_NATIVE_BASE_URL
 from .gemini import GeminiClient
 from .http import Transport, post_json
 from .loop import LLMClient
@@ -48,7 +54,21 @@ PROVIDERS = {
     # the ``X-goog-api-key`` header. See :mod:`portkit.agent.gemini`.
     "gemini_native": (GeminiClient, "GEMINI_API_KEY"),
 }
-DEFAULT_BASE_URLS = {"gemini": GEMINI_BASE_URL}
+# Providers with a built-in endpoint. The global PORTKIT_LLM_BASE_URL never
+# overrides these; only a provider-specific variable or config does.
+DEFAULT_BASE_URLS = {"gemini": GEMINI_BASE_URL, "gemini_native": GEMINI_NATIVE_BASE_URL}
+
+
+def resolve_base_url(name: str, config: Mapping[str, Any], env: Mapping[str, str]) -> str | None:
+    """config base_url, then PORTKIT_LLM_<PROVIDER>_BASE_URL, then the
+    provider's built-in endpoint, then (only for providers without one) the
+    global PORTKIT_LLM_BASE_URL."""
+    specific = config.get("base_url") or env.get(f"PORTKIT_LLM_{name.upper()}_BASE_URL")
+    if specific:
+        return specific
+    if name in DEFAULT_BASE_URLS:
+        return DEFAULT_BASE_URLS[name]
+    return env.get("PORTKIT_LLM_BASE_URL") or None
 
 
 def make_client(
@@ -77,13 +97,7 @@ def make_client(
     cls, default_key_env = PROVIDERS[name]
     api_key = config.get("api_key") or env.get(config.get("api_key_env") or default_key_env)
     kwargs: dict[str, Any] = {"model": chosen_model, "api_key": api_key, "transport": transport}
-    if name == "gemini_native":
-        # Only an explicit config base_url applies here. A global
-        # PORTKIT_LLM_BASE_URL points at an OpenAI-style gateway, which can't
-        # speak generateContent, so honouring it would only misroute the key.
-        base_url = config.get("base_url")
-    else:
-        base_url = pick(None, "base_url") or DEFAULT_BASE_URLS.get(name)
+    base_url = resolve_base_url(name, config, env)
     if base_url:
         kwargs["base_url"] = base_url
     temperature = pick(None, "temperature")

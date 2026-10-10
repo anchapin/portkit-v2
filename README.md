@@ -43,7 +43,8 @@ arguments, then a config mapping, then the environment:
 export PORTKIT_LLM_PROVIDER=anthropic   # or openai, or gemini
 export PORTKIT_LLM_MODEL=<model name>
 export ANTHROPIC_API_KEY=...            # or OPENAI_API_KEY, or GEMINI_API_KEY
-export PORTKIT_LLM_BASE_URL=...         # optional: OpenRouter, a local server, a gateway
+export PORTKIT_LLM_BASE_URL=...         # optional: OpenRouter, a local server, a gateway (openai/anthropic only;
+                                        # gemini keeps Google's endpoint unless PORTKIT_LLM_GEMINI_BASE_URL is set)
 export PORTKIT_LLM_TEMPERATURE=...      # optional: sampling temperature
 ```
 
