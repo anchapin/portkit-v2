@@ -90,15 +90,83 @@ def test_a_tag_covering_several_items_is_still_refused(tmp_path, tag):
     assert tag in result.unhandled[0].reason
 
 
-def test_smithing_says_why_rather_than_unsupported(tmp_path):
+def test_complete_smithing_becomes_bedrock_smithing(tmp_path):
+    """#87: template, base and addition all named -> the same recipe on Bedrock."""
+    mod = build(tmp_path, "upgrade", {
+        "type": "minecraft:smithing_transform",
+        "template": {"item": "minecraft:netherite_upgrade_smithing_template"},
+        "base": {"item": "examplemod:steel_sword"},
+        "addition": {"tag": "c:ingots/netherite"},
+        "result": {"id": "examplemod:netherite_steel_sword"},
+    })
+    result = recipes.convert(mod)
+    assert result.unhandled == [] and result.notes == []
+    body = result.files["recipes/upgrade.json"]["minecraft:recipe_smithing_transform"]
+    assert body == {
+        "description": {"identifier": "examplemod:upgrade"},
+        "tags": ["smithing_table"],
+        "template": "minecraft:netherite_upgrade_smithing_template",
+        "base": "examplemod:steel_sword",
+        "addition": "minecraft:netherite_ingot",
+        "result": "examplemod:netherite_steel_sword",
+    }
+
+
+def test_incomplete_smithing_downgrades_to_crafting_and_says_so(tmp_path):
+    """#87: no template or addition -> never invent them; craft base into result."""
     mod = build(tmp_path, "upgrade", {
         "type": "minecraft:smithing_transform",
         "base": {"item": "examplemod:ingot"},
         "result": {"item": "examplemod:tool"},
     })
+    result = recipes.convert(mod)
+    assert result.unhandled == []
+    body = result.files["recipes/upgrade.json"]["minecraft:recipe_shapeless"]
+    assert body["tags"] == ["crafting_table"]
+    assert body["ingredients"] == [{"item": "examplemod:ingot"}]
+    assert body["result"] == {"item": "examplemod:tool"}
+    assert len(result.notes) == 1
+    assert "template or addition" in result.notes[0] and "shapeless" in result.notes[0]
+
+
+def test_smithing_keeps_whichever_inputs_it_has(tmp_path):
+    mod = build(tmp_path, "upgrade", {
+        "type": "minecraft:smithing_transform",
+        "base": {"item": "examplemod:ingot"},
+        "addition": {"item": "minecraft:diamond"},
+        "result": {"item": "examplemod:tool"},
+    })
+    result = recipes.convert(mod)
+    body = result.files["recipes/upgrade.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "examplemod:ingot"}, {"item": "minecraft:diamond"}]
+    assert "no template," in result.notes[0]
+
+
+def test_smithing_with_a_multi_item_tag_stays_residue(tmp_path):
+    mod = build(tmp_path, "upgrade", {
+        "type": "minecraft:smithing_transform",
+        "template": {"item": "minecraft:netherite_upgrade_smithing_template"},
+        "base": {"tag": "minecraft:swords"},
+        "addition": {"item": "minecraft:netherite_ingot"},
+        "result": {"item": "examplemod:tool"},
+    })
+    result = recipes.convert(mod)
+    assert result.files == {}
+    assert "smithing base" in result.unhandled[0].reason
+
+
+def test_smithing_with_no_base_stays_residue(tmp_path):
+    mod = build(tmp_path, "upgrade", {
+        "type": "minecraft:smithing_transform",
+        "result": {"item": "examplemod:tool"},
+    })
+    assert "no readable base" in recipes.convert(mod).unhandled[0].reason
+
+
+def test_armour_trims_still_say_why(tmp_path):
+    mod = build(tmp_path, "trim", {"type": "minecraft:smithing_trim"})
     reason = recipes.convert(mod).unhandled[0].reason
-    assert "template item" in reason
-    assert "unsupported" not in reason
+    assert "trim" in reason and "unsupported" not in reason
 
 
 def test_a_genuinely_unknown_type_still_says_unsupported(tmp_path):
