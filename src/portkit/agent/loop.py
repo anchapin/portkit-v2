@@ -35,6 +35,13 @@ class Message:
     # Tokens the completion that produced this message cost, when the provider
     # says. Only assistant messages carry it.
     usage: Usage | None = None
+    # Why the provider stopped generating ("stop", "length", "tool_calls",
+    # "content_filter", Anthropic's "end_turn"/"max_tokens", ...), and any
+    # refusal text it put beside the content. Diagnostics only: an empty final
+    # reply means nothing on its own, these say whether it was a cutoff, a
+    # filter or a refusal. Never sent back to the model.
+    finish_reason: str | None = None
+    refusal: str = ""
 
 
 @runtime_checkable
