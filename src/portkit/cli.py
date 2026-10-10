@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 from pathlib import Path
 
+from .agent import Budget, Pricing, make_client  # noqa: F401  (re-exported for tests)
+from .agent.residue import ResidueAgent
 from .ingest import IngestError
 from .pipeline import convert
 from .validate import validate_tree
@@ -26,8 +29,6 @@ def _residue_agent(args):
     transcript, which needs no provider, key or network. ``--agent-record``
     writes every completion of the run to a transcript.
     """
-    from .agent import Budget, Pricing, make_client
-    from .agent.residue import ResidueAgent
     from .agent.transcript import RecordingClient, ReplayClient
 
     budget = Budget(
@@ -321,12 +322,20 @@ def cmd_report(args) -> int:
 
 
 def cmd_eval(args) -> int:
-    """Run every fixture and print the coverage table. This is the number that matters.
+    """Dispatch between the coverage matrix and the agent eval matrix (#77).
 
-    With a baseline (``fixtures/coverage-baseline.json`` by default, or
-    ``--baseline``), any fixture whose coverage or converted file count drops
-    below it fails the run, naming the fixture and the delta.
+    ``portkit eval`` prints the deterministic coverage table (the ratchet from
+    ``coverage-baseline.json``). ``portkit eval --agent --target provider:model``
+    runs the residue agent on each fixture, once per target, and prints the
+    per-provider pass rate / step count / format-failure matrix.
     """
+    if getattr(args, "agent", False):
+        return _cmd_eval_agent(args)
+    return _cmd_eval_coverage(args)
+
+
+def _cmd_eval_coverage(args) -> int:
+    """The deterministic coverage matrix. ``portkit eval`` without ``--agent``."""
     import os
     import tempfile
 
@@ -391,6 +400,326 @@ def cmd_eval(args) -> int:
         return 1
     print(f"\ncoverage at or above baseline for all {len(measured)} fixtures")
     return 1 if failures else 0
+
+
+# --- agent eval matrix (issue #77) -------------------------------------------
+#
+# ``portkit eval --agent --target provider:model`` runs every fixture's residue
+# through the agent loop, once per target, and prints a row per (fixture,
+# target). Tasks are scored on three outcomes, not two:
+#
+#   pass     validator clean and the residue cleared
+#   fail     validator rejected what was written, or the agent gave up
+#   unscored provider error, crash in the loop, or the validator never ran
+#
+# Unscored tasks are reported separately and excluded from the pass rate, so
+# a provider outage does not look like a worse model. Format failures (tool
+# names or arguments the model got wrong) are counted per provider: a model
+# that speaks the wrong wire format looks different from a model that just
+# cannot solve the task.
+
+_AGENT_OUTCOME_PASS = "pass"
+_AGENT_OUTCOME_FAIL = "fail"
+_AGENT_OUTCOME_UNSCORED = "unscored"
+
+
+def _score_residue_outcomes(outcomes) -> tuple[int, int, int]:
+    """(pass, fail, unscored) counts across one fixture's residue groups.
+
+    A group's outcome maps to:
+      pass     status == "resolved" (or "partial" whose writes validate, but
+               we keep it simple: only resolved counts as a pass)
+      unscore  status == "skipped" (deterministic refusal kind) or
+               status == "error" (provider failure during the session)
+      fail     everything else: "unresolved", "rolled_back", "partial"
+    """
+    passes = fails = unscored = 0
+    for o in outcomes:
+        if o.status == "resolved":
+            passes += 1
+        elif o.status in ("skipped", "error"):
+            unscored += 1
+        else:
+            fails += 1
+    return passes, fails, unscored
+
+
+def _parse_target(spec: str) -> tuple[str, str, str | None]:
+    """``anthropic:claude-haiku-4.5`` -> (``anthropic``, ``claude-haiku-4.5``, ``None``).
+
+    ``openai:anthropic/claude-haiku-4.5@https://openrouter.ai/api/v1`` adds an
+    optional ``base_url`` after ``@`` so the same run can hit the OpenAI path
+    on OpenRouter and the gemini_native path on Google's endpoint without a
+    separate shell-level config. The factory's own DEFAULT_BASE_URLS still
+    kicks in when no base_url is given.
+
+    Raises ValueError with a useful message if the form is wrong. ``openai`` /
+    ``anthropic`` / ``gemini`` / ``gemini_native`` are the provider names the
+    factory knows; anything else is a typo before the colon.
+    """
+    if ":" not in spec:
+        raise ValueError(
+            f"--target {spec!r} must be provider:model "
+            "(e.g. anthropic:claude-haiku-4.5, gemini_native:gemini-flash-latest, "
+            "openai:anthropic/claude-haiku-4.5@https://openrouter.ai/api/v1)"
+        )
+    head, _, base_url = spec.partition("@")
+    provider, model = head.split(":", 1)
+    provider = provider.strip()
+    model = model.strip()
+    base_url = base_url.strip() or None
+    if not provider or not model:
+        raise ValueError(f"--target {spec!r} must be provider:model with both parts non-empty")
+    return provider, model, base_url
+
+
+def _resolve_agent_out_tree(root: Path, fixture: str, target: str, run: int) -> Path:
+    """Where this (fixture, target) writes its converted tree on disk.
+
+    Used as the parent dir for a fresh TemporaryDirectory so the agent's
+    output survives long enough for the validator to score it.
+    """
+    slug = target.replace(":", "_").replace("/", "_")
+    return root / f".eval-agent-{fixture}-{slug}-run{run}"
+
+
+def _run_target_against_fixture(case: Path, provider: str, model: str, base_url: str | None, args) -> dict:
+    """Convert one fixture with one (provider, model) and return the row data.
+
+    Catches every error mode the issue lists: provider failure, loop crash,
+    validator never ran. Each becomes ``unscored`` rather than ``fail`` so
+    a model that breaks the harness does not get punished as a weaker one.
+    """
+    import tempfile
+
+    fixture_name = case.name
+    # Reset the env-driven factory: --target wins over the shell. Pricing
+    # is only required for dollar ceilings; both are off by default.
+    saved_env = {k: os.environ.get(k) for k in (
+        "PORTKIT_LLM_PROVIDER", "PORTKIT_LLM_MODEL",
+        "PORTKIT_LLM_BASE_URL", "PORTKIT_LLM_INPUT_PRICE",
+        "PORTKIT_LLM_OUTPUT_PRICE", "PORTKIT_LLM_TEMPERATURE",
+    )}
+    try:
+        os.environ["PORTKIT_LLM_PROVIDER"] = provider
+        os.environ["PORTKIT_LLM_MODEL"] = model
+        if base_url is not None:
+            os.environ["PORTKIT_LLM_BASE_URL"] = base_url
+        elif provider == "openai":
+            # If the user did not pin a base_url, let the factory fall back
+            # to OpenAI's default endpoint (``api.openai.com``). Without this
+            # ``PORTKIT_LLM_BASE_URL`` set by the shell would survive the
+            # ``try`` and reach into a target whose provider never asked for
+            # it (issue #77: matrix rows must be self-contained).
+            os.environ.pop("PORTKIT_LLM_BASE_URL", None)
+        # ``base_url`` is left alone on purpose for non-openai providers: a
+        # user pointed at OpenRouter for anthropic (via provider=openai)
+        # keeps that route, and the native Gemini endpoint stays native for
+        # provider=gemini_native. The factory falls back to
+        # DEFAULT_BASE_URLS only when nothing is set.
+
+        pricing = Pricing.from_env()
+        budget = Budget(
+            max_steps=args.agent_max_steps,
+            max_tokens=args.agent_max_tokens,
+            max_cost=args.agent_max_cost,
+            pricing=pricing,
+        )
+
+        try:
+            client = make_client()
+        except Exception as exc:
+            return {
+                "fixture": fixture_name,
+                "provider": provider,
+                "model": model,
+                "outcome": _AGENT_OUTCOME_UNSCORED,
+                "pass": 0, "fail": 0, "unscored": 0,
+                "groups": 0, "steps": 0, "tokens": 0,
+                "cost_usd": None, "stopped_by": None,
+                "format_failures": 0,
+                "reason": f"cannot build client: {type(exc).__name__}: {exc}",
+            }
+
+        agent = ResidueAgent(client, budget=budget)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out"
+            try:
+                result = convert(case / "input", out, agent=agent)
+            except Exception as exc:
+                return {
+                    "fixture": fixture_name,
+                    "provider": provider,
+                    "model": model,
+                    "outcome": _AGENT_OUTCOME_UNSCORED,
+                    "pass": 0, "fail": 0, "unscored": 0,
+                    "groups": 0, "steps": 0, "tokens": 0,
+                    "cost_usd": None, "stopped_by": None,
+                    "format_failures": 0,
+                    "reason": f"convert crashed: {type(exc).__name__}: {exc}",
+                }
+
+        agent_run = result.agent
+        if agent_run is None:
+            return {
+                "fixture": fixture_name,
+                "provider": provider,
+                "model": model,
+                "outcome": _AGENT_OUTCOME_PASS,
+                "pass": 0, "fail": 0, "unscored": 0,
+                "groups": 0, "steps": 0, "tokens": 0,
+                "cost_usd": None, "stopped_by": None,
+                "format_failures": 0,
+                "reason": "no residue",
+            }
+        p, f, u = _score_residue_outcomes(agent_run.outcomes)
+        if u and not p and not f:
+            outcome = _AGENT_OUTCOME_UNSCORED
+        elif f and not p:
+            outcome = _AGENT_OUTCOME_FAIL
+        else:
+            outcome = _AGENT_OUTCOME_PASS
+        return {
+            "fixture": fixture_name,
+            "provider": provider,
+            "model": model,
+            "outcome": outcome,
+            "pass": p, "fail": f, "unscored": u,
+            "groups": len(agent_run.outcomes),
+            "steps": agent_run.spend.steps,
+            "tokens": agent_run.spend.tokens,
+            "cost_usd": None if agent_run.spend.cost is None else round(agent_run.spend.cost, 6),
+            "stopped_by": agent_run.limit,
+            "format_failures": agent_run.format_failures,
+        }
+    finally:
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def _format_eval_matrix(rows: list[dict]) -> str:
+    """The human-readable matrix: one row per (fixture, target)."""
+    lines = []
+    cols = ("fixture", "provider:model", "pass/fail/unscored", "groups",
+            "steps", "tokens", "$", "stopped_by", "fmt_fail", "outcome")
+    header = "  ".join(c.ljust(14) for c in cols[:9]) + "  outcome"
+    lines.append(header)
+    lines.append("-" * len(header))
+    for r in rows:
+        target = f"{r['provider']}:{r['model']}"
+        score = f"{r['pass']}/{r['fail']}/{r['unscored']}"
+        lines.append(
+            "  ".join([
+                r["fixture"].ljust(14),
+                target.ljust(22),
+                score.ljust(16),
+                str(r["groups"]).ljust(6),
+                str(r["steps"]).ljust(5),
+                str(r["tokens"]).ljust(6),
+                ("" if r["cost_usd"] is None else f"${r['cost_usd']:.4f}").ljust(7),
+                (r["stopped_by"] or "-").ljust(10),
+                str(r["format_failures"]).ljust(8),
+                r["outcome"],
+            ])
+        )
+    return "\n".join(lines)
+
+
+def _per_target_totals(rows: list[dict]) -> list[dict]:
+    """One row per target with aggregated counts. Pass rate excludes unscored."""
+    by_target: dict[tuple[str, str], list[dict]] = {}
+    for r in rows:
+        by_target.setdefault((r["provider"], r["model"]), []).append(r)
+    out = []
+    for (provider, model), group in sorted(by_target.items()):
+        total_pass = sum(r["pass"] for r in group)
+        total_fail = sum(r["fail"] for r in group)
+        total_unscored = sum(r["unscored"] for r in group)
+        steps = sum(r["steps"] for r in group)
+        tokens = sum(r["tokens"] for r in group)
+        fmt = sum(r["format_failures"] for r in group)
+        out.append({
+            "provider": provider, "model": model,
+            "pass": total_pass, "fail": total_fail, "unscored": total_unscored,
+            "pass_rate": (
+                total_pass / (total_pass + total_fail)
+                if (total_pass + total_fail) else None
+            ),
+            "steps": steps, "tokens": tokens,
+            "format_failures": fmt,
+            "fixtures": len(group),
+        })
+    return out
+
+
+def _format_target_totals(totals: list[dict]) -> str:
+    lines = [f"{'provider:model':<32} {'pass':>4} {'fail':>4} {'unscored':>8}  {'pass rate':>9}  {'steps':>5}  {'tokens':>7}  fmt_fail"]
+    for t in totals:
+        target = f"{t['provider']}:{t['model']}"
+        rate = "n/a" if t["pass_rate"] is None else f"{t['pass_rate']*100:5.1f}%"
+        lines.append(
+            f"{target:<32} {t['pass']:>4} {t['fail']:>4} {t['unscored']:>8}  {rate:>9}  "
+            f"{t['steps']:>5}  {t['tokens']:>7}  {t['format_failures']}"
+        )
+    return "\n".join(lines)
+
+
+def _cmd_eval_agent(args) -> int:
+    """The per-provider pass rate / steps / format-failure matrix from #77."""
+    if not args.target:
+        print("--agent requires at least one --target provider:model", file=sys.stderr)
+        return 2
+    try:
+        targets = [_parse_target(t) for t in args.target]
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    root = Path(args.fixtures or FIXTURES)
+    if args.agent_fixture:
+        cases = [root / args.agent_fixture]
+        if not cases[0].is_dir() or not (cases[0] / "input").is_dir():
+            print(f"fixture {cases[0]} has no input/", file=sys.stderr)
+            return 2
+    else:
+        cases = sorted(p for p in root.iterdir() if (p / "input").is_dir())
+
+    if not cases:
+        print(f"no fixtures under {root}", file=sys.stderr)
+        return 1
+
+    print(
+        f"agent eval: {len(cases)} fixture(s) x {len(targets)} target(s)\n"
+        f"  budgets: max_steps={args.agent_max_steps} "
+        f"max_tokens={args.agent_max_tokens or '-'} "
+        f"max_cost={args.agent_max_cost or '-'}\n"
+    )
+
+    rows: list[dict] = []
+    for case in cases:
+        for provider, model, base_url in targets:
+            target = f"{provider}:{model}" + (f"@{base_url}" if base_url else "")
+            print(f"--> {case.name} via {target}", file=sys.stderr)
+            row = _run_target_against_fixture(case, provider, model, base_url, args)
+            rows.append(row)
+
+    print("\nper (fixture, target):")
+    print(_format_eval_matrix(rows))
+    print("\nper target:")
+    print(_format_target_totals(_per_target_totals(rows)))
+
+    if args.matrix_out:
+        out = Path(args.matrix_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({
+            "rows": rows,
+            "totals": _per_target_totals(rows),
+        }, indent=2) + "\n")
+        print(f"\nmatrix written: {out}")
+    return 0
 
 
 def main(argv=None) -> int:
@@ -484,7 +813,13 @@ def main(argv=None) -> int:
     p.add_argument("--namespace", default="examplemod")
     p.set_defaults(func=cmd_probe)
 
-    p = sub.add_parser("eval", help="run the whole fixture corpus")
+    p = sub.add_parser(
+        "eval",
+        help=(
+            "run the whole fixture corpus (coverage matrix by default; "
+            "with --agent, the per-provider residue-agent matrix from #77)"
+        ),
+    )
     p.add_argument("--fixtures")
     p.add_argument(
         "--baseline",
@@ -496,6 +831,43 @@ def main(argv=None) -> int:
         help="rewrite the baseline from this run instead of checking against it",
     )
     g.add_argument("--no-baseline", action="store_true", help="skip the baseline check")
+    # Agent mode (#77): run the agent loop on every fixture's residue, once
+    # per --target provider:model. Scores pass/fail/unscored separately and
+    # counts tool-call format failures per provider.
+    p.add_argument(
+        "--agent", action="store_true",
+        help="run the residue agent against each fixture and print the per-provider matrix",
+    )
+    p.add_argument(
+        "--target", action="append", metavar="PROVIDER:MODEL", default=[],
+        help=(
+            "provider:model pair to test (repeatable). Required with --agent. "
+            "Providers: openai, anthropic, gemini, gemini_native."
+        ),
+    )
+    p.add_argument(
+        "--agent-fixture", metavar="NAME",
+        help="with --agent, only run this fixture (otherwise every fixture under --fixtures)",
+    )
+    p.add_argument(
+        "--agent-max-steps", type=int, default=12, metavar="N",
+        help="step budget per residue group (default 12, same as convert --agent)",
+    )
+    p.add_argument(
+        "--agent-max-tokens", type=int, metavar="N",
+        help="token ceiling for the whole agent run (input + output), shared across fixtures",
+    )
+    p.add_argument(
+        "--agent-max-cost", type=float, metavar="USD",
+        help=(
+            "dollar ceiling for the whole agent run; needs "
+            "PORTKIT_LLM_INPUT_PRICE and PORTKIT_LLM_OUTPUT_PRICE"
+        ),
+    )
+    p.add_argument(
+        "--matrix-out", metavar="PATH",
+        help="with --agent, write the JSON matrix to this path",
+    )
     p.set_defaults(func=cmd_eval)
 
     args = parser.parse_args(argv)

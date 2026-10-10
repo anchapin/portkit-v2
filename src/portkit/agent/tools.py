@@ -18,6 +18,12 @@ class ToolBox:
         self.source = source
         self.out_tree = out_tree
         self._tools: dict[str, tuple[dict, Callable[..., Any]]] = {}
+        # Format failures the box has seen: unknown tool names and bad
+        # arguments. A model that talks the wrong tool-call format (HF
+        # multi-harness RL guide) lights up the counter, instead of looking
+        # like a normal weaker model whose errors arrive as ``done`` with an
+        # empty reply. See issue #77.
+        self.format_failures: int = 0
         self._register_defaults()
 
     # -- registration -------------------------------------------------
@@ -29,9 +35,17 @@ class ToolBox:
 
     def invoke(self, name: str, arguments: dict) -> Any:
         if name not in self._tools:
+            self.format_failures += 1
             return {"error": f"unknown tool {name!r}", "available": sorted(self._tools)}
         _, fn = self._tools[name]
-        return fn(**arguments)
+        try:
+            return fn(**arguments)
+        except TypeError as exc:
+            # A different harness would crash here. Count it as a format
+            # failure so a model that calls every tool with the wrong schema
+            # is visible in the matrix, instead of just looking slower.
+            self.format_failures += 1
+            return {"error": f"bad arguments for {name!r}: {exc}"}
 
     # -- the tools ----------------------------------------------------
     def _register_defaults(self) -> None:

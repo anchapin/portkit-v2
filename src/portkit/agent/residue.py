@@ -199,6 +199,10 @@ class GroupOutcome:
     note: str = ""
     limit: str | None = None  # the ceiling that stopped it: steps | tokens | cost
     spend: Spend = field(default_factory=Spend)
+    # Tool calls that did not match the toolbox (unknown tool name, bad
+    # arguments). Counts format failures separately from a normal weaker
+    # model whose errors arrive as ``done`` with an empty reply. See #77.
+    format_failures: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -210,6 +214,7 @@ class GroupOutcome:
             "written": self.written,
             "spend": self.spend.to_dict(),
             "note": self.note,
+            "format_failures": self.format_failures,
         }
 
 
@@ -247,12 +252,18 @@ class ResidueRun:
         provider error after valid writes); their residue stands."""
         return sum(len(o.written) for o in self.outcomes if o.status != "resolved")
 
+    @property
+    def format_failures(self) -> int:
+        """Tool calls that did not match the toolbox across the whole run."""
+        return sum(o.format_failures for o in self.outcomes)
+
     def summary(self) -> dict[str, Any]:
         return {
             "groups": len(self.outcomes),
             "resolved": len(self.resolved),
             "files_written": self.files_written,
             "partial_files": self.partial_files,
+            "format_failures": self.format_failures,
             "spend": self.spend.to_dict(),
             "budget": {
                 "max_steps_per_group": self.budget.max_steps,
@@ -363,6 +374,7 @@ class ResidueAgent:
             outcome.steps = session.spend.steps
             outcome.note = f"{type(exc).__name__}: {exc}"
         outcome.spend = session.spend
+        outcome.format_failures = box.format_failures
 
         outcome.written = sorted(box.originals)
         # Judged against the tree as the session found it: a group is rolled back
