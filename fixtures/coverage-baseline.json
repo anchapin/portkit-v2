@@ -66,9 +66,9 @@
       "residue": 2
     },
     "residue_mod_enriched": {
-      "coverage": 90.9,
-      "files": 10,
-      "residue": 1
+      "coverage": 100.0,
+      "files": 11,
+      "residue": 0
     },
     "rotated_model_mod": {
       "coverage": 100.0,
