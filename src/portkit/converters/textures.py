@@ -4,6 +4,13 @@ Java lays textures out under assets/<ns>/textures/block/<name>.png. Bedrock want
 them under textures/blocks/ plus an index in textures/terrain_texture.json. That
 is a rename and an index build. No judgement required, so no model.
 
+Subdirectories carry over as they are: block/palettes/andesite.png becomes
+textures/blocks/palettes/andesite, the way vanilla Bedrock keeps
+textures/blocks/huge_fungus/. Its index key flattens the subpath with
+underscores (examplemod:palettes_andesite), and models.texture_shortname
+derives the same key from the model's reference. Two files that flatten to one
+key are both residue, since picking either would be a guess.
+
 A png may carry a <name>.png.mcmeta sidecar declaring it an animation strip.
 Bedrock says the same thing in textures/flipbook_textures.json. Without that
 entry the strip renders as one squashed static image, so a sidecar we cannot map
@@ -15,11 +22,14 @@ import json
 
 from ..model import ConversionResult, SourceMod, Unhandled
 
-# java dir -> (bedrock dir, index file, index key)
+# lane -> (java dirs, bedrock dir, index file, index key). Pre-1.13 mods named
+# the dirs blocks/ and items/, and some later ones (Storage Drawers 1.19.2)
+# never renamed them; models reference whichever the mod ships.
 _LANES = {
-    "block": ("textures/blocks", "textures/terrain_texture.json", "texture_data"),
-    "item": ("textures/items", "textures/item_texture.json", "texture_data"),
+    "block": (("block", "blocks"), "textures/blocks", "textures/terrain_texture.json", "texture_data"),
+    "item": (("item", "items"), "textures/items", "textures/item_texture.json", "texture_data"),
 }
+JAVA_DIRS = frozenset(d for dirs, *_ in _LANES.values() for d in dirs)
 
 
 def _flipbook(animation: dict, texture_path: str, atlas_tile: str) -> tuple[dict | None, str | None]:
@@ -51,31 +61,47 @@ def _flipbook(animation: dict, texture_path: str, atlas_tile: str) -> tuple[dict
     return entry, None
 
 
+def shortname(subpath: str, namespace: str) -> str:
+    """Index key for a texture at <lane>/<subpath> (no extension)."""
+    return f"{namespace}:{subpath.replace('/', '_')}"
+
+
 def convert(mod: SourceMod) -> ConversionResult:
     result = ConversionResult()
     flipbooks: list[dict] = []
-    for java_dir, (bedrock_dir, index_path, index_key) in _LANES.items():
-        src = mod.assets / "textures" / java_dir
-        if not src.is_dir():
+    for lane, (java_dirs, bedrock_dir, index_path, index_key) in _LANES.items():
+        found = [
+            (src, png)
+            for src in (mod.assets / "textures" / d for d in java_dirs)
+            if src.is_dir()
+            for png in sorted(src.rglob("*.png"))
+        ]
+        if not found:
             continue
 
         index: dict[str, dict] = {}
-        for png in sorted(src.rglob("*.png")):
+        keys: dict[str, list] = {}
+        for src, png in found:
+            subpath = png.relative_to(src).with_suffix("").as_posix()
+            keys.setdefault(shortname(subpath, mod.namespace), []).append(png)
+        for src, png in found:
             rel = result.claim(mod, png)
-            if png.parent != src:
-                # Nested dirs mean the mod is doing something structural we would
-                # be guessing about. Hand it to the residue instead of flattening.
+            subpath = png.relative_to(src).with_suffix("").as_posix()
+            atlas_tile = shortname(subpath, mod.namespace)
+            clash = keys[atlas_tile]
+            if len(clash) > 1:
+                others = ", ".join(
+                    p.relative_to(mod.assets / "textures").as_posix() for p in clash if p != png
+                )
                 result.unhandled.append(
                     Unhandled(
                         source=rel,
                         kind="texture",
-                        reason="nested texture directory has no flat Bedrock equivalent",
+                        reason=f"index key {atlas_tile!r} is also claimed by {others}",
                     )
                 )
                 continue
-            name = png.stem
-            atlas_tile = f"{mod.namespace}:{name}"
-            texture_path = f"{bedrock_dir}/{name}"
+            texture_path = f"{bedrock_dir}/{subpath}"
 
             sidecar = png.with_name(f"{png.name}.mcmeta")
             if sidecar.is_file():
@@ -112,7 +138,7 @@ def convert(mod: SourceMod) -> ConversionResult:
         if index:
             result.files[index_path] = {
                 "resource_pack_name": mod.namespace,
-                "texture_name": "atlas.terrain" if java_dir == "block" else "atlas.items",
+                "texture_name": "atlas.terrain" if lane == "block" else "atlas.items",
                 index_key: index,
             }
 
