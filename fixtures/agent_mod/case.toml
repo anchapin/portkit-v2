@@ -1,0 +1,5 @@
+name = "agent_mod"
+description = "Residue that needs judgment, for live agent sweeps now that residue_mod_enriched converts fully (#88). Three groups: a held sword whose behavior lives in code (models/item/steel_sword.json), a 3x3 recipe over examplemod:alloy_ingots, a tag file naming two of the mod's own ingots, and a minecraft:smithing_trim recipe Bedrock can express but the deterministic path does not emit. Everything else (two ingots, the alloy block, the sword's crafting recipe) converts deterministically."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 3
