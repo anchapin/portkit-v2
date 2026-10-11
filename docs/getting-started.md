@@ -86,8 +86,9 @@ export ANTHROPIC_API_KEY=...
 portkit convert yourmod.jar out/ --agent --agent-max-cost 0.50
 ```
 
-The README's agent section covers budgets, transcripts and `--repeat`. A group
-the agent can't resolve cleanly is rolled back and stays in `unhandled.json`.
+The README's agent section covers budgets, transcripts, `--repeat` and the
+recommended default model (DeepSeek V4.1 Flash through OpenRouter). A group the
+agent can't resolve cleanly is rolled back and stays in `unhandled.json`.
 
 ## When the output is wrong
 
