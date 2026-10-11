@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 from pathlib import Path
@@ -581,6 +582,23 @@ def _corpus_cases(args):
         print(f"not in the corpus cache: {', '.join(missing)}; run `portkit corpus fetch` "
               "or add --fetch", file=sys.stderr)
         return 2
+    from . import data
+
+    if args.fetch:
+        try:
+            data.fetch_sounds()
+        except data.ReferenceDataError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    if data.bedrock_vanilla_sounds() is None:
+        # The corpus baseline is measured with the list; without it vanilla
+        # sound references are dropped, which can move the numbers.
+        message = (f"the Bedrock vanilla sound list isn't cached, so vanilla sound references "
+                   f"are dropped and the numbers may differ from the baseline; run "
+                   f"`{data.FETCH_COMMAND}` or add --fetch")
+        print(f"warning: {message}", file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::warning title=vanilla sounds::{message}")
     return manifest.parent, cases
 
 
@@ -664,6 +682,24 @@ def cmd_corpus(args) -> int:
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} {mod.name} -> {path}")
     return 1 if failed else 0
+
+
+def cmd_reference(args) -> int:
+    """``portkit reference fetch|list``: Mojang reference data, fetched on demand (#124)."""
+    from . import data
+
+    cache = data.cache_dir()
+    if args.action == "list":
+        state = "cached" if data.cached_sounds(cache) else "missing"
+        print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
+        return 0
+    try:
+        path, downloaded = data.fetch_sounds(cache)
+    except data.ReferenceDataError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        return 1
+    print(f"{'fetched' if downloaded else 'cached ':7} vanilla-sounds -> {path}")
+    return 0
 
 
 def main(argv=None) -> int:
@@ -776,7 +812,8 @@ def main(argv=None) -> int:
     )
     c.add_argument("--corpus", action="store_true", help="evaluate the real-mod corpus")
     c.add_argument("--manifest", metavar="PATH", help="corpus manifest (default fixtures/real/mods.toml)")
-    c.add_argument("--fetch", action="store_true", help="with --corpus, download missing jars first")
+    c.add_argument("--fetch", action="store_true",
+                   help="with --corpus, download missing jars and the vanilla sound list first")
     c.add_argument(
         "--mct", action="store_true",
         help="also run Mojang's `mct validate` (@minecraft/creator-tools) on each converted tree "
@@ -813,6 +850,13 @@ def main(argv=None) -> int:
     p.add_argument("action", choices=["fetch", "list"])
     p.add_argument("--manifest", metavar="PATH", help="corpus manifest (default fixtures/real/mods.toml)")
     p.set_defaults(func=cmd_corpus)
+
+    p = sub.add_parser(
+        "reference",
+        help="fetch or list Mojang reference data (the Bedrock vanilla sound list) (#124)",
+    )
+    p.add_argument("action", choices=["fetch", "list"])
+    p.set_defaults(func=cmd_reference)
 
     args = parser.parse_args(argv)
     return args.func(args)

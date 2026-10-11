@@ -18,14 +18,16 @@ No entry may name audio the player won't have (#116). A Java sound name with
 no namespace is vanilla (``minecraft:``), not the mod's: it is kept only when
 Bedrock's own vanilla pack has a file at the same path, which then plays.
 Otherwise it is dropped, as is a mod-namespaced name whose audio the jar
-doesn't ship. An event that keeps at least one sound converts with a note
+doesn't ship. The vanilla list is fetched on demand (``portkit reference
+fetch``, #124); without it every vanilla name is dropped, each saying to run
+the fetch to keep it. An event that keeps at least one sound converts with a note
 naming what it lost; one left with none is withdrawn to the residue.
 """
 from __future__ import annotations
 
 import json
 
-from ..data import bedrock_vanilla_sounds
+from ..data import FETCH_COMMAND, bedrock_vanilla_sounds
 from ..model import ConversionResult, SourceMod, Unhandled
 
 # Java category -> Bedrock category. Bedrock's set is smaller; anything not
@@ -53,14 +55,18 @@ class _Drop(str):
 
 
 def _sound_entry(
-    sound, namespace: str, shipped: frozenset[str] | set[str] = frozenset()
+    sound,
+    namespace: str,
+    shipped: frozenset[str] | set[str] = frozenset(),
+    vanilla: frozenset[str] | None = frozenset(),
 ) -> tuple[dict | None, str | None]:
     """One entry of a Java event's "sounds" list -> a Bedrock sound path.
 
     Returns (entry, None), or (None, reason). A reason that is a ``_Drop``
     costs only this sound; any other reason refuses the whole event.
     ``shipped`` is the mod's converted audio, as paths under sounds/ with no
-    extension.
+    extension. ``vanilla`` is Bedrock's vanilla audio paths, or None when that
+    list isn't cached.
     """
     if isinstance(sound, str):
         name, volume, pitch, stream = sound, None, None, False
@@ -83,7 +89,12 @@ def _sound_entry(
         # mob/slime/big1); those play from the vanilla pack. The rest are
         # filed elsewhere or don't exist, and guessing the new path would be
         # a guess.
-        if f"sounds/{path}" not in bedrock_vanilla_sounds():
+        if vanilla is None:
+            return None, _Drop(
+                f"{name!r} is a vanilla Java sound and the Bedrock vanilla sound list "
+                f"isn't cached; run `{FETCH_COMMAND}` to keep it if Bedrock has sounds/{path}"
+            )
+        if f"sounds/{path}" not in vanilla:
             return None, _Drop(
                 f"{name!r} is a vanilla Java sound with no Bedrock vanilla file at sounds/{path}"
             )
@@ -138,6 +149,7 @@ def convert(mod: SourceMod) -> ConversionResult:
         result.unhandled.append(Unhandled(rel, "sound", f"sounds.json is invalid JSON: {exc}"))
         return result
 
+    vanilla = bedrock_vanilla_sounds()
     definitions: dict[str, dict] = {}
     for event, body in sorted(events.items()):
         if not isinstance(body, dict):
@@ -183,7 +195,7 @@ def convert(mod: SourceMod) -> ConversionResult:
         dropped: list[str] = []
         refused: str | None = None
         for sound in sounds:
-            entry, reason = _sound_entry(sound, mod.namespace, shipped)
+            entry, reason = _sound_entry(sound, mod.namespace, shipped, vanilla)
             if entry is not None:
                 entries.append(entry)
             elif isinstance(reason, _Drop):

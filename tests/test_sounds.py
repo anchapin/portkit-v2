@@ -180,3 +180,56 @@ def test_the_validator_warns_about_a_dangling_sound(tmp_path):
     found = [f for f in validate_pack(pack).findings if f.rule.startswith("sound.")]
     assert [(f.rule, f.severity) for f in found] == [("sound.missing", "warning")]
     assert "sounds/block/gone" in found[0].message
+
+
+# --- the vanilla list is fetched on demand, not vendored (#124) -------------
+
+
+def _no_vanilla_list(monkeypatch, tmp_path):
+    monkeypatch.delenv("PORTKIT_VANILLA_SOUNDS", raising=False)
+    monkeypatch.setenv("PORTKIT_REFERENCE_CACHE", str(tmp_path / "empty-cache"))
+
+
+def test_without_the_cached_list_vanilla_names_are_dropped_saying_how_to_keep_them(tmp_path, monkeypatch):
+    _no_vanilla_list(monkeypatch, tmp_path)
+    event = {"category": "block", "sounds": [
+        "examplemod:block/brazier/crackle1", "random/bow", "minecraft:mob/slime/big1"]}
+    result = sounds.convert(build(tmp_path, {"bounce": event}))
+    assert _definitions(result)["examplemod:bounce"]["sounds"] == [
+        {"name": "sounds/block/brazier/crackle1"}]
+    [note] = result.notes
+    assert "dropped 2 sound(s)" in note
+    assert note.count("portkit reference fetch") == 2
+    assert "sounds/random/bow" in note and "sounds/mob/slime/big1" in note
+
+
+def test_without_the_cached_list_an_all_vanilla_event_is_withdrawn(tmp_path, monkeypatch):
+    _no_vanilla_list(monkeypatch, tmp_path)
+    result = sounds.convert(build(tmp_path, {"throw": {"category": "neutral", "sounds": ["random/bow"]}}))
+    assert "sounds/sound_definitions.json" not in result.files
+    [entry] = result.unhandled
+    assert entry.count == 0 and "portkit reference fetch" in entry.reason
+
+
+def test_the_no_cache_output_is_deterministic(tmp_path, monkeypatch):
+    _no_vanilla_list(monkeypatch, tmp_path)
+    index = {"a": {"category": "block", "sounds": ["random/bow", "examplemod:block/brazier/crackle1"]},
+             "b": {"category": "block", "sounds": ["mob/slime/big1"]}}
+    runs = [sounds.convert(build(tmp_path / str(i), index)) for i in range(2)]
+    assert runs[0].files == runs[1].files and runs[0].notes == runs[1].notes
+    assert [u.reason for u in runs[0].unhandled] == [u.reason for u in runs[1].unhandled]
+
+
+def test_the_validator_says_when_it_cannot_check_vanilla_audio(tmp_path, monkeypatch):
+    from portkit.validate import validate_pack
+
+    _no_vanilla_list(monkeypatch, tmp_path)
+    pack = tmp_path / "resource_pack"
+    (pack / "sounds").mkdir(parents=True)
+    (pack / "sounds" / "sound_definitions.json").write_text(json.dumps({
+        "format_version": "1.14.0",
+        "sound_definitions": {"m:e": {"category": "block", "sounds": ["sounds/random/bow"]}},
+    }))
+    [found] = [f for f in validate_pack(pack).findings if f.rule.startswith("sound.")]
+    assert found.rule == "sound.missing" and found.severity == "warning"
+    assert "portkit reference fetch" in found.message
