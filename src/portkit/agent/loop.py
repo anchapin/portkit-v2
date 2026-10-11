@@ -42,6 +42,10 @@ class Message:
     # filter or a refusal. Never sent back to the model.
     finish_reason: str | None = None
     refusal: str = ""
+    # Opaque provider fields on an assistant message that must go back on the
+    # next request unchanged, e.g. OpenRouter's ``reasoning_details`` (which
+    # carry Gemini's thought signatures there). Empty for most.
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
