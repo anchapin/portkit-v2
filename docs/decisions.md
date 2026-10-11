@@ -27,6 +27,23 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: Display-only items are allowed when the visual is real and the behavior isn't portable
+
+- **Decision:** portkit may ship an item that only looks right, when its
+  look comes from the mod's own assets and its behavior is Java code with no
+  Bedrock mapping. Such an item carries its icon, its name from the mod's lang
+  and an honest stack size, and nothing else (no mining speed, damage,
+  durability or enchantability), and the report says it is display-only and
+  that the behavior stays in Java. First use: the 1,160 baked Tinkers preset
+  tools; Tinkers' part items ship as plain inert items, like ingots.
+- **Why:** The visual is real data, and leaving it out loses coverage
+  without making anything more correct. Inventing stats would break the
+  no-fabrication rule (2026-10-09); saying "display-only" doesn't.
+- **Rejected:** Icons only, with no item (the first prototype): the art
+  ships but nothing in the game shows it. Functional tools: would need
+  Tinkers' stat formula, i.e. fabrication.
+- **Links:** #128 (Alex approved, 2026-10-11), PR #129.
+
 ## 2026-10-11: Tinkers tool icons are pre-baked from Tinkers' own preset rule (route A)
 
 - **Decision:** For Tinkers' Construct, portkit composites one icon per tool
