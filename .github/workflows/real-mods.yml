@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache
+      # Mojang's vanilla sound list (#124), fetched rather than committed. The
+      # corpus baseline is measured with it, so vanilla sound refs survive.
+      PORTKIT_REFERENCE_CACHE: ${{ github.workspace }}/.reference-cache
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +33,15 @@ jobs:
 
       - name: Fetch pinned jars (sha512-checked)
         run: portkit corpus fetch
+
+      # The pin (commit + sha256) lives in src/portkit/data/__init__.py.
+      - uses: actions/cache@v4
+        with:
+          path: .reference-cache
+          key: reference-${{ hashFiles('src/portkit/data/__init__.py') }}
+
+      - name: Fetch the Bedrock vanilla sound list (sha256-checked)
+        run: portkit reference fetch
 
       # Mojang's Minecraft Creator Tools as a second, report-only oracle (#113).
       # Pinned so a new mct release can't move the numbers unannounced.
