@@ -53,7 +53,15 @@ export ANTHROPIC_API_KEY=...            # or OPENAI_API_KEY, or GEMINI_API_KEY
 export PORTKIT_LLM_BASE_URL=...         # optional: OpenRouter, a local server, a gateway (openai/anthropic only;
                                         # gemini keeps Google's endpoint unless PORTKIT_LLM_GEMINI_BASE_URL is set)
 export PORTKIT_LLM_TEMPERATURE=...      # optional: sampling temperature
+export PORTKIT_LLM_MAX_RETRIES=2        # optional: retries on 429/5xx/timeouts (default 2; 0 = off)
 ```
+
+Transient provider failures are retried inside the client: HTTP 429, 500, 502,
+503, 504 and 529, timeouts and dropped connections, with exponential backoff
+that honours `Retry-After`; and, once, an empty reply with
+`finish_reason=error`. A retry is invisible to transcripts (same request, only
+the final reply recorded), and tokens billed for a discarded empty reply still
+count toward spend.
 
 Both clients are stdlib HTTP (no SDK dependency) and translate tool calls both
 ways, so the same `AgentSession` runs against either one unchanged.

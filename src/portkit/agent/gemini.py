@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Any
 
 from .budget import Usage
-from .http import LLMError, Transport, post_json
+from .http import LLMError, RetryPolicy, Transport, complete_with_retry, post_json
 from .loop import Message, ToolCall
 
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -41,12 +41,15 @@ class GeminiClient:
         api_key: str | None = None,
         transport: Transport = post_json,
         extra: dict[str, Any] | None = None,
+        retry: RetryPolicy | None = None,
         base_url: str | None = None,
     ):
         self.model = model
         self.models_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.api_key = api_key
         self.transport = transport
+        # None reads PORTKIT_LLM_MAX_RETRIES on every call (see http.py).
+        self.retry = retry
         self.extra = dict(extra or {})  # temperature, max_tokens, ...
 
     @property
@@ -62,8 +65,7 @@ class GeminiClient:
         if tools:
             body["tools"] = [{"functionDeclarations": [to_gemini_tool(t) for t in tools]}]
         headers = {"x-goog-api-key": self.api_key} if self.api_key else {}
-        reply = self.transport(self.base_url, headers, body)
-        return from_gemini_reply(reply)
+        return complete_with_retry(self.transport, self.base_url, headers, body, from_gemini_reply, self.retry)
 
 
 # --- request-side translations ------------------------------------------------

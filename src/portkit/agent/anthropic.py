@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from .budget import Usage
-from .http import LLMError, Transport, post_json
+from .http import LLMError, RetryPolicy, Transport, complete_with_retry, post_json
 from .loop import Message, ToolCall
 
 DEFAULT_BASE_URL = "https://api.anthropic.com"
@@ -27,12 +27,15 @@ class AnthropicClient:
         max_tokens: int = 4096,
         transport: Transport = post_json,
         extra: dict[str, Any] | None = None,
+        retry: RetryPolicy | None = None,
     ):
         self.model = model
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.max_tokens = max_tokens
         self.transport = transport
+        # None reads PORTKIT_LLM_MAX_RETRIES on every call (see http.py).
+        self.retry = retry
         self.extra = dict(extra or {})
 
     def complete(self, messages: list[Message], tools: list[dict]) -> Message:
@@ -50,8 +53,9 @@ class AnthropicClient:
         headers = {"anthropic-version": API_VERSION}
         if self.api_key:
             headers["x-api-key"] = self.api_key
-        reply = self.transport(f"{self.base_url}/v1/messages", headers, body)
-        return from_anthropic_reply(reply)
+        return complete_with_retry(
+            self.transport, f"{self.base_url}/v1/messages", headers, body, from_anthropic_reply, self.retry
+        )
 
 
 def to_anthropic_tool(schema: dict) -> dict:
