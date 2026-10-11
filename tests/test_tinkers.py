@@ -1,4 +1,4 @@
-"""Pre-baked Tinkers' Construct tool icons (#122).
+"""Pre-baked Tinkers' Construct tool icons and display-only items (#122, #128).
 
 A miniature Tinkers layout, built per test: three part items, one pickaxe, a
 handful of materials, and 2x2 sprites whose pixels say which layer and which
@@ -150,8 +150,9 @@ def test_icons_join_the_textures_converters_index(tmp_path):
     index = result.files["textures/item_texture.json"]["texture_data"]
     assert f"{NS}:tinkers_pickaxe_wood" in index
     assert f"{NS}:tool_pickaxe_head_examplemod_wood" in index  # the raw sprite is still there
-    # No items: tool behavior is Java, and items.convert refuses tool models.
-    assert not any(p.startswith("items/") for p in result.files)
+    # Each preset's display-only item points at its baked icon.
+    item = result.files["items/tinkers_pickaxe_wood.json"]["minecraft:item"]
+    assert item["components"]["minecraft:icon"] in index
     assert any("pre-baked 3 creative-tab tool icons" in n for n in result.notes)
 
 
@@ -228,3 +229,176 @@ def test_render_info_that_drew_nothing_stays_unclaimed(tmp_path):
     write(tmp_path, f"assets/{NS}/tinkering/materials/wood/crimson.json", {"color": "FF990000"})
     result, _ = tinkers.bake(mod)
     assert f"assets/{NS}/tinkering/materials/wood/crimson.json" not in result.consumed
+
+
+
+# --- display-only preset items and inert part items (#128) ---------------------
+
+def lang(tmp_path, locale, entries):
+    write(tmp_path, f"assets/{NS}/lang/{locale}.json", entries)
+
+
+def name_module(tmp_path, module):
+    path = tmp_path / f"data/{NS}/tinkering/tool_definitions/pickaxe.json"
+    body = json.loads(path.read_text())
+    body["modules"].append(module)
+    path.write_text(json.dumps(body))
+
+
+def test_each_preset_is_a_display_only_item(tmp_path):
+    """Icon and max_stack_size 1, nothing else: no digger, damage or durability."""
+    result, info = tinkers.bake(build(tmp_path))
+    for material in ("string", "wood", "iron"):
+        body = result.files[f"items/tinkers_pickaxe_{material}.json"]
+        assert body["minecraft:item"]["description"]["identifier"] == f"{NS}:tinkers_pickaxe_{material}"
+        assert body["minecraft:item"]["components"] == {
+            "minecraft:icon": f"{NS}:tinkers_pickaxe_{material}",
+            "minecraft:max_stack_size": 1,
+        }
+    [note] = [n for n in result.notes if "ship as display-only items" in n]
+    assert "3 preset tools" in note and "Java" in note
+
+
+def test_part_items_use_the_parts_own_sprite_and_stack_like_ingots(tmp_path):
+    """One per part and visible material with that stat type and a shipped sprite;
+    a material that would need a tinted fallback gets none."""
+    result, info = tinkers.bake(build(tmp_path))
+    assert info.parts == {
+        "pick_head": ["wood", "iron"],
+        "tool_binding": ["string", "wood"],  # iron's binding is only a tinted base
+        "tool_handle": ["wood"],  # iron's handle is only a tinted fallback
+    }
+    body = result.files["items/tinkers_pick_head_iron.json"]["minecraft:item"]
+    assert body["components"] == {
+        "minecraft:icon": f"{NS}:tool_pickaxe_head_examplemod_iron",
+        "minecraft:max_stack_size": 64,
+    }
+    assert not any(p.startswith("textures/items/tinkers_parts") for p in result.files)  # no new art
+
+
+def test_part_items_point_at_textures_the_textures_converter_indexed(tmp_path):
+    result = convert_all(build(tmp_path))
+    index = result.files["textures/item_texture.json"]["texture_data"]
+    for path, body in result.files.items():
+        if path.startswith("items/tinkers_"):
+            assert body["minecraft:item"]["components"]["minecraft:icon"] in index, path
+
+
+def test_tool_and_part_models_are_not_flat_icon_residue_any_more(tmp_path):
+    result = convert_all(build(tmp_path))
+    assert not [u for u in result.unhandled if u.kind == "item"]
+    assert f"assets/{NS}/models/item/pickaxe.json" in result.consumed
+    assert f"assets/{NS}/models/item/pick_head.json" in result.consumed
+
+
+def test_a_fixed_texture_tool_is_residue_with_its_reason(tmp_path):
+    mod = build(tmp_path)
+    write(tmp_path, f"assets/{NS}/models/item/staff.json",
+          {"loader": "tconstruct:tool", "textures": {"tool": f"{NS}:item/tool/staff"}})
+    write(tmp_path, f"data/{NS}/tinkering/tool_definitions/staff.json", {"modules": []})
+    result = convert_all(mod)
+    [entry] = [u for u in result.unhandled if u.source.endswith("staff.json")]
+    assert entry.kind == "tinkers_preset" and "fixed-texture" in entry.reason
+    assert not any(p.startswith("items/tinkers_staff") for p in result.files)
+
+
+def test_names_compose_from_the_mods_lang_like_tinkers_does(tmp_path):
+    mod = build(tmp_path)
+    name_module(tmp_path, {"type": "tconstruct:fixed_material_name", "index": 0})
+    lang(tmp_path, "en_us", {
+        "item.examplemod.pickaxe": "Pickaxe",
+        "item.examplemod.pick_head": "Pick Head",
+        "item.examplemod.tool_binding": "Tool Binding",
+        "item.examplemod.tool.format": "%s %s",
+        "material.examplemod.wood.format": "Wooden %s",
+        "material.examplemod.iron": "Iron",
+        "material.examplemod.string": "String",
+        "item.examplemod.tool_binding.examplemod.string": "Twine",
+    })
+    lang(tmp_path, "de_de", {"item.examplemod.pickaxe": "Spitzhacke", "material.examplemod.iron": "Eisen"})
+    result, _ = tinkers.bake(mod)
+    en = result.files["texts/en_US.lang"].splitlines()
+    assert f"item.{NS}:tinkers_pickaxe_iron.name=Iron Pickaxe" in en
+    assert f"item.{NS}:tinkers_pickaxe_wood.name=Wooden Pickaxe" in en
+    # The string preset's head (slot 0) is wood, the first material with head stats.
+    assert f"item.{NS}:tinkers_pickaxe_string.name=Wooden Pickaxe" in en
+    assert f"item.{NS}:tinkers_pick_head_iron.name=Iron Pick Head" in en
+    assert f"item.{NS}:tinkers_tool_binding_string.name=Twine" in en  # the item's own key wins
+    assert en == sorted(en)
+    de = result.files["texts/de_DE.lang"].splitlines()
+    # de_de has the names it has; the format falls back to en_us, as in Java.
+    assert f"item.{NS}:tinkers_pickaxe_iron.name=Eisen Spitzhacke" in de
+    assert result.files["texts/languages.json"] == ["en_US", "de_DE"]
+
+
+def test_a_tool_whose_name_rule_is_java_keeps_its_own_name(tmp_path):
+    mod = build(tmp_path)  # no name module: Java filters on canRepair, in code
+    lang(tmp_path, "en_us", {"item.examplemod.pickaxe": "Pickaxe", "material.examplemod.iron": "Iron",
+                             "item.examplemod.tool.format": "%s %s"})
+    result, info = tinkers.bake(mod)
+    assert f"item.{NS}:tinkers_pickaxe_iron.name=Pickaxe" in result.files["texts/en_US.lang"]
+    assert info.named_by_base == ["pickaxe"]
+    assert any("tool's own name: pickaxe" in n for n in result.notes)
+
+
+def test_material_name_all_hyphenates_the_materials_in_slot_order(tmp_path):
+    mod = build(tmp_path)
+    name_module(tmp_path, {"type": "tconstruct:material_name", "filter": "all"})
+    lang(tmp_path, "en_us", {
+        "item.examplemod.pickaxe": "Pickaxe", "item.examplemod.tool.format": "%s %s",
+        "item.examplemod.tool.material_separator": "-",
+        "material.examplemod.wood": "Wood", "material.examplemod.string": "String",
+        "material.examplemod.iron": "Iron",
+    })
+    result, _ = tinkers.bake(mod)
+    en = result.files["texts/en_US.lang"]
+    assert f"item.{NS}:tinkers_pickaxe_string.name=Wood-String Pickaxe\n" in en
+    assert f"item.{NS}:tinkers_pickaxe_iron.name=Iron Pickaxe\n" in en
+
+
+def test_without_lang_the_items_ship_unnamed_and_say_so(tmp_path):
+    result, info = tinkers.bake(build(tmp_path))
+    assert not any(p.startswith("texts/") for p in result.files)
+    assert len(info.unnamed) == 3 + 5
+    assert any("no name in the mod's lang files" in n for n in result.notes)
+
+
+def test_names_join_the_lang_converters_file(tmp_path):
+    mod = build(tmp_path)
+    lang(tmp_path, "en_us", {"item.examplemod.pickaxe": "Pickaxe", "item.examplemod.tool.format": "%s %s",
+                             "material.examplemod.iron": "Iron"})
+    result = convert_all(mod)
+    lines = result.files["texts/en_US.lang"].splitlines()
+    assert f"item.{NS}:pickaxe.name=Pickaxe" in lines  # the lang converter's own line
+    assert f"item.{NS}:tinkers_pickaxe_iron.name=Pickaxe" in lines  # the pre-bake's
+    assert lines == sorted(lines) and len(lines) == len(set(lines))
+
+
+def test_an_id_the_mod_already_uses_bakes_nothing_for_that_tool(tmp_path):
+    mod = build(tmp_path)
+    write(tmp_path, f"assets/{NS}/models/item/tinkers_pickaxe_iron.json",
+          {"parent": "minecraft:item/generated", "textures": {"layer0": f"{NS}:item/x"}})
+    result, info = tinkers.bake(mod)
+    assert "pickaxe" not in info.presets
+    assert not any(p.startswith("items/tinkers_pickaxe_") for p in result.files)
+    assert any("is taken by an item or block" in u.reason for u in result.unhandled)
+
+
+def test_the_items_and_names_are_byte_for_byte_repeatable(tmp_path):
+    mod = build(tmp_path)
+    lang(tmp_path, "en_us", {"item.examplemod.pickaxe": "Pickaxe"})
+    assert convert_all(mod).files == convert_all(mod).files
+
+
+def test_merging_lang_files_and_language_lists():
+    a = ConversionResult(files={"texts/en_US.lang": "b=2\nz=26\n", "texts/languages.json": ["en_US", "fr_FR"]})
+    b = ConversionResult(files={"texts/en_US.lang": "a=1\nb=other\n", "texts/languages.json": ["de_DE", "en_US"]})
+    merged = a.merge(b).files
+    assert merged["texts/en_US.lang"] == "a=1\nb=2\nz=26\n"  # a key both define keeps the first
+    assert merged["texts/languages.json"] == ["en_US", "de_DE", "fr_FR"]
+
+
+def test_java_format_strings():
+    assert tinkers._format("%s %s", "Iron", "Pickaxe") == "Iron Pickaxe"
+    assert tinkers._format("%2$s of %1$s", "Iron", "Pickaxe") == "Pickaxe of Iron"
+    assert tinkers._format("100%% %s", "Iron") == "100% Iron"
