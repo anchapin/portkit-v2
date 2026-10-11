@@ -281,3 +281,41 @@ def test_anthropic_keeps_stop_reason():
     reply = {"content": [], "stop_reason": "max_tokens"}
     msg = AnthropicClient("m", transport=Recorder([reply])).complete([Message("user", "x")], [])
     assert msg.finish_reason == "max_tokens"
+
+
+# -- OpenRouter reasoning_details (#86) ------------------------------------------
+_DETAILS = [{"type": "reasoning.encrypted", "data": "sig==", "id": "r1", "format": "google-gemini-v1", "index": 0}]
+
+
+def test_openrouter_reasoning_details_round_trip_on_the_next_request(tmp_path):
+    """OpenRouter carries Gemini's thought signatures in message-level
+    reasoning_details and asks for them back unmodified; they used to be dropped."""
+    first = {"choices": [{"message": {
+        "content": "", "reasoning": "plain text, not echoed", "reasoning_details": _DETAILS,
+        "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "validate", "arguments": "{}"}}],
+    }, "finish_reason": "tool_calls"}]}
+    transport = Recorder([first, oa_text("done")])
+    client = OpenAIClient("google/gemini-3.8-flash", transport=transport)
+    AgentSession(client, ToolBox(SOURCE, tmp_path), SYSTEM_PROMPT).run("go")
+    sent = transport.requests[1]["body"]["messages"][2]
+    assert sent["role"] == "assistant" and sent["reasoning_details"] == _DETAILS
+    assert "reasoning" not in sent
+    assert sent["tool_calls"][0]["id"] == "c1"
+
+
+def test_reasoning_details_on_a_text_reply_are_kept_and_echoed():
+    reply = {"choices": [{"message": {"content": "hi", "reasoning_details": _DETAILS}}]}
+    msg = OpenAIClient("m", transport=Recorder([reply])).complete([Message("user", "x")], [])
+    assert msg.extra == {"reasoning_details": _DETAILS}
+    assert to_openai_message(msg) == {"reasoning_details": _DETAILS, "role": "assistant", "content": "hi"}
+
+
+def test_message_extra_round_trips_through_a_transcript():
+    from portkit.agent.transcript import message_from_dict, message_to_dict, request_digest
+
+    m = Message("assistant", "hi", extra={"reasoning_details": _DETAILS})
+    assert message_from_dict(json.loads(json.dumps(message_to_dict(m)))) == m
+    # It goes back to the model, so it is part of what the model was asked.
+    assert request_digest([m], []) != request_digest([Message("assistant", "hi")], [])
+    # And a message without it serialises exactly as before.
+    assert "extra" not in message_to_dict(Message("assistant", "hi"))
