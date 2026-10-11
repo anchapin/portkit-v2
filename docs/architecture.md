@@ -108,8 +108,9 @@ never a guess.
   (the source content plus the exact refusal reason), and runs one session each.
   A group counts as resolved only if the session ends on its own, writes at least
   one file, adds no validator error, and every item and tag its recipes name
-  exists (`refs.py`: in the pack, in the source mod, or vanilla). Otherwise its
-  writes are rolled back. A session that writes nothing and says why is
+  exists (`refs.py`: in the pack, in the source mod, or vanilla), and every
+  gameplay number on its items (damage, durability, ...) is one the source mod
+  states for that item (`stats.py`). Otherwise its writes are rolled back. A session that writes nothing and says why is
   `declined`. The run's `status` (`complete` | `partial` | `failed`) is about the
   agent's work, not about whether the pack validates.
 - `budget.py`: step, token and dollar ceilings with per-group accounting.
