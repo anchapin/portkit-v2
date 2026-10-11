@@ -13,7 +13,9 @@ is the bridge from that list to the loop:
    bad session can never cost the player the installable addon.
 
 A group counts as resolved only when its session ended on its own, it wrote at
-least one file, and the validator found no new error. Declaring victory in prose
+least one file, the validator found no new error, and every item and tag its
+recipes name exists (in the pack, in the source mod, or in vanilla; see
+``refs.py``). Declaring victory in prose
 is not enough, and neither is a session that wrote nothing because the Java behaviour
 has no Bedrock form: that one stays residue, with the agent's reason attached.
 
@@ -36,6 +38,7 @@ from ..pack import ENGINE_FLOOR, manifest
 from ..validate import validate_tree
 from .budget import Budget, Spend
 from .loop import AgentSession, LLMClient
+from .refs import Ref, finding, unresolved_refs
 from .tools import SYSTEM_PROMPT, ToolBox
 
 # Kinds no session can make progress on with the tools it has: bytecode is not
@@ -177,6 +180,23 @@ class _TrackingToolBox(ToolBox):
         if rel not in self.originals:
             self.originals[rel] = target.read_bytes() if target.is_file() else None
 
+    def unresolved(self) -> list[Ref]:
+        """Items and tags in this session's recipes that exist nowhere (#86)."""
+        return unresolved_refs(self.out_tree, list(self.originals), self.source)
+
+    def validate(self) -> dict:
+        # The structural validator only warns on an undeclared item, and does not
+        # look at tags at all. What the agent wrote is held to the stricter rule,
+        # and it hears about it here so it can fix the reference, not just get
+        # rolled back at the end.
+        report = super().validate()
+        extra = [finding(ref) for ref in self.unresolved()]
+        if extra:
+            report["findings"] = [*report["findings"], *extra]
+            report["error_count"] += len(extra)
+            report["ok"] = False
+        return report
+
     def rollback(self) -> None:
         for rel, original in self.originals.items():
             target = self.out_tree / rel
@@ -200,6 +220,9 @@ class GroupOutcome:
     spend: Spend = field(default_factory=Spend)
     tool_calls: int = 0
     format_failures: int = 0  # tool calls that didn't fit the toolbox (#77)
+    # Recipe refs the session wrote that resolve to nothing (#86); a group with
+    # any is rolled back.
+    unresolved_refs: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -212,6 +235,7 @@ class GroupOutcome:
             "spend": self.spend.to_dict(),
             "tool_calls": self.tool_calls,
             "format_failures": self.format_failures,
+            "unresolved_refs": self.unresolved_refs,
             "note": self.note,
         }
 
@@ -370,12 +394,20 @@ class ResidueAgent:
         outcome.spend = session.spend
 
         outcome.written = sorted(box.originals)
+        # A recipe naming an item or tag that exists nowhere is a fabrication,
+        # even when the structural validator only warns about it (#86).
+        unresolved = box.unresolved() if box.originals else []
+        outcome.unresolved_refs = [ref.describe() for ref in unresolved]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
-        if box.originals and _error_set(out_tree) - before:
+        if box.originals and (unresolved or _error_set(out_tree) - before):
             box.rollback()
             outcome.status = "rolled_back"
             outcome.written = []
+            if unresolved:
+                refs = "; ".join(outcome.unresolved_refs)
+                why = f"rolled back: unresolved reference(s): {refs}"
+                outcome.note = f"{why}. {outcome.note}" if outcome.note else why
         elif outcome.stopped == "done" and box.originals:
             outcome.status = "resolved"
         elif outcome.stopped == "budget" and box.originals:

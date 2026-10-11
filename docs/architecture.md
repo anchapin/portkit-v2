@@ -107,7 +107,9 @@ never a guess.
 - `residue.py`: groups `Unhandled` by `(kind, source)`, builds one task per group
   (the source content plus the exact refusal reason), and runs one session each.
   A group counts as resolved only if the session ends on its own, writes at least
-  one file, and adds no validator error. Otherwise its writes are rolled back.
+  one file, adds no validator error, and every item and tag its recipes name
+  exists (`refs.py`: in the pack, in the source mod, or vanilla). Otherwise its
+  writes are rolled back.
 - `budget.py`: step, token and dollar ceilings with per-group accounting.
 - `transcript.py`: record a run to JSONL and replay it offline. Replay checks
   every request against the recording, so an agent regression is an ordinary

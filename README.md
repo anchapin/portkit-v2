@@ -82,7 +82,12 @@ portkit convert path/to/mod.jar /tmp/out --agent   # --agent-max-steps N per gro
 runs one session per group. Each task carries the source content and the exact
 reason the deterministic path refused it. A group counts as resolved only when
 its session ends on its own, it wrote at least one file, and the validator finds
-no new error; a group that breaks the tree is rolled back. Anything unresolved
+no new error; a group that breaks the tree is rolled back. So is a group whose
+recipes name an item or tag that exists nowhere: every item must be defined by
+the pack or the source mod or be vanilla, and every non-vanilla tag must be one
+a pack item declares in `minecraft:tags` (Bedrock does not read Java tag files).
+The `validate` tool reports these as `agent.unresolved_ref` so the model can fix
+them, and the group's `unresolved_refs` lists any left. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Bytecode, nested jars and namespace collisions are skipped, since no tool
 can read them.
