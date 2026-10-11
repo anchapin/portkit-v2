@@ -32,4 +32,4 @@ RecordingClient(ReplayClient(old_path, strict=False), new_path)
 ```
 
 run through the same `convert(..., agent=ResidueAgent(client))` the replay test
-uses. `residue_mod.jsonl` was last refreshed this way for `pack_icon.png` in the tree listing (#115).
+uses. `residue_mod.jsonl` was last refreshed this way for the no-guessed-stats rule in the system prompt and task text (#135).

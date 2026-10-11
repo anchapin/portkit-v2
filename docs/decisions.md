@@ -27,6 +27,33 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: Agent-written items may only carry gameplay numbers the source states
+
+- **Decision:** A stat on an item the residue agent writes (`minecraft:damage`,
+  `durability.max_durability`, `digger` speeds, `wearable`/`armor`
+  protection, `food` nutrition and saturation, `cooldown`, `enchantable.value`,
+  `fuel`, use duration) must equal a number in a source-mod text file that
+  names the item, outside `assets/` and outside recipes, tags, advancements and
+  loot tables. One derivation: Bedrock damage n is supported by a Java
+  `attack_damage` of n - 1. Otherwise `validate` reports
+  `agent.fabricated_stat`, and if any remain when the session ends the group is
+  **rolled back** (not stripped), listed in `fabricated_stats` and in the note.
+  The prompt says unknown stats are omitted, not guessed, and named in the
+  final message. Descriptive components (icon, name, `hand_equipped`,
+  `max_stack_size`, tags, `repairable`, the enchantable slot) are not checked.
+- **Why:** After #132, DeepSeek wrote agent_mod's steel sword with damage 5,
+  durability 250 and an enchantability value; the fixture states no stats at
+  all. That breaks the no-fabrication policy (2026-10-09), and the recipe ref
+  check doesn't look at items.
+- **Rejected:** Stripping the stats and keeping the item (rewrites the agent's
+  file after the fact with no validate pass over the result, and the existing
+  ref check already rolls back, so one rule is simpler); counting numbers from
+  `assets/` (item models are full of display rotations and scales that would
+  excuse an invented stat) or from files that don't name the item (a
+  per-material stats file is missed; that errs toward omitting, never
+  inventing); checking repair amounts and block hardness (out of scope here).
+- **Links:** #135, #87, #86.
+
 ## 2026-10-11: OpenRouter's reasoning_details go back to the model unmodified
 
 - **Decision:** The OpenAI-style client keeps a reply's message-level

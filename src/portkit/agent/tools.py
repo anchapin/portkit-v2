@@ -303,4 +303,7 @@ Rules:
 - Keep calling validate until it returns ok: true. Fix the exact findings it names.
 - If a piece of Java behaviour has no Bedrock equivalent, say so plainly in your
   final message instead of inventing a component that does not exist.
+- Never guess gameplay numbers (damage, durability, mining speed, armor, food,
+  cooldowns, enchantability, fuel). Use only values the source mod states; when
+  it states none, omit the component and say which stats you left out.
 """
