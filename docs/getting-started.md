@@ -13,6 +13,17 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+Then fetch Bedrock's vanilla sound list, once (it's Mojang's data, so it is
+downloaded rather than shipped, and cached under `~/.cache/portkit/reference/`):
+
+```bash
+portkit reference fetch
+```
+
+It lets portkit keep a sound your mod borrows from vanilla (`random/bow`,
+`minecraft:mob/slime/big1`) when Bedrock has the same file. Skip it and those
+sounds are dropped, each with a note saying to run the fetch.
+
 ## Convert
 
 Point `portkit convert` at your mod's `.jar`, or at an unpacked directory that
