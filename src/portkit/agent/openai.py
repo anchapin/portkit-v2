@@ -20,7 +20,7 @@ import json
 from typing import Any
 
 from .budget import Usage
-from .http import LLMError, Transport, post_json
+from .http import LLMError, RetryPolicy, Transport, complete_with_retry, post_json
 from .loop import Message, ToolCall
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -38,11 +38,14 @@ class OpenAIClient:
         base_url: str = DEFAULT_BASE_URL,
         transport: Transport = post_json,
         extra: dict[str, Any] | None = None,
+        retry: RetryPolicy | None = None,
     ):
         self.model = model
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.transport = transport
+        # None reads PORTKIT_LLM_MAX_RETRIES on every call (see http.py).
+        self.retry = retry
         self.extra = dict(extra or {})  # temperature, max_tokens, ... passed through
 
     def complete(self, messages: list[Message], tools: list[dict]) -> Message:
@@ -54,8 +57,9 @@ class OpenAIClient:
         if tools:
             body["tools"] = [to_openai_tool(t) for t in tools]
         headers = {"authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        reply = self.transport(f"{self.base_url}/chat/completions", headers, body)
-        return from_openai_reply(reply)
+        return complete_with_retry(
+            self.transport, f"{self.base_url}/chat/completions", headers, body, from_openai_reply, self.retry
+        )
 
 
 def to_openai_tool(schema: dict) -> dict:
