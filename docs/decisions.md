@@ -27,6 +27,27 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: Provider clients retry transient failures inside complete()
+
+- **Decision:** All three clients send through `http.complete_with_retry`:
+  HTTP 429/500/502/503/504/529, timeouts and connection failures (and an
+  OpenRouter 200 whose `error` body carries one of those codes) are retried up
+  to 2 times with exponential backoff (1 s, 2 s, capped at 20 s), honouring
+  `Retry-After` up to 60 s. An empty reply with `finish_reason=error` is
+  retried once. `PORTKIT_LLM_MAX_RETRIES` overrides the count; 0 turns all of
+  it off. Tokens billed for a discarded empty reply are added to the final
+  reply's usage.
+- **Why:** In Alex's Gemini 3.8 Flash spot-check an OpenRouter 504 ended a
+  group as `error` and an empty `finish_reason=error` reply (175 billed output
+  tokens) ended another; both are transient. Retrying inside one `complete()`
+  call keeps transcripts exact: the request digest is unchanged and only the
+  final reply is recorded, so replays and spend replay as before.
+- **Rejected:** Retrying in the agent loop (a retried step would show in the
+  transcript and the step count); recording every attempt (replay would need
+  to know about failures); retrying 4xx client errors or any empty reply (a
+  `length` cutoff or a refusal won't change on resend).
+- **Links:** #137.
+
 ## 2026-10-11: Agent-written items may only carry gameplay numbers the source states
 
 - **Decision:** A stat on an item the residue agent writes (`minecraft:damage`,
