@@ -1,4 +1,4 @@
-"""Pre-baked icons for Tinkers' Construct tools (#122).
+"""Pre-baked icons and display-only items for Tinkers' Construct tools (#122, #128).
 
 Tinkers ships one pre-rendered sprite per tool part and material
 (``tool/pickaxe/head_tconstruct_iron.png``), about 11.7k of them, and composes a
@@ -35,13 +35,35 @@ sprites' size, 16x16 in Tinkers) under
 ``item_texture.json`` key ``<ns>:tinkers_<tool>_<material>``. It is a pure
 function of the jar: same jar, same bytes.
 
+Each baked preset also becomes a **display-only** Bedrock item
+(``<ns>:tinkers_<tool>_<material>``): the icon, a display name and
+``max_stack_size`` 1, and nothing else (#128, decided 2026-10-11). A tool's
+mining speed, damage, durability, traits and modifiers come from Java code, so
+the item carries none of them, and the report says so. This is the one place
+portkit ships an item it knows is behaviorally empty; see the decision log.
+
+Tool *parts* (``pick_head``, ``tool_binding``, …) become plain items too,
+inert like an ingot: one per part and visible material, when the material has
+the part's stat type (``ToolPartItem.canUseMaterial``) and the jar ships that
+material's own sprite for the part. The icon is that sprite, already converted
+by the textures converter, so nothing is composited. A repair kit takes any
+repairable material in Java, which is decided in code, so repair kits are
+made only for materials whose stats name the repair-kit stat type.
+
+Names come from the mod's own lang files, composed the way Tinkers composes
+them: ``MaterialItem.getName`` for parts, and the tool definition's
+``fixed_material_name`` / ``material_name`` (filter ``all``) modules for
+tools. A tool whose name rule is decided in Java (no name module, so
+``canRepair``; ``unique_material_name``; ``custom_material_name``) keeps the
+tool's own name ("Pickaxe"). A locale missing a key falls back to ``en_us``,
+as Java does. The lines join the lang converter's ``texts/<Locale>.lang``.
+
 What this does not do, on purpose:
 
-- No Bedrock *items*. A tool's stats, traits, modifiers, tool station and part
-  builder are Java code. ``items.convert`` already refuses tool models for that
-  reason (an item that looks like a pickaxe and mines like a fist), and so the
-  icons ship as textures a later step can bind to an item once someone decides
-  what that item may honestly claim. No stats or recipes are invented here.
+- No stats, recipes or behavior. A tool's stats, traits, modifiers, tool
+  station and part builder are Java code; ``items.convert`` refuses tool
+  models for that reason (an item that looks like a pickaxe and mines like a
+  fist), and the items here say they're display-only instead of pretending.
 - Modifier overlays are not drawn: creative-tab stacks carry none.
 - An animated sprite (``.mcmeta``) contributes its first frame, and an emissive
   material (``luminosity``) is drawn unlit; both are reported as notes.
@@ -57,8 +79,16 @@ from pathlib import Path
 
 from .. import png
 from ..model import ConversionResult, SourceMod, Unhandled
+from . import models
+from .lang import _LOCALES, _one_line
 
 _TOOL_LOADER = "tconstruct:tool"
+_PART_LOADER = "tconstruct:material"
+_ITEM_FORMAT = "1.20.10"  # the items converter's format_version
+_MENU_CATEGORY = "items"
+_TOOL_STACK = 1  # a Tinkers tool never stacks
+_PART_STACK = 64  # a part item is a plain Java item: default stack size
+_REPAIR_KIT_STAT = "tconstruct:repair_kit"
 _PRESET_DIR = "textures/items/tinkers_presets"
 _INDEX = "textures/item_texture.json"
 _DEFAULT_SORT = 100  # MaterialManager.loadMaterial: sortOrder defaults to 100
@@ -87,6 +117,10 @@ class Bake:
     emissive: set[str] = field(default_factory=set)
     skipped_conditional: list[str] = field(default_factory=list)
     render_files: set[Path] = field(default_factory=set)  # render info actually read
+    parts: dict[str, list[str]] = field(default_factory=dict)  # part item -> materials
+    named_by_base: list[str] = field(default_factory=list)  # tools named without material
+    unnamed: list[str] = field(default_factory=list)  # item ids with no lang name at all
+    repair_kit: bool = False  # a part whose materials Java picks in code
 
 
 def _read_json(path: Path):
@@ -322,6 +356,187 @@ def _layer(mod: SourceMod, base: str, info: RenderInfo, bake: Bake):
     return None
 
 
+class _Lang:
+    """The mod's lang files, looked up the way Java does: the locale, then en_us."""
+
+    _PRIMARY = "en_us"
+
+    def __init__(self, mod: SourceMod):
+        self.tables: dict[str, dict[str, str]] = {}
+        src = mod.assets / "lang"
+        for path in sorted(src.glob("*.json")) if src.is_dir() else ():
+            locale = path.stem.lower()
+            body = _read_json(path)
+            if locale in _LOCALES and isinstance(body, dict):
+                self.tables[locale] = {k: v for k, v in body.items() if isinstance(v, str)}
+        self.primary = self.tables.get(self._PRIMARY, {})
+
+    def get(self, locale: str, key: str) -> str | None:
+        value = self.tables[locale].get(key)
+        return value if value is not None else self.primary.get(key)
+
+
+def _format(pattern: str, *args: str) -> str:
+    """Java String.format for the %s / %n$s / %% a lang format uses."""
+    out, i, auto = [], 0, 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch != "%":
+            out.append(ch)
+            i += 1
+            continue
+        j = i + 1
+        digits = ""
+        while j < len(pattern) and pattern[j].isdigit():
+            digits += pattern[j]
+            j += 1
+        if digits and pattern[j : j + 2] == "$s":
+            n = int(digits) - 1
+            out.append(args[n] if 0 <= n < len(args) else "")
+            i = j + 2
+        elif pattern[i + 1 : i + 2] == "s":
+            out.append(args[auto] if auto < len(args) else "")
+            auto += 1
+            i += 2
+        elif pattern[i + 1 : i + 2] == "%":
+            out.append("%")
+            i += 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _material_name(lang: _Lang, locale: str, ns: str, material: str, item_name: str) -> str | None:
+    """MaterialToolName.nameForMaterial: the material's own format, else "<material> <item>"."""
+    key = f"material.{ns}.{material}"
+    own = lang.get(locale, f"{key}.format")
+    if own is not None:
+        return _format(own, item_name)
+    shown, pattern = lang.get(locale, key), lang.get(locale, f"item.{ns}.tool.format")
+    if shown is None or pattern is None:
+        return None
+    return _format(pattern, shown, item_name)
+
+
+def _name_rule(mod: SourceMod, tool: str):
+    """The tool definition's display-name modules, when the name is decided by data.
+
+    Returns ("fixed", index), ("all", None), or None when Java code decides it:
+    no module (the default filters on ``canRepair``), or one we don't model.
+    """
+    body = _read_json(mod.data / "tinkering" / "tool_definitions" / f"{tool}.json")
+    modules = body.get("modules") if isinstance(body, dict) else None
+    named = [
+        m for m in modules or ()
+        if isinstance(m, dict) and isinstance(m.get("type"), str) and m["type"].endswith("_name")
+    ]
+    if len(named) != 1:
+        return None
+    kind = named[0]["type"]
+    if kind == "tconstruct:fixed_material_name" and isinstance(named[0].get("index"), int):
+        return ("fixed", named[0]["index"])
+    if kind == "tconstruct:material_name" and named[0].get("filter") == "all":
+        return ("all", None)
+    return None
+
+
+def _tool_names(mod, lang, tool, rule, picks) -> dict[str, str]:
+    """Bedrock locale -> display name for one preset."""
+    ns = mod.namespace
+    out = {}
+    for locale in sorted(lang.tables):
+        item_name = lang.get(locale, f"item.{ns}.{tool}")
+        if item_name is None:
+            continue
+        name = None
+        if rule is not None and rule[0] == "fixed" and 0 <= rule[1] < len(picks):
+            name = _material_name(lang, locale, ns, picks[rule[1]].name, item_name)
+        elif rule is not None and rule[0] == "all":
+            shown = list(dict.fromkeys(m.name for m in picks))
+            if len(shown) == 1:
+                name = _material_name(lang, locale, ns, shown[0], item_name)
+            else:
+                labels = [lang.get(locale, f"material.{ns}.{m}") for m in shown]
+                sep = lang.get(locale, f"item.{ns}.tool.material_separator")
+                pattern = lang.get(locale, f"item.{ns}.tool.format")
+                if None not in labels and sep is not None and pattern is not None:
+                    name = _format(pattern, sep.join(labels), item_name)
+        out[_LOCALES[locale]] = name if name is not None else item_name
+    return out
+
+
+def _part_names(mod, lang, part, material) -> dict[str, str]:
+    """Bedrock locale -> display name for one part item, as MaterialItem.getName."""
+    ns = mod.namespace
+    key = f"item.{ns}.{part}"
+    mkey = f"material.{ns}.{material}"
+    out = {}
+    for locale in sorted(lang.tables):
+        full = lang.get(locale, f"{key}.{ns}.{material}")
+        base = lang.get(locale, key)
+        own = lang.get(locale, f"{mkey}.format")
+        shown, pattern = lang.get(locale, mkey), lang.get(locale, f"item.{ns}.tool.format")
+        if full is not None:
+            name = full
+        elif base is None:
+            continue
+        elif own is not None:
+            name = _format(own, base)
+        elif shown is not None and pattern is not None:
+            name = _format(pattern, shown, base)
+        else:
+            name = base
+        out[_LOCALES[locale]] = name
+    return out
+
+
+def _item(identifier: str, icon: str, stack: int) -> dict:
+    return {
+        "format_version": _ITEM_FORMAT,
+        "minecraft:item": {
+            "description": {
+                "identifier": identifier,
+                "menu_category": {"category": _MENU_CATEGORY},
+            },
+            "components": {
+                "minecraft:icon": icon,
+                "minecraft:max_stack_size": stack,
+            },
+        },
+    }
+
+
+def _taken_names(mod: SourceMod) -> set[str]:
+    """Item and block names the mod itself defines, which our ids must not reuse."""
+    out = set()
+    for sub in ("models/item", "blockstates"):
+        d = mod.assets / sub
+        if d.is_dir():
+            out |= {p.stem for p in d.glob("*.json")}
+    return out
+
+
+def owns_model(model: dict) -> bool:
+    """Whether this converter answers for an item model, in a mod it ``applies`` to.
+
+    Tinkers tool and part models are drawn from NBT at runtime; the pre-bake
+    turns them into items or reports why not, so ``items.convert``'s generic
+    "not a flat icon" residue would be wrong for them.
+    """
+    return model.get("loader") in (_TOOL_LOADER, _PART_LOADER)
+
+
+def _part_models(mod: SourceMod) -> dict[str, dict]:
+    src = mod.assets / "models" / "item"
+    out = {}
+    for path in sorted(src.glob("*.json")) if src.is_dir() else ():
+        body = _read_json(path)
+        if isinstance(body, dict) and body.get("loader") == _PART_LOADER:
+            out[path.stem] = body
+    return out
+
+
 def _tool_models(mod: SourceMod) -> dict[str, dict]:
     src = mod.assets / "models" / "item"
     out = {}
@@ -355,6 +570,18 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
 
     renders: dict[str, RenderInfo] = {}
     index: dict[str, dict] = {}
+    lang = _Lang(mod)
+    taken = _taken_names(mod)
+    items: dict[str, dict] = {}  # output path -> item json
+    names: dict[str, dict[str, str]] = {}  # bedrock locale -> lang key -> value
+    item_models: set[str] = set()  # models that became at least one item
+
+    def add_names(identifier: str, by_locale: dict[str, str]) -> None:
+        if not by_locale:
+            info.unnamed.append(identifier)
+        for locale, value in by_locale.items():
+            names.setdefault(locale, {})[f"item.{identifier}.name"] = _one_line(value)
+
     for tool, model in _tool_models(mod).items():
         source = f"assets/{mod.namespace}/models/item/{tool}.json"
         textures = model.get("textures") or {}
@@ -364,9 +591,16 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
             result.unhandled.append(Unhandled(source, "tinkers_preset", f"no preset icons: {why}"))
             continue
         if not slots or not parts:
-            # A fixed-texture tool (staffs, flint and brick) already has its one
-            # icon among the converted textures; nothing to compose.
+            # A fixed-texture tool (staffs, flint and brick): its one texture
+            # already ships with the converted textures, and there's no preset
+            # to bake. It has no material to show, only Java behavior.
+            result.unhandled.append(Unhandled(
+                source, "tinkers_preset",
+                "a fixed-texture Tinkers tool: no material presets to bake, and its "
+                "behavior is Java code",
+            ))
             continue
+        rule = _name_rule(mod, tool)
 
         layers = []
         bad = None
@@ -389,6 +623,7 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
             continue
 
         baked = []
+        pending: list[tuple[str, dict, dict[str, str]]] = []  # item path, json, names
         for material in materials:
             picks = []
             used = False
@@ -430,9 +665,18 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
                 # The textures converter owns that index key already.
                 bad = f"index key {mod.namespace}:{key} is taken by a texture of the mod"
                 break
+            if key in taken:
+                bad = f"item name {mod.namespace}:{key} is taken by an item or block of the mod"
+                break
             path = f"{_PRESET_DIR}/{tool}/{material.name}"
             result.files[f"{path}.png"] = png.encode_png(size[0], size[1], bytes(canvas))
             index[f"{mod.namespace}:{key}"] = {"textures": path}
+            identifier = f"{mod.namespace}:{key}"
+            pending.append((
+                f"items/{key}.json",
+                _item(identifier, identifier, _TOOL_STACK),
+                _tool_names(mod, lang, tool, rule, picks),
+            ))
             baked.append(material.name)
         if bad:
             for material_name in baked:
@@ -440,8 +684,80 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
                 index.pop(f"{mod.namespace}:tinkers_{tool}_{material_name}", None)
             result.unhandled.append(Unhandled(source, "tinkers_preset", f"no preset icons: {bad}"))
             continue
-        if baked:
-            info.presets[tool] = baked
+        if not baked:
+            result.unhandled.append(Unhandled(
+                source, "tinkers_preset", "no visible material fits this tool, so no preset to bake"
+            ))
+            continue
+        info.presets[tool] = baked
+        if rule is None:
+            info.named_by_base.append(tool)
+        for path, body, by_locale in pending:
+            items[path] = body
+            add_names(body["minecraft:item"]["description"]["identifier"], by_locale)
+        item_models.add(source)
+
+    # Part items: inert, one per part and visible material with its own sprite.
+    for part, model in _part_models(mod).items():
+        source = f"assets/{mod.namespace}/models/item/{part}.json"
+        refs = [r for r in (model.get("textures") or {}).values() if isinstance(r, str)]
+        base = _local(refs[0], mod.namespace) if len(refs) == 1 else None
+        stat = _part_stat_type(mod, f"{mod.namespace}:{part}", by_texture)
+        if base is None or stat is None:
+            result.unhandled.append(Unhandled(
+                source, "tinkers_part",
+                "a Tinkers part model whose texture or stat type can't be read from data",
+            ))
+            continue
+        if stat == _REPAIR_KIT_STAT:
+            info.repair_kit = True
+        made = []
+        for material in materials:
+            if stat not in material.stats:
+                continue
+            if material.name not in renders:
+                renders[material.name] = _render_info(mod, material.name, info.render_files)
+            suffix = renders[material.name].texture
+            sprite_rel = f"{base}_{suffix}" if suffix is not None else None
+            if sprite_rel is None or not (mod.assets / "textures" / f"{sprite_rel}.png").is_file():
+                continue  # only a tinted fallback would show it: not a shipped sprite
+            key = f"tinkers_{part}_{material.name}"
+            identifier = f"{mod.namespace}:{key}"
+            if key in taken or f"items/{key}.json" in items:
+                result.unhandled.append(Unhandled(
+                    source, "tinkers_part", f"item name {identifier} is already taken"
+                ))
+                continue
+            icon, _ = models.texture_shortname(f"{mod.namespace}:{sprite_rel}", mod.namespace)
+            items[f"items/{key}.json"] = _item(identifier, icon, _PART_STACK)
+            add_names(identifier, _part_names(mod, lang, part, material.name))
+            made.append(material.name)
+        if made:
+            info.parts[part] = made
+            item_models.add(source)
+        else:
+            result.unhandled.append(Unhandled(
+                source, "tinkers_part",
+                "no visible material has this part's stat type and its own sprite",
+            ))
+
+    result.files.update(items)
+    for locale, lines in names.items():
+        result.files[f"texts/{locale}.lang"] = "".join(
+            f"{line}\n" for line in sorted(f"{key}={value}" for key, value in lines.items())
+        )
+    if names:
+        rest = sorted(k for k in names if k != "en_US")
+        result.files["texts/languages.json"] = (["en_US"] if "en_US" in names else []) + rest
+    for source in sorted(item_models):
+        result.claim(mod, mod.root / source)
+    if index or items:
+        # The render info the icons and items were drawn from converted into
+        # them. Only what was read: a variant's render info (wood/crimson) drew
+        # nothing.
+        for path in sorted(info.render_files):
+            result.claim(mod, path)
+        result.claim(mod, mod.assets / "tinkering" / "generator_part_textures.json")
 
     if index:
         result.files[_INDEX] = {
@@ -449,17 +765,22 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
             "texture_name": "atlas.items",
             "texture_data": index,
         }
-        # The render info the icons were drawn from converted into them. Only
-        # what was read: a variant's render info (wood/crimson) drew nothing.
-        for path in sorted(info.render_files):
-            result.claim(mod, path)
-        result.claim(mod, mod.assets / "tinkering" / "generator_part_textures.json")
         total = sum(len(v) for v in info.presets.values())
         result.notes.append(
             f"tinkers: pre-baked {total} creative-tab tool icons for {len(info.presets)} tools "
-            f"from {len(info.sprites_used)} part sprites; they ship as textures only, since "
-            "tool stats, traits and modifiers are Java code"
+            f"from {len(info.sprites_used)} part sprites"
         )
+        result.notes.append(
+            f"tinkers: the {total} preset tools ship as display-only items (icon, name, "
+            "max_stack_size 1): mining speed, damage, durability, enchantability, traits and "
+            "modifiers are Tinkers' Java code and are not converted, so in Bedrock they do "
+            "nothing a tool does"
+        )
+        if info.named_by_base:
+            result.notes.append(
+                "tinkers: these tools name their material in Java code, so their display-only "
+                "items carry the tool's own name: " + ", ".join(sorted(info.named_by_base))
+            )
         if info.animated:
             result.notes.append(
                 f"tinkers: {len(info.animated)} animated part sprite(s) drawn as their first frame "
@@ -471,8 +792,26 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
             )
         if info.skipped_conditional:
             result.notes.append(
-                "tinkers: materials that load only with other mods or config got no preset icons: "
-                + ", ".join(info.skipped_conditional)
+                "tinkers: materials that load only with other mods or config got no preset icons "
+                "or part items: " + ", ".join(info.skipped_conditional)
+            )
+    if info.unnamed:
+        result.notes.append(
+            f"tinkers: {len(info.unnamed)} item(s) have no name in the mod's lang files "
+            "and show their identifier"
+        )
+    if info.parts:
+        total_parts = sum(len(v) for v in info.parts.values())
+        result.notes.append(
+            f"tinkers: {total_parts} tool-part items ({len(info.parts)} parts × material) ship "
+            "as plain items with the part's own sprite; their use in the tool station and "
+            "part builder is Java code"
+        )
+        if info.repair_kit:
+            result.notes.append(
+                "tinkers: repair kits are made only for materials whose stats name the "
+                "repair-kit stat type; Java also accepts any repairable material, which "
+                "it decides in code"
             )
     return result, info
 
