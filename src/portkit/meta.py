@@ -91,11 +91,13 @@ def load_json(blob: bytes):
     multi-line string written straight into fabric.mod.json. The standard
     library rejects that, so every JSON metadata reader (fabric.mod.json,
     quilt.mod.json, mcmod.info, here and in icon.py) goes through this one
-    tolerant parse instead: a leading BOM is dropped, undecodable bytes are
+    tolerant parse instead: the encoding is detected as json.loads(bytes)
+    would (UTF-8 with or without a BOM, UTF-16/32), undecodable bytes are
     replaced rather than raised, and control characters inside strings are
     kept (strict=False). Raises json.JSONDecodeError for anything still broken.
     """
-    return json.loads(blob.decode("utf-8-sig", "replace"), strict=False)
+    text = blob.decode(json.detect_encoding(blob), "replace")
+    return json.loads(text, strict=False)
 
 
 def _text(value) -> str | None:
