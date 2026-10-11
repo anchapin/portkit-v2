@@ -12,6 +12,8 @@ Precedence, highest first: explicit arguments, the ``config`` mapping (e.g. an
                            anthropic), so a gateway URL saved for OpenAI never
                            captures a Gemini key (#95)
     PORTKIT_LLM_TEMPERATURE optional sampling temperature, sent as ``temperature``
+    PORTKIT_LLM_MAX_RETRIES optional retry count for transient failures (default 2,
+                           0 turns retries off; read on every call, see ``http.py``)
     OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY   the provider's usual key variable
 
 Two Gemini paths are available:
