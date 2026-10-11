@@ -162,3 +162,11 @@ def test_the_base_url_reaches_the_client_and_not_the_environment(monkeypatch, tm
     rows = json.loads(out.read_text())
     assert [r["target"] for r in rows] == ["openai:a/b@openrouter.ai", "gemini_native:g"]
     assert rows[0]["fixtures"] == {"residue_mod": {"pass": 0, "fail": 2, "unscored": 0}}
+
+
+def test_a_decline_scores_as_a_fail_but_is_counted():
+    row = MatrixRow("t")
+    row.add("f", GroupOutcome("a", "recipe", "s", "declined", "done"))
+    row.add("f", GroupOutcome("b", "recipe", "s", "unresolved", "done"))
+    assert (row.failed, row.declined) == (2, 1)
+    assert row.to_dict()["declined"] == 1
