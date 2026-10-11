@@ -132,3 +132,10 @@ sitting.
 `fixtures/coverage-baseline.json`. CI fails if any fixture loses coverage or
 converted files. Coverage only moves one way, and every step down has to show
 up as a reviewed baseline diff.
+
+## Decisions
+
+The converters' policies (no fabrication, tag resolution, what is fetched rather
+than vendored, and the rest) each have an entry in the
+[decision log](decisions.md) saying what was decided, why, and what was
+rejected. A PR that makes a design decision adds an entry there.
