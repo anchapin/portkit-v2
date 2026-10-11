@@ -7,6 +7,12 @@ endpoint): point ``base_url`` at it.
 Fields a provider adds to a tool call beyond ``id``/``type``/``function`` are
 kept on ``ToolCall.extra`` and sent back verbatim. Gemini 3 needs this: it puts
 a thought signature on each call and rejects a follow-up turn without it.
+
+OpenRouter puts reasoning on the message instead, as ``reasoning_details``
+(for Gemini that is where the thought signatures travel, as
+``reasoning.encrypted`` entries). OpenRouter asks for the array back,
+unmodified, on the assistant message in the next request, so the model can
+continue its reasoning across tool calls. It is kept on ``Message.extra``.
 """
 from __future__ import annotations
 
@@ -20,6 +26,8 @@ from .loop import Message, ToolCall
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 _CALL_KEYS = {"id", "type", "function", "index"}
+# Message-level fields echoed back on the assistant turn (see the module docstring).
+_ECHO_MESSAGE_KEYS = ("reasoning_details",)
 
 
 class OpenAIClient:
@@ -66,6 +74,7 @@ def to_openai_message(m: Message) -> dict:
         return {"role": "tool", "tool_call_id": m.tool_call_id, "content": m.content}
     if m.role == "assistant" and m.tool_calls:
         return {
+            **m.extra,
             "role": "assistant",
             "content": m.content or None,
             "tool_calls": [
@@ -78,6 +87,8 @@ def to_openai_message(m: Message) -> dict:
                 for c in m.tool_calls
             ],
         }
+    if m.role == "assistant" and m.extra:
+        return {**m.extra, "role": "assistant", "content": m.content}
     return {"role": m.role, "content": m.content}
 
 
@@ -117,6 +128,7 @@ def from_openai_reply(reply: dict) -> Message:
         usage=_usage(reply),
         finish_reason=reply["choices"][0].get("finish_reason"),
         refusal=message.get("refusal") or "",
+        extra={k: message[k] for k in _ECHO_MESSAGE_KEYS if message.get(k)},
     )
 
 
