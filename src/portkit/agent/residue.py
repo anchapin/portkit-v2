@@ -15,7 +15,10 @@ is the bridge from that list to the loop:
 A group counts as resolved only when its session ended on its own, it wrote at
 least one file, the validator found no new error, and every item and tag its
 recipes name exists (in the pack, in the source mod, or in vanilla; see
-``refs.py``). Declaring victory in prose
+``refs.py``), and every gameplay number on the items it wrote (damage,
+durability, ...) is one the source mod states (see ``stats.py``). A group
+that ends with either kind of fabrication is rolled back, with the reason
+listed. Declaring victory in prose
 is not enough, and neither is a session that wrote nothing because the Java behaviour
 has no Bedrock form: that one stays residue, with the agent's reason attached,
 and is reported as ``declined`` rather than ``unresolved`` so a sweep can tell
@@ -46,6 +49,8 @@ from ..validate import validate_tree
 from .budget import Budget, Spend
 from .loop import AgentSession, LLMClient
 from .refs import Ref, finding, unresolved_refs
+from .stats import Stat, fabricated_stats
+from .stats import finding as stat_finding
 from .tools import SYSTEM_PROMPT, ToolBox
 
 # Kinds no session can make progress on with the tools it has: bytecode is not
@@ -167,6 +172,12 @@ def build_task(group: ResidueGroup, source_root: Path, out_tree: Path, namespace
             + hint
         ).strip(),
         (
+            "Gameplay numbers (damage, durability, mining speed, armor, food, "
+            "cooldowns, enchantability, fuel) come only from the source mod: if it "
+            "does not state one, omit that component rather than guess, and say in "
+            "your final message which stats you left out."
+        ),
+        (
             "Call validate after writing and fix every finding it names. If this "
             "has no faithful Bedrock equivalent, write nothing and say why in one "
             "sentence; that is a correct answer, not a failure."
@@ -191,6 +202,10 @@ class _TrackingToolBox(ToolBox):
         """Items and tags in this session's recipes that exist nowhere (#86)."""
         return unresolved_refs(self.out_tree, list(self.originals), self.source)
 
+    def fabricated(self) -> list[Stat]:
+        """Stats on this session's items that the source never states (#135)."""
+        return fabricated_stats(self.out_tree, list(self.originals), self.source)
+
     def validate(self) -> dict:
         # The structural validator only warns on an undeclared item, and does not
         # look at tags at all. What the agent wrote is held to the stricter rule,
@@ -198,6 +213,7 @@ class _TrackingToolBox(ToolBox):
         # rolled back at the end.
         report = super().validate()
         extra = [finding(ref) for ref in self.unresolved()]
+        extra += [stat_finding(stat) for stat in self.fabricated()]
         if extra:
             report["findings"] = [*report["findings"], *extra]
             report["error_count"] += len(extra)
@@ -230,6 +246,9 @@ class GroupOutcome:
     # Recipe refs the session wrote that resolve to nothing (#86); a group with
     # any is rolled back.
     unresolved_refs: list[str] = field(default_factory=list)
+    # Item stats the session wrote that the source never states (#135); a group
+    # with any is rolled back too.
+    fabricated_stats: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -243,6 +262,7 @@ class GroupOutcome:
             "tool_calls": self.tool_calls,
             "format_failures": self.format_failures,
             "unresolved_refs": self.unresolved_refs,
+            "fabricated_stats": self.fabricated_stats,
             "note": self.note,
         }
 
@@ -429,15 +449,27 @@ class ResidueAgent:
         # even when the structural validator only warns about it (#86).
         unresolved = box.unresolved() if box.originals else []
         outcome.unresolved_refs = [ref.describe() for ref in unresolved]
+        # So is a gameplay number the source never states (#135). Rolled back
+        # rather than stripped, like a bad ref: the agent was told by validate
+        # and chose to keep it, and editing its file behind its back would
+        # leave an item nobody reviewed.
+        fabricated = box.fabricated() if box.originals else []
+        outcome.fabricated_stats = [stat.describe() for stat in fabricated]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
-        if box.originals and (unresolved or _error_set(out_tree) - before):
+        if box.originals and (unresolved or fabricated or _error_set(out_tree) - before):
             box.rollback()
             outcome.status = "rolled_back"
             outcome.written = []
+            reasons = []
             if unresolved:
-                refs = "; ".join(outcome.unresolved_refs)
-                why = f"rolled back: unresolved reference(s): {refs}"
+                reasons.append(f"unresolved reference(s): {'; '.join(outcome.unresolved_refs)}")
+            if fabricated:
+                reasons.append(
+                    f"stat(s) the source does not state: {'; '.join(outcome.fabricated_stats)}"
+                )
+            if reasons:
+                why = "rolled back: " + "; ".join(reasons)
                 outcome.note = f"{why}. {outcome.note}" if outcome.note else why
         elif outcome.stopped == "done" and box.originals:
             outcome.status = "resolved"
