@@ -114,7 +114,12 @@ recipes name an item or tag that exists nowhere: every item must be defined by
 the pack or the source mod or be vanilla, and every non-vanilla tag must be one
 a pack item declares in `minecraft:tags` (Bedrock does not read Java tag files).
 The `validate` tool reports these as `agent.unresolved_ref` so the model can fix
-them, and the group's `unresolved_refs` lists any left. Anything unresolved
+them, and the group's `unresolved_refs` lists any left. The same goes for
+gameplay numbers on an item the agent writes (damage, durability, mining speed,
+armor, food, cooldowns, enchantability, fuel): each must be a value the source
+mod states for that item, never a guess. An unknown stat is omitted and the
+agent's final note says so; one left in is reported as `agent.fabricated_stat`
+and rolls the group back, listed in `fabricated_stats`. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Its `status` is `complete` (every group resolved), `partial` or `failed`
 (none did). That is separate from `valid` and from the exit code, which are
