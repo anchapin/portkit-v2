@@ -23,6 +23,7 @@ import json
 import tomllib
 
 from . import png
+from .meta import load_json
 
 ICON_NAME = "pack_icon.png"
 _DEFAULT_SIZE = 64
@@ -68,10 +69,10 @@ def declared_paths(metadata: dict[str, bytes]) -> list[str]:
         if blob is None:
             continue
         try:
-            # strict=False: Fabric's own parser accepts raw newlines inside
-            # strings (betterend's description has them), so we do too.
-            data = json.loads(blob, strict=False)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+            # The same tolerant parse meta.py uses: betterend's description
+            # has raw newlines, which Fabric accepts and json.loads does not.
+            data = load_json(blob)
+        except json.JSONDecodeError:
             continue
         if not isinstance(data, dict):
             continue
@@ -95,8 +96,8 @@ def declared_paths(metadata: dict[str, bytes]) -> list[str]:
     blob = metadata.get("mcmod.info")
     if blob is not None:
         try:
-            data = json.loads(blob)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = load_json(blob)
+        except json.JSONDecodeError:
             data = None
         entries = data.get("modList") if isinstance(data, dict) else data
         for entry in entries or []:
