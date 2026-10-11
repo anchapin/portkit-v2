@@ -183,6 +183,8 @@ def test_icon_lookup_and_metadata_use_the_same_parser():
 
     assert load_json(_RAW_NEWLINE_FABRIC)["id"] == "tinymod"
     assert load_json(b"\xef\xbb\xbf" + _RAW_NEWLINE_FABRIC)["id"] == "tinymod"  # BOM
+    utf16 = _RAW_NEWLINE_FABRIC.decode().encode("utf-16")  # strict json.loads(bytes) took this
+    assert load_json(utf16)["id"] == "tinymod"
     assert declared_paths({"fabric.mod.json": _RAW_NEWLINE_FABRIC})[0] == "assets/tinymod/icon.png"
     legacy = b'[{"modid": "old", "description": "x\ny", "logoFile": "logo.png"}]'
     assert declared_paths({"mcmod.info": legacy})[0] == "logo.png"
