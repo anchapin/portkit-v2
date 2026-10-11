@@ -27,6 +27,27 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: The agent sees its step budget, and is nudged before it runs out
+
+- **Decision:** Every tool result the loop hands back carries
+  `steps_left: "steps left: N of M"`. While 0 < N <= 3 and the session has not
+  written a file successfully, it also carries a `nudge` to write the best
+  supported answer and validate it, or decline in one sentence. A
+  `write_output` to a path already written in the session with no `validate`
+  since gets a `note` saying so. The system prompt says steps are limited and
+  shown. All of it depends only on the step count and the toolbox's own write
+  record, so replays stay exact.
+- **Why:** In Alex's Gemini 3.8 Flash spot-check steel_sword hit the 12-step
+  ceiling in 3/3 runs on research alone (no identical-call loops), and
+  alloy_block rewrote one file five times without validating, then rolled
+  back. The model had no way to know how close the ceiling was.
+- **Rejected:** A separate system message per step (breaks Anthropic's strict
+  role alternation and doubles the turns); cutting research tools off near the
+  end (a model mid-fix may still need a lookup); forcing a validate after each
+  write (more steps, and a model may write two files before validating on
+  purpose); a token or cost countdown (only steps are per session).
+- **Links:** #139.
+
 ## 2026-10-11: Provider clients retry transient failures inside complete()
 
 - **Decision:** All three clients send through `http.complete_with_retry`:
