@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 
+# Texture indexes several converters may contribute keys to.
+_TEXTURE_INDEXES = ("textures/item_texture.json", "textures/terrain_texture.json")
+
+
 @dataclass
 class SourceMod:
     """A parsed Java mod on disk."""
@@ -63,7 +67,20 @@ class ConversionResult:
 
     def merge(self, other: "ConversionResult") -> "ConversionResult":
         merged = ConversionResult(dict(self.files), list(self.unhandled), set(self.consumed))
-        merged.files.update(other.files)
+        for path, value in other.files.items():
+            mine = merged.files.get(path)
+            if path in _TEXTURE_INDEXES and isinstance(mine, dict) and isinstance(value, dict):
+                # Two converters adding keys to one texture index (textures and
+                # the Tinkers pre-bake) must add up, not have the last one win.
+                # A key both define keeps the first: nothing re-points a texture.
+                combined = dict(mine)
+                combined["texture_data"] = {
+                    **(value.get("texture_data") or {}),
+                    **(mine.get("texture_data") or {}),
+                }
+                merged.files[path] = combined
+            else:
+                merged.files[path] = value
         merged.unhandled.extend(other.unhandled)
         merged.consumed |= other.consumed
         merged.notes = [*self.notes, *other.notes]
