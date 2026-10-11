@@ -27,6 +27,26 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: Agent-written recipes may only name items and tags that exist
+
+- **Decision:** In the residue agent, every item a recipe written in the
+  session names must be defined by the output pack, defined or named as an item
+  by the source mod, or be a `minecraft:` id; every non-vanilla tag must be
+  declared by a pack item (`minecraft:tags`) or block (`tag:` component). An
+  unresolved reference is an error in the `validate` tool's answer
+  (`agent.unresolved_ref`) and rolls the group back, listed in its
+  `unresolved_refs`. Vanilla ids and tags are taken on faith.
+- **Why:** In the #86 sweep a model wrote `examplemod:alloy_ingots` (the Java
+  tag's name) as an ingredient and the group counted as resolved, because the
+  validator's `xref.item` only warns. A recipe that matches nothing is a silent
+  no-op in game.
+- **Rejected:** Promoting `xref.item` to an error for all output (the
+  deterministic path leaves undeclared ids on purpose when a definition was
+  refused); checking vanilla names against a list (a full item list is Mojang
+  data we don't vendor, and the reference's tag list is partial, so real names
+  would be rejected).
+- **Links:** #86.
+
 ## 2026-10-11: Tinkers tool icons are pre-baked from Tinkers' own preset rule (route A)
 
 - **Decision:** For Tinkers' Construct, portkit composites one icon per tool
