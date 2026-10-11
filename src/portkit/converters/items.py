@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import models
+from . import models, tinkers
 
 # The only Java item model parents whose meaning is fully in the JSON.
 _FLAT_PARENTS = ("minecraft:item/generated", "item/generated")
@@ -50,6 +50,7 @@ def convert(mod: SourceMod) -> ConversionResult:
         return result
 
     blocks = _block_names(mod)
+    tinkers_mod = tinkers.applies(mod)
     for path in sorted(src.glob("*.json")):
         name = path.stem
         if name in blocks:
@@ -63,6 +64,11 @@ def convert(mod: SourceMod) -> ConversionResult:
             model = json.loads(path.read_text())
         except json.JSONDecodeError as exc:
             result.unhandled.append(Unhandled(rel, "item", f"invalid JSON: {exc}"))
+            continue
+
+        if tinkers_mod and tinkers.owns_model(model):
+            # Drawn from NBT at runtime; the Tinkers pre-bake turns it into
+            # items or says why it couldn't.
             continue
 
         parent = model.get("parent")
