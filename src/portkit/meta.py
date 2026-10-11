@@ -83,12 +83,36 @@ def _manifest_version(blob: bytes | None) -> str | None:
     return None
 
 
+def load_json(blob: bytes):
+    """Parse a jar's JSON metadata the way the loaders themselves do.
+
+    Fabric's own parser accepts raw newlines and other control characters
+    inside strings, and real mods ship them: betterend's description is a
+    multi-line string written straight into fabric.mod.json. The standard
+    library rejects that, so every JSON metadata reader (fabric.mod.json,
+    quilt.mod.json, mcmod.info, here and in icon.py) goes through this one
+    tolerant parse instead: the encoding is detected as json.loads(bytes)
+    would (UTF-8 with or without a BOM, UTF-16/32), undecodable bytes are
+    replaced rather than raised, and control characters inside strings are
+    kept (strict=False). Raises json.JSONDecodeError for anything still broken.
+    """
+    text = blob.decode(json.detect_encoding(blob), "replace")
+    return json.loads(text, strict=False)
+
+
+def _text(value) -> str | None:
+    """A free-text field, trimmed; None when empty or not a string."""
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
 def _fabric(blob: bytes, notes: list[str]) -> ModMetadata:
-    data = json.loads(blob)
+    data = load_json(blob)
     return ModMetadata(
         mod_id=data.get("id"),
         name=data.get("name"),
-        description=data.get("description"),
+        description=_text(data.get("description")),
         version_raw=data.get("version"),
         loader="fabric",
         notes=notes,
@@ -96,12 +120,12 @@ def _fabric(blob: bytes, notes: list[str]) -> ModMetadata:
 
 
 def _quilt(blob: bytes, notes: list[str]) -> ModMetadata:
-    loader = json.loads(blob).get("quilt_loader") or {}
+    loader = load_json(blob).get("quilt_loader") or {}
     meta = loader.get("metadata") or {}
     return ModMetadata(
         mod_id=loader.get("id"),
         name=meta.get("name"),
-        description=meta.get("description"),
+        description=_text(meta.get("description")),
         version_raw=loader.get("version"),
         loader="quilt",
         notes=notes,
@@ -129,7 +153,7 @@ def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
 
 
 def _mcmod_info(blob: bytes, notes: list[str]) -> ModMetadata:
-    data = json.loads(blob)
+    data = load_json(blob)
     entries = data.get("modList") if isinstance(data, dict) else data
     if not entries:
         notes.append("mcmod.info has no mod entries")
@@ -138,7 +162,7 @@ def _mcmod_info(blob: bytes, notes: list[str]) -> ModMetadata:
     return ModMetadata(
         mod_id=first.get("modid"),
         name=first.get("name"),
-        description=(first.get("description") or "").strip() or None,
+        description=_text(first.get("description")),
         version_raw=first.get("version"),
         loader="forge-legacy",
         notes=notes,

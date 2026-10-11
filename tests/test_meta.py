@@ -141,3 +141,56 @@ def test_header_prefers_name_then_id_then_namespace():
     assert ModMetadata(name="Nice").header_name("ns", "resource") == "Nice (resource)"
     assert ModMetadata(mod_id="nice_mod").header_name("ns", "resource") == "nice_mod (resource)"
     assert ModMetadata().header_description() == "Converted from Java by portkit"
+
+
+# betterend's fabric.mod.json writes its multi-line description with raw
+# newlines inside the JSON string. Fabric accepts that; strict json.loads does
+# not, and the mod used to fall back to being named after its directory.
+_RAW_NEWLINE_FABRIC = (
+    b'{\n  "schemaVersion": 1,\n  "id": "tinymod",\n  "version": "21.800.2",\n'
+    b'  "name": "Tiny Mod",\n'
+    b'  "description": "First line.\nMade by:\n- someone\t(art)\n",\n'
+    b'  "icon": "assets/tinymod/icon.png"\n}\n'
+)
+
+
+def test_fabric_with_raw_newlines_in_strings_is_read_not_skipped():
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(_RAW_NEWLINE_FABRIC)  # the shape strict parsing rejects
+    meta = parse({"fabric.mod.json": _RAW_NEWLINE_FABRIC}, "tinymod")
+    assert (meta.mod_id, meta.name, meta.loader) == ("tinymod", "Tiny Mod", "fabric")
+    assert meta.version == (21, 800, 2)
+    assert meta.description == "First line.\nMade by:\n- someone\t(art)"
+    assert not any("could not be read" in n or "no loader metadata" in n for n in meta.notes)
+
+
+def test_quilt_and_mcmod_info_share_the_tolerant_parse():
+    quilt = (
+        b'{"quilt_loader": {"id": "q", "version": "1.0.0",'
+        b' "metadata": {"name": "Q", "description": "a\nb"}}}'
+    )
+    meta = parse({"quilt.mod.json": quilt}, "q")
+    assert (meta.mod_id, meta.name, meta.description) == ("q", "Q", "a\nb")
+
+    legacy = b'[{"modid": "old", "name": "Old", "version": "1.2", "description": "x\ny\n"}]'
+    meta = parse({"mcmod.info": legacy}, "old")
+    assert (meta.mod_id, meta.version, meta.description) == ("old", (1, 2, 0), "x\ny")
+
+
+def test_icon_lookup_and_metadata_use_the_same_parser():
+    from portkit.icon import declared_paths
+    from portkit.meta import load_json
+
+    assert load_json(_RAW_NEWLINE_FABRIC)["id"] == "tinymod"
+    assert load_json(b"\xef\xbb\xbf" + _RAW_NEWLINE_FABRIC)["id"] == "tinymod"  # BOM
+    utf16 = _RAW_NEWLINE_FABRIC.decode().encode("utf-16")  # strict json.loads(bytes) took this
+    assert load_json(utf16)["id"] == "tinymod"
+    assert declared_paths({"fabric.mod.json": _RAW_NEWLINE_FABRIC})[0] == "assets/tinymod/icon.png"
+    legacy = b'[{"modid": "old", "description": "x\ny", "logoFile": "logo.png"}]'
+    assert declared_paths({"mcmod.info": legacy})[0] == "logo.png"
+
+
+def test_still_broken_json_is_a_note_not_a_crash():
+    meta = parse({"fabric.mod.json": b'{"id": "x", '}, "x")
+    assert meta.mod_id is None
+    assert any("could not be read" in n for n in meta.notes)
