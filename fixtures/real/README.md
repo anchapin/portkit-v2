@@ -6,6 +6,7 @@ redistribute them.
 
 ```bash
 portkit corpus fetch        # into ~/.cache/portkit/mods (PORTKIT_CORPUS_CACHE overrides)
+portkit reference fetch     # Bedrock's vanilla sound list, into ~/.cache/portkit/reference (#124)
 portkit corpus list         # what's pinned and whether it's cached
 portkit eval --corpus       # coverage per mod against coverage-baseline.json
 portkit eval --corpus --fetch --fixture betterend   # one mod, downloading if needed
@@ -75,6 +76,6 @@ eras and loaders.
 
 1. Pick a version on Modrinth and read `https://api.modrinth.com/v2/version/<id>`.
 2. Add a `[[mod]]` entry with the primary file's `url` and `hashes.sha512`, plus the license and source.
-3. Run `portkit corpus fetch && portkit eval --corpus --update-baseline` and commit both files.
+3. Run `portkit corpus fetch && portkit reference fetch && portkit eval --corpus --update-baseline` and commit both files.
 
 Mods from v1 failure reports (#26) belong here too: record the report in `notes`.
