@@ -24,3 +24,11 @@ def _offline_vanilla_sounds(request, monkeypatch):
         return
     monkeypatch.setenv("PORTKIT_VANILLA_SOUNDS", str(ROOT / "tests" / "data" / "vanilla_sounds.txt"))
     monkeypatch.setenv("PORTKIT_REFERENCE_CACHE", str(request.getfixturevalue("tmp_path_factory").mktemp("reference")))
+
+
+@pytest.fixture(autouse=True)
+def _no_llm_retries(monkeypatch):
+    """Provider clients retry transient failures with backoff (#137). Tests
+    that script a failure expect to see it, at once; the retry tests pass
+    their own RetryPolicy."""
+    monkeypatch.setenv("PORTKIT_LLM_MAX_RETRIES", "0")
