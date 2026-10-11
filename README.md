@@ -92,6 +92,9 @@ export PORTKIT_LLM_INPUT_PRICE=0.75 PORTKIT_LLM_OUTPUT_PRICE=3.75   # list price
 Gemini 3 attaches a thought signature to each tool call and refuses the next
 turn without it. The OpenAI client keeps any extra fields on a tool call and
 sends them back unchanged, and transcripts record them, so replay still matches.
+Through OpenRouter the reasoning (Gemini's signatures included) comes as a
+message-level `reasoning_details` array instead; the client keeps that too and
+echoes it on the next request, as OpenRouter asks.
 
 Then send the residue through it:
 

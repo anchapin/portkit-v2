@@ -27,6 +27,22 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: OpenRouter's reasoning_details go back to the model unmodified
+
+- **Decision:** The OpenAI-style client keeps a reply's message-level
+  `reasoning_details` on `Message.extra` and sends it back on that assistant
+  turn in later requests; transcripts record it and it is part of the request
+  digest. The plain-text `reasoning` field is not echoed.
+- **Why:** OpenRouter returns reasoning there (for Gemini, the encrypted thought
+  signatures) and documents passing it back unmodified so the model can
+  continue its reasoning across tool calls. We dropped it, which is one
+  candidate explanation for Gemini 3.8 Flash looping to the step ceiling on
+  every group in #86 (not proven; needs a live re-run).
+- **Rejected:** Echoing every unknown message field (could send providers
+  fields they reject); echoing `reasoning` text as well (redundant with the
+  details, and bigger).
+- **Links:** #86; https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+
 ## 2026-10-11: The default agent model is deepseek/deepseek-v4.1-flash via OpenRouter
 
 - **Decision:** Recommend `deepseek/deepseek-v4.1-flash` through OpenRouter
