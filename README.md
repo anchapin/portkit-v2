@@ -28,6 +28,13 @@ portkit eval                   # run every fixture, print a coverage table, fail
 portkit eval --update-baseline # bank an improvement (or a deliberate step down) in the baseline
 ```
 
+One step needs the network, once: `portkit reference fetch` caches Bedrock's
+vanilla sound list (Mojang's data, so it isn't in the repo) under
+`~/.cache/portkit/reference/`, checked against a pinned sha256. With it, a mod
+sound that names vanilla audio Bedrock also has (`random/bow`) is kept; without
+it, those references are dropped with a note saying to run the fetch. Tests and
+the fixtures don't need it.
+
 ## Where the LLM goes
 
 Nowhere, until a converter says it cannot handle something. Each converter
@@ -145,6 +152,7 @@ They're downloaded, never committed:
 
 ```bash
 portkit corpus fetch
+portkit reference fetch
 portkit eval --corpus
 ```
 
