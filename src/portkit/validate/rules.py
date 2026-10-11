@@ -11,7 +11,7 @@ import re
 import uuid
 from pathlib import Path
 
-from ..data import bedrock_vanilla_sounds
+from ..data import FETCH_COMMAND, bedrock_vanilla_sounds
 from ..paths import MAX_PATH, MAX_SEGMENTS, too_long
 from ..png import dimensions
 from .collisions import check_collisions
@@ -241,7 +241,9 @@ def _check_sound_definitions(report: ValidationReport, path: Path, rel: str, pac
 
     Bedrock loads a definition pointing at nothing and the sound is silent in
     game, so this is a warning (mct reports it as UNLINK). A name resolves when
-    the pack ships it as .ogg/.fsb/.wav or Bedrock's vanilla pack has it.
+    the pack ships it as .ogg/.fsb/.wav or Bedrock's vanilla pack has it. With
+    the vanilla list not cached (``portkit reference fetch``), only the pack's
+    own audio resolves and the warning says so.
     """
     data = _load(report, path, rel)
     if data is None:
@@ -258,16 +260,18 @@ def _check_sound_definitions(report: ValidationReport, path: Path, rel: str, pac
             if not isinstance(name, str):
                 report.add(rel, "sound.name", f"{event}: sounds[{i}] has no name")
                 continue
-            if name in vanilla or any(
+            if (vanilla is not None and name in vanilla) or any(
                 (pack_root / f"{name}{ext}").is_file() for ext in _AUDIO_EXTENSIONS
             ):
                 continue
-            report.add(
-                rel,
-                "sound.missing",
-                f"{event}: sounds[{i}] {name!r} is not in the pack or Bedrock's vanilla audio",
-                "warning",
-            )
+            if vanilla is None:
+                message = (
+                    f"{event}: sounds[{i}] {name!r} is not in the pack, and Bedrock's vanilla "
+                    f"sound list isn't cached to check it (run `{FETCH_COMMAND}`)"
+                )
+            else:
+                message = f"{event}: sounds[{i}] {name!r} is not in the pack or Bedrock's vanilla audio"
+            report.add(rel, "sound.missing", message, "warning")
 
 
 def _check_lang(report: ValidationReport, path: Path, rel: str) -> None:
