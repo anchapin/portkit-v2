@@ -1,0 +1,3 @@
+# Test-local stand-in for the Bedrock vanilla sound list (#124): a few real paths.
+sounds/mob/slime/big1
+sounds/random/bow
