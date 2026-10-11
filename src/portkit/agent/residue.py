@@ -17,7 +17,14 @@ least one file, the validator found no new error, and every item and tag its
 recipes name exists (in the pack, in the source mod, or in vanilla; see
 ``refs.py``). Declaring victory in prose
 is not enough, and neither is a session that wrote nothing because the Java behaviour
-has no Bedrock form: that one stays residue, with the agent's reason attached.
+has no Bedrock form: that one stays residue, with the agent's reason attached,
+and is reported as ``declined`` rather than ``unresolved`` so a sweep can tell
+a reasoned "no Bedrock equivalent" from a session that gave up (#86).
+
+The run's ``status`` sums it up: ``complete`` when every group the agent could
+work on resolved, ``partial`` when some did, ``failed`` when none did. It is
+separate from whether the pack validates: rolling every group back leaves a
+valid pack and a failed agent run.
 
 Every group's spend (steps, tokens, dollars when priced) is reported. Token and
 dollar ceilings are per run: once one is reached, the session in flight stops
@@ -211,7 +218,7 @@ class GroupOutcome:
     key: str
     kind: str
     source: str
-    status: str  # resolved | partial | unresolved | rolled_back | skipped | error
+    status: str  # resolved | partial | declined | unresolved | rolled_back | skipped | error
     stopped: str = ""  # the session's own stop reason: done | budget | error
     steps: int = 0
     written: list[str] = field(default_factory=list)
@@ -264,6 +271,27 @@ class ResidueRun:
         return [o for o in self.outcomes if o.status == "resolved"]
 
     @property
+    def declined(self) -> list[GroupOutcome]:
+        return [o for o in self.outcomes if o.status == "declined"]
+
+    @property
+    def tasks(self) -> list[GroupOutcome]:
+        """Groups the agent could work on: everything but the SKIP_KINDS."""
+        return [o for o in self.outcomes if not (o.status == "skipped" and o.stopped != "budget")]
+
+    @property
+    def status(self) -> str:
+        """complete | partial | failed: how much of the agent's work landed.
+
+        Not the same thing as the pack being valid. A run whose every group was
+        rolled back leaves the tree exactly as valid as it found it (#86).
+        """
+        resolved = len(self.resolved)
+        if resolved == len(self.tasks):
+            return "complete"
+        return "partial" if resolved else "failed"
+
+    @property
     def files_written(self) -> int:
         """Files from resolved groups: the ones that count as converted."""
         return sum(len(o.written) for o in self.outcomes if o.status == "resolved")
@@ -276,8 +304,10 @@ class ResidueRun:
 
     def summary(self) -> dict[str, Any]:
         return {
+            "status": self.status,
             "groups": len(self.outcomes),
             "resolved": len(self.resolved),
+            "declined": len(self.declined),
             "files_written": self.files_written,
             "partial_files": self.partial_files,
             "spend": self.spend.to_dict(),
@@ -362,6 +392,7 @@ class ResidueAgent:
         spent: Spend,
     ) -> GroupOutcome:
         outcome = GroupOutcome(group.key, group.kind, group.source, "skipped")
+        model_text = ""
         if group.kind in SKIP_KINDS:
             outcome.note = SKIP_KINDS[group.kind]
             return outcome
@@ -381,7 +412,7 @@ class ResidueAgent:
             result = session.run(task)
             outcome.stopped, outcome.steps, outcome.limit = result.stopped, result.steps, result.limit
             outcome.tool_calls, outcome.format_failures = result.tool_calls, result.format_failures
-            outcome.note = _final_text(result.messages)
+            outcome.note = model_text = _final_text(result.messages)
             if result.stopped == "done" and not outcome.note:
                 outcome.note = _empty_reply_note(result.messages)
             if result.stopped == "budget" and not outcome.note:
@@ -416,6 +447,10 @@ class ResidueAgent:
             outcome.status = "partial"
         elif outcome.stopped == "error":
             outcome.status = "error"
+        elif outcome.stopped == "done" and model_text:
+            # Wrote nothing and said why: the answer the task asks for when
+            # there is no faithful Bedrock form. Still residue, never resolved.
+            outcome.status = "declined"
         else:
             outcome.status = "unresolved"
         return outcome

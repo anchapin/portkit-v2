@@ -58,8 +58,29 @@ export PORTKIT_LLM_TEMPERATURE=...      # optional: sampling temperature
 Both clients are stdlib HTTP (no SDK dependency) and translate tool calls both
 ways, so the same `AgentSession` runs against either one unchanged.
 
+**Recommended default: `deepseek/deepseek-v4.1-flash` through OpenRouter.** In
+the #86 sweep (6 models × 3 runs on `fixtures/agent_mod`, 12 steps per group,
+$0.50 per run) it tied Claude Sonnet 5.5 and Opus 5.5 for the most groups
+resolved, 6 of 9, at about a sixth of Sonnet's cost and a tenth of Opus's
+($0.094 for all three runs). Gemini 3.8 Flash through the same OpenRouter
+setup resolved none.
+
+```bash
+export PORTKIT_LLM_PROVIDER=openai
+export PORTKIT_LLM_BASE_URL=https://openrouter.ai/api/v1
+export PORTKIT_LLM_MODEL=deepseek/deepseek-v4.1-flash
+export OPENAI_API_KEY=...               # your OpenRouter key
+export PORTKIT_LLM_INPUT_PRICE=... PORTKIT_LLM_OUTPUT_PRICE=...   # from the model's OpenRouter page, for --agent-max-cost
+```
+
+A sweep is a sample, not a guarantee: rerun `--repeat 3` on `fixtures/agent_mod`
+when a new model or a prompt change might move the ranking (see
+docs/decisions.md).
+
 `gemini` is the OpenAI client aimed at Google's OpenAI-compatible endpoint, so
-no base URL is needed. A cheap setup for trying the agent:
+no base URL is needed. A cheap setup for trying the agent (note that Gemini 3.8
+Flash went 0 of 9 through OpenRouter in #86, looping until the step ceiling; it
+has not been re-swept through this endpoint):
 
 ```bash
 export PORTKIT_LLM_PROVIDER=gemini
@@ -82,14 +103,20 @@ portkit convert path/to/mod.jar /tmp/out --agent   # --agent-max-steps N per gro
 runs one session per group. Each task carries the source content and the exact
 reason the deterministic path refused it. A group counts as resolved only when
 its session ends on its own, it wrote at least one file, and the validator finds
-no new error; a group that breaks the tree is rolled back. So is a group whose
+no new error; a group that breaks the tree is rolled back. A session that writes
+nothing and says why is `declined`: the right answer when the Java behaviour has
+no faithful Bedrock form, and still residue. One that stops without a reason is
+`unresolved`. So is a group whose
 recipes name an item or tag that exists nowhere: every item must be defined by
 the pack or the source mod or be vanilla, and every non-vanilla tag must be one
 a pack item declares in `minecraft:tags` (Bedrock does not read Java tag files).
 The `validate` tool reports these as `agent.unresolved_ref` so the model can fix
 them, and the group's `unresolved_refs` lists any left. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
-did. Bytecode, nested jars and namespace collisions are skipped, since no tool
+did. Its `status` is `complete` (every group resolved), `partial` or `failed`
+(none did). That is separate from `valid` and from the exit code, which are
+about the pack: a run whose every group was rolled back leaves a valid pack and
+a `failed` agent run. Bytecode, nested jars and namespace collisions are skipped, since no tool
 can read them.
 
 Budgets: `--agent-max-steps` bounds each group's session; `--agent-max-tokens`
@@ -114,8 +141,9 @@ in CI (`tests/test_transcripts.py`).
 
 Variance: one run is one sample. `--repeat 3` converts into `OUT/run-1..3`,
 records `run-1..3.jsonl` when `--agent-record run.jsonl` is set, and prints the
-mean, stdev and range of resolved groups, steps, tokens and cost, plus how many
-runs resolved each group. The same numbers land in `OUT/repeat-summary.json`.
+mean, stdev and range of resolved and declined groups, steps, tokens and cost,
+how many runs resolved or declined each group, and each run's `agent_status`
+beside `valid`. The same numbers land in `OUT/repeat-summary.json`.
 
 ```bash
 portkit convert fixtures/agent_mod/input /tmp/var --agent --repeat 3 \

@@ -93,11 +93,16 @@ def _run_row(run: int, result) -> dict:
         "run": run,
         "groups": len(agent.outcomes),
         "resolved": len(agent.resolved),
+        "declined": len(agent.declined),
+        # How much of the agent's work landed, and separately whether the pack
+        # validates. One "ok" used to stand for the second and read like the
+        # first: a run with every group rolled back said ok: true (#86).
+        "agent_status": agent.status,
         "statuses": {o.key: o.status for o in agent.outcomes},
         "steps": agent.spend.steps,
         "tokens": agent.spend.tokens,
         "cost_usd": None if agent.spend.cost is None else round(agent.spend.cost, 6),
-        "ok": result.report.ok,
+        "valid": result.report.ok,
     }
 
 
@@ -116,16 +121,23 @@ def _repeat_summary(rows: list[dict]) -> dict:
     """Mean and sample stdev across runs, plus how often each group resolved."""
     costs = [r["cost_usd"] for r in rows if r["cost_usd"] is not None]
     per_group: dict[str, int] = {}
+    declined_in: dict[str, int] = {}
+    agent_status: dict[str, int] = {}
     for r in rows:
         for key, status in r["statuses"].items():
             per_group[key] = per_group.get(key, 0) + (status == "resolved")
+            declined_in[key] = declined_in.get(key, 0) + (status == "declined")
+        agent_status[r["agent_status"]] = agent_status.get(r["agent_status"], 0) + 1
     return {
         "runs": len(rows),
+        "agent_status": dict(sorted(agent_status.items())),
         "resolved": _stats([r["resolved"] for r in rows]),
+        "declined": _stats([r["declined"] for r in rows]),
         "steps": _stats([r["steps"] for r in rows]),
         "tokens": _stats([r["tokens"] for r in rows]),
         "cost_usd": _stats(costs) if len(costs) == len(rows) else None,
         "group_resolved_in": per_group,
+        "group_declined_in": declined_in,
         "per_run": rows,
     }
 
@@ -138,8 +150,14 @@ def _format_repeat(summary: dict) -> str:
         if s is None or s["mean"] is None:
             continue
         lines.append(f"  {name:<9} {s['mean']:g} ± {s['stdev']:g} [{s['min']:g}..{s['max']:g}]")
+    if summary["agent_status"]:
+        statuses = ", ".join(f"{s} {c}" for s, c in summary["agent_status"].items())
+        lines.append(f"  agent runs: {statuses}")
+    declined_in = summary.get("group_declined_in", {})
     for key, hits in summary["group_resolved_in"].items():
-        lines.append(f"  {key}: resolved in {hits} of {n}")
+        declined = declined_in.get(key, 0)
+        tail = f", declined in {declined}" if declined else ""
+        lines.append(f"  {key}: resolved in {hits} of {n}{tail}")
     return "\n".join(lines)
 
 
@@ -165,9 +183,12 @@ def _convert_once(args):
         return 2, None
     print(json.dumps(result.summary(), indent=2))
     if result.agent:
+        declined = len(result.agent.declined)
         print(
-            f"\nagent resolved {len(result.agent.resolved)} of "
-            f"{len(result.agent.outcomes)} residue group(s):"
+            f"\nagent {result.agent.status}: resolved {len(result.agent.resolved)} of "
+            f"{len(result.agent.outcomes)} residue group(s)"
+            + (f", declined {declined}" if declined else "")
+            + ":"
         )
         for outcome in result.agent.outcomes:
             detail = f" ({outcome.note})" if outcome.note else ""

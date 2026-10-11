@@ -27,6 +27,44 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: The default agent model is deepseek/deepseek-v4.1-flash via OpenRouter
+
+- **Decision:** Recommend `deepseek/deepseek-v4.1-flash` through OpenRouter
+  (`PORTKIT_LLM_PROVIDER=openai`, base URL `https://openrouter.ai/api/v1`) as
+  the default for the residue agent, in the README's agent section.
+- **Why:** Alex's #86 sweep (6 models × 3 runs on `fixtures/agent_mod`, develop
+  @0252190, 12 steps per group, $0.50 per run, after a fabrication check):
+  DeepSeek V4.1 Flash 6/9 for $0.094, Claude Sonnet 5.5 6/9 for $0.574, Claude
+  Opus 5.5 6/9 for $1.046, GPT-6.1 Sol 4/9 for $0.353, Qwen 3.8 Max Prime 4/9
+  for $1.509 (one fabricated ingredient; hit the cost ceiling on steel_trim
+  every run), Gemini 3.8 Flash 0/9 for $0.188 (step ceiling on every group).
+  Same top score as the Claude models at a fraction of the cost. steel_trim
+  was 0/3 for every model, which is the expected answer (see the next entry).
+- **Rejected:** Sonnet or Opus as default (no more groups resolved, 6–11× the
+  cost); Gemini 3.8 Flash, the README's earlier "cheap setup" (0/9 via
+  OpenRouter).
+- **Links:** #86.
+
+## 2026-10-11: "Declined" is its own outcome, and agent status is separate from pack validity
+
+- **Decision:** A residue session that ends on its own having written nothing
+  but saying why is `declined`, not `unresolved`; it stays residue and scores
+  as a fail in the eval matrix, but is counted separately everywhere
+  (summary, `--repeat` summary, matrix rows). The agent run gets its own
+  `status` (`complete` | `partial` | `failed`), and the `--repeat` per-run
+  row's old `ok` (which was pack validity) is now `valid`, beside
+  `agent_status`. The exit code stays about the pack.
+- **Why:** In #86 Gemini Flash rolled back every group and its runs still said
+  `ok: true`, and steel_trim went 0/3 for every model when writing nothing is
+  the answer the task asks for (a mod item can't be a Bedrock trim material,
+  and the fixture ships no trim_material even for Java). Both read as the
+  wrong thing.
+- **Rejected:** Scoring a decline as a pass (the harness can't tell a correct
+  decline from a lazy one, so it stays a fail and is shown); failing the exit
+  code when the agent resolves nothing (the pack is still valid and
+  installable; scripts gate on `agent.status` instead).
+- **Links:** #86.
+
 ## 2026-10-11: Agent-written recipes may only name items and tags that exist
 
 - **Decision:** In the residue agent, every item a recipe written in the

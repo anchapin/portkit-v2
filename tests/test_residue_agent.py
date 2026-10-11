@@ -84,7 +84,7 @@ def test_convert_with_agent_resolves_residue_and_still_validates(tmp_path):
     assert bp["dependencies"][0]["uuid"] == rp["header"]["uuid"]
 
     statuses = {o.source: o.status for o in result.agent.outcomes}
-    assert statuses == {TAG_RECIPE: "resolved", SMITHING: "unresolved"}
+    assert statuses == {TAG_RECIPE: "resolved", SMITHING: "declined"}
     assert [u.source for u in result.unhandled] == [SMITHING]
     assert result.file_count == 5 and result.residue_count == 1
     assert result.addon is not None and result.addon.is_file()
@@ -124,7 +124,7 @@ def test_a_provider_failure_ends_the_group_not_the_run(tmp_path):
             return Message("assistant", "No Bedrock equivalent.")
 
     result = convert(RESIDUE, tmp_path / "out", agent=ResidueAgent(Flaky()))
-    assert [o.status for o in result.agent.outcomes] == ["error", "unresolved"]
+    assert [o.status for o in result.agent.outcomes] == ["error", "declined"]
     assert "overloaded" in result.agent.outcomes[0].note
     assert len(result.unhandled) == 2 and result.report.ok
 
@@ -144,7 +144,7 @@ def test_cli_convert_agent(tmp_path, monkeypatch, capsys):
     code = cli.main(["convert", str(RESIDUE), str(tmp_path / "out"), "--agent"])
     out = capsys.readouterr().out
     assert code == 0
-    assert "agent resolved 1 of 2 residue group(s)" in out
+    assert "agent partial: resolved 1 of 2 residue group(s), declined 1:" in out
     assert f"resolved: recipe:{TAG_RECIPE}" in out
     assert (tmp_path / "out" / "behavior_pack" / "recipes" / "steel_block.json").is_file()
 
@@ -232,3 +232,25 @@ def test_a_refusal_lands_in_the_note(tmp_path):
         tmp_path, Message("assistant", "", finish_reason="stop", refusal="I can't help with that.")
     )
     assert outcomes[f"recipe:{TAG_RECIPE}"].note == "model refused: I can't help with that."
+
+
+def test_run_status_is_about_the_agent_not_the_pack(tmp_path):
+    from portkit.agent.residue import ResidueRun, GroupOutcome
+
+    def run(*statuses):
+        return ResidueRun([GroupOutcome(str(i), "recipe", "s", st) for i, st in enumerate(statuses)], [])
+
+    assert run("resolved", "resolved").status == "complete"
+    assert run("resolved", "declined").status == "partial"
+    assert run("rolled_back", "partial", "declined").status == "failed"
+    assert run().status == "complete"  # nothing to do
+    skipped = GroupOutcome("java", "java_code", "x", "skipped")  # not a task
+    assert ResidueRun([skipped, GroupOutcome("r", "recipe", "s", "resolved")], []).status == "complete"
+    budget_skip = GroupOutcome("b", "recipe", "s", "skipped", stopped="budget")  # a task cut short
+    assert ResidueRun([budget_skip, GroupOutcome("r", "recipe", "s", "resolved")], []).status == "partial"
+
+
+def test_an_empty_reply_is_unresolved_not_declined(tmp_path):
+    result = convert(RESIDUE, tmp_path / "out", agent=ResidueAgent(FakeLLM([Message("assistant", "")] * 2)))
+    assert [o.status for o in result.agent.outcomes] == ["unresolved", "unresolved"]
+    assert result.agent.summary()["status"] == "failed" and result.report.ok

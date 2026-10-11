@@ -99,3 +99,29 @@ def test_factory_rejects_a_bad_temperature():
     env = {"PORTKIT_LLM_PROVIDER": "openai", "PORTKIT_LLM_MODEL": "m", "PORTKIT_LLM_TEMPERATURE": "hot"}
     with pytest.raises(ValueError, match="TEMPERATURE"):
         make_client(env=env)
+
+
+def test_repeat_summary_counts_declines_and_agent_status(tmp_path, monkeypatch, capsys):
+    scripts = iter([_writes(), _refuses(), _writes()])
+    monkeypatch.setattr(cli, "_residue_agent", lambda args: ResidueAgent(FakeLLM(next(scripts))))
+    cli.main(["convert", str(RESIDUE), str(tmp_path / "out"), "--agent", "--repeat", "3"])
+    summary = json.loads((tmp_path / "out" / "repeat-summary.json").read_text())
+    assert [r["agent_status"] for r in summary["per_run"]] == ["partial", "failed", "partial"]
+    assert [r["declined"] for r in summary["per_run"]] == [1, 2, 1]
+    assert all(r["valid"] for r in summary["per_run"]) and "ok" not in summary["per_run"][0]
+    assert summary["agent_status"] == {"failed": 1, "partial": 2}
+    smithing = "recipe:data/examplemod/recipes/steel_trim.json"
+    assert summary["group_declined_in"][smithing] == 3
+    out = capsys.readouterr().out
+    assert "agent runs: failed 1, partial 2" in out
+    assert f"{smithing}: resolved in 0 of 3, declined in 3" in out
+
+
+def test_every_group_out_of_steps_is_a_failed_run_on_a_valid_pack(tmp_path, monkeypatch, capsys):
+    # The #86 Gemini Flash shape: every session loops until the step ceiling.
+    monkeypatch.setattr(cli, "_residue_agent", lambda args: ResidueAgent(
+        FakeLLM([tool_call("validate") for _ in range(10)]), max_steps=2))
+    cli.main(["convert", str(RESIDUE), str(tmp_path / "out"), "--agent", "--repeat", "2"])
+    summary = json.loads((tmp_path / "out" / "repeat-summary.json").read_text())
+    assert summary["agent_status"] == {"failed": 2}
+    assert all(r["valid"] and r["resolved"] == 0 for r in summary["per_run"])

@@ -26,7 +26,7 @@ def test_committed_transcript_replays_deterministically(tmp_path):
     client = ReplayClient(TRANSCRIPT)
     result = _replay(tmp_path, client)
     assert client.remaining == 0
-    assert {o.key: o.status for o in result.agent.outcomes} == {TAG: "resolved", SMITHING: "unresolved"}
+    assert {o.key: o.status for o in result.agent.outcomes} == {TAG: "resolved", SMITHING: "declined"}
     assert result.report.ok and result.addon is not None
     assert (tmp_path / "out" / "behavior_pack" / "recipes" / "steel_block.json").is_file()
     # Usage is part of the recording, so the spend report replays too.
