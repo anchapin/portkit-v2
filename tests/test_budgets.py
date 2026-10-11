@@ -117,7 +117,7 @@ def test_finishing_exactly_at_the_ceiling_is_not_a_cut(tmp_path):
     client = FakeLLM(script, usage=Usage(500, 100))  # 600 a call
     run = convert(HARD, tmp_path / "out", agent=ResidueAgent(client, budget=Budget(max_tokens=2400))).agent
     assert run.spend.tokens == 2400 and run.limit is None
-    assert [o.status for o in run.outcomes] == ["resolved", "unresolved", "unresolved"]
+    assert [o.status for o in run.outcomes] == ["resolved", "declined", "declined"]
 
 
 def test_session_budget_overrides_max_steps(tmp_path):
