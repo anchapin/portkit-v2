@@ -8,6 +8,11 @@ from typing import Any
 
 # Texture indexes several converters may contribute keys to.
 _TEXTURE_INDEXES = ("textures/item_texture.json", "textures/terrain_texture.json")
+_LANGUAGES = "texts/languages.json"
+
+
+def _is_lang(path: str) -> bool:
+    return path.startswith("texts/") and path.endswith(".lang")
 
 
 @dataclass
@@ -79,6 +84,20 @@ class ConversionResult:
                     **(mine.get("texture_data") or {}),
                 }
                 merged.files[path] = combined
+            elif _is_lang(path) and isinstance(mine, str) and isinstance(value, str):
+                # The lang converter and the Tinkers pre-bake both name items:
+                # one file, every line, sorted as the lang converter sorts. A key both define keeps the
+                # first converter's line.
+                lines = {}
+                for text in (value, mine):
+                    for line in text.splitlines():
+                        key, sep, _ = line.partition("=")
+                        if sep:
+                            lines[key] = line
+                merged.files[path] = "".join(f"{line}\n" for line in sorted(lines.values()))
+            elif path == _LANGUAGES and isinstance(mine, list) and isinstance(value, list):
+                both = set(mine) | set(value)
+                merged.files[path] = (["en_US"] if "en_US" in both else []) + sorted(both - {"en_US"})
             else:
                 merged.files[path] = value
         merged.unhandled.extend(other.unhandled)
