@@ -24,7 +24,15 @@ class ToolBox:
         self.source = source
         self.out_tree = out_tree
         self._tools: dict[str, tuple[dict, Callable[..., Any]]] = {}
+        # Paths written successfully in this session, and those written since
+        # the last validate (#139).
+        self.written_paths: set[str] = set()
+        self._unvalidated: set[str] = set()
         self._register_defaults()
+
+    @property
+    def wrote_anything(self) -> bool:
+        return bool(self.written_paths)
 
     # -- registration -------------------------------------------------
     def register(self, schema: dict, fn: Callable[..., Any]) -> None:
@@ -222,7 +230,15 @@ class ToolBox:
         self._before_write(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(content, indent=2) + "\n")
-        return {"written": path, "bytes": target.stat().st_size}
+        result: dict[str, Any] = {"written": path, "bytes": target.stat().st_size}
+        key = target.relative_to(self.out_tree.resolve()).as_posix()
+        if key in self._unvalidated:
+            # Rewriting a file again and again without asking the validator is
+            # guessing (#139); say so, once per overwrite.
+            result["note"] = "overwrote your previous version without validating it; run validate"
+        self.written_paths.add(key)
+        self._unvalidated.add(key)
+        return result
 
     def set_lang_entries(self, path: str, lines: list) -> dict:
         """Upsert ``key=value`` lines into a resource pack .lang file (#105).
@@ -264,6 +280,7 @@ class ToolBox:
         self._before_write(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("\n".join(out) + "\n", encoding="utf-8")
+        self.written_paths.add(target.relative_to(self.out_tree.resolve()).as_posix())
 
         locale = match.group(1)
         index = target.parent / "languages.json"
@@ -278,6 +295,7 @@ class ToolBox:
         return {"written": path, "added": added, "replaced": sorted(replaced)}
 
     def validate(self) -> dict:
+        self._unvalidated.clear()
         return validate_tree(self.out_tree).to_dict()
 
     def lookup_bedrock(self, topic: str) -> dict:
@@ -301,6 +319,8 @@ Rules:
 - Unsure how a Bedrock component, recipe or file is spelled? Call
   lookup_bedrock(topic) before writing; list_bedrock_topics shows what it knows.
 - Keep calling validate until it returns ok: true. Fix the exact findings it names.
+- Steps are limited; every tool result says how many are left. Research only
+  what you need, then write.
 - If a piece of Java behaviour has no Bedrock equivalent, say so plainly in your
   final message instead of inventing a component that does not exist.
 - Never guess gameplay numbers (damage, durability, mining speed, armor, food,

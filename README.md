@@ -135,7 +135,10 @@ about the pack: a run whose every group was rolled back leaves a valid pack and
 a `failed` agent run. Bytecode, nested jars and namespace collisions are skipped, since no tool
 can read them.
 
-Budgets: `--agent-max-steps` bounds each group's session; `--agent-max-tokens`
+Budgets: `--agent-max-steps` bounds each group's session, and the model sees it:
+every tool result says how many steps are left, and with three or fewer left and
+nothing written yet it is told to write its best supported answer or decline.
+Rewriting a file without validating in between is pointed out too. `--agent-max-tokens`
 and `--agent-max-cost` bound the whole run, shared across groups. The run stops
 before the next model call once a ceiling is reached, keeps whatever it wrote
 that still validates (the group shows as `partial`, its residue stands), and

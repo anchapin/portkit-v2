@@ -113,7 +113,9 @@ never a guess.
   states for that item (`stats.py`). Otherwise its writes are rolled back. A session that writes nothing and says why is
   `declined`. The run's `status` (`complete` | `partial` | `failed`) is about the
   agent's work, not about whether the pack validates.
-- `budget.py`: step, token and dollar ceilings with per-group accounting.
+- `budget.py`: step, token and dollar ceilings with per-group accounting. The
+  loop stamps every tool result with the steps left, and while three or fewer
+  remain with nothing written it adds a nudge to write or decline (#139).
 - `transcript.py`: record a run to JSONL and replay it offline. Replay checks
   every request against the recording, so an agent regression is an ordinary
   failing test (`fixtures/transcripts/`).
