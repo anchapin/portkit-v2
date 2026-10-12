@@ -21,7 +21,9 @@ states (see ``stats.py``), and
 every namespaced id in its files is in ``minecraft``, the conversion's
 namespace or one the mod ships (see ``refs.py``, #147), and every block
 state it declares or tests is one the Java blockstate has, with a value Java
-lists (see ``states.py``, #149). A group that ends
+lists (see ``states.py``, #149), and every trim recipe it wrote names only
+vanilla ``minecraft:`` template and addition slots (see ``trim.py``, #86).
+A group that ends
 with any kind of fabrication is rolled back, with the reason listed.
 Declaring victory in prose is not enough, and neither is a session that wrote nothing because the Java behaviour
 has no Bedrock form: that one stays residue, with the agent's reason attached,
@@ -65,6 +67,8 @@ from .states import BadState, invented_states
 from .states import finding as state_finding
 from .stats import Stat, fabricated_stats
 from .stats import finding as stat_finding
+from .trim import Trim, fabricated_trims
+from .trim import finding as trim_finding
 from .tools import SYSTEM_PROMPT, ToolBox
 
 # Kinds no session can make progress on with the tools it has: bytecode is not
@@ -249,6 +253,10 @@ class _TrackingToolBox(ToolBox):
         """Block states on this session's blocks that the Java blockstate lacks (#149)."""
         return invented_states(self.out_tree, list(self.originals), self.source)
 
+    def unresolved_trims(self) -> list[Trim]:
+        """Written trim recipes whose template or addition is not vanilla (#86)."""
+        return fabricated_trims(self.out_tree, list(self.originals), self.source)
+
     def validate(self) -> dict:
         # The structural validator only warns on an undeclared item, and does not
         # look at tags at all. What the agent wrote is held to the stricter rule,
@@ -261,6 +269,7 @@ class _TrackingToolBox(ToolBox):
         extra += [namespace_finding(ref, valid) for ref in self.unknown_namespaces(unresolved)]
         extra += [stat_finding(stat) for stat in self.fabricated()]
         extra += [state_finding(bad) for bad in self.invented()]
+        extra += [trim_finding(trim) for trim in self.unresolved_trims()]
         if extra:
             report["findings"] = [*report["findings"], *extra]
             report["error_count"] += len(extra)
@@ -300,6 +309,9 @@ class GroupOutcome:
     unknown_namespaces: list[str] = field(default_factory=list)
     # Block states or values the Java blockstate doesn't have (#149); rolled back too.
     invented_states: list[str] = field(default_factory=list)
+    # Trim recipes the session wrote whose template or addition is not vanilla
+    # (#86); a group with any is rolled back too.
+    unresolved_trims: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -316,6 +328,7 @@ class GroupOutcome:
             "fabricated_stats": self.fabricated_stats,
             "unknown_namespaces": self.unknown_namespaces,
             "invented_states": self.invented_states,
+            "unresolved_trims": self.unresolved_trims,
             "note": self.note,
         }
 
@@ -516,10 +529,17 @@ class ResidueAgent:
         # integer code for facing=north (#149).
         states = box.invented() if box.originals else []
         outcome.invented_states = [bad.describe() for bad in states]
+        # So is a trim recipe whose template or addition is not vanilla (#86):
+        # a Bedrock add-on can't apply a mod trim pattern or material, so the
+        # file would validate and the trim would do nothing in game.
+        bad_trims = box.unresolved_trims() if box.originals else []
+        outcome.unresolved_trims = [trim.describe() for trim in bad_trims]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
         introduced = sorted(_error_set(out_tree) - before) if box.originals else []
-        if box.originals and (unresolved or fabricated or foreign or states or introduced):
+        if box.originals and (
+            unresolved or fabricated or foreign or states or bad_trims or introduced
+        ):
             box.rollback()
             outcome.status = "rolled_back"
             outcome.written = []
@@ -537,6 +557,10 @@ class ResidueAgent:
             if states:
                 reasons.append(
                     f"block state(s) the Java blockstate does not have: {'; '.join(outcome.invented_states)}"
+                )
+            if bad_trims:
+                reasons.append(
+                    f"trim slot(s) with no working form: {'; '.join(outcome.unresolved_trims)}"
                 )
             if introduced:
                 # Name what broke, so a stub that never validated reads as one (#141).

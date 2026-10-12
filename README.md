@@ -145,7 +145,12 @@ that blockstate keys on, with the values it lists, spelled as Java spells them:
 and rolls the group back, listed in `invented_states`. Bedrock's own trait
 states (`minecraft:cardinal_direction`, `minecraft:block_face`, ...), which the
 deterministic converter maps Java's facing and axis onto, are accepted with
-their own values. Anything unresolved
+their own values. The same goes for `minecraft:recipe_smithing_trim`: every
+`template` and `addition` slot must name a vanilla `minecraft:` item or tag.
+A Bedrock add-on can't apply a mod's trim pattern or material, so a trim
+slot naming any other id applies nothing in game; a written recipe there is
+`agent.unresolved_trim` and rolls the group back, listed in
+`unresolved_trims`. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Its `status` is `complete` (every group resolved), `partial` or `failed`
 (none did). That is separate from `valid` and from the exit code, which are

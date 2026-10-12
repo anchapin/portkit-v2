@@ -401,4 +401,9 @@ Rules:
   resistance, light, friction, flammability, map colour). Use only values the
   source mod states; when it states none, omit the component and say which
   ones you left out.
+- A ``minecraft:recipe_smithing_trim`` only applies on Bedrock when its
+  ``template`` and ``addition`` are vanilla ``minecraft:`` items or tags. A
+  Bedrock add-on can't apply a mod's trim pattern or trim material, so if
+  either side names a mod id, write nothing and decline: the recipe would
+  validate, but the trim would do nothing in game.
 """
