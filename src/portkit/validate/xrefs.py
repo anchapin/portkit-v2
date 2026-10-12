@@ -136,6 +136,31 @@ def _check_item_icons(report: ValidationReport, behavior: Path, index: Index) ->
         )
 
 
+def _check_block_placers(report: ValidationReport, behavior: Path, index: Index) -> None:
+    """An item that places a block must name one the pack declares (or vanilla's).
+
+    ``replace_block_item`` makes the item the block's own item, which Bedrock
+    only accepts when the item's identifier is the block's (learn.microsoft.com,
+    Items Documentation - minecraft:block_placer).
+    """
+    prefix = behavior.name
+    for path in sorted((behavior / "items").glob("*.json")):
+        rel = f"{prefix}/items/{path.name}"
+        item = _obj(_obj(_load(path)).get("minecraft:item"))
+        placer = _obj(item.get("components")).get("minecraft:block_placer")
+        if not isinstance(placer, dict):
+            continue
+        block = placer.get("block")
+        if _is_custom(block) and block not in index.blocks:
+            report.add(rel, "xref.block_placer",
+                       f"minecraft:block_placer places {block!r}, which no block definition declares")
+        ident = _obj(item.get("description")).get("identifier")
+        if placer.get("replace_block_item") is True and isinstance(block, str) and block != ident:
+            report.add(rel, "xref.block_placer",
+                       f"replace_block_item needs the item's identifier ({ident!r}) to be the "
+                       f"block's ({block!r})")
+
+
 def _recipe_item_refs(body: dict) -> list[tuple[str, object]]:
     """(where, identifier) for every item a recipe names."""
     refs: list[tuple[str, object]] = []
@@ -286,6 +311,7 @@ def check_cross_pack(report: ValidationReport, tree: Path) -> Index:
             _check_block_textures(report, behavior, index)
             _check_item_icons(report, behavior, index)
         _check_recipes(report, behavior, index)
+        _check_block_placers(report, behavior, index)
         _check_loot(report, behavior, index)
     if resource is not None:
         _check_lang(report, resource, index)
