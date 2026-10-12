@@ -63,6 +63,7 @@ class Index:
         self.items: dict[str, str] = {}
         self.terrain: set[str] = set()
         self.items_atlas: set[str] = set()
+        self.item_tags: set[str] = set()  # every tag an item's minecraft:tags names
 
         if resource is not None:
             self.terrain = _texture_keys(resource, "terrain_texture.json")
@@ -85,6 +86,9 @@ class Index:
             ident = _obj(_obj(data.get("minecraft:item")).get("description")).get("identifier")
             if isinstance(ident, str):
                 self.items[ident] = f"{prefix}/items/{path.name}"
+            tags = _obj(_obj(_obj(data.get("minecraft:item")).get("components")).get("minecraft:tags")).get("tags")
+            if isinstance(tags, list):
+                self.item_tags |= {t for t in tags if isinstance(t, str)}
 
     @property
     def obtainable(self) -> set[str]:
@@ -164,6 +168,19 @@ def _recipe_item_refs(body: dict) -> list[tuple[str, object]]:
     return refs
 
 
+def _recipe_tag_refs(body: dict) -> list[tuple[str, str]]:
+    """(where, tag) for every tag ingredient a recipe names."""
+    refs: list[tuple[str, str]] = []
+    for slot, ingredient in (body.get("key") or {}).items():
+        if isinstance(ingredient, dict) and isinstance(ingredient.get("tag"), str):
+            refs.append((f"key[{slot!r}]", ingredient["tag"]))
+    ingredients = body.get("ingredients")
+    for i, ingredient in enumerate(ingredients if isinstance(ingredients, list) else []):
+        if isinstance(ingredient, dict) and isinstance(ingredient.get("tag"), str):
+            refs.append((f"ingredients[{i}]", ingredient["tag"]))
+    return refs
+
+
 def _check_recipes(report: ValidationReport, behavior: Path, index: Index) -> None:
     prefix = behavior.name
     obtainable = index.obtainable
@@ -186,6 +203,18 @@ def _check_recipes(report: ValidationReport, behavior: Path, index: Index) -> No
                     f"{where} names {ident!r}, which no block or item definition declares; "
                     f"the recipe will never appear in game. Usually the definition was "
                     f"refused: check the residue report for that identifier.",
+                    severity="warning",
+                )
+            for where, tag in _recipe_tag_refs(body):
+                # A vanilla tag is Bedrock's own; a custom one only matches the
+                # pack items whose minecraft:tags name it (#160).
+                if not _is_custom(tag) or tag in index.item_tags:
+                    continue
+                report.add(
+                    rel,
+                    "xref.tag",
+                    f"{where} takes tag {tag!r}, which no item's minecraft:tags names; "
+                    f"the recipe can never be crafted.",
                     severity="warning",
                 )
 
