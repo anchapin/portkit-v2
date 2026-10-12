@@ -35,6 +35,12 @@ def _load(path: Path):
         return None  # the per-pack rules report a broken file themselves
 
 
+def _obj(value) -> dict:
+    """``value`` when it is a JSON object, else ``{}``: a malformed file is the
+    per-pack rules' to report (doc.unknown_shape), never a crash here (#141)."""
+    return value if isinstance(value, dict) else {}
+
+
 def _texture_keys(pack: Path, index: str) -> set[str]:
     data = _load(pack / "textures" / index)
     if not isinstance(data, dict):
@@ -69,14 +75,14 @@ class Index:
             data = _load(path)
             if not isinstance(data, dict):
                 continue
-            ident = ((data.get("minecraft:block") or {}).get("description") or {}).get("identifier")
+            ident = _obj(_obj(data.get("minecraft:block")).get("description")).get("identifier")
             if isinstance(ident, str):
                 self.blocks[ident] = f"{prefix}/blocks/{path.name}"
         for path in sorted((behavior / "items").glob("*.json")):
             data = _load(path)
             if not isinstance(data, dict):
                 continue
-            ident = ((data.get("minecraft:item") or {}).get("description") or {}).get("identifier")
+            ident = _obj(_obj(data.get("minecraft:item")).get("description")).get("identifier")
             if isinstance(ident, str):
                 self.items[ident] = f"{prefix}/items/{path.name}"
 
@@ -90,8 +96,8 @@ def _check_block_textures(report: ValidationReport, behavior: Path, index: Index
     prefix = behavior.name
     for path in sorted((behavior / "blocks").glob("*.json")):
         rel = f"{prefix}/blocks/{path.name}"
-        data = _load(path) or {}
-        components = ((data.get("minecraft:block") or {})).get("components") or {}
+        data = _obj(_load(path))
+        components = _obj(_obj(data.get("minecraft:block")).get("components"))
         instances = components.get("minecraft:material_instances")
         if not isinstance(instances, dict):
             continue
@@ -114,7 +120,7 @@ def _check_item_icons(report: ValidationReport, behavior: Path, index: Index) ->
         data = _load(path)
         if not isinstance(data, dict):
             continue
-        icon = ((data.get("minecraft:item") or {}).get("components") or {}).get("minecraft:icon")
+        icon = _obj(_obj(data.get("minecraft:item")).get("components")).get("minecraft:icon")
         if isinstance(icon, dict):  # 1.21 shape: {"texture": "..."}
             icon = icon.get("texture")
         if not isinstance(icon, str) or icon in index.items_atlas:
@@ -189,9 +195,11 @@ def _check_loot(report: ValidationReport, behavior: Path, index: Index) -> None:
     obtainable = index.obtainable
     for path in sorted((behavior / "loot_tables").rglob("*.json")):
         rel = f"{prefix}/{path.relative_to(behavior).as_posix()}"
-        data = _load(path) or {}
-        for i, pool in enumerate(data.get("pools") or []):
-            for j, entry in enumerate(pool.get("entries") or []):
+        data = _obj(_load(path))
+        pools = data.get("pools")
+        for i, pool in enumerate(pools if isinstance(pools, list) else []):
+            entries = _obj(pool).get("entries")
+            for j, entry in enumerate(entries if isinstance(entries, list) else []):
                 name = entry.get("name") if isinstance(entry, dict) else None
                 if not _is_custom(name) or name in obtainable:
                     continue
