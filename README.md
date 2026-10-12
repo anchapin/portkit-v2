@@ -28,12 +28,22 @@ portkit eval                   # run every fixture, print a coverage table, fail
 portkit eval --update-baseline # bank an improvement (or a deliberate step down) in the baseline
 ```
 
-One step needs the network, once: `portkit reference fetch` caches Bedrock's
-vanilla sound list (Mojang's data, so it isn't in the repo) under
-`~/.cache/portkit/reference/`, checked against a pinned sha256. With it, a mod
-sound that names vanilla audio Bedrock also has (`random/bow`) is kept; without
-it, those references are dropped with a note saying to run the fetch. Tests and
-the fixtures don't need it.
+One step needs the network, once: `portkit reference fetch` caches reference
+data that isn't in the repo under `~/.cache/portkit/reference/`, each piece
+checked against a pinned sha256:
+
+- Bedrock's vanilla sound list (Mojang's data). With it, a mod sound that names
+  vanilla audio Bedrock also has (`random/bow`) is kept; without it, those
+  references are dropped with a note saying to run the fetch.
+- The item tags Forge 1.20.1, NeoForge 1.21.1, Fabric's convention tags and
+  vanilla define (#160). A mod's `c:`/`forge:`/`neoforge:`/`minecraft:` tag file
+  is only its own share; the loader and vanilla add the rest
+  (`forge:glass/colorless` is `minecraft:glass` plus whatever the mod adds). The
+  data for the loader and game version the jar declares completes those tags;
+  without it, recipes using them stay residue rather than being narrowed.
+  `portkit reference fetch --mod your.jar` fetches only what that jar needs.
+
+Tests and the fixtures don't need it.
 
 ## Where the LLM goes
 
