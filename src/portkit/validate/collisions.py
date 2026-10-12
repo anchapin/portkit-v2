@@ -86,8 +86,9 @@ def _replaced_block_items(tree: Path) -> set[str]:
         item = data.get("minecraft:item") if isinstance(data, dict) else None
         if not isinstance(item, dict):
             continue
-        name = (item.get("description") or {}).get("identifier")
-        placer = (item.get("components") or {}).get("minecraft:block_placer")
+        description, components = item.get("description"), item.get("components")
+        name = description.get("identifier") if isinstance(description, dict) else None
+        placer = components.get("minecraft:block_placer") if isinstance(components, dict) else None
         if isinstance(placer, dict) and placer.get("replace_block_item") is True and placer.get("block") == name:
             found.add(name)
     return found
