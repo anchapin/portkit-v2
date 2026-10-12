@@ -1,0 +1,5 @@
+{"set": "neoforge-1.21.1", "note": "Minimal hand-written test fixture (#160).",
+ "tags": {
+  "c:foods/vegetable": ["minecraft:carrot", "minecraft:potato", {"id": "#c:foods/vegetables", "required": false}],
+  "c:crops/wheat": ["minecraft:wheat", {"id": "#forge:crops/wheat", "required": false}]
+ }}
