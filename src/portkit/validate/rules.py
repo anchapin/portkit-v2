@@ -46,12 +46,78 @@ _RECIPE_REQUIRED: dict[str, tuple] = {
 }
 
 
+# Directories where every .json file is one Bedrock document, and the top-level
+# key(s) that name that document (#141). A file there with none of them, or with
+# one whose body is not an object, loads as nothing: Bedrock skips it, and an
+# agent's stub such as {"format_version": "1.20.80", "minecraft": "item"} would
+# otherwise pass as a valid pack. blocks/, recipes/ and loot_tables/ have their
+# own, stricter checks below. Directories not listed are not shape-checked.
+_DOCUMENT_KEYS: dict[str, dict[str, tuple[str, ...]]] = {
+    "behavior_pack": {
+        "items": ("minecraft:item",),
+        "entities": ("minecraft:entity",),
+        "spawn_rules": ("minecraft:spawn_rules",),
+        "biomes": ("minecraft:biome",),
+        "feature_rules": ("minecraft:feature_rules",),
+        "dimensions": ("minecraft:dimension",),
+        "animations": ("animations",),
+        "animation_controllers": ("animation_controllers",),
+    },
+    "resource_pack": {
+        "items": ("minecraft:item",),
+        "entity": ("minecraft:client_entity",),
+        "attachables": ("minecraft:attachable",),
+        "fogs": ("minecraft:fog_settings",),
+        "particles": ("particle_effect",),
+        "animations": ("animations",),
+        "animation_controllers": ("animation_controllers",),
+        "render_controllers": ("render_controllers",),
+    },
+}
+
+
+def _shape_error(report: ValidationReport, rel: str, data, expected: tuple[str, ...]) -> bool:
+    """Report a file that is not the Bedrock document its directory holds.
+
+    True when it reported, so a caller with its own checks can stop there.
+    """
+    want = " or ".join(expected)
+    if not isinstance(data, dict):
+        report.add(rel, "doc.unknown_shape",
+                   f"file must be a JSON object with {want}, got a {type(data).__name__}")
+        return True
+    present = [k for k in expected if k in data]
+    if not present:
+        found = ", ".join(sorted(map(str, data))) or "none"
+        message = f"no Bedrock document key: needs {want}; found keys: {found}"
+        if any(str(k) == "minecraft" for k in data):
+            message += " (a bare 'minecraft' key is usually a 'minecraft:...' key cut at the colon)"
+        report.add(rel, "doc.unknown_shape", message)
+        return True
+    body = data[present[0]]
+    if not isinstance(body, dict):
+        report.add(rel, "doc.unknown_shape",
+                   f"{present[0]} must be a JSON object, got {json.dumps(body)[:40]}")
+        return True
+    return False
+
+
+def _check_document(report: ValidationReport, path: Path, rel: str, expected: tuple[str, ...]) -> None:
+    data = _load(report, path, rel)
+    if data is not None:
+        _shape_error(report, rel, data, expected)
+
+
 def _load(report: ValidationReport, path: Path, rel: str):
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         report.add(rel, "json.parse", f"invalid JSON: {exc}")
         return None
+    if data is None:
+        # A literal ``null`` parses, then every check would skip it as unreadable.
+        report.add(rel, "doc.unknown_shape", "file is JSON null, not a Bedrock document")
+    return data
 
 
 def _check_manifest(report: ValidationReport, path: Path, rel: str) -> None:
@@ -199,6 +265,9 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
     data = _load(report, path, rel)
     if data is None:
         return
+    if not isinstance(data, dict):
+        _shape_error(report, rel, data, ("minecraft:block",))
+        return
     if "format_version" not in data:
         report.add(rel, "block.format_version", "missing format_version")
     body = data.get("minecraft:block")
@@ -295,11 +364,17 @@ def _check_loot_table(report: ValidationReport, path: Path, rel: str) -> None:
     data = _load(report, path, rel)
     if data is None:
         return
+    if not isinstance(data, dict):
+        _shape_error(report, rel, data, ("pools",))
+        return
     pools = data.get("pools")
     if not isinstance(pools, list) or not pools:
         report.add(rel, "loot.pools", "table has no pools")
         return
     for i, pool in enumerate(pools):
+        if not isinstance(pool, dict):
+            report.add(rel, "loot.pools", f"pools[{i}] must be a JSON object")
+            continue
         rolls = pool.get("rolls")
         if not isinstance(rolls, (int, float)):
             report.add(rel, "loot.rolls", f"pools[{i}].rolls must be a number")
@@ -309,6 +384,9 @@ def _check_loot_table(report: ValidationReport, path: Path, rel: str) -> None:
             continue
         for j, entry in enumerate(entries):
             where = f"pools[{i}].entries[{j}]"
+            if not isinstance(entry, dict):
+                report.add(rel, "loot.entries", f"{where} must be a JSON object")
+                continue
             if entry.get("type") != "item":
                 report.add(rel, "loot.entry_type", f"{where}.type must be 'item'")
             name = entry.get("name")
@@ -382,6 +460,10 @@ def validate_pack(pack_root: Path) -> ValidationReport:
 
     for path in sorted((pack_root / "loot_tables").rglob("*.json")):
         _check_loot_table(report, path, f"{prefix}/{path.relative_to(pack_root).as_posix()}")
+
+    for folder, expected in _DOCUMENT_KEYS.get(prefix, {}).items():
+        for path in sorted((pack_root / folder).rglob("*.json")):
+            _check_document(report, path, f"{prefix}/{path.relative_to(pack_root).as_posix()}", expected)
 
     for index in ("textures/terrain_texture.json", "textures/item_texture.json"):
         path = pack_root / index
