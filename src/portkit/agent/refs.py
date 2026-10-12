@@ -27,6 +27,24 @@ data (see docs/decisions.md on EULA material), and the tag list the agent
 reference has is partial, so rejecting an unlisted ``minecraft:`` name would
 reject real ones. The check is aimed at what a model can actually invent: ids
 in the mod's own namespace, or any other non-vanilla namespace.
+
+Unknown namespaces (#147)
+-------------------------
+The recipe check only reads recipes. On real-mod residue GLM 5.3 wrote blocks
+and items naming ``sd:`` ids, a typo for storage drawers' ``storagedrawers``
+namespace, and nothing caught them. So every identifier in *any* JSON file the
+session writes (a string value or object key of the form ``ns:path``, an id
+quoted inside a Molang string, a ``tag:ns:path`` component, a ``tile.ns:path``
+lang key) must have a namespace that is:
+
+- ``minecraft``;
+- one the mod has a folder for under ``assets/`` or ``data/``; or
+- the conversion's own namespace (the pack's identity).
+
+Two exceptions keep it from flagging what the agent did not invent: an exact
+id the source mod names in an item position (``source_items``, which covers a
+compat recipe naming another mod's item), and an id the file already held
+before the session touched it.
 """
 from __future__ import annotations
 
@@ -204,6 +222,147 @@ def source_items(source_root: Path) -> set[str]:
             for path in sorted(base.rglob("*.json")):
                 found.update(_walk_loot_names(_load(path)))
     return {_bare(i) for i in found if isinstance(i, str) and _ID.match(_bare(i))}
+
+
+# -- unknown namespaces (#147) -------------------------------------------
+
+# Ids quoted inside a Molang expression: q.block_state('sd:facing').
+_QUOTED_ID = re.compile(r"'([a-z0-9_.\-]+:[a-z0-9_./\-]+)'")
+# Bedrock lang keys that carry an id: tile.ns:name.name, item.ns:name, entity.ns:name.name
+_LANG_ID = re.compile(r"^(?:tile|item|entity|block)\.([a-z0-9_.\-]+:[a-z0-9_./\-]+?)(?:\.name)?$")
+
+
+def _id_like(text: str) -> bool:
+    """``ns:path`` with a real-looking namespace: not a time, ratio or URL."""
+    if not _ID.match(text):
+        return False
+    ns, path = text.split(":", 1)
+    return any(c.isalpha() for c in ns) and not path.startswith("/")
+
+
+def _string_ids(text: str) -> Iterator[str]:
+    if text.startswith("tag:"):
+        text = text[len("tag:"):]
+    lang = _LANG_ID.match(text)  # a translation key: item.ns:name.name
+    if lang:
+        text = lang.group(1)
+    bare = _bare(text)
+    if _id_like(bare):
+        yield bare
+        return
+    for match in _QUOTED_ID.finditer(text):
+        if _id_like(match.group(1)):
+            yield match.group(1)
+
+
+def document_ids(node, where: str = "") -> Iterator[tuple[str, str]]:
+    """(where, id) for every namespaced identifier a JSON document names."""
+    if isinstance(node, str):
+        for ident in _string_ids(node):
+            yield where or "(value)", ident
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            here = f"{where}.{key}" if where else str(key)
+            if isinstance(key, str):
+                for ident in _string_ids(key):
+                    yield f"{here} (key)", ident
+            yield from document_ids(value, here)
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from document_ids(value, f"{where}[{i}]")
+
+
+def lang_ids(text: str) -> Iterator[tuple[str, str]]:
+    """(where, id) for every id-bearing key in a .lang file."""
+    for line in text.splitlines():
+        key = line.split("=", 1)[0].strip()
+        if "=" not in line or key.startswith("#"):
+            continue
+        match = _LANG_ID.match(key)
+        if match and _id_like(match.group(1)):
+            yield f"lang key {key!r}", match.group(1)
+
+
+def _file_ids(rel: str, raw: bytes | str | None) -> list[tuple[str, str]]:
+    if raw is None:
+        return []
+    text = raw.decode("utf-8-sig", errors="replace") if isinstance(raw, bytes) else raw
+    if rel.endswith(".lang"):
+        return list(lang_ids(text))
+    if not rel.endswith(".json"):
+        return []
+    try:
+        data = json.loads(text.lstrip("\ufeff"))
+    except json.JSONDecodeError:
+        return []  # a broken file is the validator's to report
+    return list(document_ids(data))
+
+
+def source_namespaces(source_root: Path) -> set[str]:
+    """Namespaces the mod has a folder for under ``assets/`` or ``data/``."""
+    found: set[str] = set()
+    for top in ("assets", "data"):
+        base = source_root / top
+        if base.is_dir():
+            found.update(p.name for p in base.iterdir() if p.is_dir())
+    return found
+
+
+def valid_namespaces(source_root: Path, namespace: str | None = None) -> set[str]:
+    found = {_VANILLA, *source_namespaces(source_root)}
+    if namespace:
+        found.add(namespace)
+    return found
+
+
+def unknown_namespace_refs(
+    out_tree: Path,
+    written: list[str],
+    source_root: Path,
+    namespace: str | None = None,
+    originals: dict[str, bytes | None] | None = None,
+    *,
+    _source_ids: set[str] | None = None,
+) -> list[Ref]:
+    """Ids in the files listed in ``written`` whose namespace this mod does not have.
+
+    ``originals`` maps a written path to what it held before the session (None
+    for a new file): ids already there are not the session's to answer for.
+    """
+    valid = valid_namespaces(source_root, namespace)
+    originals = {k.replace("\\", "/"): v for k, v in (originals or {}).items()}
+    known_ids = _source_ids
+    bad: list[Ref] = []
+    for rel in sorted({r.replace("\\", "/") for r in written}):
+        target = out_tree / rel
+        if not rel.startswith(("behavior_pack/", "resource_pack/")) or not target.is_file():
+            continue
+        before = {ident for _, ident in _file_ids(rel, originals.get(rel))}
+        seen: set[tuple[str, str]] = set()
+        for where, ident in _file_ids(rel, target.read_bytes()):
+            ns = ident.split(":", 1)[0]
+            if ns in valid or ident in before or (where, ident) in seen:
+                continue
+            if known_ids is None:
+                known_ids = source_items(source_root)
+            if ident in known_ids:
+                continue
+            seen.add((where, ident))
+            bad.append(Ref(rel, where, "id", ident))
+    return bad
+
+
+def namespace_finding(ref: Ref, valid: set[str]) -> dict:
+    """The validate-tool finding for one id in a namespace the mod does not have."""
+    ns = ref.ident.split(":", 1)[0]
+    listed = ", ".join(sorted(valid, key=lambda n: (n != _VANILLA, n)))
+    message = (
+        f"{ref.where} names {ref.ident!r}, but namespace {ns!r} is neither vanilla nor one this "
+        f"mod has. Valid namespaces: {listed}. Use the id the source mod actually uses (check "
+        "its assets/ and data/ folders), a vanilla minecraft: id, or leave the reference out; "
+        "never invent a namespace."
+    )
+    return {"path": ref.path, "rule": "agent.unknown_namespace", "message": message, "severity": "error"}
 
 
 # -- the check ---------------------------------------------------------
