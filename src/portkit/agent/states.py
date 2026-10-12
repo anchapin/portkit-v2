@@ -30,6 +30,17 @@ are accepted, but a value outside the trait's own set (``cardinal_direction ==
 2``) is the same integer-enum fabrication and is rejected. A ``minecraft:``
 state not listed in :data:`TRAIT_VALUES` is taken on faith.
 
+A declared state named ``<prefix>_<javastate>`` (``waystones:portstone_half``
+for Java's ``half``) counts as that Java state when it is a rename, not an
+encoding: its suffix matches exactly one Java state, and the values it
+declares are that state's values exactly, the same set and spelled as Java
+names them (no integers, so a numeric Java state is never aliased). DeepSeek
+wrote waystones portstones this way with the real ``lower``/``upper`` values
+(an offline check of its output found 13); a renamed state invents nothing. A
+``q.block_state()`` may use the alias only when ``description.states``
+declares it and it passed. An alias with invented, missing or integer values,
+one whose suffix matches two Java states, or one never declared is rejected.
+
 A boolean Java state counts as both ``true`` and ``false`` even when a
 multipart only tests one of them. A block with no Java blockstate under its name is not checked: there is
 nothing to compare against. A state the Java blockstate never mentions (often
@@ -75,6 +86,7 @@ class BadState:
     value: str | None  # the offending value, or None when the name itself is unknown
     java: str  # what Java has: the blockstate file, or the trait
     allowed: tuple[str, ...]  # the names (value None) or values Java allows
+    alias_of: tuple[str, ...] = ()  # the Java state(s) a rejected ``<prefix>_<state>`` name suffix-matches
 
     def describe(self) -> str:
         if self.value is None:
@@ -191,6 +203,26 @@ def _bare(state: str) -> str:
     return state.split(":", 1)[1] if ":" in state else state
 
 
+_INTEGER = re.compile(r"-?\d+")
+
+
+def _suffix_matches(name: str, java: dict[str, set[str]]) -> list[str]:
+    """The Java states ``name`` could be a ``<prefix>_<state>`` rename of."""
+    return sorted(j for j in java if name.endswith("_" + j) and len(name) > len(j) + 1)
+
+
+def _same_named_values(values: list | None, java_values: set[str]) -> bool:
+    """The declared values are exactly Java's, and none is an integer code."""
+    if not values:
+        return False
+    for value in values:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return False
+        if _INTEGER.fullmatch(_norm(value)):
+            return False
+    return {_norm(v) for v in values} == java_values
+
+
 def invented_states_in(out_tree: Path, rel: str, source_root: Path) -> list[BadState]:
     """Block states in one pack block file that its Java blockstate doesn't have."""
     data = _load(out_tree / rel)
@@ -206,6 +238,7 @@ def invented_states_in(out_tree: Path, rel: str, source_root: Path) -> list[BadS
     java = java_states(blockstate) if isinstance(blockstate, dict) else None
     java_rel = java_file.relative_to(source_root).as_posix() if java_file else ""
     bad: list[BadState] = []
+    aliases: dict[str, str] = {}  # a declared ``<prefix>_<state>`` rename -> Java's state
 
     def check(where: str, state: str, value) -> None:
         if state.split(":", 1)[0] == _VANILLA:
@@ -216,6 +249,8 @@ def invented_states_in(out_tree: Path, rel: str, source_root: Path) -> list[BadS
         if java is None:
             return  # no Java blockstate to compare against
         name = _bare(state)
+        if name not in java and state in aliases:
+            name = aliases[state]
         if name not in java:
             bad.append(BadState(rel, ident, where, state, None, java_rel, tuple(sorted(java))))
         elif value is not None and _norm(value) not in java[name]:
@@ -227,6 +262,14 @@ def invented_states_in(out_tree: Path, rel: str, source_root: Path) -> list[BadS
             if not isinstance(state, str):
                 continue
             values = _declared_values(spec)
+            if java is not None and state.split(":", 1)[0] != _VANILLA and _bare(state) not in java:
+                matches = _suffix_matches(_bare(state), java)
+                if len(matches) == 1 and _same_named_values(values, java[matches[0]]):
+                    aliases[state] = matches[0]
+                elif matches:
+                    bad.append(BadState(rel, ident, "description.states", state, None, java_rel,
+                                        tuple(sorted(java)), tuple(matches)))
+                    continue
             before = len(bad)
             check("description.states", state, None)
             if len(bad) == before:  # a known name: now each value
@@ -266,6 +309,14 @@ def finding(bad: BadState) -> dict:
             "or a Bedrock trait state for placement (minecraft:cardinal_direction, "
             "minecraft:block_face, ...); never invent a state."
         )
+        if len(bad.alias_of) > 1:
+            message += (f" {bad.state!r} could be a rename of any of {', '.join(bad.alias_of)}, "
+                        "so it is not accepted as one.")
+        elif bad.alias_of:
+            java_state = bad.alias_of[0]
+            message += (f" A renamed {java_state!r} passes only when it declares exactly "
+                        f"{java_state}'s values as Java names them, no integers; better, use "
+                        f"{java_state!r} itself.")
     else:
         message = (
             f"{bad.where}: {bad.state} = {bad.value!r} on {bad.block}, but {bad.java} only has "
