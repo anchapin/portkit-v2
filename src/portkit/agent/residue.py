@@ -18,7 +18,9 @@ recipes name exists (in the pack, in the source mod, or in vanilla; see
 ``refs.py``), and every gameplay number on the items it wrote (damage,
 durability, ...) is one the source mod states (see ``stats.py``), and
 every namespaced id in its files is in ``minecraft``, the conversion's
-namespace or one the mod ships (see ``refs.py``, #147). A group that ends
+namespace or one the mod ships (see ``refs.py``, #147), and every block
+state it declares or tests is one the Java blockstate has, with a value Java
+lists (see ``states.py``, #149). A group that ends
 with any kind of fabrication is rolled back, with the reason listed.
 Declaring victory in prose is not enough, and neither is a session that wrote nothing because the Java behaviour
 has no Bedrock form: that one stays residue, with the agent's reason attached,
@@ -58,6 +60,8 @@ from .refs import (
     unresolved_refs,
     valid_namespaces,
 )
+from .states import BadState, invented_states
+from .states import finding as state_finding
 from .stats import Stat, fabricated_stats
 from .stats import finding as stat_finding
 from .tools import SYSTEM_PROMPT, ToolBox
@@ -239,6 +243,10 @@ class _TrackingToolBox(ToolBox):
         """Stats on this session's items that the source never states (#135)."""
         return fabricated_stats(self.out_tree, list(self.originals), self.source)
 
+    def invented(self) -> list[BadState]:
+        """Block states on this session's blocks that the Java blockstate lacks (#149)."""
+        return invented_states(self.out_tree, list(self.originals), self.source)
+
     def validate(self) -> dict:
         # The structural validator only warns on an undeclared item, and does not
         # look at tags at all. What the agent wrote is held to the stricter rule,
@@ -250,6 +258,7 @@ class _TrackingToolBox(ToolBox):
         valid = self.valid_namespaces()
         extra += [namespace_finding(ref, valid) for ref in self.unknown_namespaces(unresolved)]
         extra += [stat_finding(stat) for stat in self.fabricated()]
+        extra += [state_finding(bad) for bad in self.invented()]
         if extra:
             report["findings"] = [*report["findings"], *extra]
             report["error_count"] += len(extra)
@@ -287,6 +296,8 @@ class GroupOutcome:
     fabricated_stats: list[str] = field(default_factory=list)
     # Ids in a namespace neither vanilla nor the mod's (#147); rolled back too.
     unknown_namespaces: list[str] = field(default_factory=list)
+    # Block states or values the Java blockstate doesn't have (#149); rolled back too.
+    invented_states: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -302,6 +313,7 @@ class GroupOutcome:
             "unresolved_refs": self.unresolved_refs,
             "fabricated_stats": self.fabricated_stats,
             "unknown_namespaces": self.unknown_namespaces,
+            "invented_states": self.invented_states,
             "note": self.note,
         }
 
@@ -498,10 +510,14 @@ class ResidueAgent:
         # storagedrawers (#147).
         foreign = box.unknown_namespaces(unresolved) if box.originals else []
         outcome.unknown_namespaces = [ref.describe() for ref in foreign]
+        # And a block state or value the Java blockstate never has, such as an
+        # integer code for facing=north (#149).
+        states = box.invented() if box.originals else []
+        outcome.invented_states = [bad.describe() for bad in states]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
         introduced = sorted(_error_set(out_tree) - before) if box.originals else []
-        if box.originals and (unresolved or fabricated or foreign or introduced):
+        if box.originals and (unresolved or fabricated or foreign or states or introduced):
             box.rollback()
             outcome.status = "rolled_back"
             outcome.written = []
@@ -515,6 +531,10 @@ class ResidueAgent:
             if foreign:
                 reasons.append(
                     f"unknown namespace(s): {'; '.join(outcome.unknown_namespaces)}"
+                )
+            if states:
+                reasons.append(
+                    f"block state(s) the Java blockstate does not have: {'; '.join(outcome.invented_states)}"
                 )
             if introduced:
                 # Name what broke, so a stub that never validated reads as one (#141).

@@ -132,7 +132,14 @@ a file the agent writes must be `minecraft:`, the conversion's namespace or one
 the mod has an `assets/` or `data/` folder for (an id the source itself names,
 or one the file already held, is fine too); anything else, such as an `sd:`
 typo for `storagedrawers:`, is `agent.unknown_namespace` and rolls the group
-back, listed in `unknown_namespaces`. Anything unresolved
+back, listed in `unknown_namespaces`. A block the agent writes whose Java
+blockstate exists may only declare and test (`q.block_state(...)`) the states
+that blockstate keys on, with the values it lists, spelled as Java spells them:
+`facing` as `0..3` when Java says `north`/`east`/... is `agent.invented_state`
+and rolls the group back, listed in `invented_states`. Bedrock's own trait
+states (`minecraft:cardinal_direction`, `minecraft:block_face`, ...), which the
+deterministic converter maps Java's facing and axis onto, are accepted with
+their own values. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Its `status` is `complete` (every group resolved), `partial` or `failed`
 (none did). That is separate from `valid` and from the exit code, which are

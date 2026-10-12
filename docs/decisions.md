@@ -27,6 +27,35 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: agent-written block states must be the Java blockstate's
+
+- **Decision:** when a residue session writes a `minecraft:block` whose Java
+  blockstate exists (`assets/<ns>/blockstates/<name>.json`, matched by id),
+  every custom state in `description.states` and every
+  `q.block_state('<custom>')` in the file must be a state that blockstate keys
+  on (variant keys, multipart `when` incl. `OR`/`AND`/`a|b`, Forge
+  `forge_marker` variants), and every value (declared, or compared with
+  `==`/`!=`) one it lists, compared as Java spells it. Integers pass only where
+  Java uses integers; a boolean state accepts both `true` and `false` even if a
+  multipart only tests one. Vanilla trait states (`minecraft:cardinal_direction`,
+  `block_face`, `facing_direction`, `vertical_half`, `connection_*`) are
+  accepted with their own value sets, other `minecraft:` states on faith.
+  Otherwise `validate` reports `agent.invented_state` and the group rolls back,
+  listed in `invented_states`.
+- **Why:** on real-mod residue GLM 5.3 wrote `facing` as an invented `0/1/2`
+  enum and state values the Java blockstate doesn't have; no guard read block
+  states. Trait states are how `converters/blocks.py` already maps facing,
+  axis and connections, so the guard accepts exactly that mapping. A
+  synthetic faithful block for each of the 1,525 stateful blockstates in the
+  10 corpus mods (plus the fixtures) passes, as does every deterministic block.
+- **Rejected:** requiring trait states to correspond to a Java state (a
+  separate question: a trait with no Java basis is an addition, not an
+  encoding); guarding omitted states (waystones portstones' WATERLOGGED/ORIGIN
+  were dropped, which loses fidelity but invents nothing); matching per-variant
+  blocks (`basicdrawers_oak`) to a shorter blockstate by prefix (could compare
+  a slab against its full block's states).
+- **Links:** #149, #86 ([real-mod report](https://github.com/anchapin/portkit-v2/issues/86#issuecomment-6122960840)), #147.
+
 ## 2026-10-12: agent-written ids must be in a namespace the mod has
 
 - **Decision:** every namespaced id in a JSON or `.lang` file a residue session
