@@ -27,6 +27,47 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: recipes that share a file name are named by their path; no output is written twice
+
+- **Decision:** A Java recipe is written to `recipes/<name>.json` with the
+  identifier `<namespace>:<name>`. `<name>` is the file's stem when no other
+  recipe file of the namespace has that stem (counting every recipe file in
+  the jar, converted or not), so those keep the name they always had. When
+  several files share a stem, *every* one of them is named by its whole path
+  under `recipes/`, folders joined with `_`
+  (`smeltery/casting/planks` -> `smeltery_casting_planks`); a file at the root
+  of `recipes/` keeps its stem, which is its whole path. Per-member recipes
+  (#161/#162/#164) append `__<member>` to that name. If a path-qualified name
+  lands on an unshared stem (`x/planks` vs `x_planks`) or two qualified names
+  meet (`a/b/c` vs `a_b/c`), the unshared stem keeps its name and each
+  qualified file that met it is residue naming the other file; a per-member
+  name that is another recipe's name sends the expanding recipe to residue.
+  Guards: inside the recipe converter, a second write to an output path or a
+  second recipe declaring an identifier is residue (`refused rather than
+  overwrite`), never an overwrite; and `ConversionResult.merge` (one
+  converter after another) lets a later converter replace a file only when
+  both declare the same identifier (recipes adding `minecraft:tags` to an
+  item); anything else keeps the first file and is `output_collision`
+  residue. The validator's existing `recipe.identifier_collision` still
+  catches duplicate identifiers in the written tree.
+- **Why:** Every recipe used to go to `recipes/<stem>.json`, so recipes with
+  the same file name in different folders overwrote each other: only the last
+  shipped, nothing went to residue, and the lost ones counted as converted.
+  On the corpus that was 102 converted recipes lost (create 28, supplementaries
+  7, tinkers_construct 67, including Tinkers' four wood `planks`). Qualifying
+  the whole colliding group means the result depends only on which files
+  exist, not the order a jar or the filesystem yields them, and no member is
+  arbitrarily the "real" one; keeping unshared stems leaves every other
+  recipe's file and identifier unchanged.
+- **Rejected:** Path-qualifying every recipe (renames ~3,000 corpus recipes
+  and every existing identifier for no gain); keeping the bare name for the
+  first file in sort order and qualifying the rest (picks a winner by
+  character order, so adding a folder can rename an unrelated recipe);
+  numbering duplicates (`planks_2`: order-dependent and meaningless to a
+  reader); raising on a collision (a mod's own file names can cause one, and a
+  converter refusing a file is residue, not a crash).
+- **Links:** #163, #161, #162, #164.
+
 ## 2026-10-12: stairs, slabs, walls and turned pillars convert from vanilla's templates; tags of mostly-block members ride on block items
 
 - **Decision:** Blocks whose blockstate has exactly vanilla's stairs state set
