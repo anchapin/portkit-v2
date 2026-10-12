@@ -15,8 +15,9 @@ is the bridge from that list to the loop:
 A group counts as resolved only when its session ended on its own, it wrote at
 least one file, the validator found no new error, and every item and tag its
 recipes name exists (in the pack, in the source mod, or in vanilla; see
-``refs.py``), and every gameplay number on the items it wrote (damage,
-durability, ...) is one the source mod states (see ``stats.py``), and
+``refs.py``), and every gameplay number on the items and blocks it wrote
+(damage, durability, light, hardness, map colour, ...) is one the source mod
+states (see ``stats.py``), and
 every namespaced id in its files is in ``minecraft``, the conversion's
 namespace or one the mod ships (see ``refs.py``, #147), and every block
 state it declares or tests is one the Java blockstate has, with a value Java
@@ -186,9 +187,10 @@ def build_task(group: ResidueGroup, source_root: Path, out_tree: Path, namespace
         ).strip(),
         (
             "Gameplay numbers (damage, durability, mining speed, armor, food, "
-            "cooldowns, enchantability, fuel) come only from the source mod: if it "
-            "does not state one, omit that component rather than guess, and say in "
-            "your final message which stats you left out."
+            "cooldowns, enchantability, fuel) and block properties (hardness, blast "
+            "resistance, light, friction, flammability, map colour) come only from "
+            "the source mod: if it does not state one, omit that component rather "
+            "than guess, and say in your final message which ones you left out."
         ),
         (
             "Call validate after writing and fix every finding it names. If this "

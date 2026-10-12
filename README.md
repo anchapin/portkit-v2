@@ -127,7 +127,13 @@ gameplay numbers on an item the agent writes (damage, durability, mining speed,
 armor, food, cooldowns, enchantability, fuel): each must be a value the source
 mod states for that item, never a guess. An unknown stat is omitted and the
 agent's final note says so; one left in is reported as `agent.fabricated_stat`
-and rolls the group back, listed in `fabricated_stats`. Every namespaced id in
+and rolls the group back, listed in `fabricated_stats`. Blocks get the same
+rule for their properties (light emission and dampening, friction, seconds to
+destroy, explosion resistance, flammability) and for `minecraft:map_color`:
+Java sets all of these in code, so unless the source states the value for that
+block (a stated hardness x 1.5 counts for seconds to destroy), the agent must
+leave the component out. Writing Bedrock's own default (light 0, dampening 15,
+friction 0.4) claims nothing and passes. Every namespaced id in
 a file the agent writes must be `minecraft:`, the conversion's namespace or one
 the mod has an `assets/` or `data/` folder for (an id the source itself names,
 or one the file already held, is fine too); anything else, such as an `sd:`
