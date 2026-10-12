@@ -35,6 +35,16 @@ _MENU_CATEGORY = "items"
 _DEFAULT_STACK_SIZE = 64
 
 
+def bedrock_identifier(namespace: str, name: str) -> str:
+    """The Bedrock id the converter gives a Java item or block ``namespace:name``.
+
+    Identity on purpose: Bedrock keeps the Java id. The residue agent's item
+    guard (``portkit.agent.items``) maps Java ids through this same function,
+    so a deterministic mapping always passes it.
+    """
+    return f"{namespace}:{name}"
+
+
 def _block_names(mod: SourceMod) -> set[str]:
     """Names that already exist as blocks, so their item is Bedrock's to make."""
     states = mod.assets / "blockstates"
@@ -116,7 +126,7 @@ def convert(mod: SourceMod) -> ConversionResult:
             "format_version": "1.20.10",
             "minecraft:item": {
                 "description": {
-                    "identifier": f"{mod.namespace}:{name}",
+                    "identifier": bedrock_identifier(mod.namespace, name),
                     "menu_category": {"category": _MENU_CATEGORY},
                 },
                 "components": {
