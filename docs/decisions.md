@@ -27,6 +27,28 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: A file that is not the document its folder holds is an error
+
+- **Decision:** `doc.unknown_shape` (error) for a `.json` file in a document
+  folder with none of that folder's top-level document keys, or with one whose
+  body is not an object: BP `items/` (`minecraft:item`), `entities/`,
+  `spawn_rules/`, `biomes/`, `feature_rules/`, `dimensions/`, `animations/`,
+  `animation_controllers/`; RP `items/`, `entity/` (`minecraft:client_entity`),
+  `attachables/`, `fogs/`, `particles/` (`particle_effect`), `animations/`,
+  `animation_controllers/`, `render_controllers/`. Also for a JSON `null` file
+  anywhere, and a non-object top level in `blocks/` and `loot_tables/`
+  (`blocks/` and `recipes/` keep their own body checks). Folders not listed are
+  not shape-checked. A bare `minecraft` key gets a hint that it is usually a
+  `minecraft:...` key cut at the colon.
+- **Why:** Gemini 3.8 Flash's stubs (`{"format_version": ..., "minecraft":
+  "item"}`) passed as `valid: true` and scored `partial`; Bedrock loads them as
+  nothing. As an error it rolls the agent group back (the residue agent already
+  rolls back any group that adds validator errors, and its note now names them).
+  No converter output in the fixtures or the 10-mod corpus trips it.
+- **Rejected:** A warning (the run would still report a stub as work done);
+  checking every folder (unknown folders would false-positive).
+- **Links:** #141.
+
 ## 2026-10-11: The agent sees its step budget, and is nudged before it runs out
 
 - **Decision:** Every tool result the loop hands back carries

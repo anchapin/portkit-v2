@@ -189,3 +189,17 @@ def test_a_group_that_keeps_a_fabricated_stat_is_rolled_back(tmp_path):
     assert not (tmp_path / "out" / SWORD_PATH).exists()
     assert result.report.ok
     assert sword.to_dict()["fabricated_stats"] == sword.fabricated_stats
+
+
+def test_a_flash_stub_sword_is_rolled_back_not_partial(tmp_path):
+    """Gemini 3.8 Flash's rerun: the sword's only file was a stub (#141).
+
+    Before #141 it validated clean, and a budget stop scored the group partial.
+    """
+    stub = {"format_version": "1.20.80", "minecraft": "item"}
+    steps = [tool_call("write_output", path=SWORD_PATH, content=stub)] * 30
+    result, outcomes = _run(tmp_path, _script_for_sword(tmp_path, steps))
+    sword = outcomes[SWORD]
+    assert sword.status == "rolled_back"
+    assert "doc.unknown_shape" in sword.note
+    assert not (tmp_path / "out" / SWORD_PATH).exists()
