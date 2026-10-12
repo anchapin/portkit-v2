@@ -27,6 +27,38 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: agent-written items must be ones the Java source registers
+
+- **Decision:** every `minecraft:item` the residue agent writes (either pack)
+  whose identifier is in a source-mod namespace or the conversion's namespace
+  must be the Bedrock id, under the converter's own mapping
+  (`converters.items.bedrock_identifier`, also applied with the conversion
+  namespace), of an id the Java source registers: a blockstate (block and its
+  block item), a lang key (JSON `item.`/`block.` keys; 1.12 `.lang`
+  `item.`/`tile.` keys, lower- or snake-cased), or an item a recipe, item tag
+  or loot table names, or a block loot table. An id an item or block the
+  deterministic output already defines, or that the file held before the
+  session, passes too. Anything else makes `validate` report
+  `agent.unknown_item`, naming the closest registered Java id, and a group
+  that ends with one is rolled back, listed in `unknown_items` and in the
+  note. An item model file alone is not a registration. `minecraft:` ids are
+  out of scope, and a namespace the mod does not have stays
+  `agent.unknown_namespace`'s.
+- **Why:** on real-mod residue GLM 5.3 wrote per-variant item duplicates that
+  no guard caught: `items/basicdrawers_full2_jungle.json` and its siblings in
+  storage_drawers_1122 (22 copies) and nine per-variant items in waystones.
+  Java registers one item there and keeps the variant in block state,
+  metadata or NBT; the per-variant names come from 1.12 per-metadata item
+  models and modern override models (`twinbound_feather_brushing_0`), so the
+  files validated while the pack gained items no Java player can hold.
+- **Rejected:** a block/item id-collision rule (reject an item only when it
+  duplicates a block or another item): too narrow, it misses every
+  per-variant id that collides with nothing. Also rejected: counting
+  `models/item` files as registrations (`refs.source_items` does, which is
+  right for "does this ingredient exist" but is exactly where the invented
+  per-variant names come from).
+- **Links:** #86, #87.
+
 ## 2026-10-12: a `<prefix>_<state>` rename with Java's exact values counts as that Java state
 
 - **Decision:** the `agent.invented_state` guard accepts a declared custom
