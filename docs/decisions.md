@@ -27,6 +27,47 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: the item converter emits only items the Java source registers
+
+- **Decision:** the deterministic item converter writes a Bedrock item only
+  when its id passes the same registration test as the agent's
+  `agent.unknown_item` guard: `portkit.registry.registered_ids` (blockstate,
+  JSON or 1.12 `.lang` key, recipe, item tag or loot table), under
+  `converters.items.bedrock_identifier`. That test moved out of
+  `agent/items.py` into `src/portkit/registry.py` so the converter and the
+  guard share one copy. An item id whose only evidence is its item model file
+  (a 1.12 per-metadata model such as `upgrade_storage_obsidian`, a modern
+  override model such as `twinbound_feather_brushing_0`) is claimed, not
+  emitted and not sent to the residue, and a note names it and the registered
+  item it is a variant of. Its texture is not dropped: the textures converter
+  ships it like every other texture (or lists it in the residue with its
+  reason), and the note records it as a variant texture of the parent item
+  when the parent's own model does not already use it. Nothing in the pack
+  switches to it; that choice is Java code. Because the converter no longer
+  defines these ids, the guard's "deterministic output already defines it"
+  allowance no longer lets the agent write them. Real-mod corpus baseline:
+  39 such item files left the packs (storage_drawers_1122 16, supplementaries
+  9, create 3, waystones 3, tinkers_construct 3, betterend 2,
+  storage_drawers_1192 2, farmers_delight_neoforge 1), and 10 more
+  supplementaries models (`speedometer_1`..`_9`, `flint_shard`) that had been
+  withdrawn to the residue for an unconverted texture are no longer residue.
+  Every one was checked to have no registration (examples:
+  `storagedrawers:keybutton_drawer`, `storagedrawers:upgrade_storage_iron`,
+  `create:clipboard_0`, `betterend:elytra_armored_broken`). Fixture baselines
+  are unchanged.
+- **Why:** Java registers one item and carries the variant in metadata, NBT
+  or a model override, so these files were items no Java player can hold, the
+  same fabrication #157 stopped the agent from writing. Keeping the converter
+  and the guard on one test keeps them from disagreeing. The textures stay
+  because of the project rule (2026-10-11) to keep source assets and find
+  ways to use them.
+- **Rejected:** keep emitting them (the pack keeps items Java never
+  registers, and the guard keeps an exemption for them); drop the variants'
+  textures with the items (loses source assets a later override mapping could
+  use); invent a Bedrock icon switch for them (Bedrock behaviour with nothing
+  in the source to check it against).
+- **Links:** #158, #157, #87.
+
 ## 2026-10-12: agent-written items must be ones the Java source registers
 
 - **Decision:** every `minecraft:item` the residue agent writes (either pack)
