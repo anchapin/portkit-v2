@@ -289,7 +289,9 @@ def convert(
             namespace = meta.mod_id
 
         per_namespace = {
-            ns: convert_all(SourceMod(root=staged.root, namespace=ns)) for ns in selected
+            ns: convert_all(SourceMod(root=staged.root, namespace=ns, loader=meta.loader,
+                                     minecraft=meta.minecraft))
+            for ns in selected
         }
         result = merge_namespaces(per_namespace)
         drop_untextured(result, namespace)
