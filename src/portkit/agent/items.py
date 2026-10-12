@@ -247,7 +247,7 @@ def unknown_items(
     originals = {k.replace("\\", "/"): v for k, v in (originals or {}).items()}
     checked = valid_namespaces(source_root, namespace) - {_VANILLA}
     java = _registered
-    allowed: set[str] = set()
+    allowed: set[str] | None = None  # built on the first item that needs it
     bad: list[UnknownItem] = []
     for rel in targets:
         ident = _item_identifier(_load(out_tree / rel))
@@ -257,7 +257,7 @@ def unknown_items(
             continue  # vanilla is out of scope; a foreign namespace is refs.py's
         if ident == _item_identifier(_parse(originals.get(rel))):
             continue  # the file already defined it before the session
-        if not allowed:
+        if allowed is None:
             if java is None:
                 java = registered_ids(source_root)
             allowed = bedrock_ids(java, namespace) | _pack_defined(out_tree, set(normalised))
