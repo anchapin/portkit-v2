@@ -157,7 +157,11 @@ mapping; an item model file alone is not a registration. A per-variant item
 such as `storagedrawers:basicdrawers_full2_jungle`, where Java registers one
 `basicdrawers` and keeps the variant in block state or NBT, is
 `agent.unknown_item` (the finding names the closest real Java id) and rolls the
-group back, listed in `unknown_items`. Anything unresolved
+group back, listed in `unknown_items`. The deterministic item converter holds
+itself to the same test (#158): it writes no item for an item model alone (a
+1.12 per-metadata model or a modern override model), explains the skip in the
+summary's `notes`, and leaves the variant's texture to ship like any other
+texture. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Its `status` is `complete` (every group resolved), `partial` or `failed`
 (none did). That is separate from `valid` and from the exit code, which are
