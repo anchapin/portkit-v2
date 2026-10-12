@@ -2,13 +2,13 @@
   "fixtures": {
     "betterend": {
       "coverage": 30.7,
-      "files": 2960,
+      "files": 2958,
       "residue": 6668,
       "errors": 0
     },
     "create": {
       "coverage": 19.6,
-      "files": 2600,
+      "files": 2597,
       "residue": 10651,
       "errors": 0
     },
@@ -19,8 +19,8 @@
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 29.4,
-      "files": 659,
+      "coverage": 29.3,
+      "files": 658,
       "residue": 1585,
       "errors": 0
     },
@@ -31,32 +31,32 @@
       "errors": 0
     },
     "storage_drawers_1122": {
-      "coverage": 29.6,
-      "files": 172,
+      "coverage": 27.6,
+      "files": 156,
       "residue": 410,
       "errors": 0
     },
     "storage_drawers_1192": {
-      "coverage": 34.0,
-      "files": 257,
+      "coverage": 33.9,
+      "files": 255,
       "residue": 498,
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 24.6,
-      "files": 1358,
-      "residue": 4163,
+      "coverage": 24.5,
+      "files": 1349,
+      "residue": 4153,
       "errors": 0
     },
     "tinkers_construct": {
       "coverage": 41.9,
-      "files": 13268,
+      "files": 13265,
       "residue": 18371,
       "errors": 0
     },
     "waystones": {
-      "coverage": 9.1,
-      "files": 89,
+      "coverage": 8.8,
+      "files": 86,
       "residue": 889,
       "errors": 0
     }
