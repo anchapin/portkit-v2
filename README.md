@@ -127,7 +127,12 @@ gameplay numbers on an item the agent writes (damage, durability, mining speed,
 armor, food, cooldowns, enchantability, fuel): each must be a value the source
 mod states for that item, never a guess. An unknown stat is omitted and the
 agent's final note says so; one left in is reported as `agent.fabricated_stat`
-and rolls the group back, listed in `fabricated_stats`. Anything unresolved
+and rolls the group back, listed in `fabricated_stats`. Every namespaced id in
+a file the agent writes must be `minecraft:`, the conversion's namespace or one
+the mod has an `assets/` or `data/` folder for (an id the source itself names,
+or one the file already held, is fine too); anything else, such as an `sd:`
+typo for `storagedrawers:`, is `agent.unknown_namespace` and rolls the group
+back, listed in `unknown_namespaces`. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Its `status` is `complete` (every group resolved), `partial` or `failed`
 (none did). That is separate from `valid` and from the exit code, which are
