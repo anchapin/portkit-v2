@@ -14,7 +14,15 @@ this conversion emits (``emitted``, filled by
 1. Bedrock vanilla tag. When the membership is exactly that of one of the
    vanilla tags Bedrock's own recipes take under the same name and meaning
    (:data:`_BEDROCK_VANILLA_TAGS`, membership from the vanilla reference data),
-   the recipe takes that tag.
+   the recipe takes that tag. When the Java tag *is* one of those and the mod
+   adds its own members to it (Silent Gear's netherwood planks in
+   ``minecraft:planks``), the recipe takes Bedrock's tag and each of the mod's
+   members carries it: an item in its ``minecraft:tags``, a block through an
+   item that replaces the block's own item and carries the tag (see
+   :func:`_block_item`). If one of them can't (a block that already has an
+   item file), a single-slot ingredient keeps the tag recipe and gets one more
+   recipe per mod member beside it (``<recipe>__<member>.json``); anything
+   else stays residue. Bedrock's tag on its own would drop the mod's members.
 2. Native tag. When every member is an item this conversion emits (no vanilla
    item, no block), the recipe keeps ``{"tag": "<java tag id>"}`` and each
    member item gets the tag in its ``minecraft:tags`` component. A vanilla item
@@ -47,6 +55,9 @@ EXPANSION_CAP = 16
 # minecraft:tags on an item needs item format_version 1.20.50 or later
 # (learn.microsoft.com, Items Documentation - minecraft:tags).
 _ITEM_TAGS_FORMAT = "1.20.50"
+# minecraft:block_placer's replace_block_item needs item format_version 1.21.50
+# or later (learn.microsoft.com, Items Documentation - minecraft:block_placer).
+_BLOCK_ITEM_FORMAT = "1.21.50"
 
 # Java type -> (Bedrock body key, crafting tags).
 # Bedrock has no separate stonecutter recipe type: a stonecutter recipe is a
@@ -155,7 +166,7 @@ def _item(spec, tags: TagResolver | None = None) -> dict | None:
         if "id" in spec:
             return {"item": spec["id"]}
         if "tag" in spec:
-            if str(spec["tag"]) in _BEDROCK_VANILLA_TAGS:
+            if _passes_through(str(spec["tag"]), tags):
                 return {"tag": str(spec["tag"])}
             resolved = resolve_tag(str(spec["tag"]))
             if resolved and not (tags is not None and tags.own_share(str(spec["tag"]))):
@@ -169,6 +180,19 @@ def _item(spec, tags: TagResolver | None = None) -> dict | None:
             return None
     # multi-item tags and weighted lists have no clean 1:1 Bedrock form
     return None
+
+
+def _passes_through(tag: str, tags: TagResolver | None) -> bool:
+    """Whether Bedrock's own tag of this name is the whole Java tag.
+
+    True for a :data:`_BEDROCK_VANILLA_TAGS` tag the mod adds nothing to. When
+    the mod adds its own members (Silent Gear's netherwood planks in
+    ``minecraft:planks``), Bedrock's tag alone would drop them, so the recipe
+    goes through the full membership instead (see :func:`convert`).
+    """
+    if tag not in _BEDROCK_VANILLA_TAGS:
+        return False
+    return tags is None or tags.mod_additions(tag) == []
 
 
 def _tag_reason(spec, tags: TagResolver | None = None) -> str:
@@ -237,7 +261,11 @@ def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult,
 
 
 def emitted_definitions(files: dict) -> dict[str, tuple[str, str, dict]]:
-    """identifier -> (kind, path, body) for every block and item definition in ``files``."""
+    """identifier -> (kind, path, body) for every block and item definition in ``files``.
+
+    kind is ``"item"``, ``"block"``, or ``"block_and_item"`` for a block that
+    also has its own item file (path and body are then the first one seen).
+    """
     found: dict[str, tuple[str, str, dict]] = {}
     for path, body in files.items():
         if not isinstance(body, dict):
@@ -245,7 +273,13 @@ def emitted_definitions(files: dict) -> dict[str, tuple[str, str, dict]]:
         for key, kind in (("minecraft:item", "item"), ("minecraft:block", "block")):
             root = body.get(key)
             ident = ((root or {}).get("description") or {}).get("identifier") if isinstance(root, dict) else None
-            if isinstance(ident, str):
+            if not isinstance(ident, str):
+                continue
+            if ident in found and found[ident][0] != kind:
+                # A block with its own item file: which one a recipe slot sees
+                # depends on how the player got it, so neither can be tagged alone.
+                found[ident] = ("block_and_item", *found[ident][1:])
+            else:
                 found.setdefault(ident, (kind, path, body))
     return found
 
@@ -258,6 +292,9 @@ class _Multi:
     found: MultiMembers
     taggable: bool  # every member is an emitted item, so a native tag works
     vanilla_tag: str | None = None  # a Bedrock vanilla tag with the same membership
+    # A Bedrock vanilla tag of the same name whose every member this mod adds
+    # can carry it: an emitted item, or an emitted block given an item form.
+    bedrock_tag: bool = False
 
 
 def _bedrock_equivalent(found: MultiMembers, tags: TagResolver) -> str | None:
@@ -297,7 +334,12 @@ def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
         else:
             return None  # a member this conversion did not emit: not ours to drop
     taggable = all(k == "item" for k in kinds) and not found.tag.startswith("minecraft:")
-    return _Multi(spec=spec, found=found, taggable=taggable, vanilla_tag=_bedrock_equivalent(found, tags))
+    # Bedrock's tag holds vanilla's whole share, so only when the jar's file
+    # doesn't replace the tag (mod_additions is None then).
+    bedrock_tag = (found.tag in _BEDROCK_VANILLA_TAGS and tags.mod_additions(found.tag) is not None
+                   and all(k in ("vanilla", "item", "block") for k in kinds))
+    return _Multi(spec=spec, found=found, taggable=taggable, vanilla_tag=_bedrock_equivalent(found, tags),
+                  bedrock_tag=bedrock_tag)
 
 
 def _not_emitted(spec, tags: TagResolver, emitted: dict | None) -> list[str]:
@@ -318,6 +360,33 @@ def _max_format(current, minimum: str) -> str:
         except ValueError:
             return ()
     return current if isinstance(current, str) and parse(current) >= parse(minimum) else minimum
+
+
+def _block_item(identifier: str, block_path: str) -> tuple[str, dict]:
+    """(path, body) of an item standing in as a block's own item, to carry tags.
+
+    A block's ``minecraft:tags`` are block tags; recipes match item tags. Since
+    format 1.21.50 an item whose identifier is the block's and whose
+    ``minecraft:block_placer`` sets ``replace_block_item`` becomes the block's
+    item (what breaking or picking the block gives), and that item can carry
+    ``minecraft:tags``. Vanilla does exactly this: bedrock-samples'
+    ``items/shelf_mushroom.json`` replaces the block's item and tags it
+    ``minecraft:mushrooms_for_stew``, which ``recipes/mushroom_stew.json`` takes
+    as a tag (learn.microsoft.com, Items Documentation - minecraft:block_placer).
+    No icon: a block placer without ``minecraft:icon`` renders the block. The
+    display name is the block's lang key, as the vanilla samples do.
+    """
+    stem = block_path.rsplit("/", 1)[-1]
+    return f"items/{stem}", {
+        "format_version": _BLOCK_ITEM_FORMAT,
+        "minecraft:item": {
+            "description": {"identifier": identifier},
+            "components": {
+                "minecraft:block_placer": {"block": identifier, "replace_block_item": True},
+                "minecraft:display_name": {"value": f"tile.{identifier}.name"},
+            },
+        },
+    }
 
 
 def _member_suffix(member: str) -> str:
@@ -394,20 +463,43 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
         variants: list[tuple[str, list]] = [("", mapped)]  # (file suffix, ingredients)
         native: set[int] = set()  # ingredients written as this addon's own tag
         expanded: int | None = None  # the ingredient written once per member
+        rest: list[int] = []  # tag ingredients only a per-member expansion could write
         if failing and all(multis.values()):
             ingredients = list(mapped)
-            rest = []
             for i in failing:
                 multi = multis[i]
                 if not furnace and multi.vanilla_tag:
                     ingredients[i] = {"tag": multi.vanilla_tag}
+                elif not furnace and multi.bedrock_tag:
+                    # Bedrock's own tag, with this mod's members tagged into it.
+                    ingredients[i] = {"tag": multi.found.tag}
+                    native.add(i)
                 elif not furnace and multi.taggable:
                     ingredients[i] = {"tag": multi.found.tag}
                     native.add(i)
                 else:
                     rest.append(i)
+            own = ([m for m in multis[rest[0]].found.members if not m.startswith("minecraft:")]
+                   if len(rest) == 1 else [])
             if not rest:
                 variants = [("", ingredients)]
+            elif (
+                not furnace
+                and len(rest) == 1
+                and multis[rest[0]].found.tag in _BEDROCK_VANILLA_TAGS
+                and tag_resolver.mod_additions(multis[rest[0]].found.tag) is not None
+                and positions[rest[0]][1] == 1
+                and len(own) <= EXPANSION_CAP
+            ):
+                # Bedrock's tag keeps the vanilla members; a member of this mod
+                # that can't carry the tag gets its own recipe beside it.
+                expanded = rest[0]
+                ingredients[expanded] = {"tag": multis[expanded].found.tag}
+                variants = [("", ingredients)]
+                for member in own:
+                    one = list(ingredients)
+                    one[expanded] = {"item": member}
+                    variants.append((f"__{_member_suffix(member)}", one))
             elif (
                 len(rest) == 1
                 and positions[rest[0]][1] == 1
@@ -425,7 +517,8 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
             # Not expressible (or not fully known): the reason is the one the
             # first failing ingredient always had, plus which members this
             # conversion didn't emit when that is what blocks it.
-            bad = positions[failing[0]][0]
+            # A tag this conversion could have written isn't what blocks it.
+            bad = positions[next((i for i in failing if multis[i] is None), (rest or failing)[0])][0]
             reason = _tag_reason(bad, tag_resolver)
             missing = _not_emitted(bad, tag_resolver, emitted)
             if missing:
@@ -501,13 +594,27 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
             multi_used[multi.found.tag] = multi.found
             if i in native:
                 for member in multi.found.members:
-                    item_tags.setdefault(member, set()).add(multi.found.tag)
+                    if not member.startswith("minecraft:"):
+                        item_tags.setdefault(member, set()).add(multi.found.tag)
+                if multi.found.tag in _BEDROCK_VANILLA_TAGS:
+                    own = [m for m in multi.found.members if not m.startswith("minecraft:")]
+                    result.notes.append(
+                        f"{rel}: tag {multi.found.tag!r} also holds {', '.join(own)} from this mod, "
+                        "so they carry Bedrock's tag of that name and the recipe takes it"
+                    )
             elif multi.vanilla_tag and i != expanded:
                 result.notes.append(
                     f"{rel}: tag {multi.found.tag!r} has the same members as Bedrock's "
                     f"{multi.vanilla_tag!r}, so the recipe takes that tag"
                 )
-        if expanded is not None:
+        if expanded is not None and variants[0][0] == "":
+            member_tag = multis[expanded].found.tag
+            result.notes.append(
+                f"{rel}: tag {member_tag!r} also holds {len(variants) - 1} of this mod's members "
+                f"that can't carry Bedrock's tag of that name, so each got its own recipe "
+                f"({path.stem}__<member>) beside the one taking the tag"
+            )
+        elif expanded is not None:
             member_tag = multis[expanded].found.tag
             result.notes.append(
                 f"{rel}: tag {member_tag!r} has {len(variants)} members, which Bedrock "
@@ -516,7 +623,12 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
             )
 
     for member, member_tags in sorted(item_tags.items()):
-        _, item_path, source_body = emitted[member]
+        kind, item_path, source_body = emitted[member]
+        if kind == "block":
+            item_path, item = _block_item(member, item_path)
+            item["minecraft:item"]["components"]["minecraft:tags"] = {"tags": sorted(member_tags)}
+            result.files[item_path] = item
+            continue
         item = copy.deepcopy(source_body)
         components = item["minecraft:item"].setdefault("components", {})
         existing = components.get("minecraft:tags") or {}
