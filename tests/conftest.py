@@ -14,7 +14,8 @@ def fixtures_dir():
 
 @pytest.fixture(autouse=True)
 def _offline_vanilla_sounds(request, monkeypatch):
-    """Point every test at a tiny vanilla sound list of our own (#124).
+    """Point every test at a tiny vanilla sound list of our own (#124), and an
+    empty reference cache, so no fetched tag data either (#160).
 
     The real list is Mojang's and is fetched on demand into the user's cache;
     tests must neither need the network nor change with what that cache holds.
@@ -24,6 +25,8 @@ def _offline_vanilla_sounds(request, monkeypatch):
         return
     monkeypatch.setenv("PORTKIT_VANILLA_SOUNDS", str(ROOT / "tests" / "data" / "vanilla_sounds.txt"))
     monkeypatch.setenv("PORTKIT_REFERENCE_CACHE", str(request.getfixturevalue("tmp_path_factory").mktemp("reference")))
+    # Loader and vanilla tag data (#160): none unless a test points at its own.
+    monkeypatch.delenv("PORTKIT_TAG_REFERENCE", raising=False)
 
 
 @pytest.fixture(autouse=True)
