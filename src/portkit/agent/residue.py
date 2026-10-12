@@ -457,7 +457,8 @@ class ResidueAgent:
         outcome.fabricated_stats = [stat.describe() for stat in fabricated]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
-        if box.originals and (unresolved or fabricated or _error_set(out_tree) - before):
+        introduced = sorted(_error_set(out_tree) - before) if box.originals else []
+        if box.originals and (unresolved or fabricated or introduced):
             box.rollback()
             outcome.status = "rolled_back"
             outcome.written = []
@@ -468,6 +469,11 @@ class ResidueAgent:
                 reasons.append(
                     f"stat(s) the source does not state: {'; '.join(outcome.fabricated_stats)}"
                 )
+            if introduced:
+                # Name what broke, so a stub that never validated reads as one (#141).
+                shown = "; ".join(f"{path}: {rule}" for path, rule, _ in introduced[:3])
+                more = f" (+{len(introduced) - 3} more)" if len(introduced) > 3 else ""
+                reasons.append(f"validator error(s): {shown}{more}")
             if reasons:
                 why = "rolled back: " + "; ".join(reasons)
                 outcome.note = f"{why}. {outcome.note}" if outcome.note else why
