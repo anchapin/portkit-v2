@@ -45,7 +45,8 @@ def _identifier(data: dict, kind: str) -> str | None:
     for key in _DEFINITION_KEYS[kind]:
         body = data.get(key)
         if isinstance(body, dict):
-            name = (body.get("description") or {}).get("identifier")
+            description = body.get("description")
+            name = description.get("identifier") if isinstance(description, dict) else None
             if isinstance(name, str):
                 return name
     return None
