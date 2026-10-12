@@ -72,7 +72,9 @@ builds in-game probe packs for the questions only the game can answer.
 a rule name and a message:
 
 - `rules.py`: structural rules per file type (manifests, recipe bodies,
-  identifiers, required fields).
+  identifiers, required fields). A JSON file in a document folder (`items/`,
+  `entities/`, `entity/`, `attachables/`, ...) without that folder's document key
+  (`minecraft:item`, ...) or with a non-object body is `doc.unknown_shape`.
 - `xrefs.py`: cross-file references (a recipe naming an item no pack defines, an
   icon missing from `item_texture.json`).
 - `collisions.py`: two files claiming one identifier.
