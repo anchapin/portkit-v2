@@ -27,6 +27,62 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: shared tags take their full membership from fetched loader and vanilla data, and fully known multi-member tags convert
+
+- **Decision:** A tag in the `minecraft:`, `c:`, `forge:`, `neoforge:` or
+  `fabric:` namespace read from a mod jar is incomplete unless its file sets
+  `"replace": true`. Its full membership is the jar's members, plus the
+  loader's and vanilla's shares from reference data, nested `#tag` entries
+  resolved the same way. `portkit reference fetch` downloads that data on
+  demand from pinned artifacts and caches it beside the vanilla sound list,
+  sha256-checked: Forge 1.20.1-47.4.26's and NeoForge 21.1.259's universal
+  jars (LGPL-2.1), Fabric API's `fabric-convention-tags-v1`/`-v2` module jars
+  for 1.20.1, 1.21.1, 1.21.8 and 26.1 (Apache-2.0), and misode/mcmeta's vanilla
+  item tag summaries for 1.16.5, 1.19.2, 1.20.1, 1.21.1, 1.21.8 and 26.1
+  (Mojang's data, Minecraft EULA). Only tag id -> `values` is kept; nothing is
+  committed (`src/portkit/data/NOTICE.md`). The loader and game version come
+  from the jar's `mods.toml` / `neoforge.mods.toml` / `fabric.mod.json`
+  (`ModMetadata.minecraft`) and map to the nearest pinned set (Forge and
+  pre-1.20.5 NeoForge to Forge 1.20.1; Fabric before 1.20.5 to convention
+  tags v1). A namespace the loader never writes (Forge 1.20.1 ships no `c:`
+  tags, NeoForge 1.21 dropped `forge:`) holds only mods' entries there, so the
+  jar's share is all the addon can hold. When the data isn't cached, or the
+  jar doesn't say its loader and version, the recipe stays residue and the
+  reason says why; a recipe is never narrowed to the jar's share. The
+  built-in single-vanilla-item table (`rods/wooden` -> stick) no longer
+  applies when the mod adds its own item to that tag.
+  With the membership known, the recipe converter (the #160 prototype) also
+  writes multi-member tags whose every member is vanilla or emitted by this
+  conversion: a Bedrock vanilla tag when the membership is exactly that of one
+  of `_BEDROCK_VANILLA_TAGS`; else the Java tag as a native tag, with
+  `minecraft:tags` added to the emitted member items, when every member is an
+  emitted item; else one recipe per member (`<recipe>__<member>.json`) when the
+  tag fills one grid slot and has at most 16 members. Anything else stays
+  residue, and the reason names members this conversion didn't emit. The
+  validator accepts tag ingredients, still flags unknown items, and warns
+  (`xref.tag`) on a custom tag no pack item carries. `fixtures/agent_mod`'s
+  `alloy_ingots` tag gains `examplemod:tin_ingot`, which the jar has no model
+  for, so that group still needs the agent (its 2-member form would now
+  convert deterministically); its
+  scripted agent tests keep their outcomes and the residue_mod transcript
+  replays unchanged.
+- **Why:** A mod's file for a shared tag lists only its own additions (Forge's
+  `forge:glass/colorless` is `minecraft:glass`; Tinkers' file adds its clear
+  glass), so treating it as the whole tag made recipes accept only the mod's
+  item, a fabrication in the other direction (#87). Corpus (10 mods): 243
+  recipes convert that didn't (230 of the 354 blocked only by convention
+  tags), and 46 recipes that converted narrowed are residue now (Tinkers' glass
+  11, Silent Gear's `forge:rods/wooden`/`forge:string` 33, Farmers Delight's
+  `c:drinks/milk` 2).
+- **Rejected:** Vendoring the loaders' tag files (licence and size; fetched
+  like #124 instead); trusting the jar's share when the data is missing (the
+  #160 bug); dropping vanilla members to fit a native tag (narrows); splitting a
+  tag that fills several slots into per-member recipes (forbids mixing
+  members); expanding big families (cap 16) that would flood the recipe book.
+- **Links:** #160 (PR #161), #88 (PR #94), #94, #87. Supersedes in part the
+  2026-10-09 entry "Item tags resolve from the mod's tag file, then the
+  convention name, then residue" for shared namespaces.
+
 ## 2026-10-12: the item converter emits only items the Java source registers
 
 - **Decision:** the deterministic item converter writes a Bedrock item only
@@ -561,6 +617,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   membership in hand.
 - **Rejected:** Refusing every tag; emitting Bedrock tags the addon can't fill.
 - **Links:** #88 (PR #94).
+- **Superseded in part by** 2026-10-12 (#160): a shared-namespace (`c:`,
+  `forge:`, `neoforge:`, `fabric:`, `minecraft:`) tag file is only the mod's
+  share; the loader's and vanilla's shares come from fetched reference data.
 
 ## 2026-10-09: No fabrication: smithing recipes never get invented inputs
 

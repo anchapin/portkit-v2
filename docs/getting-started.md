@@ -24,6 +24,13 @@ It lets portkit keep a sound your mod borrows from vanilla (`random/bow`,
 `minecraft:mob/slime/big1`) when Bedrock has the same file. Skip it and those
 sounds are dropped, each with a note saying to run the fetch.
 
+The same command fetches the item tags your loader and vanilla define (Forge
+1.20.1, NeoForge 1.21.1, Fabric convention tags, vanilla per game version).
+Your mod's own `c:`/`forge:`/`minecraft:` tag files only list what it adds;
+without the loader's share a recipe like "any colorless glass" stays residue
+instead of quietly becoming "only my glass". Add `--mod yourmod.jar` to fetch
+only the data your jar's loader and game version need.
+
 ## Convert
 
 Point `portkit convert` at your mod's `.jar`, or at an unpacked directory that

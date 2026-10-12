@@ -646,12 +646,26 @@ def _corpus_cases(args):
         return 2
     from . import data
 
+    from .data import tags as tag_data
+
     if args.fetch:
         try:
             data.fetch_sounds()
+            for tag_set in tag_data.SETS:
+                tag_data.fetch(tag_set)
         except data.ReferenceDataError as exc:
             print(str(exc), file=sys.stderr)
             return 2
+    missing_tags = [s.id for s in tag_data.SETS if tag_data.load(s) is None]
+    if missing_tags:
+        # The corpus baseline is measured with the loader and vanilla tag data;
+        # without it shared tags stay residue (#160), which can move the numbers.
+        message = (f"tag reference data isn't cached ({', '.join(missing_tags)}), so loader and "
+                   f"vanilla tags stay residue and the numbers may differ from the baseline; "
+                   f"run `{data.FETCH_COMMAND}` or add --fetch")
+        print(f"warning: {message}", file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::warning title=tag reference::{message}")
     if data.bedrock_vanilla_sounds() is None:
         # The corpus baseline is measured with the list; without it vanilla
         # sound references are dropped, which can move the numbers.
@@ -746,22 +760,57 @@ def cmd_corpus(args) -> int:
     return 1 if failed else 0
 
 
+def _reference_sets(args):
+    """The tag sets ``reference fetch|list`` works on: every pinned one, or the
+    ones a given mod's loader and game version select (#160)."""
+    from .data import tags
+
+    if not getattr(args, "mod", None):
+        return list(tags.SETS), None
+    from .ingest import ingest
+    from .meta import parse as parse_metadata
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="portkit-ref-") as staging:
+        staged = ingest(Path(args.mod), Path(staging))
+        meta = parse_metadata(staged.metadata, staged.namespace)
+    return tags.select(meta.loader, meta.minecraft), meta
+
+
 def cmd_reference(args) -> int:
-    """``portkit reference fetch|list``: Mojang reference data, fetched on demand (#124)."""
+    """``portkit reference fetch|list``: reference data fetched on demand: Mojang's
+    vanilla sound list (#124) and the loaders' and vanilla's item tags (#160)."""
     from . import data
+    from .data import tags
 
     cache = data.cache_dir()
+    sets, meta = _reference_sets(args)
+    if meta is not None:
+        chosen = ", ".join(s.id for s in sets) or "none"
+        print(f"{args.mod}: loader {meta.loader or '?'}, minecraft {meta.minecraft or '?'} -> tag data: {chosen}")
     if args.action == "list":
         state = "cached" if data.cached_sounds(cache) else "missing"
         print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
+        for tag_set in sets:
+            state = "cached" if tags.cached(tag_set, cache) else "missing"
+            print(f"{'tags-' + tag_set.id:28} {tag_set.label} {state}")
         return 0
+    failed = 0
     try:
         path, downloaded = data.fetch_sounds(cache)
+        print(f"{'fetched' if downloaded else 'cached ':7} vanilla-sounds -> {path}")
     except data.ReferenceDataError as exc:
         print(f"FAILED {exc}", file=sys.stderr)
-        return 1
-    print(f"{'fetched' if downloaded else 'cached ':7} vanilla-sounds -> {path}")
-    return 0
+        failed += 1
+    for tag_set in sets:
+        try:
+            path, downloaded = tags.fetch(tag_set, cache)
+        except data.ReferenceDataError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} tags-{tag_set.id} -> {path}")
+    return 1 if failed else 0
 
 
 def main(argv=None) -> int:
@@ -923,9 +972,13 @@ def main(argv=None) -> int:
 
     p = sub.add_parser(
         "reference",
-        help="fetch or list Mojang reference data (the Bedrock vanilla sound list) (#124)",
+        help="fetch or list reference data: the Bedrock vanilla sound list (#124) and "
+             "loader/vanilla item tag membership (#160)",
     )
     p.add_argument("action", choices=["fetch", "list"])
+    p.add_argument("--mod", metavar="JAR",
+                   help="only the tag data this mod's loader and game version need "
+                        "(default: every pinned set)")
     p.set_defaults(func=cmd_reference)
 
     args = parser.parse_args(argv)

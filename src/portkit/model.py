@@ -12,6 +12,10 @@ class SourceMod:
 
     root: Path
     namespace: str
+    # What the jar's metadata declares, when known: which loader's and which
+    # game version's tag data completes its shared tags (#160).
+    loader: str | None = None
+    minecraft: str | None = None
 
     @property
     def assets(self) -> Path:

@@ -3,13 +3,50 @@
 Java recipe JSON and Bedrock recipe JSON are both declarative, so this is a
 mapping table, not an inference problem. Anything not in the table becomes an
 Unhandled item rather than a plausible-looking guess.
+
+Ingredients that are tags with several members (#160) convert only when the
+tag's whole membership is known (see :mod:`portkit.converters.tags`: a shared
+``c:``/``forge:``/``neoforge:``/``fabric:``/``minecraft:`` tag needs the fetched
+loader and vanilla data) and every member is either vanilla or a block or item
+this conversion emits (``emitted``, filled by
+:func:`portkit.converters.convert_all`). Three forms, in order:
+
+1. Bedrock vanilla tag. When the membership is exactly that of one of the
+   vanilla tags Bedrock's own recipes take under the same name and meaning
+   (:data:`_BEDROCK_VANILLA_TAGS`, membership from the vanilla reference data),
+   the recipe takes that tag.
+2. Native tag. When every member is an item this conversion emits (no vanilla
+   item, no block), the recipe keeps ``{"tag": "<java tag id>"}`` and each
+   member item gets the tag in its ``minecraft:tags`` component. A vanilla item
+   can't be given a tag by an add-on, and a block's ``minecraft:tags`` are
+   block tags, so neither can join.
+3. One recipe per member. Otherwise, when the recipe has exactly one such
+   ingredient left, it fills exactly one grid slot, and the tag has at most
+   :data:`EXPANSION_CAP` members, each member gets its own recipe. One slot
+   only, because a tag filling several slots lets the player mix members, and
+   per-member recipes would forbid that. Furnace recipes always take this
+   form, since Bedrock's furnace input is one item id.
+
+Anything else stays residue, and the reason names any members this conversion
+did not emit. A recipe is never narrowed to part of a tag.
 """
 from __future__ import annotations
 
+import copy
 import json
+from dataclasses import dataclass
 
 from ..model import ConversionResult, SourceMod, Unhandled
-from .tags import TagResolver
+from .tags import MultiMembers, TagResolver
+
+# Most members a single-slot tag ingredient is expanded into, one recipe each.
+# 16 covers a full dye-colour set; a bigger tag is a family (every drawer, every
+# cast) whose recipe would flood the recipe book, so it stays residue.
+EXPANSION_CAP = 16
+
+# minecraft:tags on an item needs item format_version 1.20.50 or later
+# (learn.microsoft.com, Items Documentation - minecraft:tags).
+_ITEM_TAGS_FORMAT = "1.20.50"
 
 # Java type -> (Bedrock body key, crafting tags).
 # Bedrock has no separate stonecutter recipe type: a stonecutter recipe is a
@@ -121,7 +158,10 @@ def _item(spec, tags: TagResolver | None = None) -> dict | None:
             if str(spec["tag"]) in _BEDROCK_VANILLA_TAGS:
                 return {"tag": str(spec["tag"])}
             resolved = resolve_tag(str(spec["tag"]))
-            if resolved:
+            if resolved and not (tags is not None and tags.own_share(str(spec["tag"]))):
+                # The table names the loader's one vanilla member; a mod that adds
+                # its own item to the tag goes through the full membership instead,
+                # so the recipe doesn't lose that item (#160).
                 return {"item": resolved}
             if tags is not None:
                 found = tags.resolve(str(spec["tag"])).item
@@ -196,7 +236,101 @@ def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult,
     }
 
 
-def convert(mod: SourceMod) -> ConversionResult:
+def emitted_definitions(files: dict) -> dict[str, tuple[str, str, dict]]:
+    """identifier -> (kind, path, body) for every block and item definition in ``files``."""
+    found: dict[str, tuple[str, str, dict]] = {}
+    for path, body in files.items():
+        if not isinstance(body, dict):
+            continue
+        for key, kind in (("minecraft:item", "item"), ("minecraft:block", "block")):
+            root = body.get(key)
+            ident = ((root or {}).get("description") or {}).get("identifier") if isinstance(root, dict) else None
+            if isinstance(ident, str):
+                found.setdefault(ident, (kind, path, body))
+    return found
+
+
+@dataclass
+class _Multi:
+    """A tag ingredient whose every member this addon holds."""
+
+    spec: dict
+    found: MultiMembers
+    taggable: bool  # every member is an emitted item, so a native tag works
+    vanilla_tag: str | None = None  # a Bedrock vanilla tag with the same membership
+
+
+def _bedrock_equivalent(found: MultiMembers, tags: TagResolver) -> str | None:
+    """A Bedrock vanilla tag whose Java twin has exactly this membership, or None.
+
+    Only the tags in :data:`_BEDROCK_VANILLA_TAGS`, whose Bedrock meaning matches
+    Java's, and only when the vanilla reference data gives the twin's full
+    membership: then ``{"tag": "minecraft:planks"}`` accepts the same items the
+    Java tag does.
+    """
+    wanted = set(found.members)
+    for candidate in sorted(_BEDROCK_VANILLA_TAGS):
+        if candidate == found.tag:
+            continue
+        twin = tags.members(candidate)
+        if (twin is not None and not twin.dropped and set(twin.members) == wanted
+                and all(m.startswith("minecraft:") for m in twin.members)):
+            # Bedrock's own tag holds only vanilla items, so a twin the mod
+            # adds to is not the same set on Bedrock.
+            return candidate
+    return None
+
+
+def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
+    """The tag ingredient as a known, fully emitted membership, or None."""
+    if emitted is None or not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
+        return None
+    found = tags.members(spec["tag"])
+    if found is None or len(found.members) < 2:
+        return None
+    kinds = []
+    for member in found.members:
+        if member.startswith("minecraft:"):
+            kinds.append("vanilla")
+        elif member in emitted:
+            kinds.append(emitted[member][0])
+        else:
+            return None  # a member this conversion did not emit: not ours to drop
+    taggable = all(k == "item" for k in kinds) and not found.tag.startswith("minecraft:")
+    return _Multi(spec=spec, found=found, taggable=taggable, vanilla_tag=_bedrock_equivalent(found, tags))
+
+
+def _not_emitted(spec, tags: TagResolver, emitted: dict | None) -> list[str]:
+    """Members of a known tag ingredient that this conversion did not emit."""
+    if emitted is None or not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
+        return []
+    found = tags.members(spec["tag"])
+    if found is None:
+        return []
+    return [m for m in found.members if not m.startswith("minecraft:") and m not in emitted]
+
+
+def _max_format(current, minimum: str) -> str:
+    """The later of two dotted format versions."""
+    def parse(text):
+        try:
+            return tuple(int(p) for p in str(text).split("."))
+        except ValueError:
+            return ()
+    return current if isinstance(current, str) and parse(current) >= parse(minimum) else minimum
+
+
+def _member_suffix(member: str) -> str:
+    return member.replace(":", "_").replace("/", "_")
+
+
+def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
+    """Convert the mod's recipes.
+
+    ``emitted`` maps identifier -> (kind, path, body) for the blocks and items the
+    earlier converters wrote (see :func:`emitted_definitions`). Without it a
+    multi-member tag ingredient stays residue, as before #160.
+    """
     result = ConversionResult()
     for lane in ("recipes", "recipe"):
         src = mod.data / lane
@@ -206,6 +340,8 @@ def convert(mod: SourceMod) -> ConversionResult:
         return result
 
     tag_resolver = TagResolver(mod)
+    item_tags: dict[str, set[str]] = {}  # emitted item id -> native tags it must carry
+    multi_used: dict[str, MultiMembers] = {}  # tags a converted recipe kept or expanded
     for path in sorted(src.rglob("*.json")):
         rel = result.claim(mod, path)
         try:
@@ -239,53 +375,74 @@ def convert(mod: SourceMod) -> ConversionResult:
             "tags": list(tags),
         }
 
+        # Ingredient positions as (spec, grid slots it fills). A shaped key
+        # entry fills one slot per use in the pattern; everything else one.
         if java_type == "minecraft:crafting_shaped":
-            key = {}
-            unmapped = ""
-            for symbol, spec in (recipe.get("key") or {}).items():
-                mapped = _item(spec, tag_resolver)
-                if mapped is None:
-                    unmapped = _tag_reason(spec, tag_resolver)
-                    break
-                key[symbol] = mapped
-            if unmapped:
-                result.unhandled.append(Unhandled(rel, "recipe", unmapped))
-                continue
-            body["pattern"] = recipe.get("pattern", [])
-            body["key"] = key
+            pattern = recipe.get("pattern", [])
+            used = "".join(row for row in pattern if isinstance(row, str))
+            key_specs = list((recipe.get("key") or {}).items())
+            positions = [(spec, used.count(symbol)) for symbol, spec in key_specs]
         elif java_type == "minecraft:crafting_shapeless":
-            specs = recipe.get("ingredients", [])
-            ingredients = [_item(i, tag_resolver) for i in specs]
-            if any(i is None for i in ingredients):
-                bad = next(s for s, i in zip(specs, ingredients) if i is None)
-                result.unhandled.append(Unhandled(rel, "recipe", _tag_reason(bad, tag_resolver)))
-                continue
-            body["ingredients"] = ingredients
-        elif java_type == "minecraft:stonecutting":
-            # One input, one output, expressed as a shapeless recipe on the stonecutter.
-            ingredient = _item(recipe.get("ingredient"), tag_resolver)
-            if ingredient is None:
-                result.unhandled.append(
-                    Unhandled(rel, "recipe", _tag_reason(recipe.get("ingredient"), tag_resolver))
-                )
-                continue
-            body["ingredients"] = [ingredient]
-        else:  # the furnace family
-            ingredient = _item(recipe.get("ingredient"), tag_resolver)
-            if ingredient is None:
-                result.unhandled.append(
-                    Unhandled(rel, "recipe", _tag_reason(recipe.get("ingredient"), tag_resolver))
-                )
-                continue
-            if "item" not in ingredient:
+            positions = [(spec, 1) for spec in recipe.get("ingredients", [])]
+        else:  # stonecutting and the furnace family: one input
+            positions = [(recipe.get("ingredient"), 1)]
+        furnace = java_type in _FURNACE_TYPES
+
+        mapped = [_item(spec, tag_resolver) for spec, _ in positions]
+        failing = [i for i, m in enumerate(mapped) if m is None]
+        multis = {i: _multi_tag(positions[i][0], tag_resolver, emitted) for i in failing}
+        variants: list[tuple[str, list]] = [("", mapped)]  # (file suffix, ingredients)
+        native: set[int] = set()  # ingredients written as this addon's own tag
+        expanded: int | None = None  # the ingredient written once per member
+        if failing and all(multis.values()):
+            ingredients = list(mapped)
+            rest = []
+            for i in failing:
+                multi = multis[i]
+                if not furnace and multi.vanilla_tag:
+                    ingredients[i] = {"tag": multi.vanilla_tag}
+                elif not furnace and multi.taggable:
+                    ingredients[i] = {"tag": multi.found.tag}
+                    native.add(i)
+                else:
+                    rest.append(i)
+            if not rest:
+                variants = [("", ingredients)]
+            elif (
+                len(rest) == 1
+                and positions[rest[0]][1] == 1
+                and len(multis[rest[0]].found.members) <= EXPANSION_CAP
+            ):
+                expanded = rest[0]
+                variants = []
+                for member in multis[expanded].found.members:
+                    one = list(ingredients)
+                    one[expanded] = {"item": member}
+                    variants.append((f"__{_member_suffix(member)}", one))
+            else:
+                native = set()
+        if any(m is None for _, ms in variants for m in ms):
+            # Not expressible (or not fully known): the reason is the one the
+            # first failing ingredient always had, plus which members this
+            # conversion didn't emit when that is what blocks it.
+            bad = positions[failing[0]][0]
+            reason = _tag_reason(bad, tag_resolver)
+            missing = _not_emitted(bad, tag_resolver, emitted)
+            if missing:
+                reason += f"; not converted: {', '.join(missing)}"
+            result.unhandled.append(Unhandled(rel, "recipe", reason))
+            continue
+
+        if furnace:
+            first = variants[0][1][0]
+            if "item" not in first:
                 # Bedrock's furnace input is one item id; a tag has no place there.
                 result.unhandled.append(Unhandled(
                     rel, "recipe",
-                    f"furnace input is tag {ingredient.get('tag')!r}; Bedrock's furnace "
+                    f"furnace input is tag {first.get('tag')!r}; Bedrock's furnace "
                     "recipe takes a single item id, not a tag",
                 ))
                 continue
-            body["input"] = ingredient["item"]
 
         out = _item(recipe.get("result"), tag_resolver)
         if out is None:
@@ -312,10 +469,68 @@ def convert(mod: SourceMod) -> ConversionResult:
         else:
             body["result"] = {**out, "count": count} if count != 1 else out
 
-        result.files[f"recipes/{path.stem}.json"] = {
-            "format_version": "1.20.10",
-            bedrock_type: body,
-        }
+        if len(variants) > 1 and any(
+            f"recipes/{path.stem}{suffix}.json" in result.files for suffix, _ in variants
+        ):
+            # A per-member file name another recipe already took: refuse rather
+            # than overwrite either one.
+            result.unhandled.append(Unhandled(rel, "recipe", _tag_reason(positions[failing[0]][0], tag_resolver)))
+            continue
+
+        for suffix, ingredients in variants:
+            variant = copy.deepcopy(body)
+            variant["description"]["identifier"] = f"{identifier}{suffix}"
+            if java_type == "minecraft:crafting_shaped":
+                variant["pattern"] = recipe.get("pattern", [])
+                variant["key"] = {symbol: ing for (symbol, _), ing in zip(key_specs, ingredients)}
+                # keep the field order the single-recipe form always had
+                variant["result"] = variant.pop("result")
+            elif furnace:
+                variant["input"] = ingredients[0]["item"]
+                variant["output"] = variant.pop("output")
+            else:
+                variant["ingredients"] = ingredients
+                variant["result"] = variant.pop("result")
+            result.files[f"recipes/{path.stem}{suffix}.json"] = {
+                "format_version": "1.20.10",
+                bedrock_type: variant,
+            }
+        for i, multi in multis.items():
+            if multi is None:
+                continue
+            multi_used[multi.found.tag] = multi.found
+            if i in native:
+                for member in multi.found.members:
+                    item_tags.setdefault(member, set()).add(multi.found.tag)
+            elif multi.vanilla_tag and i != expanded:
+                result.notes.append(
+                    f"{rel}: tag {multi.found.tag!r} has the same members as Bedrock's "
+                    f"{multi.vanilla_tag!r}, so the recipe takes that tag"
+                )
+        if expanded is not None:
+            member_tag = multis[expanded].found.tag
+            result.notes.append(
+                f"{rel}: tag {member_tag!r} has {len(variants)} members, which Bedrock "
+                f"can't group under one tag here, so the recipe was written once per member "
+                f"({path.stem}__<member>)"
+            )
+
+    for member, member_tags in sorted(item_tags.items()):
+        _, item_path, source_body = emitted[member]
+        item = copy.deepcopy(source_body)
+        components = item["minecraft:item"].setdefault("components", {})
+        existing = components.get("minecraft:tags") or {}
+        merged_tags = sorted(set(existing.get("tags") or []) | member_tags)
+        components["minecraft:tags"] = {"tags": merged_tags}
+        item["format_version"] = _max_format(item.get("format_version"), _ITEM_TAGS_FORMAT)
+        result.files[item_path] = item
+    for tag, found in sorted(multi_used.items()):
+        for source in found.sources:
+            result.consumed.add(source)
+        if found.dropped:
+            result.notes.append(
+                f"tag {tag!r}: dropped {', '.join(found.dropped)}, which this addon cannot contain"
+            )
     for tag, found in sorted(tag_resolver.resolved().items()):
         for source in found.sources:
             result.consumed.add(source)  # the tag files were read, so they are owned

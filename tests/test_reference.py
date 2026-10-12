@@ -93,6 +93,8 @@ def test_cli_reference_list_and_fetch(pinned, monkeypatch, capsys):
     assert "missing" in capsys.readouterr().out
     real = data.fetch_sounds
     monkeypatch.setattr(data, "fetch_sounds", lambda cache=None: real(cache, opener=_opener(UPSTREAM)))
+    from portkit.data import tags as tag_data  # the tag sets (#160) stay offline too
+    monkeypatch.setattr(tag_data, "fetch", lambda s, cache=None: (pinned / f"{s.id}.json", False))
     assert cli.main(["reference", "fetch"]) == 0
     assert "fetched" in capsys.readouterr().out
     assert cli.main(["reference", "list"]) == 0
