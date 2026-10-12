@@ -27,6 +27,35 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: agent-written block properties and map colours need a source
+
+- **Decision:** the fabricated-stat guard (#135) now covers agent-written
+  blocks, over base components and every permutation's: `light_emission`,
+  `light_dampening`, `friction`, `destructible_by_mining.seconds_to_destroy`,
+  `destructible_by_explosion.explosion_resistance`, `flammable`'s two
+  modifiers (and the legacy bare `destroy_time`, `explosion_resistance`,
+  `block_light_emission`, `block_light_filter`) must be numbers the source
+  states for that block, by the same file rule as item stats (outside
+  `assets/` and recipe-like data, in a file that names the block). A
+  `minecraft:map_color` (hex, `[r, g, b]` or `{"color": ...}`) must appear in
+  such a file as hex or as its decimal RGB integer. `seconds_to_destroy` may
+  also be a stated hardness x 1.5. Bedrock's omitted-component defaults (light
+  0, dampening 15, friction 0.4) and `true`/`false` forms pass. Otherwise
+  `agent.fabricated_stat` and rollback, as for items. The system prompt and
+  task prompt's no-guessing line names block properties and map colour; the
+  `residue_mod` transcript was re-recorded with its replies kept.
+- **Why:** GLM 5.3 wrote `minecraft:map_color` on storage drawers and
+  waystones blocks; Java sets map colour, hardness, blast resistance, light and
+  friction in code, so the converter never has them (see the converters/blocks.py
+  docstring) and the agent can't either. No deterministic output in the 21
+  fixtures or 10 corpus mods carries any of these components.
+- **Rejected:** deriving a map colour from the texture's average (Java's map
+  colour is chosen in code, not computed from the texture); stripping the
+  component instead of rolling back (same reasoning as #135); checking boolean
+  forms such as `flammable: true` (no number to trace; a separate policy if
+  wanted).
+- **Links:** #152, #86 ([real-mod report](https://github.com/anchapin/portkit-v2/issues/86#issuecomment-6122960840)), #135, #147, #149.
+
 ## 2026-10-12: agent-written block states must be the Java blockstate's
 
 - **Decision:** when a residue session writes a `minecraft:block` whose Java
