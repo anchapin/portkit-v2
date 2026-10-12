@@ -42,6 +42,11 @@ checked against a pinned sha256:
   data for the loader and game version the jar declares completes those tags;
   without it, recipes using them stay residue rather than being narrowed.
   `portkit reference fetch --mod your.jar` fetches only what that jar needs.
+- A handful of vanilla block model templates (Mojang's data): stairs, slabs,
+  walls, fences and the cube shapes. A mod's stairs model only names
+  `minecraft:block/stairs`; the boxes are vanilla's. With them, stairs, slabs,
+  walls and turned pillars convert; without them they stay residue, saying to
+  run the fetch.
 
 Tests and the fixtures don't need it.
 
