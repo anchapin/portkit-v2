@@ -23,11 +23,17 @@ this conversion emits (``emitted``, filled by
    item file), a single-slot ingredient keeps the tag recipe and gets one more
    recipe per mod member beside it (``<recipe>__<member>.json``); anything
    else stays residue. Bedrock's tag on its own would drop the mod's members.
-2. Native tag. When every member is an item this conversion emits (no vanilla
-   item, no block), the recipe keeps ``{"tag": "<java tag id>"}`` and each
-   member item gets the tag in its ``minecraft:tags`` component. A vanilla item
-   can't be given a tag by an add-on, and a block's ``minecraft:tags`` are
-   block tags, so neither can join.
+2. Native tag. When the mod's members are items or blocks this conversion
+   emits, the recipe keeps ``{"tag": "<java tag id>"}``: each member item gets
+   the tag in its ``minecraft:tags`` component, and each member block gets an
+   item form carrying it (see :func:`_block_item`; a block's own
+   ``minecraft:tags`` are block tags, which recipes don't read). A vanilla item
+   can't be given a tag by an add-on, nor can a block with its own item file;
+   when the tag holds such members and at least two of the mod's own, a
+   single-slot ingredient keeps the tag recipe and gets one recipe per such
+   member beside it (``<recipe>__<member>.json``, at most
+   :data:`EXPANSION_CAP`). Create's ``stone_types`` tags (14 blocks and one
+   vanilla stone) take this form.
 3. One recipe per member. Otherwise, when the recipe has exactly one such
    ingredient left, it fills exactly one grid slot, and the tag has at most
    :data:`EXPANSION_CAP` members, each member gets its own recipe. One slot
@@ -45,6 +51,7 @@ import json
 from dataclasses import dataclass
 
 from ..model import ConversionResult, SourceMod, Unhandled
+from ..data import FETCH_COMMAND
 from .tags import MultiMembers, TagResolver
 
 # Most members a single-slot tag ingredient is expanded into, one recipe each.
@@ -197,7 +204,18 @@ def _passes_through(tag: str, tags: TagResolver | None) -> bool:
 
 def _tag_reason(spec, tags: TagResolver | None = None) -> str:
     if isinstance(spec, dict) and "tag" in spec and tags is not None:
-        return tags.resolve(str(spec["tag"])).reason
+        tag = str(spec["tag"])
+        nested = tags.unknown_nested(tag) if tag in _BEDROCK_VANILLA_TAGS else []
+        if nested and tags.mod_additions(tag) is None:
+            # Bedrock has this tag, but without the vanilla tag data it can't be
+            # told whether the jar's own share of a nested tag belongs in it.
+            shown = ", ".join(nested[:3]) + (f" and {len(nested) - 3} more" if len(nested) > 3 else "")
+            return (
+                f"ingredient uses tag {tag!r}, which Bedrock also has, but this jar adds to "
+                f"{shown}, which vanilla may nest in it, and without the vanilla tag data "
+                f"(run `{FETCH_COMMAND}`) Bedrock's tag alone could drop those members"
+            )
+        return tags.resolve(tag).reason
     if isinstance(spec, dict) and "tag" in spec:
         return f"ingredient uses tag {spec['tag']!r}, which covers more than one item"
     return "ingredient uses a tag or item list"
@@ -290,11 +308,18 @@ class _Multi:
 
     spec: dict
     found: MultiMembers
-    taggable: bool  # every member is an emitted item, so a native tag works
+    # Every member of this mod can carry the Java tag as a native tag: an
+    # emitted item in its minecraft:tags, an emitted block through a replacing
+    # block_placer item (see _block_item). Members that can't (vanilla items,
+    # a block that has its own item file) are in ``extras``.
+    taggable: bool
     vanilla_tag: str | None = None  # a Bedrock vanilla tag with the same membership
     # A Bedrock vanilla tag of the same name whose every member this mod adds
     # can carry it: an emitted item, or an emitted block given an item form.
     bedrock_tag: bool = False
+    # Members a native tag can't hold, each needing its own recipe beside the
+    # tag recipe: vanilla items, and blocks that already have an item file.
+    extras: list = None  # type: ignore[assignment]
 
 
 def _bedrock_equivalent(found: MultiMembers, tags: TagResolver) -> str | None:
@@ -333,13 +358,16 @@ def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
             kinds.append(emitted[member][0])
         else:
             return None  # a member this conversion did not emit: not ours to drop
-    taggable = all(k == "item" for k in kinds) and not found.tag.startswith("minecraft:")
+    own = [k for k in kinds if k != "vanilla"]
+    taggable = (not found.tag.startswith("minecraft:")
+                and any(k in ("item", "block") for k in own))
+    extras = [m for m, k in zip(found.members, kinds) if k in ("vanilla", "block_and_item")]
     # Bedrock's tag holds vanilla's whole share, so only when the jar's file
     # doesn't replace the tag (mod_additions is None then).
     bedrock_tag = (found.tag in _BEDROCK_VANILLA_TAGS and tags.mod_additions(found.tag) is not None
                    and all(k in ("vanilla", "item", "block") for k in kinds))
     return _Multi(spec=spec, found=found, taggable=taggable, vanilla_tag=_bedrock_equivalent(found, tags),
-                  bedrock_tag=bedrock_tag)
+                  bedrock_tag=bedrock_tag, extras=extras)
 
 
 def _not_emitted(spec, tags: TagResolver, emitted: dict | None) -> list[str]:
@@ -462,6 +490,8 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
         multis = {i: _multi_tag(positions[i][0], tag_resolver, emitted) for i in failing}
         variants: list[tuple[str, list]] = [("", mapped)]  # (file suffix, ingredients)
         native: set[int] = set()  # ingredients written as this addon's own tag
+        partly: list[int] = []  # native-tag candidates with members that can't carry it
+        with_extras: int | None = None  # the native tag ingredient with extra recipes
         expanded: int | None = None  # the ingredient written once per member
         rest: list[int] = []  # tag ingredients only a per-member expansion could write
         if failing and all(multis.values()):
@@ -474,14 +504,38 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
                     # Bedrock's own tag, with this mod's members tagged into it.
                     ingredients[i] = {"tag": multi.found.tag}
                     native.add(i)
-                elif not furnace and multi.taggable:
+                elif not furnace and multi.taggable and not multi.extras:
                     ingredients[i] = {"tag": multi.found.tag}
                     native.add(i)
+                elif not furnace and multi.taggable and len(multi.found.members) - len(multi.extras) >= 2:
+                    # Worth it only when it writes fewer recipes than one per
+                    # member: two or more of the mod's members share the tag.
+                    partly.append(i)
                 else:
                     rest.append(i)
+            if (
+                len(partly) == 1
+                and not rest
+                and positions[partly[0]][1] == 1
+                and len(multis[partly[0]].extras) <= EXPANSION_CAP
+            ):
+                # The mod's members carry the tag; each member that can't (a
+                # vanilla item, a block with its own item) gets its own recipe
+                # beside the tag recipe. One slot only, as for every expansion.
+                with_extras = partly[0]
+                ingredients[with_extras] = {"tag": multis[with_extras].found.tag}
+                native.add(with_extras)
+            else:
+                rest.extend(partly)
             own = ([m for m in multis[rest[0]].found.members if not m.startswith("minecraft:")]
                    if len(rest) == 1 else [])
-            if not rest:
+            if not rest and with_extras is not None:
+                variants = [("", ingredients)]
+                for member in multis[with_extras].extras:
+                    one = list(ingredients)
+                    one[with_extras] = {"item": member}
+                    variants.append((f"__{_member_suffix(member)}", one))
+            elif not rest:
                 variants = [("", ingredients)]
             elif (
                 not furnace
@@ -594,7 +648,7 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
             multi_used[multi.found.tag] = multi.found
             if i in native:
                 for member in multi.found.members:
-                    if not member.startswith("minecraft:"):
+                    if not member.startswith("minecraft:") and member not in (multi.extras or []):
                         item_tags.setdefault(member, set()).add(multi.found.tag)
                 if multi.found.tag in _BEDROCK_VANILLA_TAGS:
                     own = [m for m in multi.found.members if not m.startswith("minecraft:")]
@@ -607,6 +661,13 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
                     f"{rel}: tag {multi.found.tag!r} has the same members as Bedrock's "
                     f"{multi.vanilla_tag!r}, so the recipe takes that tag"
                 )
+        if with_extras is not None and with_extras in native:
+            multi = multis[with_extras]
+            result.notes.append(
+                f"{rel}: tag {multi.found.tag!r} is carried by this mod's members, and "
+                f"{', '.join(multi.extras)} (which can't carry it) got their own recipe "
+                f"({path.stem}__<member>) beside the one taking the tag"
+            )
         if expanded is not None and variants[0][0] == "":
             member_tag = multis[expanded].found.tag
             result.notes.append(

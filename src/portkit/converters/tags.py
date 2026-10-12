@@ -308,9 +308,31 @@ class TagResolver:
         found = self.members(tag)
         if found is None:
             if path is None and self.reference.values(tag) is None:
-                return []
+                # No vanilla data, so vanilla's nesting isn't known either: the
+                # jar's own share of a tag vanilla nests in this one (its
+                # minecraft:oak_logs feeding minecraft:logs) would be dropped.
+                return None if self.unknown_nested(tag) else []
             return None
         return [m for m in found.members if not m.startswith("minecraft:")]
+
+    def unknown_nested(self, tag: str) -> list[str]:
+        """The jar's other tag files in the tag's shared namespace, when the
+        reference data that would say whether vanilla nests them in ``tag``
+        isn't there. Empty when the data is there or the jar has no such file.
+        """
+        ns = tag.partition(":")[0]
+        if not _is_shared(tag) or self.reference.values(tag) is not None:
+            return []
+        found: list[str] = []
+        for folder in ("items", "item"):
+            base = self.mod.root / "data" / ns / "tags" / folder
+            if not base.is_dir():
+                continue
+            for path in sorted(base.rglob("*.json")):
+                other = f"{ns}:{path.relative_to(base).with_suffix('').as_posix()}"
+                if other != tag and other not in found:
+                    found.append(other)
+        return found
 
     def unknown_reason(self, tag: str) -> str | None:
         """Why the tag's full membership is unknown, or None when it is known."""

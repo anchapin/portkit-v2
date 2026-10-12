@@ -31,6 +31,11 @@ without the loader's share a recipe like "any colorless glass" stays residue
 instead of quietly becoming "only my glass". Add `--mod yourmod.jar` to fetch
 only the data your jar's loader and game version need.
 
+It also fetches a few vanilla block model templates (stairs, slabs, walls,
+fences, the cube shapes). Your stairs model names `minecraft:block/stairs` and
+its textures; the boxes come from vanilla's model, so without the templates
+stairs, slabs, walls and pillars that lie on their side stay residue.
+
 ## Convert
 
 Point `portkit convert` at your mod's `.jar`, or at an unpacked directory that

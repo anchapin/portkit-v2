@@ -648,9 +648,12 @@ def _corpus_cases(args):
 
     from .data import tags as tag_data
 
+    from .data import models as model_data
+
     if args.fetch:
         try:
             data.fetch_sounds()
+            model_data.fetch()
             for tag_set in tag_data.SETS:
                 tag_data.fetch(tag_set)
         except data.ReferenceDataError as exc:
@@ -666,6 +669,15 @@ def _corpus_cases(args):
         print(f"warning: {message}", file=sys.stderr)
         if os.environ.get("GITHUB_ACTIONS") == "true":
             print(f"::warning title=tag reference::{message}")
+    if model_data.templates() is None:
+        # The corpus baseline is measured with the vanilla model templates;
+        # without them stairs, slabs, walls and turned pillars stay residue.
+        message = (f"the vanilla block model templates aren't cached, so stairs, slabs, walls "
+                   f"and turned pillars stay residue and the numbers may differ from the "
+                   f"baseline; run `{data.FETCH_COMMAND}` or add --fetch")
+        print(f"warning: {message}", file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::warning title=model templates::{message}")
     if data.bedrock_vanilla_sounds() is None:
         # The corpus baseline is measured with the list; without it vanilla
         # sound references are dropped, which can move the numbers.
@@ -779,7 +791,8 @@ def _reference_sets(args):
 
 def cmd_reference(args) -> int:
     """``portkit reference fetch|list``: reference data fetched on demand: Mojang's
-    vanilla sound list (#124) and the loaders' and vanilla's item tags (#160)."""
+    vanilla sound list (#124), the loaders' and vanilla's item tags (#160) and
+    the vanilla block model templates stairs, slabs and walls are built from."""
     from . import data
     from .data import tags
 
@@ -788,9 +801,13 @@ def cmd_reference(args) -> int:
     if meta is not None:
         chosen = ", ".join(s.id for s in sets) or "none"
         print(f"{args.mod}: loader {meta.loader or '?'}, minecraft {meta.minecraft or '?'} -> tag data: {chosen}")
+    from .data import models as model_data
+
     if args.action == "list":
         state = "cached" if data.cached_sounds(cache) else "missing"
         print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
+        state = "cached" if model_data.cached(cache) else "missing"
+        print(f"{model_data.SET_ID:28} {model_data.LABEL} {state}")
         for tag_set in sets:
             state = "cached" if tags.cached(tag_set, cache) else "missing"
             print(f"{'tags-' + tag_set.id:28} {tag_set.label} {state}")
@@ -799,6 +816,12 @@ def cmd_reference(args) -> int:
     try:
         path, downloaded = data.fetch_sounds(cache)
         print(f"{'fetched' if downloaded else 'cached ':7} vanilla-sounds -> {path}")
+    except data.ReferenceDataError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        failed += 1
+    try:
+        path, downloaded = model_data.fetch(cache)
+        print(f"{'fetched' if downloaded else 'cached ':7} {model_data.SET_ID} -> {path}")
     except data.ReferenceDataError as exc:
         print(f"FAILED {exc}", file=sys.stderr)
         failed += 1
@@ -972,8 +995,9 @@ def main(argv=None) -> int:
 
     p = sub.add_parser(
         "reference",
-        help="fetch or list reference data: the Bedrock vanilla sound list (#124) and "
-             "loader/vanilla item tag membership (#160)",
+        help="fetch or list reference data: the Bedrock vanilla sound list (#124), "
+             "loader/vanilla item tag membership (#160) and the vanilla block model "
+             "templates stairs, slabs and walls are built from",
     )
     p.add_argument("action", choices=["fetch", "list"])
     p.add_argument("--mod", metavar="JAR",

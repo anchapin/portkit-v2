@@ -6,10 +6,12 @@ else about the block, hardness, tool, light, drops, lives in compiled code.
 
 So this converter takes the half that is declarative and refuses the rest. A
 block that is a plain cube converts to a Bedrock block definition with its
-geometry and material instances. A block with real states (stairs, slabs,
-anything with facing or variants) goes to the residue with its state names,
-because approximating one produces a block that loads and behaves wrong, which
-is worse than one that never shipped.
+geometry and material instances. A block with real states converts only when a
+Bedrock placement or connection trait sets the same states Java's block code
+does: pillars (axis), fences and walls (connections), seats (facing), stairs
+(facing, half, corner) and slabs (half). Anything else goes to the residue with
+its state names, because approximating one produces a block that loads and
+behaves wrong, which is worse than one that never shipped.
 
 Destroy time and light emission are deliberately absent: they are not in the
 Java JSON at all, and inventing numbers for them is the failure mode this
@@ -379,7 +381,11 @@ def _flat_model(mod: SourceMod, result: ConversionResult, model_ref: str) -> tup
     flat, parents, why = models.resolve(mod, model)
     for parent_file in parents:
         result.claim(mod, parent_file)
-    return (None, why) if why else (flat, "")
+    if why:
+        return None, why
+    # A model that only names a vanilla parent (stairs, a wall post, a cube)
+    # gets that parent's boxes from the fetched templates.
+    return models.expand_template(flat)
 
 
 def _convert_palisade(
@@ -533,10 +539,16 @@ def _model_block(
 
     if any(turn):
         if not flat.get("elements"):
-            return None, None, None, (
-                f"blockstate turns {model_ref!r} (x={turn[0]} y={turn[1]}), a plain "
-                "cube; turning its per-face textures is not mapped yet"
-            )
+            # A plain cube turned whole (a pillar lying on its side): its
+            # vanilla parent's box, turned with its textures, as Java does.
+            expanded, why = models.expand_template(flat)
+            if expanded is None:
+                return None, None, None, (
+                    f"blockstate turns {model_ref!r} (x={turn[0]} y={turn[1]}), a plain "
+                    f"cube whose box isn't known: {why}"
+                )
+            flat = expanded
+            textures = flat.get("textures") or {}
         turned = []
         for element in flat["elements"]:
             moved, why = models.turn_rigid(element, turn[0], turn[1])
@@ -605,6 +617,22 @@ def convert(mod: SourceMod) -> ConversionResult:
             continue
         if why:
             result.unhandled.append(Unhandled(rel, "block", why))
+            continue
+
+        stairs, why = _stairs_variants(blockstate)
+        if stairs is not None:
+            _convert_stairs(mod, result, rel, name, stairs)
+            continue
+        slab, why = _slab_variants(blockstate) if not why else (None, why)
+        if slab is not None:
+            _convert_slab(mod, result, rel, name, slab)
+            continue
+        if why:
+            result.unhandled.append(Unhandled(rel, "block", why))
+            continue
+        wall = _wall_parts(blockstate)
+        if wall is not None:
+            _convert_wall(mod, result, rel, name, *wall)
             continue
 
         post_ref, side_ref, uvlock = _palisade_parts(blockstate)
@@ -737,6 +765,464 @@ def _block_definition(
             },
             "components": {
                 "minecraft:geometry": geometry,
+                "minecraft:material_instances": instances,
+            },
+        },
+    }
+
+
+# --------------------------------------------------------------------------
+# Stairs, slabs and walls (vanilla shape blocks).
+#
+# Each is recognised by its blockstate's structure (the exact state set vanilla
+# stairs, slabs and walls have) and by the vanilla template its models extend,
+# never by name. Geometry comes from the mod's own blockstate: every Java
+# variant (model, x/y turn, uvlock) becomes one geometry (stairs) or bone
+# (slabs, walls), its boxes read from the vanilla template
+# (portkit.data.models) and turned as Java turns them. The
+# Bedrock states that pick a bone are the trait states with the same meaning:
+#
+# * facing -> minecraft:cardinal_direction. Both are the player's horizontal
+#   facing when the block is placed (Java StairBlock; "if the player is facing
+#   north, the state will be north" with y_rotation_offset 0, block traits
+#   schema / learn.microsoft.com placement_direction).
+# * half (stairs) and type=bottom|top (slabs) -> minecraft:vertical_half, set
+#   from where on the face the block was placed, "to create blocks that behave
+#   like slabs" (learn.microsoft.com, Block Traits).
+# * shape -> minecraft:corner, enabled by minecraft:corner_and_cardinal_direction
+#   (stable from block format 1.26.0, inner corners fixed in 1.26.10; 1.26.0 and
+#   1.26.10 creator update notes). Same five values, straight being "none".
+# * a wall's north/east/south/west -> the connection trait's
+#   minecraft:connection_<dir> (stable from 1.26.0), as the palisade path does.
+_SHAPE_FORMAT = "1.26.0"
+
+_STAIR_FACINGS = _CARDINALS
+_STAIR_HALVES = ("bottom", "top")
+_STAIR_SHAPES = ("straight", "inner_left", "inner_right", "outer_left", "outer_right")
+_STAIR_TEMPLATES = {
+    "minecraft:block/stairs", "minecraft:block/inner_stairs", "minecraft:block/outer_stairs",
+}
+_SLAB_TEMPLATES = {"bottom": "minecraft:block/slab", "top": "minecraft:block/slab_top"}
+_WALL_TEMPLATES = {
+    "post": "minecraft:block/template_wall_post",
+    "side": "minecraft:block/template_wall_side",
+    "tall": "minecraft:block/template_wall_side_tall",
+}
+# Java's corner shapes by Bedrock's minecraft:corner values.
+_CORNER = {"straight": "none"}
+
+
+def _parse_variant_key(key: str) -> dict[str, str] | None:
+    states = {}
+    for pair in key.split(","):
+        name, sep, value = pair.partition("=")
+        if not sep or not name or name in states:
+            return None
+        states[name] = value
+    return states
+
+
+def _turned_entry(entry, key: str) -> tuple[tuple[str, int, int, bool] | None, str]:
+    """(model, x, y, uvlock) for one variant entry, or why not."""
+    if isinstance(entry, list):
+        return None, f"variant {key!r} picks randomly between models"
+    model = entry.get("model") if isinstance(entry, dict) else None
+    if not isinstance(model, str):
+        return None, f"variant {key!r} names no model"
+    try:
+        x, y = int(entry.get("x") or 0), int(entry.get("y") or 0)
+    except (TypeError, ValueError):
+        return None, f"variant {key!r} has an unreadable turn"
+    if x % 90 or y % 90:
+        return None, f"variant {key!r} turns by x={x} y={y}, not quarter turns"
+    return (model, x % 360, y % 360, bool(entry.get("uvlock"))), ""
+
+
+def _stairs_variants(blockstate: dict) -> tuple[dict | None, str]:
+    """{(facing, half, shape): (model, x, y, uvlock)} for a stairs blockstate.
+
+    (None, "") when the blockstate isn't stairs-shaped; (None, why) when it
+    has exactly the stairs state set but something about it can't convert.
+    """
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or not variants:
+        return None, ""
+    parsed = {}
+    for key, entry in variants.items():
+        states = _parse_variant_key(key)
+        if states is None or set(states) != {"facing", "half", "shape"}:
+            return None, ""
+        parsed[(states["facing"], states["half"], states["shape"])] = (key, entry)
+    wanted = {(f, h, s) for f in _STAIR_FACINGS for h in _STAIR_HALVES for s in _STAIR_SHAPES}
+    if set(parsed) != wanted:
+        return None, ""
+    out = {}
+    for combo, (key, entry) in parsed.items():
+        turned, why = _turned_entry(entry, key)
+        if turned is None:
+            return None, f"stairs: {why}"
+        out[combo] = turned
+    return out, ""
+
+
+def _slab_variants(blockstate: dict) -> tuple[dict | None, str]:
+    """{"bottom"|"top"|"double": (model, x, y, uvlock)} for a slab blockstate."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or set(variants) != {"type=bottom", "type=top", "type=double"}:
+        return None, ""
+    out = {}
+    for kind in ("bottom", "top", "double"):
+        turned, why = _turned_entry(variants[f"type={kind}"], f"type={kind}")
+        if turned is None:
+            return None, f"slab: {why}"
+        if kind != "double" and (turned[1] or turned[2]):
+            return None, f"slab: variant 'type={kind}' turns its model, which no slab template does"
+        out[kind] = turned
+    return out, ""
+
+
+def _wall_parts(blockstate: dict) -> tuple[str, str, str, bool] | None:
+    """(post, side, tall side, uvlock) for a vanilla-wall-shaped multipart, else None.
+
+    The shape: a post part gated on up=true alone, and for each cardinal
+    direction a low and a tall side part gated on that direction alone, each
+    turned to face it, with one side model and one tall side model throughout.
+    """
+    parts = blockstate.get("multipart")
+    if not isinstance(parts, list) or len(parts) != 9:
+        return None
+    post = side = tall = None
+    uvlocks: set[bool] = set()
+    seen: set[tuple[str, str]] = set()
+    for part in parts:
+        if not isinstance(part, dict) or not isinstance(part.get("apply"), dict):
+            return None
+        apply, when = part["apply"], part.get("when")
+        model = apply.get("model")
+        if not isinstance(model, str) or apply.get("x") or not isinstance(when, dict) or len(when) != 1:
+            return None
+        (state, value), = when.items()
+        value = str(value).lower()
+        if state == "up":
+            if value != "true" or post is not None or apply.get("y"):
+                return None
+            post = model
+            continue
+        if state not in _CARDINALS or value not in ("low", "tall") or (state, value) in seen:
+            return None
+        if (apply.get("y") or 0) % 360 != _CARDINAL_TURN[state]:
+            return None
+        if value == "low":
+            if side not in (None, model):
+                return None
+            side = model
+        else:
+            if tall not in (None, model):
+                return None
+            tall = model
+        seen.add((state, value))
+        uvlocks.add(bool(apply.get("uvlock")))
+    if post is None or side is None or tall is None or len(seen) != 8 or len(uvlocks) != 1:
+        return None
+    return post, side, tall, uvlocks.pop()
+
+
+def _template_flat(mod: SourceMod, result: ConversionResult, model_ref: str,
+                   templates: set[str], what: str) -> tuple[dict | None, str]:
+    """The model with its template's boxes, checked to extend one of ``templates``."""
+    flat, why = _flat_model(mod, result, model_ref)
+    if flat is None:
+        return None, f"{what} model {model_ref!r}: {why}"
+    if flat.get("parent") not in templates:
+        wanted = "/".join(sorted(t.rsplit("/", 1)[-1] for t in templates))
+        parent = flat.get("parent")
+        extends = f"extends {parent!r}" if isinstance(parent, str) else "has no vanilla parent"
+        return None, f"{what} model {model_ref!r} {extends}, not the vanilla {wanted} template"
+    return flat, ""
+
+
+def _merge_textures(flats: list[dict]) -> tuple[dict | None, str]:
+    textures: dict = {}
+    for flat in flats:
+        for key, value in (flat.get("textures") or {}).items():
+            if textures.setdefault(key, value) != value:
+                return None, f"its models disagree about their {key!r} texture"
+    return textures, ""
+
+
+def _shape_geometry(mod: SourceMod, name: str, parts: list[tuple[str, list]],
+                    textures: dict) -> tuple[str | None, dict | None, dict | None, str]:
+    """(identifier, material instances, geometry) for named bones of elements."""
+    combined = {"textures": textures, "elements": [e for _, els in parts for e in els]}
+    by_face, why = models.element_materials(combined)
+    tag_faces = by_face is None and "disagree" in why
+    if tag_faces:
+        by_face, why = models.tagged_materials(combined)
+    if by_face is None:
+        return None, None, None, why
+    instances, why = _instances(mod, by_face, textures, tag_faces)
+    if instances is None:
+        return None, None, None, why
+    identifier = f"geometry.{mod.namespace}.{name}"
+    geo, why = models.geometry_bones(parts, identifier, tag_faces=tag_faces)
+    if geo is None:
+        return None, None, None, why
+    return identifier, instances, geo, ""
+
+
+def _turn_all(elements: list, x: int, y: int, uvlock: bool) -> tuple[list | None, str]:
+    turned = []
+    for element in elements:
+        moved, why = (models.turn_locked if uvlock else models.turn_rigid)(element, x, y)
+        if moved is None:
+            return None, why
+        turned.append(moved)
+    return turned, ""
+
+
+def _convert_stairs(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                    variants: dict) -> None:
+    """Stairs: one bone per Java variant, picked by direction, half and corner."""
+    flats: dict[str, dict] = {}
+    parts: list[tuple[str, list]] = []
+    boxes: dict[tuple, list] = {}
+    for facing in _STAIR_FACINGS:
+        for half in _STAIR_HALVES:
+            for shape in _STAIR_SHAPES:
+                model_ref, x, y, uvlock = variants[(facing, half, shape)]
+                if model_ref not in flats:
+                    flat, why = _template_flat(mod, result, model_ref, _STAIR_TEMPLATES, "stairs")
+                    if flat is None:
+                        result.unhandled.append(Unhandled(rel, "block", why))
+                        return
+                    flats[model_ref] = flat
+                elements, why = _turn_all(flats[model_ref]["elements"], x, y, uvlock)
+                if elements is None:
+                    result.unhandled.append(Unhandled(rel, "block", f"stairs {facing}/{half}/{shape}: {why}"))
+                    return
+                bone = f"{facing}_{half}_{shape}"
+                parts.append((bone, elements))
+                found, why = models.bounding_boxes(elements)
+                if found is None:
+                    result.unhandled.append(Unhandled(rel, "block", f"stairs {bone}: {why}"))
+                    return
+                boxes[(facing, half, shape)] = found
+    textures, why = _merge_textures(list(flats.values()))
+    if textures is None:
+        result.unhandled.append(Unhandled(rel, "block", f"stairs: {why}"))
+        return
+    identifier, instances, geo, why = _shape_geometry(mod, name, parts, textures)
+    if identifier is None:
+        result.unhandled.append(Unhandled(rel, "block", f"stairs: {why}"))
+        return
+    # One geometry per variant in the one file, each permutation naming its
+    # own: a few cubes per geometry rather than ~100 in one, which mct flags
+    # (GEOMETRY, "more than 50 cubes ... degraded performance").
+    (template,) = geo["minecraft:geometry"]
+    geometries = []
+    for bone in template["bones"]:
+        one = json.loads(json.dumps(template))
+        one["description"]["identifier"] = f"{identifier}.{bone['name']}"
+        one["bones"] = [{**bone, "name": "root"}]
+        geometries.append(one)
+    result.files[f"models/blocks/{name}.geo.json"] = {**geo, "minecraft:geometry": geometries}
+    result.files[f"blocks/{name}.json"] = _stairs_definition(mod.namespace, name, identifier, instances, boxes)
+    result.notes.append(
+        f"{name}: stairs placed with Bedrock's placement traits (direction, half, corner), "
+        "cornering with any block tagged minecraft:cornerable_stairs as Java stairs corner "
+        "with any stairs; Bedrock works the corner out itself, which needs 1.26.10 or newer "
+        "for inner corners. Waterlogging is not carried over."
+    )
+
+
+def _stair_condition(facing: str, half: str, shape: str) -> str:
+    return (
+        f"q.block_state('minecraft:cardinal_direction') == '{facing}' && "
+        f"q.block_state('minecraft:vertical_half') == '{half}' && "
+        f"q.block_state('minecraft:corner') == '{_CORNER.get(shape, shape)}'"
+    )
+
+
+def _stairs_definition(namespace: str, name: str, geometry: str, instances: dict,
+                       boxes: dict[tuple, list]) -> dict:
+    combos = [(f, h, s) for f in _STAIR_FACINGS for h in _STAIR_HALVES for s in _STAIR_SHAPES]
+    return {
+        "format_version": _SHAPE_FORMAT,
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{namespace}:{name}",
+                "menu_category": {"category": _MENU_CATEGORY},
+                "traits": {
+                    "minecraft:placement_direction": {
+                        "enabled_states": ["minecraft:corner_and_cardinal_direction"],
+                        "blocks_to_corner_with": [{"tags": "q.any_tag('minecraft:cornerable_stairs')"}],
+                    },
+                    "minecraft:placement_position": {"enabled_states": ["minecraft:vertical_half"]},
+                },
+            },
+            "components": {
+                # The default state (south, bottom, no corner); every state has
+                # its permutation below.
+                "minecraft:geometry": f"{geometry}.south_bottom_straight",
+                "minecraft:material_instances": instances,
+                "minecraft:support": {"shape": "stair"},
+                "tag:minecraft:cornerable_stairs": {},
+            },
+            # Collision follows the boxes, as Java's stair shape is the same boxes.
+            "permutations": [
+                {"condition": _stair_condition(f, h, s),
+                 "components": {"minecraft:geometry": f"{geometry}.{f}_{h}_{s}",
+                                "minecraft:collision_box": boxes[(f, h, s)]}}
+                for f, h, s in combos
+            ],
+        },
+    }
+
+
+def _convert_slab(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                  variants: dict) -> None:
+    """Slabs: a bottom and a top bone, picked by vertical_half; no double form."""
+    parts: list[tuple[str, list]] = []
+    flats = []
+    boxes: dict[str, list] = {}
+    for half in ("bottom", "top"):
+        model_ref = variants[half][0]
+        flat, why = _template_flat(mod, result, model_ref, {_SLAB_TEMPLATES[half]}, f"{half} slab")
+        if flat is None:
+            result.unhandled.append(Unhandled(rel, "block", why))
+            return
+        found, why = models.bounding_boxes(flat["elements"])
+        if found is None:
+            result.unhandled.append(Unhandled(rel, "block", f"{half} slab: {why}"))
+            return
+        flats.append(flat)
+        parts.append((half, flat["elements"]))
+        boxes[half] = found
+    textures, why = _merge_textures(flats)
+    if textures is None:
+        result.unhandled.append(Unhandled(rel, "block", f"slab: {why}"))
+        return
+    identifier, instances, geo, why = _shape_geometry(mod, name, parts, textures)
+    if identifier is None:
+        result.unhandled.append(Unhandled(rel, "block", f"slab: {why}"))
+        return
+    # The double slab's model was read and set aside on purpose (see the note).
+    double_ref = variants["double"][0]
+    double_path = models.model_path(mod, double_ref)
+    if double_path is not None and double_path.is_file():
+        result.claim(mod, double_path)
+    result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = _slab_definition(mod.namespace, name, identifier, instances, boxes)
+    result.notes.append(
+        f"{name}: bottom and top slab via Bedrock's vertical_half trait; Java's double slab "
+        f"(type=double, {double_ref}) has no data-driven Bedrock form, so a second slab "
+        "placed on this one goes in the next block space instead of merging. Waterlogging "
+        "is not carried over."
+    )
+
+
+def _union(boxes: list[dict]) -> dict:
+    lo = [min(b["origin"][i] for b in boxes) for i in range(3)]
+    hi = [max(b["origin"][i] + b["size"][i] for b in boxes) for i in range(3)]
+    return {"origin": lo, "size": [h - l for l, h in zip(lo, hi)]}
+
+
+def _slab_definition(namespace: str, name: str, geometry: str, instances: dict,
+                     boxes: dict[str, list]) -> dict:
+    def half_is(half: str) -> str:
+        return f"q.block_state('minecraft:vertical_half') == '{half}'"
+
+    return {
+        "format_version": _SHAPE_FORMAT,
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{namespace}:{name}",
+                "menu_category": {"category": _MENU_CATEGORY},
+                "traits": {
+                    "minecraft:placement_position": {"enabled_states": ["minecraft:vertical_half"]},
+                },
+            },
+            "components": {
+                "minecraft:geometry": {
+                    "identifier": geometry,
+                    "bone_visibility": {half: half_is(half) for half in ("bottom", "top")},
+                },
+                "minecraft:material_instances": instances,
+            },
+            "permutations": [
+                {"condition": half_is(half),
+                 "components": {"minecraft:collision_box": boxes[half],
+                                "minecraft:selection_box": _union(boxes[half])}}
+                for half in ("bottom", "top")
+            ],
+        },
+    }
+
+
+def _convert_wall(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                  post_ref: str, side_ref: str, tall_ref: str, uvlock: bool) -> None:
+    """Walls: a post and four low sides, joined through the connection trait."""
+    post, why = _template_flat(mod, result, post_ref, {_WALL_TEMPLATES["post"]}, "wall post")
+    side = tall = None
+    if post is not None:
+        side, why = _template_flat(mod, result, side_ref, {_WALL_TEMPLATES["side"]}, "wall side")
+    if side is not None:
+        tall, why = _template_flat(mod, result, tall_ref, {_WALL_TEMPLATES["tall"]}, "tall wall side")
+    if post is None or side is None or tall is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+    textures, why = _merge_textures([post, side])
+    if textures is None:
+        result.unhandled.append(Unhandled(rel, "block", f"wall: {why}"))
+        return
+    parts = [("post", post["elements"])]
+    for direction in _CARDINALS:
+        turned = []
+        for element in side["elements"]:
+            moved, why = models.turn_y(element, _CARDINAL_TURN[direction], uvlock)
+            if moved is None:
+                result.unhandled.append(Unhandled(rel, "block", f"wall {direction} side: {why}"))
+                return
+            turned.append(moved)
+        parts.append((direction, turned))
+    identifier, instances, geo, why = _shape_geometry(mod, name, parts, textures)
+    if identifier is None:
+        result.unhandled.append(Unhandled(rel, "block", f"wall: {why}"))
+        return
+    result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = _wall_definition(mod.namespace, name, identifier, instances)
+    result.notes.append(
+        f"{name}: wall sides join through Bedrock's connection trait, which decides on its "
+        "own which neighbours connect. Shown: the post and the low sides, the post raised "
+        "unless exactly two opposite sides join, as Java does with nothing above. Not shown: "
+        f"the tall sides ({tall_ref}) and the post raised by the block above, which Java "
+        "works out from the block above and no Bedrock trait reports; collision stays a "
+        "full block. Needs Bedrock 1.26.0 or newer."
+    )
+
+
+def _wall_definition(namespace: str, name: str, geometry: str, instances: dict) -> dict:
+    side = {d: f"q.block_state('minecraft:connection_{d}')" for d in _CARDINALS}
+    n, e, s, w = (side[d] for d in _CARDINALS)
+    # Java's WallBlock raises the post when nothing joins, or when the joined
+    # sides aren't exactly one opposite pair (north == south and east == west
+    # covers both straight runs and the four-way cross, which have no post).
+    post = f"(!{n} && !{e} && !{s} && !{w}) || ({n} != {s}) || ({e} != {w})"
+    return {
+        "format_version": _SHAPE_FORMAT,
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{namespace}:{name}",
+                "menu_category": {"category": _MENU_CATEGORY},
+                "traits": {
+                    "minecraft:connection": {"enabled_states": ["minecraft:cardinal_connections"]}
+                },
+            },
+            "components": {
+                "minecraft:geometry": {
+                    "identifier": geometry,
+                    "bone_visibility": {"post": post, **side},
+                },
                 "minecraft:material_instances": instances,
             },
         },

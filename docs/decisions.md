@@ -27,6 +27,73 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: stairs, slabs, walls and turned pillars convert from vanilla's templates; tags of mostly-block members ride on block items
+
+- **Decision:** Blocks whose blockstate has exactly vanilla's stairs state set
+  (`facing` x `half` x `shape`, all 40), slab set (`type=bottom|top|double`) or
+  wall multipart (post on `up=true`, low and tall sides per direction), and
+  whose models extend vanilla's `block/stairs`/`inner_stairs`/`outer_stairs`,
+  `slab`/`slab_top` or `template_wall_post`/`_side`/`_side_tall`, convert at
+  block format 1.26.0. Detection is structural plus the parent; names are never
+  read. The boxes come from those vanilla templates, fetched by
+  `portkit reference fetch` from misode/mcmeta's 1.20.1 model summary (pinned,
+  sha256-checked, never vendored; identical for 1.16.5 to 26.1). Every Java
+  variant keeps its own model, x/y turn and uvlock (a new `turn_locked` for
+  uvlock with x turns; position-derived uvs only, else residue):
+  stairs get one geometry per variant, picked per permutation by
+  `minecraft:cardinal_direction` (= Java `facing`), `minecraft:vertical_half`
+  (= `half`) and `minecraft:corner` (= `shape`, `straight` = `none`) from the
+  `placement_direction` trait's `corner_and_cardinal_direction` plus
+  `placement_position`; they corner with anything tagged
+  `minecraft:cornerable_stairs` (they carry the tag), get
+  `minecraft:support` `stair` and a collision box per variant equal to its
+  boxes. Slabs get bottom/top bones on `vertical_half` with half-height
+  collision and selection boxes; Java's `type=double` has no data-driven
+  Bedrock form, so it is read, set aside and named in a note. Walls get a post
+  and four low sides on the connection trait, the post shown by Java's own rule
+  with nothing above (raised unless exactly one opposite pair joins); tall sides
+  and the above-block post are not reachable and are named in a note, and
+  collision stays a full block. A blockstate that turns a plain cube (pillars
+  and logs lying on their side, `axis=x|z` with x/y and no uvlock) now takes the
+  template's box and turns it with `turn_rigid`. Models that only name a
+  vanilla template also feed the palisade and facing paths. Without the
+  templates cached, all of these stay residue saying to run the fetch.
+  Recipes: a tag whose mod members are emitted items or blocks keeps the Java
+  tag as a native item tag on them (blocks through the #162 replacing
+  block_placer item); members that can't carry it (vanilla items, blocks with
+  their own item file) get one recipe each beside the tag recipe, for a
+  single-slot ingredient, when at least two of the mod's members share the tag
+  (otherwise the #161 one-recipe-per-member form stays). Also: offline (no
+  vanilla tag data), a Bedrock vanilla tag such as `minecraft:logs` no longer
+  passes through when the jar ships other `minecraft:` item tag files (its own
+  `minecraft:oak_logs` may feed `minecraft:logs`); the recipe stays residue
+  naming them.
+- **Why:** 120 stairs, 123 slabs, 88 walls and ~80 turned pillars were block
+  residue across the corpus, and Create's stairs, walls and pillars kept all
+  266 `create:stone_types/*` stonecutting recipes residue. Bedrock has the
+  states these blocks need as stable traits since 1.26.0: the connection trait,
+  `corner_and_cardinal_direction` ("can now be used without the Beta APIs
+  toggle", inner corners fixed in 1.26.10), `minecraft:support`, array
+  collision boxes (learn.microsoft.com 1.26.0 / 1.26.10 creator update notes;
+  Block Traits: placement_direction; Block Traits; minecraft:support; vendored
+  1.26.60 schemas `block_placement_direction`, `block_placement_position`,
+  `block_connection`, `block_support`, `block_components`). Java facing and
+  Bedrock `cardinal_direction` are both the player's facing at placement
+  (y_rotation_offset 0). Corpus: stairs 117/120, slabs 120/123, walls 86/88
+  and 79 more turned pillars convert; all 266 stone_types recipes (278 in all)
+  leave residue, and with native tags Create ships 3,904 files instead of the
+  7,790 one recipe per member would have written.
+- **Rejected:** Straight stairs only (Bedrock has stable corner states);
+  `minecraft:transformation` to turn one geometry (turns textures too, which
+  Java's uvlock doesn't); one geometry with 40 bones (mct GEOMETRY warning, ~100
+  cubes in one model); vendoring vanilla's template JSON (Mojang's data, #124
+  policy); hand-typed box tables (the fetched models are the source); a scripted
+  double slab (no scripts in packs); wall collision from Java code (24 high,
+  not in the JSON); one recipe per member for stone_types (~4,000 files);
+  passing an offline vanilla tag through when the jar adds to other vanilla tags
+  (could drop the mod's members, #87).
+- **Links:** #87, #161, #162.
+
 ## 2026-10-12: a mod's own members of a Bedrock vanilla tag carry that tag; Bedrock's tag alone never stands in for them
 
 - **Decision:** A Java recipe ingredient naming one of the vanilla tags

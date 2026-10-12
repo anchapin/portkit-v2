@@ -42,3 +42,22 @@ mod's jar declares; without it, recipes on shared tags stay residue.
 The tests use a few hand-written entries in `tests/data/tag_reference/`, not
 copies of these files. `python -m portkit.data.tags --pins` downloads every set
 and prints the sha256 to pin after bumping a version.
+
+## Vanilla block model templates (stairs, slabs, walls)
+
+Nothing from these is stored here or shipped either. The block converter needs
+the elements of a few vanilla parent models (`block/stairs`, `inner_stairs`,
+`outer_stairs`, `slab`, `slab_top`, `template_wall_post`, `template_wall_side`,
+`template_wall_side_tall`, `fence_post`, `fence_side`, `cube`, `cube_all`,
+`cube_column`, `cube_column_horizontal`, and their parent `block/block`).
+`portkit reference fetch` downloads `assets/model/data.json` of
+[misode/mcmeta](https://github.com/misode/mcmeta) `1.20.1-summary` at
+`15f05b54846b0cc5adebe63b245c7045ba105709` (the commit the vanilla-1.20.1 tag
+set pins), keeps only those models' `parent`, `textures` and `elements`, checks
+the result against the sha256 pinned in `portkit/data/models.py` and caches it
+as `models-vanilla-1.20.1-<sha12>.json`. Generated from Minecraft: (c) Mojang AB,
+subject to the [Minecraft EULA](https://www.minecraft.net/en-us/eula). The same
+derivation is identical for the 1.16.5, 1.19.2, 1.21.1, 1.21.8 and 26.1
+summaries, so one set serves every mod. The tests use hand-written shapes in
+`tests/data/model_templates.json`, not copies. `python -m portkit.data.models
+--pin` prints the sha256 to pin after bumping the commit.

@@ -647,3 +647,138 @@ def turn_rigid(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | No
             spec["cullface"] = _face_for(_turn_vector(_FACE_NORMAL[cull], xq, yq))
         faces[target] = spec
     return {**element, "from": new_start, "to": new_end, "faces": faces}, ""
+
+
+# --------------------------------------------------------------------------
+# Vanilla templates. A stairs, slab or wall model names a vanilla parent
+# (minecraft:block/stairs) and only fills in textures; the boxes are vanilla's.
+# portkit reads those parents from the fetched reference set
+# (portkit.data.models), never from a copy in the repository.
+def expand_template(model: dict) -> tuple[dict | None, str]:
+    """A flattened model with its vanilla template's elements filled in.
+
+    A model that already has elements comes back as it is. Otherwise its
+    vanilla parent chain is read from the reference templates: the first
+    elements found on the way up are the model's, textures merge with the
+    model's own taking precedence, and ``#name`` texture variables are resolved
+    to what they finally point at, so each face names a real texture.
+    """
+    if model.get("elements"):
+        return model, ""
+    parent = model.get("parent")
+    if not isinstance(parent, str):
+        return None, "model has no parent and no elements"
+    from ..data import FETCH_COMMAND
+    from ..data.models import templates
+
+    known = templates()
+    if known is None:
+        return None, (
+            f"model extends {parent!r}, whose boxes are in vanilla's model, and the "
+            f"vanilla model templates aren't cached (run `{FETCH_COMMAND}`)"
+        )
+    if parent not in known:
+        return None, f"model parent {parent!r} is not one of the vanilla templates portkit reads"
+
+    textures = dict(model.get("textures") or {})
+    elements = None
+    current: str | None = parent
+    for _ in range(_MAX_PARENT_DEPTH):
+        if current is None:
+            break
+        body = known.get(current)
+        if not isinstance(body, dict):
+            return None, f"vanilla template {current!r} is missing from the reference data"
+        for key, value in (body.get("textures") or {}).items():
+            textures.setdefault(key, value)
+        if elements is None and body.get("elements"):
+            elements = body["elements"]
+        current = body.get("parent") if isinstance(body.get("parent"), str) else None
+    if not elements:
+        return None, f"vanilla template {parent!r} has no elements"
+
+    # Java derives a face's uv from the box when the model names none; write it
+    # down, so the geometry says it rather than leaving it to Bedrock.
+    elements = json.loads(json.dumps(elements))
+    for element in elements:
+        for face, spec in (element.get("faces") or {}).items():
+            if isinstance(spec, dict) and spec.get("uv") is None and face in _FACE_NORMAL:
+                try:
+                    spec["uv"] = auto_uv(face, element["from"], element["to"])
+                except (KeyError, TypeError, ValueError):
+                    return None, f"vanilla template {parent!r} has an element without usable from/to"
+
+    resolved: dict = {}
+    for key, value in textures.items():
+        seen = {key}
+        while isinstance(value, str) and value.startswith("#") and value[1:] in textures and value[1:] not in seen:
+            seen.add(value[1:])
+            value = textures[value[1:]]
+        resolved[key] = value
+    return {**model, "elements": elements, "textures": resolved}, ""
+
+
+def turn_locked(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | None, str]:
+    """An element as a Java blockstate x/y turn WITH uvlock leaves it, or why not.
+
+    uvlock keeps every face's texture fixed to the world while the box moves.
+    That is exactly the uv Java derives from a face's position (see auto_uv),
+    so the case taken is the one we can state: an unrotated element whose faces
+    carry position-derived uvs (or none) and no texture rotation. The box moves
+    as turn_rigid moves it, each face lands where its normal now points, and
+    wears the position-derived uv of where it landed.
+    """
+    if not (x_degrees % 360 or y_degrees % 360):
+        return element, ""
+    if element.get("rotation"):
+        return None, "blockstate turns a model whose elements are themselves rotated"
+    try:
+        start = [float(c) for c in element["from"]]
+        end = [float(c) for c in element["to"]]
+    except (KeyError, TypeError, ValueError):
+        return None, "element is missing usable from/to coordinates"
+    for face, spec in (element.get("faces") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        corners = spec.get("uv")
+        if corners is not None:
+            try:
+                same = [float(v) for v in corners] == auto_uv(face, start, end)
+            except (TypeError, ValueError, KeyError):
+                same = False
+            if not same:
+                return None, (
+                    f"blockstate turns a model with a hand-set uv on its {face} face, and "
+                    "uvlock would replace it in a way that is not mapped yet"
+                )
+        if spec.get("rotation"):
+            return None, (
+                f"blockstate turns a model whose {face} face turns its texture, and uvlock "
+                "would undo that in a way that is not mapped yet"
+            )
+    moved, why = turn_rigid(element, x_degrees, y_degrees)
+    if moved is None:
+        return None, why
+    faces = {}
+    for face, spec in (moved.get("faces") or {}).items():
+        spec = {k: v for k, v in spec.items() if k != "rotation"}
+        spec["uv"] = auto_uv(face, moved["from"], moved["to"])
+        faces[face] = spec
+    return {**moved, "faces": faces}, ""
+
+
+def bounding_boxes(elements: list) -> tuple[list[dict] | None, str]:
+    """Bedrock collision boxes for unrotated elements, in the same mirrored
+    space cube() puts the geometry in."""
+    boxes = []
+    for element in elements:
+        if element.get("rotation"):
+            return None, "a rotated element has no box-shaped collision"
+        try:
+            x1, y1, z1 = (float(v) for v in element["from"])
+            x2, y2, z2 = (float(v) for v in element["to"])
+        except (KeyError, TypeError, ValueError):
+            return None, "element is missing usable from/to coordinates"
+        origin_x = _HALF - x2 if X_AXIS_IS_FLIPPED else x1 - _HALF
+        boxes.append({"origin": [origin_x, y1, z1 - _HALF], "size": [x2 - x1, y2 - y1, z2 - z1]})
+    return boxes, ""
