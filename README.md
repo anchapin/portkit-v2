@@ -164,9 +164,14 @@ mean, stdev and range of resolved and declined groups, steps, tokens and cost,
 how many runs resolved or declined each group, and each run's `agent_status`
 beside `valid`. The same numbers land in `OUT/repeat-summary.json`.
 
+`--agent-max-cost` caps each run; `--agent-max-total-cost` caps the sweep. Each
+run's dollar ceiling is tightened to what the sweep has left, and once it is
+spent no further run starts: those runs are listed under `skipped_runs` in
+`repeat-summary.json`, beside `total_cost_usd`.
+
 ```bash
 portkit convert fixtures/agent_mod/input /tmp/var --agent --repeat 3 \
-  --agent-max-cost 0.25 --agent-record /tmp/var/run.jsonl
+  --agent-max-cost 0.25 --agent-max-total-cost 0.50 --agent-record /tmp/var/run.jsonl
 ```
 
 ## Comparing providers
