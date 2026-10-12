@@ -18,7 +18,8 @@ pack) whose ``description.identifier`` is in a source-mod namespace or the
 conversion's namespace must be the Bedrock id, under the converter's own
 mapping (:func:`portkit.converters.items.bedrock_identifier`), of a Java id the
 source *registers*. The registered set is what the deterministic core already
-reads, minus item models:
+reads, minus item models (:func:`portkit.registry.registered_ids`, which the
+item converter applies to its own output too since #158):
 
 - a blockstate (a block, and the block item Java gives it);
 - a lang key (``item.<ns>.<name>`` / ``block.<ns>.<name>`` in a JSON lang
@@ -39,22 +40,22 @@ If a written item violates the rule, :func:`finding` produces an
 """
 from __future__ import annotations
 
-import difflib
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..converters.items import bedrock_identifier
-from .refs import (
-    _ID,
-    _VANILLA,
-    _bare,
-    _java_item_specs,
-    _load,
-    _walk_loot_names,
-    valid_namespaces,
-)
+from ..registry import _load, closest_id, registered_ids
+from .refs import _VANILLA, valid_namespaces
+
+__all__ = [
+    "UnknownItem",
+    "bedrock_ids",
+    "closest_id",
+    "finding",
+    "registered_ids",
+    "unknown_items",
+]
 
 
 @dataclass(frozen=True)
@@ -68,90 +69,7 @@ class UnknownItem:
         return f"{self.path}: item {self.ident!r}{hint}"
 
 
-# -- what Java registers -------------------------------------------------
-
-_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
-
-
-def _legacy_lang_ids(ns: str, path: Path) -> set[str]:
-    """Ids a 1.12 ``.lang`` file's ``item.<ns>.<key>.name`` keys stand for."""
-    found: set[str] = set()
-    try:
-        text = path.read_text(encoding="utf-8-sig", errors="replace")
-    except OSError:
-        return found
-    for line in text.splitlines():
-        key = line.split("=", 1)[0].strip()
-        parts = key.split(".")
-        if "=" not in line or len(parts) < 4 or parts[-1] != "name":
-            continue
-        if parts[0] not in ("item", "tile") or parts[1] != ns:
-            continue
-        base = parts[2]
-        found.add(f"{ns}:{base.lower()}")
-        found.add(f"{ns}:{_CAMEL.sub('_', base).lower()}")
-    return found
-
-
-def registered_ids(source_root: Path) -> set[str]:
-    """Item and block ids the Java source registers (item models excluded)."""
-    found: set[str] = set()
-    assets = source_root / "assets"
-    for ns_dir in sorted(p for p in assets.iterdir() if p.is_dir()) if assets.is_dir() else []:
-        ns = ns_dir.name
-        states = ns_dir / "blockstates"
-        if states.is_dir():
-            found.update(f"{ns}:{p.relative_to(states).with_suffix('').as_posix()}" for p in states.rglob("*.json"))
-        lang = ns_dir / "lang"
-        for path in sorted(lang.glob("*.json")) if lang.is_dir() else []:
-            data = _load(path)
-            for key in data if isinstance(data, dict) else []:
-                parts = key.split(".")
-                if len(parts) == 3 and parts[0] in ("item", "block") and parts[1] == ns:
-                    found.add(f"{ns}:{parts[2]}")
-        for path in sorted(lang.glob("*.lang")) if lang.is_dir() else []:
-            found |= _legacy_lang_ids(ns, path)
-    data_root = source_root / "data"
-    for ns_dir in sorted(p for p in data_root.iterdir() if p.is_dir()) if data_root.is_dir() else []:
-        ns = ns_dir.name
-        for folder in ("recipes", "recipe"):
-            for path in sorted((ns_dir / folder).rglob("*.json")) if (ns_dir / folder).is_dir() else []:
-                recipe = _load(path)
-                if not isinstance(recipe, dict):
-                    continue
-                for slot in ("result", "ingredient", "ingredients", "template", "base", "addition"):
-                    found.update(_java_item_specs(recipe.get(slot)))
-                if isinstance(recipe.get("key"), dict):
-                    for spec in recipe["key"].values():
-                        found.update(_java_item_specs(spec))
-        for folder in ("tags/items", "tags/item"):
-            for path in sorted((ns_dir / folder).rglob("*.json")) if (ns_dir / folder).is_dir() else []:
-                tag = _load(path)
-                if isinstance(tag, dict):
-                    found.update(_java_item_specs(tag.get("values")))
-        for folder in ("loot_tables", "loot_table"):
-            base = ns_dir / folder
-            if not base.is_dir():
-                continue
-            blocks = base / "blocks"
-            if blocks.is_dir():
-                found.update(f"{ns}:{p.relative_to(blocks).with_suffix('').as_posix()}" for p in blocks.rglob("*.json"))
-            for path in sorted(base.rglob("*.json")):
-                found.update(_walk_loot_names(_load(path)))
-    # 1.12 recipes live under assets/<ns>/recipes.
-    for ns_dir in sorted(p for p in assets.iterdir() if p.is_dir()) if assets.is_dir() else []:
-        recipes = ns_dir / "recipes"
-        for path in sorted(recipes.rglob("*.json")) if recipes.is_dir() else []:
-            recipe = _load(path)
-            if not isinstance(recipe, dict):
-                continue
-            found.update(_java_item_specs(recipe.get("result")))
-            for slot in ("ingredient", "ingredients"):
-                found.update(_java_item_specs(recipe.get(slot)))
-            if isinstance(recipe.get("key"), dict):
-                for spec in recipe["key"].values():
-                    found.update(_java_item_specs(spec))
-    return {_bare(i) for i in found if isinstance(i, str) and _ID.match(_bare(i))}
+# -- what Java registers: portkit.registry, shared with the converter ---
 
 
 def bedrock_ids(java_ids: set[str], namespace: str | None) -> set[str]:
@@ -163,26 +81,6 @@ def bedrock_ids(java_ids: set[str], namespace: str | None) -> set[str]:
         if namespace:
             out.add(bedrock_identifier(namespace, path))
     return out
-
-
-def closest_id(ident: str, java_ids: set[str]) -> str | None:
-    """The registered Java id nearest an invented one.
-
-    A per-variant id is usually a real id plus a suffix
-    (``basicdrawers_full2_jungle`` for ``basicdrawers``), so the longest
-    registered path the invented one extends wins; otherwise the nearest by
-    edit similarity, preferring the same namespace.
-    """
-    if not java_ids:
-        return None
-    ns, path = ident.split(":", 1)
-    same = sorted(i for i in java_ids if i.split(":", 1)[0] == ns) or sorted(java_ids)
-    stems = [i for i in same if path.startswith(i.split(":", 1)[1] + "_")]
-    if stems:
-        return max(stems, key=lambda i: (len(i), i))
-    paths = {i.split(":", 1)[1]: i for i in same}
-    match = difflib.get_close_matches(path, list(paths), n=1, cutoff=0.0)
-    return paths[match[0]] if match else same[0]
 
 
 # -- what the session wrote ----------------------------------------------
