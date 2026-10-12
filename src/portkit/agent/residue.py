@@ -76,13 +76,15 @@ from .trim import finding as trim_finding
 from .tools import SYSTEM_PROMPT, ToolBox
 
 # Kinds no session can make progress on with the tools it has: bytecode is not
-# readable text, a nested jar is not unpacked, and a namespace collision is a
-# decision about the pack, not a file to convert. They stay residue, skipped
-# with a reason rather than burning a session.
+# readable text, a nested jar is not unpacked, and a namespace or output
+# collision is a decision about the pack (or a converter bug), not a file to
+# convert. They stay residue, skipped with a reason rather than burning a
+# session.
 SKIP_KINDS = {
     "java_code": "compiled bytecode; the agent's tools read text files only",
     "nested_jar": "nested jars are not unpacked, so there is nothing to read",
     "namespace_collision": "a collision is a packaging decision, not a file to convert",
+    "output_collision": "two converters wrote one output path; a converter bug, not a file to convert",
 }
 
 # Where Bedrock keeps each kind of content. A hint, not a constraint: the
