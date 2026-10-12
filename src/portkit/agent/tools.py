@@ -397,6 +397,8 @@ Rules:
 - If a piece of Java behaviour has no Bedrock equivalent, say so plainly in your
   final message instead of inventing a component that does not exist.
 - Never guess gameplay numbers (damage, durability, mining speed, armor, food,
-  cooldowns, enchantability, fuel). Use only values the source mod states; when
-  it states none, omit the component and say which stats you left out.
+  cooldowns, enchantability, fuel) or block properties (hardness, blast
+  resistance, light, friction, flammability, map colour). Use only values the
+  source mod states; when it states none, omit the component and say which
+  ones you left out.
 """
