@@ -16,10 +16,11 @@ A group counts as resolved only when its session ended on its own, it wrote at
 least one file, the validator found no new error, and every item and tag its
 recipes name exists (in the pack, in the source mod, or in vanilla; see
 ``refs.py``), and every gameplay number on the items it wrote (damage,
-durability, ...) is one the source mod states (see ``stats.py``). A group
-that ends with either kind of fabrication is rolled back, with the reason
-listed. Declaring victory in prose
-is not enough, and neither is a session that wrote nothing because the Java behaviour
+durability, ...) is one the source mod states (see ``stats.py``), and
+every namespaced id in its files is in ``minecraft``, the conversion's
+namespace or one the mod ships (see ``refs.py``, #147). A group that ends
+with any kind of fabrication is rolled back, with the reason listed.
+Declaring victory in prose is not enough, and neither is a session that wrote nothing because the Java behaviour
 has no Bedrock form: that one stays residue, with the agent's reason attached,
 and is reported as ``declined`` rather than ``unresolved`` so a sweep can tell
 a reasoned "no Bedrock equivalent" from a session that gave up (#86).
@@ -48,7 +49,15 @@ from ..pack import ENGINE_FLOOR, manifest
 from ..validate import validate_tree
 from .budget import Budget, Spend
 from .loop import AgentSession, LLMClient
-from .refs import Ref, finding, unresolved_refs
+from .refs import (
+    Ref,
+    finding,
+    namespace_finding,
+    source_items,
+    unknown_namespace_refs,
+    unresolved_refs,
+    valid_namespaces,
+)
 from .stats import Stat, fabricated_stats
 from .stats import finding as stat_finding
 from .tools import SYSTEM_PROMPT, ToolBox
@@ -189,9 +198,11 @@ def build_task(group: ResidueGroup, source_root: Path, out_tree: Path, namespace
 class _TrackingToolBox(ToolBox):
     """A ToolBox that remembers what each write replaced, so a group can roll back."""
 
-    def __init__(self, source: Path, out_tree: Path):
+    def __init__(self, source: Path, out_tree: Path, namespace: str | None = None):
         super().__init__(source, out_tree)
         self.originals: dict[str, bytes | None] = {}
+        self.namespace = namespace
+        self._source_ids: set[str] | None = None  # the source does not change mid-session
 
     def _before_write(self, target: Path) -> None:
         rel = str(target.resolve().relative_to(self.out_tree.resolve()))
@@ -201,6 +212,28 @@ class _TrackingToolBox(ToolBox):
     def unresolved(self) -> list[Ref]:
         """Items and tags in this session's recipes that exist nowhere (#86)."""
         return unresolved_refs(self.out_tree, list(self.originals), self.source)
+
+    def unknown_namespaces(self, unresolved: list[Ref] | None = None) -> list[Ref]:
+        """Ids in this session's files whose namespace the mod does not have (#147).
+
+        An id the recipe check already reports for the same file is left to it,
+        so one bad ingredient is one finding, not two.
+        """
+        if self._source_ids is None:
+            self._source_ids = source_items(self.source)
+        if unresolved is None:
+            unresolved = self.unresolved()
+        reported = {(ref.path, ref.ident) for ref in unresolved}
+        return [
+            ref for ref in unknown_namespace_refs(
+                self.out_tree, list(self.originals), self.source, self.namespace,
+                self.originals, _source_ids=self._source_ids,
+            )
+            if (ref.path, ref.ident) not in reported
+        ]
+
+    def valid_namespaces(self) -> set[str]:
+        return valid_namespaces(self.source, self.namespace)
 
     def fabricated(self) -> list[Stat]:
         """Stats on this session's items that the source never states (#135)."""
@@ -212,7 +245,10 @@ class _TrackingToolBox(ToolBox):
         # and it hears about it here so it can fix the reference, not just get
         # rolled back at the end.
         report = super().validate()
-        extra = [finding(ref) for ref in self.unresolved()]
+        unresolved = self.unresolved()
+        extra = [finding(ref) for ref in unresolved]
+        valid = self.valid_namespaces()
+        extra += [namespace_finding(ref, valid) for ref in self.unknown_namespaces(unresolved)]
         extra += [stat_finding(stat) for stat in self.fabricated()]
         if extra:
             report["findings"] = [*report["findings"], *extra]
@@ -249,6 +285,8 @@ class GroupOutcome:
     # Item stats the session wrote that the source never states (#135); a group
     # with any is rolled back too.
     fabricated_stats: list[str] = field(default_factory=list)
+    # Ids in a namespace neither vanilla nor the mod's (#147); rolled back too.
+    unknown_namespaces: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -263,6 +301,7 @@ class GroupOutcome:
             "format_failures": self.format_failures,
             "unresolved_refs": self.unresolved_refs,
             "fabricated_stats": self.fabricated_stats,
+            "unknown_namespaces": self.unknown_namespaces,
             "note": self.note,
         }
 
@@ -423,7 +462,7 @@ class ResidueAgent:
             return outcome
 
         before = _error_set(out_tree)
-        box = _TrackingToolBox(source_root, out_tree)
+        box = _TrackingToolBox(source_root, out_tree, namespace)
         session = AgentSession(
             self.client, box, self.system, budget=self.budget, run_spend=spent
         )
@@ -455,10 +494,14 @@ class ResidueAgent:
         # leave an item nobody reviewed.
         fabricated = box.fabricated() if box.originals else []
         outcome.fabricated_stats = [stat.describe() for stat in fabricated]
+        # And an id in a namespace the mod does not have, e.g. "sd:" for
+        # storagedrawers (#147).
+        foreign = box.unknown_namespaces(unresolved) if box.originals else []
+        outcome.unknown_namespaces = [ref.describe() for ref in foreign]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
         introduced = sorted(_error_set(out_tree) - before) if box.originals else []
-        if box.originals and (unresolved or fabricated or introduced):
+        if box.originals and (unresolved or fabricated or foreign or introduced):
             box.rollback()
             outcome.status = "rolled_back"
             outcome.written = []
@@ -468,6 +511,10 @@ class ResidueAgent:
             if fabricated:
                 reasons.append(
                     f"stat(s) the source does not state: {'; '.join(outcome.fabricated_stats)}"
+                )
+            if foreign:
+                reasons.append(
+                    f"unknown namespace(s): {'; '.join(outcome.unknown_namespaces)}"
                 )
             if introduced:
                 # Name what broke, so a stub that never validated reads as one (#141).
