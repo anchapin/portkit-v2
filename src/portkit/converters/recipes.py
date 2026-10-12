@@ -4,6 +4,15 @@ Java recipe JSON and Bedrock recipe JSON are both declarative, so this is a
 mapping table, not an inference problem. Anything not in the table becomes an
 Unhandled item rather than a plausible-looking guess.
 
+Output names (#163): a recipe is written to ``recipes/<name>.json`` with the
+identifier ``<namespace>:<name>``. ``<name>`` is the file's stem when no other
+recipe file of the namespace shares it; when several do (Tinkers'
+``world/wood/{greenheart,skyroot}/planks.json``), every one of them is named by
+its whole path under ``recipes/``, folders joined with ``_``
+(``world_wood_greenheart_planks``). See :func:`recipe_names`. No output is
+ever written twice: a name another recipe already holds sends the later recipe
+to residue saying which one holds it.
+
 Ingredients that are tags with several members (#160) convert only when the
 tag's whole membership is known (see :mod:`portkit.converters.tags`: a shared
 ``c:``/``forge:``/``neoforge:``/``fabric:``/``minecraft:`` tag needs the fetched
@@ -49,6 +58,7 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
@@ -417,6 +427,51 @@ def _block_item(identifier: str, block_path: str) -> tuple[str, dict]:
     }
 
 
+def _qualified(rel: PurePosixPath) -> str:
+    """A recipe's whole path under ``recipes/``, folders joined by ``_``."""
+    return "_".join(rel.with_suffix("").parts)
+
+
+def recipe_names(rels: list[PurePosixPath]) -> tuple[dict[PurePosixPath, str], dict[PurePosixPath, str]]:
+    """Output name per recipe file (paths relative to ``recipes/``), and the refused ones.
+
+    A stem no other file shares is kept as it is, so a recipe that never
+    collided keeps the name (and identifier) it always had. A stem several
+    files share is qualified for every one of them by its whole path: none of
+    them is picked to keep the bare name, so the outcome depends only on which
+    files exist, never on the order they are read in. A qualified name can
+    still meet an unshared stem (``x/planks`` and ``x_planks``) or another
+    qualified name; the unshared stem keeps its name, and every qualified file
+    that lands on a taken name is refused, mapped to the file(s) it met.
+    """
+    by_stem: dict[str, list[PurePosixPath]] = {}
+    for rel in rels:
+        by_stem.setdefault(rel.stem, []).append(rel)
+    names: dict[PurePosixPath, str] = {}
+    for stem, group in by_stem.items():
+        if len(group) == 1:
+            names[group[0]] = stem
+    bare = {name: rel for rel, name in names.items()}
+    qualified: dict[str, list[PurePosixPath]] = {}
+    for stem, group in by_stem.items():
+        if len(group) > 1:
+            for rel in group:
+                qualified.setdefault(_qualified(rel), []).append(rel)
+    refused: dict[PurePosixPath, str] = {}
+    for name, group in qualified.items():
+        if name in bare or len(group) > 1:
+            for rel in group:
+                others = sorted({*(r.as_posix() for r in group if r != rel),
+                                 *([bare[name].as_posix()] if name in bare else [])})
+                refused[rel] = (
+                    f"recipe output name {name!r} (its path, because its file name is shared) "
+                    f"is also the name of {', '.join(others)}; refused rather than overwrite"
+                )
+        else:
+            names[group[0]] = name
+    return names, refused
+
+
 def _member_suffix(member: str) -> str:
     return member.replace(":", "_").replace("/", "_")
 
@@ -439,8 +494,33 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
     tag_resolver = TagResolver(mod)
     item_tags: dict[str, set[str]] = {}  # emitted item id -> native tags it must carry
     multi_used: dict[str, MultiMembers] = {}  # tags a converted recipe kept or expanded
-    for path in sorted(src.rglob("*.json")):
+    sources = sorted(src.rglob("*.json"))
+    names, refused = recipe_names([PurePosixPath(p.relative_to(src).as_posix()) for p in sources])
+    reserved = set(names.values())
+    owners: dict[str, str] = {}  # output path -> the source recipe that wrote it
+    identifiers: dict[str, str] = {}  # recipe identifier -> the source recipe that declared it
+
+    def taken(rel: str, outputs: list[tuple[str, str]]) -> str | None:
+        """Why one of ``outputs`` ((path, identifier)) can't be written, if one can't."""
+        for out_path, ident in outputs:
+            holder = owners.get(out_path) or identifiers.get(ident)
+            if holder is not None and holder != rel:
+                return (f"output {out_path} ({ident}) was already written by {holder}; "
+                        "refused rather than overwrite")
+        return None
+
+    def write(rel: str, out_path: str, ident: str, value: dict) -> None:
+        owners[out_path] = rel
+        identifiers[ident] = rel
+        result.files[out_path] = value
+
+    for path in sources:
         rel = result.claim(mod, path)
+        key = PurePosixPath(path.relative_to(src).as_posix())
+        if key in refused:
+            result.unhandled.append(Unhandled(rel, "recipe", refused[key]))
+            continue
+        name = names[key]
         try:
             recipe = json.loads(path.read_text())
         except json.JSONDecodeError as exc:
@@ -449,13 +529,15 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
 
         java_type = recipe.get("type")
         if java_type == "minecraft:smithing_transform":
-            converted = _smithing(recipe, f"{mod.namespace}:{path.stem}", rel, result, tag_resolver)
+            converted = _smithing(recipe, f"{mod.namespace}:{name}", rel, result, tag_resolver)
             if converted is not None:
                 body_key, body = converted
-                result.files[f"recipes/{path.stem}.json"] = {
-                    "format_version": "1.20.10",
-                    body_key: body,
-                }
+                out_path, ident = f"recipes/{name}.json", f"{mod.namespace}:{name}"
+                clash = taken(rel, [(out_path, ident)])
+                if clash:
+                    result.unhandled.append(Unhandled(rel, "recipe", clash))
+                    continue
+                write(rel, out_path, ident, {"format_version": "1.20.10", body_key: body})
             continue
         mapping = _SUPPORTED.get(java_type)
         if mapping is None:
@@ -466,7 +548,7 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
             continue
         bedrock_type, tags = mapping
 
-        identifier = f"{mod.namespace}:{path.stem}"
+        identifier = f"{mod.namespace}:{name}"
         body: dict = {
             "description": {"identifier": identifier},
             "tags": list(tags),
@@ -616,12 +698,20 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
         else:
             body["result"] = {**out, "count": count} if count != 1 else out
 
-        if len(variants) > 1 and any(
-            f"recipes/{path.stem}{suffix}.json" in result.files for suffix, _ in variants
+        outputs = [(f"recipes/{name}{suffix}.json", f"{identifier}{suffix}") for suffix, _ in variants]
+        if any(suffix for suffix, _ in variants) and any(
+            path_ in result.files or (suffix and f"{name}{suffix}" in reserved)
+            for (path_, _), (suffix, _) in zip(outputs, variants)
         ):
-            # A per-member file name another recipe already took: refuse rather
-            # than overwrite either one.
+            # A per-member file name another recipe already took or will take:
+            # refuse rather than overwrite either one.
             result.unhandled.append(Unhandled(rel, "recipe", _tag_reason(positions[failing[0]][0], tag_resolver)))
+            continue
+        clash = taken(rel, outputs)
+        if clash:
+            # Not reached on the corpus (names are unique by construction); the
+            # guard that keeps a future change from overwriting a recipe (#163).
+            result.unhandled.append(Unhandled(rel, "recipe", clash))
             continue
 
         for suffix, ingredients in variants:
@@ -638,10 +728,10 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
             else:
                 variant["ingredients"] = ingredients
                 variant["result"] = variant.pop("result")
-            result.files[f"recipes/{path.stem}{suffix}.json"] = {
+            write(rel, f"recipes/{name}{suffix}.json", f"{identifier}{suffix}", {
                 "format_version": "1.20.10",
                 bedrock_type: variant,
-            }
+            })
         for i, multi in multis.items():
             if multi is None:
                 continue
@@ -666,21 +756,21 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
             result.notes.append(
                 f"{rel}: tag {multi.found.tag!r} is carried by this mod's members, and "
                 f"{', '.join(multi.extras)} (which can't carry it) got their own recipe "
-                f"({path.stem}__<member>) beside the one taking the tag"
+                f"({name}__<member>) beside the one taking the tag"
             )
         if expanded is not None and variants[0][0] == "":
             member_tag = multis[expanded].found.tag
             result.notes.append(
                 f"{rel}: tag {member_tag!r} also holds {len(variants) - 1} of this mod's members "
                 f"that can't carry Bedrock's tag of that name, so each got its own recipe "
-                f"({path.stem}__<member>) beside the one taking the tag"
+                f"({name}__<member>) beside the one taking the tag"
             )
         elif expanded is not None:
             member_tag = multis[expanded].found.tag
             result.notes.append(
                 f"{rel}: tag {member_tag!r} has {len(variants)} members, which Bedrock "
                 f"can't group under one tag here, so the recipe was written once per member "
-                f"({path.stem}__<member>)"
+                f"({name}__<member>)"
             )
 
     for member, member_tags in sorted(item_tags.items()):

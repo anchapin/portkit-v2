@@ -32,7 +32,11 @@ mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶
 3. **Converters** run once per namespace (`converters/__init__.py:convert_all`),
    and `merge_namespaces` folds the results. Output that lands on the same path
    twice is combined where Bedrock allows it (`languages.json`, `.lang`, texture
-   indexes). Anything else is reported as a `namespace_collision`.
+   indexes). Anything else is reported as a `namespace_collision`. Within one
+   namespace, a converter may only replace an earlier converter's file when
+   both declare the same identifier; any other second write keeps the first
+   and is an `output_collision` (`ConversionResult.merge`). Recipes sharing a
+   file name in different folders are named by their path (#163).
 4. **Unowned files.** Any staged file that no converter `claim`ed becomes an
    `unowned` residue entry, grouped by directory. A file nobody opened is the
    one outcome the pipeline never allows silently.
