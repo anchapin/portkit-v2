@@ -1,0 +1,578 @@
+{
+ "label": "hand-written test shapes",
+ "models": {
+  "minecraft:block/block": {},
+  "minecraft:block/cube": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#down"
+      },
+      "east": {
+       "texture": "#east"
+      },
+      "north": {
+       "texture": "#north"
+      },
+      "south": {
+       "texture": "#south"
+      },
+      "up": {
+       "texture": "#up"
+      },
+      "west": {
+       "texture": "#west"
+      }
+     },
+     "from": [
+      0,
+      0,
+      0
+     ],
+     "to": [
+      16,
+      16,
+      16
+     ]
+    }
+   ],
+   "parent": "minecraft:block/block"
+  },
+  "minecraft:block/cube_all": {
+   "parent": "minecraft:block/cube",
+   "textures": {
+    "down": "#all",
+    "east": "#all",
+    "north": "#all",
+    "south": "#all",
+    "up": "#all",
+    "west": "#all"
+   }
+  },
+  "minecraft:block/cube_column": {
+   "parent": "minecraft:block/cube",
+   "textures": {
+    "down": "#end",
+    "east": "#side",
+    "north": "#side",
+    "south": "#side",
+    "up": "#end",
+    "west": "#side"
+   }
+  },
+  "minecraft:block/cube_column_horizontal": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#down"
+      },
+      "east": {
+       "texture": "#east"
+      },
+      "north": {
+       "texture": "#north"
+      },
+      "south": {
+       "texture": "#south"
+      },
+      "up": {
+       "rotation": 180,
+       "texture": "#up"
+      },
+      "west": {
+       "texture": "#west"
+      }
+     },
+     "from": [
+      0,
+      0,
+      0
+     ],
+     "to": [
+      16,
+      16,
+      16
+     ]
+    }
+   ],
+   "parent": "minecraft:block/block",
+   "textures": {
+    "down": "#end",
+    "east": "#side",
+    "north": "#side",
+    "south": "#side",
+    "up": "#end",
+    "west": "#side"
+   }
+  },
+  "minecraft:block/fence_post": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#texture"
+      },
+      "east": {
+       "texture": "#texture"
+      },
+      "north": {
+       "texture": "#texture"
+      },
+      "south": {
+       "texture": "#texture"
+      },
+      "up": {
+       "texture": "#texture"
+      },
+      "west": {
+       "texture": "#texture"
+      }
+     },
+     "from": [
+      6,
+      0,
+      6
+     ],
+     "to": [
+      10,
+      16,
+      10
+     ]
+    }
+   ]
+  },
+  "minecraft:block/fence_side": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#texture"
+      },
+      "east": {
+       "texture": "#texture"
+      },
+      "north": {
+       "texture": "#texture"
+      },
+      "up": {
+       "texture": "#texture"
+      },
+      "west": {
+       "texture": "#texture"
+      }
+     },
+     "from": [
+      7,
+      12,
+      0
+     ],
+     "to": [
+      9,
+      15,
+      9
+     ]
+    }
+   ]
+  },
+  "minecraft:block/inner_stairs": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#bottom"
+      },
+      "east": {
+       "texture": "#side"
+      },
+      "north": {
+       "texture": "#side"
+      },
+      "south": {
+       "texture": "#side"
+      },
+      "up": {
+       "texture": "#top"
+      },
+      "west": {
+       "texture": "#side"
+      }
+     },
+     "from": [
+      0,
+      0,
+      0
+     ],
+     "to": [
+      16,
+      8,
+      16
+     ]
+    },
+    {
+     "faces": {
+      "east": {
+       "texture": "#side"
+      },
+      "north": {
+       "texture": "#side"
+      },
+      "south": {
+       "texture": "#side"
+      },
+      "up": {
+       "texture": "#top"
+      },
+      "west": {
+       "texture": "#side"
+      }
+     },
+     "from": [
+      8,
+      8,
+      0
+     ],
+     "to": [
+      16,
+      16,
+      16
+     ]
+    },
+    {
+     "faces": {
+      "north": {
+       "texture": "#side"
+      },
+      "south": {
+       "texture": "#side"
+      },
+      "up": {
+       "texture": "#top"
+      },
+      "west": {
+       "texture": "#side"
+      }
+     },
+     "from": [
+      0,
+      8,
+      8
+     ],
+     "to": [
+      8,
+      16,
+      16
+     ]
+    }
+   ]
+  },
+  "minecraft:block/outer_stairs": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#bottom"
+      },
+      "east": {
+       "texture": "#side"
+      },
+      "north": {
+       "texture": "#side"
+      },
+      "south": {
+       "texture": "#side"
+      },
+      "up": {
+       "texture": "#top"
+      },
+      "west": {
+       "texture": "#side"
+      }
+     },
+     "from": [
+      0,
+      0,
+      0
+     ],
+     "to": [
+      16,
+      8,
+      16
+     ]
+    },
+    {
+     "faces": {
+      "east": {
+       "texture": "#side"
+      },
+      "north": {
+       "texture": "#side"
+      },
+      "south": {
+       "texture": "#side"
+      },
+      "up": {
+       "texture": "#top"
+      },
+      "west": {
+       "texture": "#side"
+      }
+     },
+     "from": [
+      8,
+      8,
+      8
+     ],
+     "to": [
+      16,
+      16,
+      16
+     ]
+    }
+   ]
+  },
+  "minecraft:block/slab": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#bottom"
+      },
+      "east": {
+       "texture": "#side"
+      },
+      "north": {
+       "texture": "#side"
+      },
+      "south": {
+       "texture": "#side"
+      },
+      "up": {
+       "texture": "#top"
+      },
+      "west": {
+       "texture": "#side"
+      }
+     },
+     "from": [
+      0,
+      0,
+      0
+     ],
+     "to": [
+      16,
+      8,
+      16
+     ]
+    }
+   ],
+   "parent": "minecraft:block/block"
+  },
+  "minecraft:block/slab_top": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#bottom"
+      },
+      "east": {
+       "texture": "#side"
+      },
+      "north": {
+       "texture": "#side"
+      },
+      "south": {
+       "texture": "#side"
+      },
+      "up": {
+       "texture": "#top"
+      },
+      "west": {
+       "texture": "#side"
+      }
+     },
+     "from": [
+      0,
+      8,
+      0
+     ],
+     "to": [
+      16,
+      16,
+      16
+     ]
+    }
+   ]
+  },
+  "minecraft:block/stairs": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#bottom"
+      },
+      "east": {
+       "texture": "#side"
+      },
+      "north": {
+       "texture": "#side"
+      },
+      "south": {
+       "texture": "#side"
+      },
+      "up": {
+       "texture": "#top"
+      },
+      "west": {
+       "texture": "#side"
+      }
+     },
+     "from": [
+      0,
+      0,
+      0
+     ],
+     "to": [
+      16,
+      8,
+      16
+     ]
+    },
+    {
+     "faces": {
+      "east": {
+       "texture": "#side"
+      },
+      "north": {
+       "texture": "#side"
+      },
+      "south": {
+       "texture": "#side"
+      },
+      "up": {
+       "texture": "#top"
+      },
+      "west": {
+       "texture": "#side"
+      }
+     },
+     "from": [
+      8,
+      8,
+      0
+     ],
+     "to": [
+      16,
+      16,
+      16
+     ]
+    }
+   ],
+   "parent": "minecraft:block/block"
+  },
+  "minecraft:block/template_wall_post": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#wall"
+      },
+      "east": {
+       "texture": "#wall"
+      },
+      "north": {
+       "texture": "#wall"
+      },
+      "south": {
+       "texture": "#wall"
+      },
+      "up": {
+       "texture": "#wall"
+      },
+      "west": {
+       "texture": "#wall"
+      }
+     },
+     "from": [
+      4,
+      0,
+      4
+     ],
+     "to": [
+      12,
+      16,
+      12
+     ]
+    }
+   ]
+  },
+  "minecraft:block/template_wall_side": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#wall"
+      },
+      "east": {
+       "texture": "#wall"
+      },
+      "north": {
+       "texture": "#wall"
+      },
+      "up": {
+       "texture": "#wall"
+      },
+      "west": {
+       "texture": "#wall"
+      }
+     },
+     "from": [
+      5,
+      0,
+      0
+     ],
+     "to": [
+      11,
+      14,
+      8
+     ]
+    }
+   ]
+  },
+  "minecraft:block/template_wall_side_tall": {
+   "elements": [
+    {
+     "faces": {
+      "down": {
+       "texture": "#wall"
+      },
+      "east": {
+       "texture": "#wall"
+      },
+      "north": {
+       "texture": "#wall"
+      },
+      "up": {
+       "texture": "#wall"
+      },
+      "west": {
+       "texture": "#wall"
+      }
+     },
+     "from": [
+      5,
+      0,
+      0
+     ],
+     "to": [
+      11,
+      16,
+      8
+     ]
+    }
+   ]
+  }
+ },
+ "set": "models-vanilla-1.20.1"
+}
