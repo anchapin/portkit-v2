@@ -1,0 +1,12 @@
+{"set": "forge-1.20.1", "note": "Minimal hand-written test fixture in the shape `portkit reference fetch` caches (#160). A few entries only; the real data is fetched, never committed.",
+ "tags": {
+  "forge:glass/colorless": ["minecraft:glass"],
+  "forge:glass": ["#forge:glass/colorless", "#forge:glass/tinted"],
+  "forge:glass/tinted": ["minecraft:tinted_glass"],
+  "forge:chests/wooden": ["minecraft:chest", "minecraft:trapped_chest"],
+  "forge:rods/wooden": ["minecraft:stick"],
+  "forge:dyes/red": ["minecraft:red_dye"],
+  "forge:stone": ["minecraft:stone", "minecraft:granite", {"id": "#forge:stone/extra", "required": false}],
+  "forge:sand": ["#minecraft:sand_like"],
+  "forge:planks_alias": ["#minecraft:planks"]
+ }}
