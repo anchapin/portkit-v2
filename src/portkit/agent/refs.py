@@ -54,10 +54,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
+from ..registry import _ID, _bare, _java_item_specs, _load, _walk_loot_names
+
 _VANILLA = "minecraft"
-_ID = re.compile(r"^[a-z0-9_.\-]+:[a-z0-9_./\-]+$")
-# Bedrock still accepts a legacy aux value on an item id: "minecraft:dye:4".
-_AUX = re.compile(r"^([^:]+:[^:]+):\d+$")
 
 
 @dataclass(frozen=True)
@@ -69,18 +68,6 @@ class Ref:
 
     def describe(self) -> str:
         return f"{self.path} {self.where}: {self.kind} {self.ident!r}"
-
-
-def _load(path: Path):
-    try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-
-
-def _bare(ident: str) -> str:
-    match = _AUX.match(ident)
-    return match.group(1) if match else ident
 
 
 # -- what a recipe names -------------------------------------------------
@@ -151,30 +138,6 @@ def pack_known(out_tree: Path) -> Known:
                 tags.update(t for t in declared["tags"] if isinstance(t, str))
             tags.update(name[len("tag:"):] for name in components if name.startswith("tag:"))
     return Known(items, tags)
-
-
-def _java_item_specs(spec) -> Iterator[str]:
-    if isinstance(spec, str):
-        if not spec.startswith("#"):
-            yield spec
-    elif isinstance(spec, dict):
-        for key in ("item", "id"):
-            if isinstance(spec.get(key), str):
-                yield spec[key]
-    elif isinstance(spec, list):
-        for entry in spec:
-            yield from _java_item_specs(entry)
-
-
-def _walk_loot_names(node) -> Iterator[str]:
-    if isinstance(node, dict):
-        if node.get("type") in ("minecraft:item", "item") and isinstance(node.get("name"), str):
-            yield node["name"]
-        for value in node.values():
-            yield from _walk_loot_names(value)
-    elif isinstance(node, list):
-        for value in node:
-            yield from _walk_loot_names(value)
 
 
 def source_items(source_root: Path) -> set[str]:
