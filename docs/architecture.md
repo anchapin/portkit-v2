@@ -92,7 +92,8 @@ never a guess.
 
 - `loop.py`: about 100 lines. Send messages, receive a tool call, run it, append
   the result, repeat until the model stops or a budget runs out.
-- `tools.py`: `read_source`, `list_source`, `write_output` (JSON only),
+- `tools.py`: `read_source`, `list_source`, `write_output` (one JSON file, sent
+  as JSON text in `content_json`),
   `set_lang_entries` (upserts `key=value` lines into a resource pack `.lang`
   file), `lookup_bedrock` / `list_bedrock_topics` and `validate`, plus the
   system prompt.

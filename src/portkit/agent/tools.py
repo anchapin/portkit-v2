@@ -19,6 +19,13 @@ from . import reference
 _LANG_PATH = re.compile(r"resource_pack/texts/([a-z]{2}_[A-Z]{2})\.lang")
 
 
+# Arguments a tool still takes but no longer advertises, and the declared
+# argument each stands in for (#142). ``write_output`` took the file as a JSON
+# object before ``content_json``; recorded transcripts and models that ignore
+# the schema still send it, and that is not a format failure.
+_LEGACY_ARGS: dict[str, dict[str, str]] = {"write_output": {"content": "content_json"}}
+
+
 class ToolBox:
     def __init__(self, source: Path, out_tree: Path):
         self.source = source
@@ -55,8 +62,10 @@ class ToolBox:
         if not isinstance(arguments, dict):
             return f"{name}: arguments are {type(arguments).__name__}, not an object"
         params = self._tools[name][0].get("parameters") or {}
-        declared = set(params.get("properties") or {})
-        missing = [a for a in params.get("required") or [] if a not in arguments]
+        legacy = _LEGACY_ARGS.get(name, {})
+        declared = set(params.get("properties") or {}) | set(legacy)
+        given = set(arguments) | {legacy[a] for a in arguments if a in legacy}
+        missing = [a for a in params.get("required") or [] if a not in given]
         if missing:
             return f"{name}: missing required argument(s) {', '.join(missing)}"
         unknown = sorted(set(arguments) - declared)
@@ -100,15 +109,23 @@ class ToolBox:
                 "name": "write_output",
                 "description": (
                     "Write a JSON file into the Bedrock output tree, e.g. "
-                    "'behavior_pack/entities/foo.json'. Overwrites."
+                    "'behavior_pack/items/foo.json'. Pass the whole file as JSON text "
+                    "in content_json, e.g. '{\"format_version\": \"1.21.40\", "
+                    "\"minecraft:item\": {...}}'. Overwrites."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string"},
-                        "content": {"type": "object"},
+                        "path": {"type": "string", "description": "path inside the output tree"},
+                        # A string, not a free-form object (#142): Gemini's function
+                        # schemas have no way to say "any object", and its calls came
+                        # back as stubs like {"minecraft": "item"}.
+                        "content_json": {
+                            "type": "string",
+                            "description": "the complete file as JSON text",
+                        },
                     },
-                    "required": ["path", "content"],
+                    "required": ["path", "content_json"],
                 },
             },
             self.write_output,
@@ -211,21 +228,43 @@ class ToolBox:
     def _before_write(self, target: Path) -> None:
         """Hook called before any file in the output tree changes."""
 
-    def write_output(self, path: str, content: dict) -> dict:
-        # ``content`` must be a JSON object. A model that hands us a string
-        # would write ``json.dumps("foo")`` = ``'"foo"'`` to disk, a valid JSON
-        # document but useless as a Bedrock file. Tell the loop the call was
-        # bad instead of producing one of those — the model can fix it on the
-        # next step.
-        if not isinstance(content, dict):
+    def write_output(self, path: str, content_json: Any = None, content: Any = None) -> dict:
+        """Write one JSON document. ``content_json`` is the file as JSON text
+        (#142); ``content``, the file as an object, is the older form, still
+        taken but no longer advertised."""
+        if (content_json is None) == (content is None):
+            return {
+                "error": (
+                    "pass the file exactly once, as JSON text in content_json"
+                    if content is None
+                    else "pass the file once: content_json (JSON text) or content, not both"
+                )
+            }
+        note = None
+        if content_json is not None:
+            content, problem = _parse_document(content_json)
+            if problem:
+                return problem
+        elif not isinstance(content, dict):
+            # A model that hands ``content`` a string would write
+            # ``json.dumps("foo")`` = ``'"foo"'`` to disk, a valid JSON document
+            # but useless as a Bedrock file. Tell the loop the call was bad
+            # instead of producing one of those.
             return {
                 "error": (
                     f"content must be a JSON object, got {type(content).__name__}; "
-                    "pass Bedrock JSON like {\"minecraft:recipe_shapeless\": {...}}"
+                    "pass the whole file as JSON text in content_json"
                 ),
                 "received_type": type(content).__name__,
                 "received_preview": repr(content)[:120],
             }
+        if "minecraft" in content:
+            # What a namespaced key such as "minecraft:item" became in Gemini 3.8
+            # Flash's object-valued calls (#142).
+            note = (
+                "your file has a bare 'minecraft' key, usually a 'minecraft:...' key cut at "
+                "the colon; write the namespaced key, as JSON text in content_json"
+            )
         target = self._resolve(self.out_tree, path)
         self._before_write(target)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -235,7 +274,11 @@ class ToolBox:
         if key in self._unvalidated:
             # Rewriting a file again and again without asking the validator is
             # guessing (#139); say so, once per overwrite.
-            result["note"] = "overwrote your previous version without validating it; run validate"
+            note = "; ".join(filter(None, [
+                note, "overwrote your previous version without validating it; run validate"
+            ]))
+        if note:
+            result["note"] = note
         self.written_paths.add(key)
         self._unvalidated.add(key)
         return result
@@ -306,6 +349,35 @@ class ToolBox:
         return reference.list_topics(prefix)
 
 
+def _parse_document(text: Any) -> tuple[dict | None, dict | None]:
+    """``content_json`` -> (document, None), or (None, a tool error).
+
+    A model that sends an object anyway gets it used as is. A parse error names
+    the line and column, which is what the model needs to fix it.
+    """
+    if isinstance(text, dict):
+        return text, None
+    if not isinstance(text, str):
+        return None, {"error": f"content_json must be JSON text, got {type(text).__name__}"}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        lines = text.splitlines() or [""]
+        near = lines[exc.lineno - 1][max(0, exc.colno - 30): exc.colno + 30] if exc.lineno <= len(lines) else ""
+        return None, {
+            "error": f"content_json is not valid JSON: {exc.msg} at line {exc.lineno} column {exc.colno}",
+            "line": exc.lineno,
+            "column": exc.colno,
+            "near": near,
+        }
+    if not isinstance(data, dict):
+        return None, {
+            "error": f"content_json must hold a JSON object, got {type(data).__name__}; "
+            "a Bedrock file is {\"format_version\": ..., \"minecraft:...\": {...}}"
+        }
+    return data, None
+
+
 SYSTEM_PROMPT = """You convert leftover Minecraft Java mod content to Bedrock Edition.
 
 The deterministic converters already handled textures, recipes and lang files.
@@ -313,7 +385,8 @@ You only see what they refused to guess at.
 
 Rules:
 - Read the source file before writing anything.
-- Write Bedrock JSON with write_output, then call validate.
+- Write Bedrock JSON with write_output, the whole file as JSON text in
+  content_json, then call validate.
 - Name new blocks and items with set_lang_entries, which adds lines to an
   existing .lang file instead of replacing it.
 - Unsure how a Bedrock component, recipe or file is spelled? Call
