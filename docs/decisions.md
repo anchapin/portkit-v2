@@ -27,6 +27,37 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: agent-written armour-trim recipes may only name vanilla trim slots
+
+- **Decision:** a written `minecraft:recipe_smithing_trim` may only name a
+  `template` and an `addition` that are vanilla `minecraft:` items or tags.
+  Any other id in either slot, item or tag, in the mod's namespace or any
+  other, makes `validate` report `agent.unresolved_trim`, and a group that
+  ends with any is rolled back, listed in `unresolved_trims` and in the note;
+  the agent is told to write nothing and decline. Vanilla ids and tags are
+  taken on faith, as `refs.py` does (a complete vanilla list is Mojang data we
+  don't vendor). `base` is not gated: Bedrock's recipe matcher accepts a
+  trimmable armour, vanilla or modded, so only the two slots that decide
+  whether the trim applies anything are checked.
+- **Why:** in the #86 sweep mistral-large-4-0 wrote agent_mod's steel_trim as
+  a Bedrock `recipe_smithing_trim` whose addition was `examplemod:steel_ingot`.
+  The structural oracle only checks the three slots are non-empty, so the
+  recipe validated and the group counted as resolved, but Bedrock add-ons
+  can't register trim materials or patterns, so a mod item in either slot
+  applies nothing in game.
+- **Rejected:** an escape hatch accepting a mod id when the source ships
+  `data/<ns>/trim_material/<id>.json` or `trim_pattern/<id>.json` with `<id>`
+  equal to the item id (PR #150's first version): Java keys those files by
+  material or pattern name (`steel.json`) with the item in its `ingredient`
+  (`template_item` for patterns) field, so the match was wrong, and Bedrock
+  can't use the definition anyway. Also rejected: stripping the recipe and
+  keeping the residue as declined (rewrites the agent's file behind its back
+  after the validator already named the slot, like the recipe ref check);
+  checking `base` against vanilla (a trimmable mod armour is the point of a
+  modded trim, and Bedrock accepts it); accepting any mod `addition` as "the
+  mod's call" (the sweep finding is why this guard exists).
+- **Links:** #86, supersedes #150.
+
 ## 2026-10-12: agent-written block properties and map colours need a source
 
 - **Decision:** the fabricated-stat guard (#135) now covers agent-written
