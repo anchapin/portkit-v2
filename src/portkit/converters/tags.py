@@ -285,6 +285,33 @@ class TagResolver:
                 dropped.append(ref)
         return MultiMembers(tag=tag, members=kept, dropped=dropped, sources=list(full.sources))
 
+    def mod_additions(self, tag: str) -> list[str] | None:
+        """Members other than vanilla's that this addon holds in a vanilla tag.
+
+        For a tag Bedrock also has under the same name (``minecraft:planks``):
+        the ids in this mod's namespace that the merged membership (#160) puts
+        in it, nested tags included. ``[]`` when the jar adds nothing, so the
+        Bedrock tag alone means the same set. None when the jar's own file says
+        something the vanilla tag can't express: the membership isn't known, or
+        the file sets ``"replace": true`` and so may drop vanilla members.
+        Without a tag file in the jar and without reference data, ``[]``: the
+        jar can only add to the tag through its own file.
+        """
+        path = self._tag_file(tag)
+        if path is not None:
+            try:
+                data = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                return None
+            if isinstance(data, dict) and data.get("replace") is True:
+                return None
+        found = self.members(tag)
+        if found is None:
+            if path is None and self.reference.values(tag) is None:
+                return []
+            return None
+        return [m for m in found.members if not m.startswith("minecraft:")]
+
     def unknown_reason(self, tag: str) -> str | None:
         """Why the tag's full membership is unknown, or None when it is known."""
         full = self._full(tag)

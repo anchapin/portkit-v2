@@ -185,6 +185,28 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
             )
         )
 
+    # An item form written for a block (recipes._block_item) goes with it.
+    blocks = {
+        ((body.get("minecraft:block") or {}).get("description") or {}).get("identifier")
+        for path, body in result.files.items()
+        if path.startswith("blocks/") and isinstance(body, dict)
+    }
+    for path in sorted(result.files):
+        body = result.files[path]
+        if not path.startswith("items/") or not isinstance(body, dict):
+            continue
+        placer = ((body.get("minecraft:item") or {}).get("components") or {}).get("minecraft:block_placer")
+        if not isinstance(placer, dict):
+            continue
+        block = placer.get("block")
+        if (placer.get("replace_block_item") is True and isinstance(block, str)
+                and not block.startswith("minecraft:") and block not in blocks):
+            # The block's own residue entry already covers it.
+            del result.files[path]
+            result.notes.append(
+                f"{path}: dropped with its block {block}, which did not convert"
+            )
+
     if borrowed:
         index = dict(result.files.get("textures/item_texture.json") or {
             "resource_pack_name": namespace,

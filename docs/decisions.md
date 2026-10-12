@@ -27,6 +27,54 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: a mod's own members of a Bedrock vanilla tag carry that tag; Bedrock's tag alone never stands in for them
+
+- **Decision:** A Java recipe ingredient naming one of the vanilla tags
+  Bedrock also has under the same name (`_BEDROCK_VANILLA_TAGS`:
+  `minecraft:planks`, `minecraft:wooden_slabs`, `minecraft:logs`, ...) passes
+  through as Bedrock's tag only when the mod adds nothing to it: no tag file
+  in the jar, or a merged membership (#160 rules, nested tags included) whose
+  every kept member is vanilla. When the mod adds its own members, the recipe
+  still takes Bedrock's tag, and each of those members carries it: an emitted
+  item gets it in `minecraft:tags` (format 1.20.50); an emitted block gets an
+  item form, `items/<block>.json` with the block's identifier,
+  `minecraft:block_placer` `{"block": <id>, "replace_block_item": true}`,
+  `minecraft:display_name` = the block's `tile.<id>.name` key, and
+  `minecraft:tags` (format 1.21.50). Only members the Java data puts in the
+  tag are tagged; nothing is added by name. A member that can't carry it (a
+  block that already has its own item file, now marked `block_and_item` by
+  `emitted_definitions`) falls back, for a single-slot ingredient, to the tag
+  recipe plus one recipe per mod member (`<recipe>__<member>.json`, at most
+  16); a multi-slot one, a member this conversion didn't emit, a jar file that
+  sets `"replace": true` (it may drop vanilla members) or an unknown
+  membership (no reference data) stays residue with the reason. When a block
+  is withdrawn later for a texture that didn't convert, its item form goes
+  with it. The validator gains `xref.block_placer` (error: a block placer
+  naming a block the pack doesn't declare, or `replace_block_item` on an item
+  whose identifier isn't the block's) and no longer warns
+  `identifier.block_and_item` for a block whose item form says so through
+  `replace_block_item`.
+- **Why:** Bedrock's `minecraft:planks` holds vanilla planks only, so passing
+  the tag through dropped the planks the mod adds (#87 in the narrowing
+  direction). Bedrock lets a block's item carry item tags that recipes match:
+  `replace_block_item` "registers the item as the item for this block"
+  (learn.microsoft.com, Items Documentation - minecraft:block_placer, format
+  1.21.50; Customizing the Item for a Block), and vanilla does exactly this:
+  Mojang/bedrock-samples `behavior_pack/items/shelf_mushroom.json` replaces
+  the shelf mushroom block's item and tags it `minecraft:mushrooms_for_stew`,
+  which `recipes/mushroom_stew.json` takes as a tag (main @ 46ba6ea). Corpus:
+  5 recipes now keep the mod's members instead of narrowing (Silent Gear
+  `refabricator`, `upgrade_base`; Tinkers `pattern`, `part_chest`,
+  `tinkers_chest`), with 5 new item forms (Silent Gear netherwood planks,
+  Tinkers greenheart/skyroot/bloodshroom/enderbark planks).
+- **Rejected:** Passing the tag through and dropping the mod's members (the
+  #161 behaviour, a silent narrowing); making these recipes residue (they have
+  a faithful form); one recipe per member for every tag (needs one slot and
+  forbids mixing members, so only the fallback); block tags (`tag:minecraft:planks`
+  block components are block tags, which recipes don't read); tagging blocks
+  by name (`*_planks`) without the Java tag saying so (fabrication).
+- **Links:** #161, #160, #87.
+
 ## 2026-10-12: shared tags take their full membership from fetched loader and vanilla data, and fully known multi-member tags convert
 
 - **Decision:** A tag in the `minecraft:`, `c:`, `forge:`, `neoforge:` or
