@@ -27,6 +27,33 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: write_output takes the file as JSON text, for every provider
+
+- **Decision:** `write_output` advertises `path` and `content_json` (a string:
+  the whole file as JSON text), both required, for every provider. No tool
+  schema has a free-form object any more (a test enforces it). A parse error
+  comes back as a tool error with `line`, `column` and the text `near` it;
+  JSON text that isn't an object is refused. The old `content` object is still
+  taken, though no longer advertised, and is not counted as a format failure
+  (recorded transcripts and models that ignore the schema send it); exactly
+  one of the two is required. A file with a bare `minecraft` key gets a note
+  that it is usually a `minecraft:...` key cut at the colon.
+- **Why:** Gemini 3.8 Flash, via OpenRouter, sent only stubs
+  (`{"format_version": ..., "minecraft": null | "item" | true}`) for
+  `content: {"type": "object"}`. Gemini's function declarations take "a select
+  subset of an OpenAPI 3.0 schema object" with no `additionalProperties`
+  (https://ai.google.dev/api/generate-content#v1beta.Schema); free-form objects
+  have been rejected or ignored, and the workaround Google's forum gives is a
+  JSON string (https://discuss.ai.google.dev/t/gemini-api-2-0-flash-exp-requires-non-empty-properties-for-open-ended-object-parameters/64086). One tool surface for all
+  providers keeps the eval matrix comparing like with like.
+- **Rejected:** Advertising both params (Gemini would still see, and could
+  still pick, the free-form object; OpenAPI-subset `required` can't say
+  "exactly one"); a Gemini-only schema (two tool surfaces, and OpenRouter model
+  names don't reliably say which backend serves them); sending
+  `parametersJsonSchema` on the native endpoint (doesn't reach the OpenRouter
+  path, and `additionalProperties` there has drawn `MALFORMED_FUNCTION_CALL`).
+- **Links:** #142, #141.
+
 ## 2026-10-11: A file that is not the document its folder holds is an error
 
 - **Decision:** `doc.unknown_shape` (error) for a `.json` file in a document
