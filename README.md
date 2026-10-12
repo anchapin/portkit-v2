@@ -150,7 +150,14 @@ their own values. The same goes for `minecraft:recipe_smithing_trim`: every
 A Bedrock add-on can't apply a mod's trim pattern or material, so a trim
 slot naming any other id applies nothing in game; a written recipe there is
 `agent.unresolved_trim` and rolls the group back, listed in
-`unresolved_trims`. Anything unresolved
+`unresolved_trims`. An item the agent defines in the mod's or the conversion's
+namespace must be one the Java source registers (a blockstate, a lang key, an
+item a recipe, item tag or loot table names), under the converter's own id
+mapping; an item model file alone is not a registration. A per-variant item
+such as `storagedrawers:basicdrawers_full2_jungle`, where Java registers one
+`basicdrawers` and keeps the variant in block state or NBT, is
+`agent.unknown_item` (the finding names the closest real Java id) and rolls the
+group back, listed in `unknown_items`. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Its `status` is `complete` (every group resolved), `partial` or `failed`
 (none did). That is separate from `valid` and from the exit code, which are

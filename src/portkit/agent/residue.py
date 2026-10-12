@@ -22,7 +22,9 @@ every namespaced id in its files is in ``minecraft``, the conversion's
 namespace or one the mod ships (see ``refs.py``, #147), and every block
 state it declares or tests is one the Java blockstate has, with a value Java
 lists (see ``states.py``, #149), and every trim recipe it wrote names only
-vanilla ``minecraft:`` template and addition slots (see ``trim.py``, #86).
+vanilla ``minecraft:`` template and addition slots (see ``trim.py``, #86),
+and every item it defines in the mod's or the conversion's namespace is one
+the Java source registers (see ``items.py``, #86).
 A group that ends
 with any kind of fabrication is rolled back, with the reason listed.
 Declaring victory in prose is not enough, and neither is a session that wrote nothing because the Java behaviour
@@ -53,6 +55,8 @@ from ..model import Unhandled
 from ..pack import ENGINE_FLOOR, manifest
 from ..validate import validate_tree
 from .budget import Budget, Spend
+from .items import UnknownItem, registered_ids, unknown_items
+from .items import finding as item_finding
 from .loop import AgentSession, LLMClient
 from .refs import (
     Ref,
@@ -213,6 +217,7 @@ class _TrackingToolBox(ToolBox):
         self.originals: dict[str, bytes | None] = {}
         self.namespace = namespace
         self._source_ids: set[str] | None = None  # the source does not change mid-session
+        self._registered: set[str] | None = None  # likewise, for the item guard
 
     def _before_write(self, target: Path) -> None:
         rel = str(target.resolve().relative_to(self.out_tree.resolve()))
@@ -257,6 +262,15 @@ class _TrackingToolBox(ToolBox):
         """Written trim recipes whose template or addition is not vanilla (#86)."""
         return fabricated_trims(self.out_tree, list(self.originals), self.source)
 
+    def unknown_items(self) -> list[UnknownItem]:
+        """Items this session defined that the Java source never registers (#86)."""
+        if self._registered is None:
+            self._registered = registered_ids(self.source)
+        return unknown_items(
+            self.out_tree, list(self.originals), self.source, self.namespace, self.originals,
+            _registered=self._registered,
+        )
+
     def validate(self) -> dict:
         # The structural validator only warns on an undeclared item, and does not
         # look at tags at all. What the agent wrote is held to the stricter rule,
@@ -270,6 +284,7 @@ class _TrackingToolBox(ToolBox):
         extra += [stat_finding(stat) for stat in self.fabricated()]
         extra += [state_finding(bad) for bad in self.invented()]
         extra += [trim_finding(trim) for trim in self.unresolved_trims()]
+        extra += [item_finding(item) for item in self.unknown_items()]
         if extra:
             report["findings"] = [*report["findings"], *extra]
             report["error_count"] += len(extra)
@@ -312,6 +327,9 @@ class GroupOutcome:
     # Trim recipes the session wrote whose template or addition is not vanilla
     # (#86); a group with any is rolled back too.
     unresolved_trims: list[str] = field(default_factory=list)
+    # Items the session defined whose id the Java source never registers, e.g.
+    # a per-variant item (#86); rolled back too.
+    unknown_items: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -329,6 +347,7 @@ class GroupOutcome:
             "unknown_namespaces": self.unknown_namespaces,
             "invented_states": self.invented_states,
             "unresolved_trims": self.unresolved_trims,
+            "unknown_items": self.unknown_items,
             "note": self.note,
         }
 
@@ -534,11 +553,16 @@ class ResidueAgent:
         # file would validate and the trim would do nothing in game.
         bad_trims = box.unresolved_trims() if box.originals else []
         outcome.unresolved_trims = [trim.describe() for trim in bad_trims]
+        # And an item the Java source never registers, such as a per-variant
+        # item for what Java keeps in block state or NBT (#86).
+        bad_items = box.unknown_items() if box.originals else []
+        outcome.unknown_items = [item.describe() for item in bad_items]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
         introduced = sorted(_error_set(out_tree) - before) if box.originals else []
         if box.originals and (
-            unresolved or fabricated or foreign or states or bad_trims or introduced
+            unresolved or fabricated or foreign or states or bad_trims or bad_items
+            or introduced
         ):
             box.rollback()
             outcome.status = "rolled_back"
@@ -561,6 +585,10 @@ class ResidueAgent:
             if bad_trims:
                 reasons.append(
                     f"trim slot(s) with no working form: {'; '.join(outcome.unresolved_trims)}"
+                )
+            if bad_items:
+                reasons.append(
+                    f"item(s) the Java source does not register: {'; '.join(outcome.unknown_items)}"
                 )
             if introduced:
                 # Name what broke, so a stub that never validated reads as one (#141).
