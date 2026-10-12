@@ -53,12 +53,25 @@ def _numbered(path: str, run: int) -> str:
     return str(p.with_name(f"{p.stem if p.suffix else p.name}-{run}{suffix}"))
 
 
+def _run_cost_cap(per_run: float | None, remaining: float | None) -> float | None:
+    """The dollar ceiling for one run: its own, tightened to what the sweep has left."""
+    caps = [c for c in (per_run, remaining) if c is not None]
+    return min(caps) if caps else None
+
+
 def cmd_convert(args) -> int:
     repeat = getattr(args, "repeat", 1) or 1
+    total_cap = getattr(args, "agent_max_total_cost", None)
     if repeat < 1:
         print("--repeat must be at least 1", file=sys.stderr)
         return 2
+    if total_cap is not None and total_cap <= 0:
+        print("--agent-max-total-cost must be more than 0", file=sys.stderr)
+        return 2
     if repeat == 1:
+        if total_cap is not None:
+            args = argparse.Namespace(**vars(args))
+            args.agent_max_cost = _run_cost_cap(args.agent_max_cost, total_cap)
         code, _ = _convert_once(args)
         return code
     if not (args.agent or args.agent_replay):
@@ -66,10 +79,23 @@ def cmd_convert(args) -> int:
         return 2
 
     rows: list[dict] = []
+    skipped: list[int] = []
+    spent = 0.0
     worst = 0
     for run in range(1, repeat + 1):
+        # The sweep cap (#143): each run's dollar ceiling is tightened to what
+        # is left, and once nothing is, the remaining runs never start.
+        remaining = None if total_cap is None else round(total_cap - spent, 9)
+        if remaining is not None and remaining <= 0:
+            skipped = list(range(run, repeat + 1))
+            print(
+                f"\nthe sweep's ${total_cap:g} total-cost ceiling is reached "
+                f"(${spent:.4f} spent); skipping run(s) {run}..{repeat}"
+            )
+            break
         run_args = argparse.Namespace(**vars(args))
         run_args.out = str(Path(args.out) / f"run-{run}")
+        run_args.agent_max_cost = _run_cost_cap(args.agent_max_cost, remaining)
         if args.agent_record:
             run_args.agent_record = _numbered(args.agent_record, run)
         print(f"\n=== run {run} of {repeat} -> {run_args.out} ===")
@@ -79,7 +105,16 @@ def cmd_convert(args) -> int:
         worst = max(worst, code)
         if result is not None and result.agent is not None:
             rows.append(_run_row(run, result))
+            spent += result.agent.spend.cost or 0.0
     summary = _repeat_summary(rows)
+    if total_cap is not None:
+        summary["max_total_cost_usd"] = total_cap
+        summary["total_cost_usd"] = round(spent, 6)
+        summary["runs_requested"] = repeat
+        summary["skipped_runs"] = [
+            {"run": run, "status": "skipped", "reason": f"the ${total_cap:g} total-cost ceiling was reached"}
+            for run in skipped
+        ]
     print("\n" + _format_repeat(summary))
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -150,6 +185,12 @@ def _format_repeat(summary: dict) -> str:
         if s is None or s["mean"] is None:
             continue
         lines.append(f"  {name:<9} {s['mean']:g} ± {s['stdev']:g} [{s['min']:g}..{s['max']:g}]")
+    if summary.get("skipped_runs"):
+        lines.append(
+            f"  skipped: {len(summary['skipped_runs'])} of {summary['runs_requested']} run(s), "
+            f"the ${summary['max_total_cost_usd']:g} total-cost ceiling "
+            f"(spent ${summary['total_cost_usd']:.4f})"
+        )
     if summary["agent_status"]:
         statuses = ", ".join(f"{s} {c}" for s, c in summary["agent_status"].items())
         lines.append(f"  agent runs: {statuses}")
@@ -754,6 +795,14 @@ def main(argv=None) -> int:
         help=(
             "dollar ceiling for the whole agent run; needs PORTKIT_LLM_INPUT_PRICE "
             "and PORTKIT_LLM_OUTPUT_PRICE (USD per million tokens)"
+        ),
+    )
+    p.add_argument(
+        "--agent-max-total-cost", type=float, metavar="USD",
+        help=(
+            "dollar ceiling across all --repeat runs: each run's ceiling is tightened "
+            "to what is left, and once it is spent no further run starts (they are "
+            "listed as skipped in repeat-summary.json); needs the same prices"
         ),
     )
     p.add_argument(

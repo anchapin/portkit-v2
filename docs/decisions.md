@@ -27,6 +27,24 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-11: `--agent-max-total-cost` caps a `--repeat` sweep
+
+- **Decision:** `--agent-max-total-cost USD` bounds the dollars spent across
+  all `--repeat` runs. Before each run, its ceiling becomes the smaller of
+  `--agent-max-cost` and what the sweep has left; once nothing is left, the
+  remaining runs don't start and are listed in `repeat-summary.json` under
+  `skipped_runs` (with `max_total_cost_usd`, `total_cost_usd`,
+  `runs_requested`). Without `--repeat` it acts as a run ceiling. It needs the
+  same prices as `--agent-max-cost`.
+- **Why:** `--agent-max-cost` is per run, so a three-run sweep could spend three
+  times it; Alex's Gemini 3.8 Flash `--repeat 3` spent $0.544 with nothing
+  landing. Tightening the last run to the remainder keeps the overshoot to the
+  one completion in flight, as for every other ceiling.
+- **Rejected:** Only stopping between runs (the last run could still spend a
+  full per-run ceiling past the cap); changing `--agent-max-cost` to mean the
+  sweep (existing commands would silently change meaning).
+- **Links:** #143.
+
 ## 2026-10-11: write_output takes the file as JSON text, for every provider
 
 - **Decision:** `write_output` advertises `path` and `content_json` (a string:
