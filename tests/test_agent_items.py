@@ -170,6 +170,24 @@ def test_an_item_model_only_variant_in_a_modern_mod_fails(tmp_path):
     assert [b.closest for b in unknown_items(out, [rel], src, "examplemod")] == ["examplemod:steel_sword"]
 
 
+def test_a_variant_the_converter_no_longer_emits_is_rejected(tmp_path):
+    """#158: a flat override model used to come out of the converter as an
+    item, and the guard let the agent write it because the converter's output
+    defined it. The converter now skips it, so that allowance is gone."""
+    src = _copy_agent_mod(tmp_path)
+    icon = src / "assets/examplemod/textures/item/bronze_ingot_shiny.png"
+    icon.write_bytes((src / "assets/examplemod/textures/item/bronze_ingot.png").read_bytes())
+    (src / "assets/examplemod/models/item/bronze_ingot_shiny.json").write_text(
+        json.dumps({"parent": "minecraft:item/generated", "textures": {"layer0": "examplemod:item/bronze_ingot_shiny"}})
+    )
+    out = _converted(tmp_path, src)
+    assert not (out / "behavior_pack/items/bronze_ingot_shiny.json").exists()
+    assert (out / "resource_pack/textures/items/bronze_ingot_shiny.png").is_file()  # asset kept
+    rel = _write(out, "behavior_pack/items/bronze_ingot_shiny.json", "examplemod:bronze_ingot_shiny")
+    bad = unknown_items(out, [rel], src, "examplemod")
+    assert [(b.ident, b.closest) for b in bad] == [("examplemod:bronze_ingot_shiny", "examplemod:bronze_ingot")]
+
+
 def test_closest_falls_back_to_similarity():
     ids = {"examplemod:steel_ingot", "examplemod:bronze_ingot", "other:steel_ingots"}
     assert closest_id("examplemod:steal_ingot", ids) == "examplemod:steel_ingot"
