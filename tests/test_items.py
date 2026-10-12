@@ -7,11 +7,18 @@ from portkit.converters import items
 from portkit.model import SourceMod
 
 
-def build(tmp_path, models, blockstates=()):
+def build(tmp_path, models, blockstates=(), registered=None):
+    """A mod with these item models. Every model is a registered item (it has
+    a lang key) unless ``registered`` names the ones that are."""
     assets = tmp_path / "assets" / "examplemod"
     (assets / "models" / "item").mkdir(parents=True, exist_ok=True)
     for name, model in models.items():
         (assets / "models" / "item" / f"{name}.json").write_text(json.dumps(model))
+    names = models if registered is None else registered
+    (assets / "lang").mkdir(parents=True, exist_ok=True)
+    (assets / "lang" / "en_us.json").write_text(
+        json.dumps({f"item.examplemod.{n}": n for n in names})
+    )
     if blockstates:
         (assets / "blockstates").mkdir(parents=True, exist_ok=True)
         for name in blockstates:
@@ -94,3 +101,107 @@ def test_the_fixture_converts_the_icon_and_refuses_the_rest(tmp_path, fixtures_d
     reasons = " ".join(u.reason for u in out.unhandled)
     assert "compiled code" in reasons
     assert "texture layers" in reasons
+
+
+# -- item models that are not items (#158) ---------------------------------
+
+
+def _png(assets, rel):
+    path = assets / "textures" / f"{rel}.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+
+def _icon(texture):
+    return {"parent": "minecraft:item/generated", "textures": {"layer0": f"examplemod:item/{texture}"}}
+
+
+def test_an_item_model_alone_is_not_an_item(tmp_path):
+    """Override models (waystones' twinbound_feather_brushing_0) name no item."""
+    mod = build(
+        tmp_path,
+        {"feather": _icon("feather"), "feather_brushing_0": _icon("feather_brushing_0")},
+        registered=["feather"],
+    )
+    result = items.convert(mod)
+    assert sorted(result.files) == ["items/feather.json"]
+    assert result.unhandled == []  # not residue: the agent may not write it either
+    assert any(c.endswith("models/item/feather_brushing_0.json") for c in result.consumed)
+    [note] = result.notes
+    assert note.startswith("examplemod:feather: item model feather_brushing_0 is not a registered item")
+
+
+def test_a_skipped_variant_keeps_its_own_texture_as_a_variant_of_the_parent(tmp_path):
+    from portkit.pipeline import convert
+
+    src = tmp_path / "src"
+    mod = build(
+        src,
+        {
+            "feather": _icon("feather"),
+            "feather_brushing_0": _icon("feather_brushing_0"),
+            "feather_brushing_1": _icon("feather_brushing_1"),
+            "feather_plain": _icon("feather"),  # the parent's own look: nothing extra to keep
+        },
+        registered=["feather"],
+    )
+    for name in ("feather", "feather_brushing_0", "feather_brushing_1"):
+        _png(mod.assets, f"item/{name}")
+    [note] = items.convert(mod).notes
+    assert "feather_brushing_0, feather_brushing_1, feather_plain are not registered items" in note
+    assert "The source registers examplemod:feather;" in note
+    assert (
+        "These variant textures of examplemod:feather "
+        "(examplemod:item/feather_brushing_0, examplemod:item/feather_brushing_1) are not dropped"
+    ) in note
+
+    out = convert(src, tmp_path / "out")
+    items_dir = out.tree / "behavior_pack" / "items"
+    assert sorted(p.name for p in items_dir.glob("*.json")) == ["feather.json"]
+    rp = out.tree / "resource_pack"
+    assert (rp / "textures/items/feather_brushing_0.png").is_file()
+    index = json.loads((rp / "textures/item_texture.json").read_text())["texture_data"]
+    assert "examplemod:feather_brushing_1" in index
+    assert note in out.notes
+
+
+def test_a_variant_with_no_registered_parent_still_keeps_its_texture(tmp_path):
+    mod = build(tmp_path, {"flint_shard": _icon("flint_shard")}, registered=[])
+    _png(mod.assets, "item/flint_shard")
+    result = items.convert(mod)
+    assert result.files == {}
+    assert result.notes == [
+        "examplemod: item model flint_shard is not a registered item (no blockstate, lang key, "
+        "recipe, tag or loot table names it), so no Bedrock item was written for it. "
+        "The texture (examplemod:item/flint_shard) is not dropped: the textures "
+        "converter ships it like any other texture, or lists it in the residue with the reason "
+        "it could not."
+    ]
+
+
+@pytest.mark.parametrize("evidence", ["json_lang", "legacy_lang", "recipe", "item_tag", "loot"])
+def test_a_registered_per_variant_item_is_still_emitted(tmp_path, evidence):
+    """A variant-looking id with its own registration is a real item."""
+    mod = build(tmp_path, {"feather": _icon("feather"), "feather_gold": _icon("feather_gold")},
+                registered=["feather"])
+    data = tmp_path / "data" / "examplemod"
+    if evidence == "json_lang":
+        (mod.assets / "lang" / "en_us.json").write_text(json.dumps(
+            {"item.examplemod.feather": "F", "item.examplemod.feather_gold": "Gold F"}))
+    elif evidence == "legacy_lang":
+        (mod.assets / "lang" / "en_us.lang").write_text("item.examplemod.featherGold.name=Gold F\n")
+    elif evidence == "recipe":
+        (data / "recipe").mkdir(parents=True)
+        (data / "recipe" / "gold.json").write_text(json.dumps(
+            {"type": "minecraft:crafting_shapeless", "ingredients": [{"item": "minecraft:gold_ingot"}],
+             "result": {"id": "examplemod:feather_gold"}}))
+    elif evidence == "item_tag":
+        (data / "tags" / "item").mkdir(parents=True)
+        (data / "tags" / "item" / "shiny.json").write_text(json.dumps({"values": ["examplemod:feather_gold"]}))
+    else:
+        (data / "loot_table" / "chests").mkdir(parents=True)
+        (data / "loot_table" / "chests" / "x.json").write_text(json.dumps(
+            {"pools": [{"entries": [{"type": "minecraft:item", "name": "examplemod:feather_gold"}]}]}))
+    result = items.convert(mod)
+    assert sorted(result.files) == ["items/feather.json", "items/feather_gold.json"]
+    assert result.notes == []
