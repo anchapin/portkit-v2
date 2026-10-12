@@ -275,3 +275,13 @@ def test_emitted_definitions_marks_a_block_with_its_own_item():
     found = recipes.emitted_definitions(files)
     assert found["examplemod:door"][0] == "block_and_item"
     assert found["examplemod:key"][0] == "item"
+
+
+def test_a_malformed_item_does_not_crash_the_collision_check(tmp_path, fixtures_dir):
+    src = tmp_path / "src"
+    shutil.copytree(fixtures_dir / "agent_mod" / "input", src)
+    result = convert(src, tmp_path / "out", emit_addon=False)
+    items = result.tree / "behavior_pack" / "items"
+    _write(items, "junk.json", {"format_version": "1.21.50",
+                                "minecraft:item": {"description": "x", "components": ["y"]}})
+    validate_tree(result.tree)  # no exception
