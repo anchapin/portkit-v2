@@ -43,6 +43,17 @@ class Unhandled:
     count: int = 1
 
 
+def _declared(value: Any) -> str | None:
+    """The identifier a definition file declares (``{"minecraft:item": {"description": ...}}``)."""
+    if not isinstance(value, dict):
+        return None
+    for body in value.values():
+        description = body.get("description") if isinstance(body, dict) else None
+        if isinstance(description, dict) and isinstance(description.get("identifier"), str):
+            return description["identifier"]
+    return None
+
+
 @dataclass
 class ConversionResult:
     """What one converter produced."""
@@ -66,8 +77,27 @@ class ConversionResult:
         return rel
 
     def merge(self, other: "ConversionResult") -> "ConversionResult":
+        """This result followed by ``other`` (a later converter of the same namespace).
+
+        A later converter may rewrite an earlier one's definition (recipes give
+        an item its ``minecraft:tags``), so a path both write is taken from
+        ``other`` when both declare the same identifier. Any other second
+        write to one path keeps the first and is residue (#163): one output
+        silently replacing another is the failure this project refuses.
+        """
         merged = ConversionResult(dict(self.files), list(self.unhandled), set(self.consumed))
-        merged.files.update(other.files)
+        for path, value in other.files.items():
+            first = merged.files.get(path)
+            if path in merged.files and first != value:
+                was, now = _declared(first), _declared(value)
+                if was is None or was != now:
+                    merged.unhandled.append(Unhandled(
+                        path, "output_collision",
+                        f"two converters wrote {path} ({was or 'no identifier'} and "
+                        f"{now or 'no identifier'}); kept the first",
+                    ))
+                    continue
+            merged.files[path] = value
         merged.unhandled.extend(other.unhandled)
         merged.consumed |= other.consumed
         merged.notes = [*self.notes, *other.notes]
