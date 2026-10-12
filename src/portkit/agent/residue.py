@@ -15,10 +15,12 @@ is the bridge from that list to the loop:
 A group counts as resolved only when its session ended on its own, it wrote at
 least one file, the validator found no new error, and every item and tag its
 recipes name exists (in the pack, in the source mod, or in vanilla; see
-``refs.py``), and every gameplay number on the items it wrote (damage,
-durability, ...) is one the source mod states (see ``stats.py``). A group
-that ends with either kind of fabrication is rolled back, with the reason
-listed. Declaring victory in prose
+``refs.py``), every gameplay number on the items it wrote (damage,
+durability, ...) is one the source mod states (see ``stats.py``), and every
+trim recipe it wrote names only vanilla template and addition slots or slots
+the source registers with a ``trim_pattern``/``trim_material`` definition (see
+``trim.py``). A group that ends with any kind of fabrication is rolled back,
+with the reason listed. Declaring victory in prose
 is not enough, and neither is a session that wrote nothing because the Java behaviour
 has no Bedrock form: that one stays residue, with the agent's reason attached,
 and is reported as ``declined`` rather than ``unresolved`` so a sweep can tell
@@ -51,6 +53,8 @@ from .loop import AgentSession, LLMClient
 from .refs import Ref, finding, unresolved_refs
 from .stats import Stat, fabricated_stats
 from .stats import finding as stat_finding
+from .trim import Trim, fabricated_trims
+from .trim import finding as trim_finding
 from .tools import SYSTEM_PROMPT, ToolBox
 
 # Kinds no session can make progress on with the tools it has: bytecode is not
@@ -206,6 +210,10 @@ class _TrackingToolBox(ToolBox):
         """Stats on this session's items that the source never states (#135)."""
         return fabricated_stats(self.out_tree, list(self.originals), self.source)
 
+    def unresolved_trims(self) -> list[Trim]:
+        """Written trim recipes whose template or addition has no working form (#86)."""
+        return fabricated_trims(self.out_tree, list(self.originals), self.source)
+
     def validate(self) -> dict:
         # The structural validator only warns on an undeclared item, and does not
         # look at tags at all. What the agent wrote is held to the stricter rule,
@@ -214,6 +222,7 @@ class _TrackingToolBox(ToolBox):
         report = super().validate()
         extra = [finding(ref) for ref in self.unresolved()]
         extra += [stat_finding(stat) for stat in self.fabricated()]
+        extra += [trim_finding(trim) for trim in self.unresolved_trims()]
         if extra:
             report["findings"] = [*report["findings"], *extra]
             report["error_count"] += len(extra)
@@ -249,6 +258,9 @@ class GroupOutcome:
     # Item stats the session wrote that the source never states (#135); a group
     # with any is rolled back too.
     fabricated_stats: list[str] = field(default_factory=list)
+    # Trim recipes the session wrote whose template or addition has no working
+    # form (#86); a group with any is rolled back too.
+    unresolved_trims: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -263,6 +275,7 @@ class GroupOutcome:
             "format_failures": self.format_failures,
             "unresolved_refs": self.unresolved_refs,
             "fabricated_stats": self.fabricated_stats,
+            "unresolved_trims": self.unresolved_trims,
             "note": self.note,
         }
 
@@ -455,10 +468,16 @@ class ResidueAgent:
         # leave an item nobody reviewed.
         fabricated = box.fabricated() if box.originals else []
         outcome.fabricated_stats = [stat.describe() for stat in fabricated]
+        # So is a trim recipe whose template or addition has no working form
+        # (#86): non-vanilla, with no trim_pattern/trim_material in the mod.
+        # Bedrock would accept the file as is, the trim would do nothing in
+        # game, and the validator would not say so.
+        bad_trims = box.unresolved_trims() if box.originals else []
+        outcome.unresolved_trims = [trim.describe() for trim in bad_trims]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
         introduced = sorted(_error_set(out_tree) - before) if box.originals else []
-        if box.originals and (unresolved or fabricated or introduced):
+        if box.originals and (unresolved or fabricated or bad_trims or introduced):
             box.rollback()
             outcome.status = "rolled_back"
             outcome.written = []
@@ -468,6 +487,10 @@ class ResidueAgent:
             if fabricated:
                 reasons.append(
                     f"stat(s) the source does not state: {'; '.join(outcome.fabricated_stats)}"
+                )
+            if bad_trims:
+                reasons.append(
+                    f"trim slot(s) with no working form: {'; '.join(outcome.unresolved_trims)}"
                 )
             if introduced:
                 # Name what broke, so a stub that never validated reads as one (#141).

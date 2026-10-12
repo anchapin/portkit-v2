@@ -127,7 +127,14 @@ gameplay numbers on an item the agent writes (damage, durability, mining speed,
 armor, food, cooldowns, enchantability, fuel): each must be a value the source
 mod states for that item, never a guess. An unknown stat is omitted and the
 agent's final note says so; one left in is reported as `agent.fabricated_stat`
-and rolls the group back, listed in `fabricated_stats`. Anything unresolved
+and rolls the group back, listed in `fabricated_stats`. The same goes for
+`minecraft:recipe_smithing_trim`: every `template` and `addition` slot must
+name a vanilla item or tag, or a mod id the source registers with a matching
+`data/<ns>/trim_pattern/<id>.json` or `data/<ns>/trim_material/<id>.json`.
+Bedrock's recipe matcher accepts the file either way, but a trim slot that
+is neither vanilla nor registered applies nothing in game, so a written
+recipe there is reported as `agent.unresolved_trim` and rolls the group
+back, listed in `unresolved_trims`. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Its `status` is `complete` (every group resolved), `partial` or `failed`
 (none did). That is separate from `valid` and from the exit code, which are

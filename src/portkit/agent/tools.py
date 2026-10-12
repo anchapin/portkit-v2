@@ -399,4 +399,10 @@ Rules:
 - Never guess gameplay numbers (damage, durability, mining speed, armor, food,
   cooldowns, enchantability, fuel). Use only values the source mod states; when
   it states none, omit the component and say which stats you left out.
+- A ``minecraft:recipe_smithing_trim`` only applies on Bedrock when its
+  ``template`` and ``addition`` name a vanilla item or tag, or a mod id for
+  which the source ships a matching ``data/<ns>/trim_pattern/<id>.json`` or
+  ``data/<ns>/trim_material/<id>.json``. If neither side holds, write nothing
+  and decline: the recipe would validate and count as resolved, but the trim
+  would do nothing in game.
 """

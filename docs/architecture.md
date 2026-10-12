@@ -110,10 +110,13 @@ never a guess.
 - `residue.py`: groups `Unhandled` by `(kind, source)`, builds one task per group
   (the source content plus the exact refusal reason), and runs one session each.
   A group counts as resolved only if the session ends on its own, writes at least
-  one file, adds no validator error, and every item and tag its recipes name
-  exists (`refs.py`: in the pack, in the source mod, or vanilla), and every
+  one file, adds no validator error, every item and tag its recipes name
+  exists (`refs.py`: in the pack, in the source mod, or vanilla), every
   gameplay number on its items (damage, durability, ...) is one the source mod
-  states for that item (`stats.py`). Otherwise its writes are rolled back. A session that writes nothing and says why is
+  states for that item (`stats.py`), and every `template` and `addition` it
+  puts into a written `minecraft:recipe_smithing_trim` is either vanilla or
+  registered in the source as a `trim_pattern` / `trim_material` (`trim.py`).
+  Otherwise its writes are rolled back. A session that writes nothing and says why is
   `declined`. The run's `status` (`complete` | `partial` | `failed`) is about the
   agent's work, not about whether the pack validates.
 - `budget.py`: step, token and dollar ceilings with per-group accounting. The

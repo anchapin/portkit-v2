@@ -27,6 +27,39 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: Agent-written armour-trim recipes may only name working trim slots
+
+- **Decision:** A written ``minecraft:recipe_smithing_trim`` may only name a
+  ``template`` or ``addition`` that is either a vanilla ``minecraft:`` item /
+  tag, or a non-vanilla id the source mod registers with a matching
+  ``data/<ns>/trim_pattern/<id>.json`` (template) or
+  ``data/<ns>/trim_material/<id>.json`` (addition). If either side fails,
+  ``validate`` reports ``agent.unresolved_trim`` and a group that ends with
+  any is rolled back, listed in ``unresolved_trims`` and in the note. Vanilla
+  ids and tags are taken on faith, for the same reason ``refs.py`` takes
+  vanilla ids on faith: a complete vanilla list is Mojang data we don't
+  vendor. ``base`` is not gated: a trimmable armour, vanilla or modded, is
+  always accepted by Bedrock's recipe matcher, so the guard focuses on the
+  two slots that decide whether the trim applies anything.
+- **Why:** In the #86 sweep mistral-large-4-0 wrote agent_mod's steel_trim as
+  a Bedrock ``recipe_smithing_trim`` whose addition was
+  ``examplemod:steel_ingot``. The fixture's mod ships no
+  ``data/examplemod/trim_material/steel_ingot.json``, so the trim would apply
+  nothing in game. The structural oracle only checks the three slots are
+  non-empty, so the recipe passed validation and the group counted as
+  resolved. The deterministic converter's note ("a judgment call") was
+  overridden by the file's existence, not by any evidence the trim works.
+- **Rejected:** Stripping the recipe and keeping the residue as declined
+  (rewrites the agent's file behind its back after the validator already
+  named the slot, like the recipe ref check it sits beside); checking
+  ``base`` against vanilla (a trimmable mod armour is the whole point of a
+  modded trim, and Bedrock accepts it); accepting any mod ``addition``
+  because the trim is "the mod's call" (the sweep finding is the whole
+  reason this guard exists); reducing the rule to "no mod ids anywhere"
+  (the rule the recipe ref check already applies, and which would also
+  reject legitimate ``trim_material`` registrations the mod ships).
+- **Links:** #86.
+
 ## 2026-10-11: `--agent-max-total-cost` caps a `--repeat` sweep
 
 - **Decision:** `--agent-max-total-cost USD` bounds the dollars spent across
