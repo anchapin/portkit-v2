@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from portkit.validate import validate_tree
 
 
@@ -199,3 +201,69 @@ def test_smithing_transform_needs_all_four_slots(tmp_path):
         _recipe("minecraft:recipe_smithing_transform", base="m:a", result="m:b"),
     )
     assert {f.message.split()[0] for f in empty} == {"template", "addition"}
+
+
+# -- doc.unknown_shape (#141) ------------------------------------------------
+# Gemini 3.8 Flash wrote these bodies to items/ in Alex's live rerun; each one
+# validated clean before #141.
+FLASH_STUBS = [
+    {"format_version": "1.20.20", "minecraft": None},
+    {"format_version": "1.20.80", "minecraft": "item"},
+    {"format_version": "1.20.10", "minecraft": True},
+]
+
+
+def _shape_findings(tmp_path, relpath, data):
+    _write(tmp_path, "behavior_pack/manifest.json", _manifest())
+    _write(tmp_path, relpath, data)
+    return [f for f in validate_tree(tmp_path).errors if f.rule == "doc.unknown_shape"]
+
+
+
+@pytest.mark.parametrize("stub", FLASH_STUBS)
+def test_flash_stub_items_are_errors(tmp_path, stub):
+    found = _shape_findings(tmp_path, "behavior_pack/items/steel_sword.json", stub)
+    assert len(found) == 1
+    assert "minecraft:item" in found[0].message
+    assert "cut at the colon" in found[0].message
+
+
+@pytest.mark.parametrize("body", [None, "item", True, [], 3])
+def test_non_object_document_body_is_an_error(tmp_path, body):
+    found = _shape_findings(
+        tmp_path, "behavior_pack/items/x.json", {"format_version": "1.20.80", "minecraft:item": body}
+    )
+    assert len(found) == 1 and "minecraft:item must be a JSON object" in found[0].message
+
+
+@pytest.mark.parametrize("relpath, data", [
+    ("behavior_pack/items/x.json", '"oops"'),
+    ("behavior_pack/items/x.json", "null"),
+    ("behavior_pack/blocks/x.json", "[]"),
+    ("behavior_pack/blocks/x.json", "null"),
+    ("behavior_pack/loot_tables/blocks/x.json", "[1]"),
+    ("behavior_pack/entities/x.json", "{}"),
+    ("resource_pack/entity/x.json", '{"format_version": "1.10.0"}'),
+])
+def test_files_that_are_not_documents_are_errors(tmp_path, relpath, data):
+    _write(tmp_path, "behavior_pack/manifest.json", _manifest())
+    target = tmp_path / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(data)
+    rules = {f.rule for f in validate_tree(tmp_path).errors if f.path.endswith("x.json")}
+    assert "doc.unknown_shape" in rules
+
+
+def test_real_item_and_unlisted_folders_pass(tmp_path):
+    item = {"format_version": "1.21.40", "minecraft:item": {"description": {"identifier": "m:x"}, "components": {}}}
+    assert _shape_findings(tmp_path, "behavior_pack/items/x.json", item) == []
+    # A folder the rule doesn't know is left alone.
+    assert _shape_findings(tmp_path, "behavior_pack/scripts_data/x.json", {"anything": 1}) == []
+
+
+def test_loot_pool_and_entry_that_are_not_objects_are_errors(tmp_path):
+    _write(tmp_path, "behavior_pack/manifest.json", _manifest())
+    _write(tmp_path, "behavior_pack/loot_tables/blocks/x.json",
+           {"pools": ["oops", {"rolls": 1, "entries": [None]}]})
+    rules = [f.rule for f in validate_tree(tmp_path).errors if f.path.endswith("x.json")]
+    assert rules.count("loot.pools") == 1 and rules.count("loot.entries") == 1
