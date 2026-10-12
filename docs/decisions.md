@@ -27,6 +27,28 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: agent-written ids must be in a namespace the mod has
+
+- **Decision:** every namespaced id in a JSON or `.lang` file a residue session
+  writes (string values, object keys, ids quoted in Molang, `tag:` components,
+  `tile.`/`item.` lang keys) must be `minecraft`, the conversion's namespace,
+  or a namespace the mod has a folder for under `assets/` or `data/`. An exact
+  id the source names in an item position (`source_items`) and an id the file
+  held before the session are exempt. Otherwise `validate` reports
+  `agent.unknown_namespace` (naming the id and the valid namespaces) and a
+  group that ends with one is rolled back, listed in `unknown_namespaces`.
+  A recipe id the #132 check already reports is not reported twice.
+- **Why:** on real-mod residue GLM 5.3 wrote `sd:` ids for storage drawers
+  (namespace `storagedrawers`) and passed every guard; the #132 check only
+  reads recipes. Run against every file the deterministic converter emits for
+  the 21 fixtures and 10 corpus mods, the check flags nothing in the packs.
+- **Rejected:** checking that each id *exists* (needs a full vanilla list,
+  which is Mojang data, and the agent may legitimately define new ids in the
+  mod's namespace); only checking recipes and item references (the typos were
+  in block identifiers and loot/state names too); flagging any non-vanilla
+  namespace in the source's own data (compat recipes name other mods' items).
+- **Links:** #147, #86 ([real-mod report](https://github.com/anchapin/portkit-v2/issues/86#issuecomment-6122960840)), #132.
+
 ## 2026-10-11: `--agent-max-total-cost` caps a `--repeat` sweep
 
 - **Decision:** `--agent-max-total-cost USD` bounds the dollars spent across
