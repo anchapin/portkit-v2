@@ -23,5 +23,11 @@ CONVERTERS = [
 def convert_all(mod: SourceMod) -> ConversionResult:
     result = ConversionResult()
     for fn in CONVERTERS:
-        result = result.merge(fn(mod))
+        if fn is recipes.convert:
+            # Recipes run after blocks and items so a multi-member tag can be
+            # checked against what this conversion actually emits (#160).
+            converted = fn(mod, emitted=recipes.emitted_definitions(result.files))
+        else:
+            converted = fn(mod)
+        result = result.merge(converted)
     return result
