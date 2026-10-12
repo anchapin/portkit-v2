@@ -1,33 +1,33 @@
 {
   "fixtures": {
     "betterend": {
-      "coverage": 30.7,
-      "files": 2958,
-      "residue": 6668,
+      "coverage": 34.1,
+      "files": 3256,
+      "residue": 6283,
       "errors": 0
     },
     "create": {
-      "coverage": 24.1,
-      "files": 3355,
-      "residue": 10561,
+      "coverage": 29.1,
+      "files": 3904,
+      "residue": 9523,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 27.7,
-      "files": 720,
-      "residue": 1883,
+      "coverage": 27.8,
+      "files": 723,
+      "residue": 1881,
       "errors": 0
     },
     "farmers_delight_neoforge": {
       "coverage": 30.6,
-      "files": 691,
-      "residue": 1569,
+      "files": 690,
+      "residue": 1567,
       "errors": 0
     },
     "silent_gear_1165": {
-      "coverage": 32.3,
-      "files": 1144,
-      "residue": 2396,
+      "coverage": 32.8,
+      "files": 1162,
+      "residue": 2383,
       "errors": 0
     },
     "storage_drawers_1122": {
@@ -43,15 +43,15 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 25.4,
-      "files": 1399,
-      "residue": 4119,
+      "coverage": 25.9,
+      "files": 1426,
+      "residue": 4071,
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 42.1,
-      "files": 13310,
-      "residue": 18338,
+      "coverage": 42.5,
+      "files": 13445,
+      "residue": 18211,
       "errors": 0
     },
     "waystones": {
