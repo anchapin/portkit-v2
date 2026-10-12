@@ -27,6 +27,30 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: a `<prefix>_<state>` rename with Java's exact values counts as that Java state
+
+- **Decision:** the `agent.invented_state` guard accepts a declared custom
+  state named `<prefix>_<javastate>` (`waystones:portstone_half` for Java's
+  `half`) as that Java state when its suffix matches exactly one Java state
+  and the values it declares are exactly that state's values: the same set,
+  spelled as Java names them, and no integers (so a numeric Java state such
+  as `level` is never aliased). `q.block_state()` may then use the alias, with
+  its compared values checked against the Java state's. Still rejected: a name
+  with no Java suffix match, a suffix match with invented, missing or integer
+  values, a name that suffix-matches two Java states, and an alias used in
+  Molang without being declared. The finding tells the agent the rename's
+  condition and to prefer the Java name.
+- **Why:** an offline check of DeepSeek residue output found 13 hits on
+  waystones `black_portstone`/`cyan_portstone`/`cyan_sharestone` that renamed
+  Java's `half` to `<block>_half` with the real `lower`/`upper` values. A
+  rename isn't fabrication, and our principle (#87) is no invented data, not
+  Java's exact spelling; strict names rolled that work back.
+- **Rejected:** strict Java names only (the #151 behaviour; rolls back real
+  DeepSeek work that invents nothing); accepting any suffix match whatever its
+  values (lets an integer enum or invented values through under a new name);
+  picking one of several suffix matches (guessing which state was meant).
+- **Links:** #151, #86, #87.
+
 ## 2026-10-12: agent-written armour-trim recipes may only name vanilla trim slots
 
 - **Decision:** a written `minecraft:recipe_smithing_trim` may only name a
