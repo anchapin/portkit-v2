@@ -37,6 +37,9 @@ class ModMetadata:
     version: tuple[int, int, int] = (0, 1, 0)
     version_raw: str | None = None
     loader: str | None = None
+    # The Minecraft version the mod declares it runs on (the lower bound of a
+    # range, the newest of a list), as written; None when it doesn't say (#160).
+    minecraft: str | None = None
     notes: list[str] = field(default_factory=list)
 
     def header_name(self, namespace: str, kind: str) -> str:
@@ -100,6 +103,35 @@ def load_json(blob: bytes):
     return json.loads(text, strict=False)
 
 
+_MC_VERSION = re.compile(r"\d+\.\d+(?:\.\d+)?")
+
+
+def _mc_version(value) -> str | None:
+    """A Minecraft version out of a declared range or list.
+
+    ``[1.20.1,1.21)`` and ``>=1.21`` give their lower bound, ``~26.1`` the
+    version itself, and a list (``["1.21.6", "1.21.8"]``) its newest entry.
+    """
+    if isinstance(value, list):
+        found = [v for v in (_mc_version(x) for x in value) if v]
+        return max(found, key=lambda v: tuple(int(p) for p in v.split(".")), default=None)
+    if not isinstance(value, str):
+        return None
+    match = _MC_VERSION.search(value)
+    return match.group(0) if match else None
+
+
+def _toml_minecraft(data: dict) -> str | None:
+    """The minecraft dependency's versionRange in mods.toml / neoforge.mods.toml."""
+    deps = data.get("dependencies")
+    groups = deps.values() if isinstance(deps, dict) else []
+    for group in groups:
+        for dep in group if isinstance(group, list) else []:
+            if isinstance(dep, dict) and dep.get("modId") == "minecraft":
+                return _mc_version(dep.get("versionRange"))
+    return None
+
+
 def _text(value) -> str | None:
     """A free-text field, trimmed; None when empty or not a string."""
     if not isinstance(value, str):
@@ -115,6 +147,7 @@ def _fabric(blob: bytes, notes: list[str]) -> ModMetadata:
         description=_text(data.get("description")),
         version_raw=data.get("version"),
         loader="fabric",
+        minecraft=_mc_version((data.get("depends") or {}).get("minecraft")),
         notes=notes,
     )
 
@@ -128,8 +161,19 @@ def _quilt(blob: bytes, notes: list[str]) -> ModMetadata:
         description=_text(meta.get("description")),
         version_raw=loader.get("version"),
         loader="quilt",
+        minecraft=_quilt_minecraft(loader.get("depends")),
         notes=notes,
     )
+
+
+def _quilt_minecraft(depends) -> str | None:
+    for dep in depends if isinstance(depends, list) else []:
+        if isinstance(dep, dict) and dep.get("id") == "minecraft":
+            versions = dep.get("versions")
+            if isinstance(versions, dict):  # {"any": [...]} / {"all": [...]}
+                versions = next(iter(versions.values()), None)
+            return _mc_version(versions)
+    return None
 
 
 def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
@@ -137,7 +181,7 @@ def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
     mods = data.get("mods") or []
     if not mods:
         notes.append(f"{loader} metadata declares no [[mods]] entry")
-        return ModMetadata(loader=loader, notes=notes)
+        return ModMetadata(loader=loader, minecraft=_toml_minecraft(data), notes=notes)
     if len(mods) > 1:
         ids = ", ".join(str(m.get("modId")) for m in mods)
         notes.append(f"{loader} metadata declares {len(mods)} mods ({ids}); using the first")
@@ -148,6 +192,7 @@ def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
         description=(first.get("description") or "").strip() or None,
         version_raw=first.get("version"),
         loader=loader,
+        minecraft=_toml_minecraft(data),
         notes=notes,
     )
 
@@ -165,6 +210,7 @@ def _mcmod_info(blob: bytes, notes: list[str]) -> ModMetadata:
         description=_text(first.get("description")),
         version_raw=first.get("version"),
         loader="forge-legacy",
+        minecraft=_mc_version(first.get("mcversion")),
         notes=notes,
     )
 
