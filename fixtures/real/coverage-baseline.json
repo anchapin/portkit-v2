@@ -1,33 +1,33 @@
 {
   "fixtures": {
     "alexs_mobs": {
-      "coverage": 19.7,
-      "files": 1069,
-      "residue": 4364,
+      "coverage": 20.0,
+      "files": 1084,
+      "residue": 4348,
       "errors": 0
     },
     "betterend": {
-      "coverage": 34.1,
-      "files": 3256,
-      "residue": 6283,
+      "coverage": 34.4,
+      "files": 3278,
+      "residue": 6261,
       "errors": 0
     },
     "create": {
       "coverage": 29.2,
-      "files": 3934,
-      "residue": 9522,
+      "files": 3935,
+      "residue": 9520,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 27.8,
-      "files": 723,
-      "residue": 1881,
+      "coverage": 28.2,
+      "files": 735,
+      "residue": 1869,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 30.6,
-      "files": 690,
-      "residue": 1567,
+      "coverage": 31.1,
+      "files": 701,
+      "residue": 1556,
       "errors": 0
     },
     "mekanism": {
@@ -37,9 +37,9 @@
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 41.7,
-      "files": 1496,
-      "residue": 2090,
+      "coverage": 45.0,
+      "files": 1613,
+      "residue": 1970,
       "errors": 1
     },
     "silent_gear_1165": {
@@ -49,33 +49,33 @@
       "errors": 0
     },
     "storage_drawers_1122": {
-      "coverage": 27.6,
-      "files": 156,
-      "residue": 410,
+      "coverage": 28.1,
+      "files": 159,
+      "residue": 407,
       "errors": 0
     },
     "storage_drawers_1192": {
-      "coverage": 37.7,
-      "files": 291,
-      "residue": 480,
+      "coverage": 38.6,
+      "files": 296,
+      "residue": 471,
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 26.0,
-      "files": 1432,
-      "residue": 4071,
+      "coverage": 26.1,
+      "files": 1434,
+      "residue": 4066,
       "errors": 0
     },
     "tinkers_construct": {
       "coverage": 42.6,
-      "files": 13512,
-      "residue": 18211,
+      "files": 13513,
+      "residue": 18210,
       "errors": 0
     },
     "waystones": {
-      "coverage": 12.0,
-      "files": 117,
-      "residue": 858,
+      "coverage": 12.6,
+      "files": 123,
+      "residue": 852,
       "errors": 0
     }
   }

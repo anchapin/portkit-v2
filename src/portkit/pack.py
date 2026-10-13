@@ -79,17 +79,19 @@ ENGINE_FLOOR = (1, 20, 20)
 
 
 def engine_floor(files: dict) -> tuple[int, int, int]:
-    """The oldest engine that loads every block in this pack.
+    """The oldest engine that loads every block and item in this pack.
 
-    The floor stays at ENGINE_FLOOR unless a block or a block geometry was
-    written at a newer format because it needs a newer feature, so a mod with only simple blocks
-    still loads on older versions.
+    The floor stays at ENGINE_FLOOR unless a block, a block geometry or an
+    item was written at a newer format because it needs a newer feature (an
+    item's ``minecraft:hand_equipped`` needs 1.20.30, ``minecraft:tags`` 1.20.50),
+    so a mod with only simple blocks and items still loads on older versions.
     """
     floor = ENGINE_FLOOR
     for relpath, content in files.items():
         is_block = relpath.startswith("blocks/")
+        is_item = relpath.startswith("items/")
         is_geometry = relpath.startswith("models/blocks/") and relpath.endswith(".geo.json")
-        if not ((is_block or is_geometry) and isinstance(content, dict)):
+        if not ((is_block or is_item or is_geometry) and isinstance(content, dict)):
             continue
         version = str(content.get("format_version", ""))
         try:

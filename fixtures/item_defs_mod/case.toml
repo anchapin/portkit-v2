@@ -1,5 +1,5 @@
 name = "item_defs_mod"
-description = "A plain icon item converts; a held tool and a two-layer armor icon are refused with reasons."
+description = "A plain icon item and a held tool (item/handheld: icon plus minecraft:hand_equipped, no stats) convert; a two-layer armor icon is refused with a reason."
 namespace = "examplemod"
 expect_valid = true
-expect_unhandled = 2
+expect_unhandled = 1

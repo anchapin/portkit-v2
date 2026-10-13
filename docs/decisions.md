@@ -27,6 +27,56 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: held items (`item/handheld`, `_rod`, `_mace`) convert as flat icons with `minecraft:hand_equipped`
+
+- **Decision:** an item model whose parent chain ends in vanilla
+  `item/handheld`, `item/handheld_rod` or `item/handheld_mace` converts like an
+  `item/generated` one: the same single-layer icon through
+  `item_texture.json`, plus `"minecraft:hand_equipped": true` so Bedrock
+  draws it in the hand like a tool, at item `format_version` 1.20.30 (the
+  minimum that component needs; plain icons stay at 1.20.10). No damage,
+  durability, digger speed, tool tier or enchantable slot is written (#87):
+  the model states none of them, so one note per mod lists the held items
+  and says their behavior is Java code that is not converted. The parent
+  chain is now followed through the mod's own intermediate models (as the
+  block converter already did) for generated icons too; the leaf's textures
+  win over a parent's, and intermediate files are claimed only when the item
+  converts. Still residue, with their own reasons: `item/template_bow`; a
+  model with its own `overrides` (Java reads overrides from the item's own
+  model only, so a parent's do not count); any model in the chain with
+  `elements` (a 3D shape, now said as such instead of "not a flat icon");
+  two or more `layerN` textures (same as generated icons, no compositing);
+  a chain that leaves the mod's namespace or its folder. An empty
+  `"elements": []` counts as none (Java inherits the parent's), and `#name`
+  texture variables resolve through the merged map. `pack.engine_floor` now
+  reads item definitions too, so a pack with a held item declares
+  `min_engine_version` 1.20.30 (Mythic Metals, Waystones, both Storage
+  Drawers), and Mekanism's tagged items (1.20.50) lift its floor from
+  1.20.20, a gap that predates this change. The agent_mod fixture's steel
+  sword gained a one-box `elements` list so it stays the agent's
+  stat-fabrication probe; item_defs_mod's pickaxe gained a lang key so it is
+  a registered item, and it now converts.
+- **Why:** the icon and the held pose are fully stated in the JSON; refusing
+  the whole item over code-side behavior left 212 handheld models in the
+  corpus as residue (Mythic Metals alone 129), when the honest partial answer
+  is the item as Java draws it, with the missing behavior named in a note.
+  `minecraft:hand_equipped` is documented in Microsoft's item reference
+  (https://learn.microsoft.com/en-us/minecraft/creator/reference/content/itemreference/examples/itemcomponents/minecraft_hand_equipped:
+  boolean, "rendered like a tool while it is in a player's hand", format
+  1.20.30+; vanilla `breeze_rod.json` in Mojang/bedrock-samples uses it), and
+  in the fetched lookup reference (`item:minecraft:hand_equipped`, docs pin
+  4186dc4ec84c). The vendored 1.26.60 item schema leaves `components` an open
+  object, so it neither confirms nor rejects it. Corpus: 188 of 212 handheld
+  models convert (Mythic Metals 117 of 129), 13 stay residue (overrides 9,
+  vanilla `minecraft:item/stick` icon 3, a foreign-namespace texture 1), 11
+  are unregistered variants (notes); mct 0 errors on every changed mod.
+- **Rejected:** keep refusing held tools (loses icons the JSON fully
+  states); write tool components with guessed numbers (fabrication, #87);
+  composite multi-layer icons (no such path exists for generated icons
+  either); resolve `overrides` (bows, pulling) here (out of scope, they stay
+  residue).
+- **Links:** #87, #158, #135.
+
 ## 2026-10-12: Tinkers' Construct is an optional corpus mod; Mythic Metals takes its default slot
 
 - **Decision:** `fixtures/real/mods.toml` entries can be `optional = true`:
