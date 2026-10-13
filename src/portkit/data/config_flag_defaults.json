@@ -1,0 +1,1235 @@
+{
+ "about": "Defaults of mod-specific recipe load-condition flags, cited from each mod's source at the pinned version (docs/decisions.md, 2026-10-13). Keyed by mod id, the exact version its metadata declares, and condition type. A flag that is not here, or a mod version that is not here, is an unknown load condition: residue, never a guess.",
+ "entries": [
+  {
+   "mod": "supplementaries",
+   "version": "1.20-3.1.43",
+   "loader": "forge",
+   "condition": "supplementaries:flag",
+   "argument": "flag",
+   "repo": "https://github.com/MehVahdJukaar/Supplementaries",
+   "commit": "c095e8718b1e3fe68007f6375ec14e8efe7127c0",
+   "pinning": "Modrinth S0TIJ1hU (1.20-3.1.43-forge, published 2026-04-06 12:12 UTC) has no git tag; gradle.properties mod_version is 1.20-3.1.43 from 40034344 to f6207dba and CommonConfigs.java/ModConstants.java are identical across that range; c095e871 is the last commit before publication",
+   "registration": {
+    "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/Supplementaries.java",
+    "line": 80,
+    "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/Supplementaries.java#L80",
+    "why": "RegHelper.registerSimpleRecipeCondition(res(\"flag\"), CommonConfigs::isEnabled)"
+   },
+   "flags": {
+    "altimeter": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1002,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1002",
+     "why": "feature toggle tools.altimeter = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "antique_ink": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 998,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L998",
+     "why": "feature toggle tools.antique_ink.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "loot_modifiers",
+      "moonlight",
+      "recipes"
+     ]
+    },
+    "ash": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 400,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L400",
+     "why": "feature toggle building.ash.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "loot_modifiers",
+      "moonlight",
+      "recipes"
+     ]
+    },
+    "ash_bricks": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 444,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L444",
+     "why": "feature toggle building.ash_bricks.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "ash_from_burning": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1354,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1354",
+     "why": "not a registered feature toggle; isEnabled returns FEATURE_TOGGLES.getOrDefault(key, () -> true), so the config cannot turn it off",
+     "used_in": [
+      "loot_modifiers"
+     ]
+    },
+    "awning": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 454,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L454",
+     "why": "feature toggle building.awning.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "bamboo_spikes": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 701,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L701",
+     "why": "feature toggle functional.bamboo_spikes.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "bamboo_spikes_tipped": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1354,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1354",
+     "why": "not a registered feature toggle; isEnabled returns FEATURE_TOGGLES.getOrDefault(key, () -> true), so the config cannot turn it off",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "bellows": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 172,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L172",
+     "why": "feature toggle redstone.bellows.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "blackboard": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 326,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L326",
+     "why": "feature toggle building.blackboard.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "blackstone_lamp": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 478,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L478",
+     "why": "feature toggle building.blackstone_lamp = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "bomb": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 951,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L951",
+     "why": "feature toggle tools.bomb.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "advancements",
+      "moonlight",
+      "recipes"
+     ]
+    },
+    "bubble_blower": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 912,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L912",
+     "why": "feature toggle tools.bubble_blower.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "bunting": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 482,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L482",
+     "why": "feature toggle building.bunting = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "cage": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 665,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L665",
+     "why": "feature toggle functional.cage.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "candle_holder": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 493,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L493",
+     "why": "feature toggle building.candle_holder = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "candy": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1000,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1000",
+     "why": "feature toggle tools.candy = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "cannon": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 738,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L738",
+     "why": "feature toggle functional.cannon.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "moonlight",
+      "recipes"
+     ]
+    },
+    "cannonball": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 748,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L748",
+     "why": "feature toggle functional.cannon.cannonball.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "moonlight",
+      "recipes"
+     ]
+    },
+    "checker_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 486,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L486",
+     "why": "feature toggle building.checker_block = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "clock_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 245,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L245",
+     "why": "feature toggle redstone.clock_block = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "cog_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 248,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L248",
+     "why": "feature toggle redstone.cog_block = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "confetti_popper": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1003,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1003",
+     "why": "feature toggle tools.confetti_popper = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "crank": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 247,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L247",
+     "why": "feature toggle redstone.crank = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "crystal_display": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 238,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L238",
+     "why": "feature toggle redstone.crystal_display.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "daub": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 439,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L439",
+     "why": "feature toggle building.daub.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "deepslate_lamp": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 476,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L476",
+     "why": "feature toggle building.deepslate_lamp = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "dispenser_minecart": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 224,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L224",
+     "why": "feature toggle redstone.dispenser_minecart.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "doormat": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 490,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L490",
+     "why": "feature toggle building.doormat = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "dragon_banner_pattern": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1083,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1083",
+     "why": "feature toggle tweaks.dragon_banner_pattern.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "end_stone_lamp": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 477,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L477",
+     "why": "feature toggle building.end_stone_lamp = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "faucet": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 230,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L230",
+     "why": "feature toggle redstone.faucet.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "feather_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 488,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L488",
+     "why": "feature toggle building.feather_block = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "fine_wood": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 492,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L492",
+     "why": "feature toggle building.fine_wood = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "fire_pit": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 494,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L494",
+     "why": "feature toggle building.fire_pit = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "flag": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 411,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L411",
+     "why": "feature toggle building.flag.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "flax": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 764,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L764",
+     "why": "feature toggle functional.flax.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "loot_modifiers",
+      "moonlight",
+      "recipes"
+     ]
+    },
+    "flax_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1354,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1354",
+     "why": "not a registered feature toggle; isEnabled returns FEATURE_TOGGLES.getOrDefault(key, () -> true), so the config cannot turn it off",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "flint_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 491,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L491",
+     "why": "feature toggle building.flint_block = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "flower_box": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 465,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L465",
+     "why": "feature toggle building.flower_box.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "flute": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 942,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L942",
+     "why": "feature toggle tools.flute.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "fodder": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 786,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L786",
+     "why": "feature toggle functional.fodder = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "globe": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 424,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L424",
+     "why": "feature toggle building.globe.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "advancements",
+      "moonlight",
+      "recipes"
+     ]
+    },
+    "globe_sepia": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1351,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1351",
+     "why": "isEnabled special case: building.globe.sepia_globe (L425, default true, under building.globe.enabled L424, default true) and tools.antique_ink.enabled (L998, default true)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "goblet": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 419,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L419",
+     "why": "feature toggle building.goblet.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "advancements",
+      "recipes"
+     ]
+    },
+    "gold_door": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 249,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L249",
+     "why": "feature toggle redstone.gold_door = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "gold_trapdoor": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 250,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L250",
+     "why": "feature toggle redstone.gold_trapdoor = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "gravel_bricks": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 335,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L335",
+     "why": "feature toggle building.gravel_bricks.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "hat_stand": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 448,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L448",
+     "why": "feature toggle building.hat_stand.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "hourglass": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 787,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L787",
+     "why": "feature toggle functional.hourglass = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "iron_gate": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 356,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L356",
+     "why": "feature toggle building.iron_gate.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "item_lore": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1209,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1209",
+     "why": "feature toggle tweaks.item_lore.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "item_shelf": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 364,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L364",
+     "why": "feature toggle building.item_shelf.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "jar": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 646,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L646",
+     "why": "feature toggle functional.jar.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "key": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1352,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1352",
+     "why": "isEnabled special case: netherite door/trapdoor (L471-472, default true) or functional.safe.enabled (L681, default true)",
+     "used_in": [
+      "slots"
+     ]
+    },
+    "lapis_bricks": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 475,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L475",
+     "why": "feature toggle building.lapis_bricks = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "lock_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 251,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L251",
+     "why": "feature toggle redstone.lock_block = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "lumisene": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 770,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L770",
+     "why": "feature toggle functional.lumisene.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "lumisene_bottle": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 772,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L772",
+     "why": "feature toggle functional.lumisene.lumisene_bottle.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "lunch_basket": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 897,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L897",
+     "why": "feature toggle tools.lunch_basket.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "netherite_door": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1354,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1354",
+     "why": "not a registered feature toggle; isEnabled returns FEATURE_TOGGLES.getOrDefault(key, () -> true), so the config cannot turn it off",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "netherite_trapdoor": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1354,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1354",
+     "why": "not a registered feature toggle; isEnabled returns FEATURE_TOGGLES.getOrDefault(key, () -> true), so the config cannot turn it off",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "notice_board": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 386,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L386",
+     "why": "feature toggle building.notice_board.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "pancake": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 485,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L485",
+     "why": "feature toggle building.pancake = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "pedestal": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 394,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L394",
+     "why": "feature toggle building.pedestal.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "planter": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 378,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L378",
+     "why": "feature toggle building.planter.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "present": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 758,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L758",
+     "why": "feature toggle functional.present.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "pulley_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 218,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L218",
+     "why": "feature toggle redstone.pulley_block.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "quiver": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 880,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L880",
+     "why": "feature toggle tools.quiver.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes",
+      "slots"
+     ]
+    },
+    "random_adventurer_maps": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1354,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1354",
+     "why": "not a registered feature toggle; isEnabled returns FEATURE_TOGGLES.getOrDefault(key, () -> true), so the config cannot turn it off",
+     "used_in": [
+      "moonlight"
+     ]
+    },
+    "redstone_illuminator": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 246,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L246",
+     "why": "feature toggle redstone.redstone_illuminator = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "relayer": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 252,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L252",
+     "why": "feature toggle redstone.relayer = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "rich_soil_planter": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1354,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1354",
+     "why": "not a registered feature toggle; isEnabled returns FEATURE_TOGGLES.getOrDefault(key, () -> true), so the config cannot turn it off",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "rope": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 630,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L630",
+     "why": "FEATURE_TOGGLES.put(\"rope\", TRUE): a constant, not a config option",
+     "used_in": [
+      "loot_modifiers",
+      "moonlight",
+      "recipes"
+     ]
+    },
+    "rope_arrow": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 934,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L934",
+     "why": "feature toggle tools.rope_arrow.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "moonlight",
+      "recipes"
+     ]
+    },
+    "sack": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 690,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L690",
+     "why": "feature toggle functional.sack.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "safe": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 681,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L681",
+     "why": "feature toggle functional.safe.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "sconce": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 483,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L483",
+     "why": "feature toggle building.sconce = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "sconce_lever": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 484,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L484",
+     "why": "feature toggle building.sconce_lever = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "sconce_soul": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1354,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1354",
+     "why": "not a registered feature toggle; isEnabled returns FEATURE_TOGGLES.getOrDefault(key, () -> true), so the config cannot turn it off",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "sign_post": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 429,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L429",
+     "why": "feature toggle building.sign_post.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "slice_map": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 906,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L906",
+     "why": "feature toggle tools.slice_map.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "slidy_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 340,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L340",
+     "why": "feature toggle building.slidy_block.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "slingshot": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 969,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L969",
+     "why": "feature toggle tools.slingshot.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "soap": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 719,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L719",
+     "why": "feature toggle functional.soap.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "advancements",
+      "recipes"
+     ]
+    },
+    "speaker_block": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 162,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L162",
+     "why": "feature toggle redstone.speaker_block.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "spring_launcher": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 193,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L193",
+     "why": "feature toggle redstone.spring_launcher.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "statue": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 489,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L489",
+     "why": "feature toggle building.statue = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "stone_lamp": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 479,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L479",
+     "why": "feature toggle building.stone_lamp = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "stone_tile": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 480,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L480",
+     "why": "feature toggle building.stone_tile = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "sugar_cube": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 370,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L370",
+     "why": "feature toggle building.sugar_cube.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "sus_recipes": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 1214,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L1214",
+     "why": "feature toggle tweaks.sus_recipes.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "timber_frame": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 346,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L346",
+     "why": "feature toggle building.timber_frame.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "trapped_present": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 759,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L759",
+     "why": "feature toggle functional.present.trapped_present = builder.define(..., true) via feature() (L1323-1340); ANDed with its category toggle present (L758, default true)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "turn_table": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 210,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L210",
+     "why": "feature toggle redstone.turn_table.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "advancements",
+      "recipes"
+     ]
+    },
+    "wattle_and_daub": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 440,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L440",
+     "why": "feature toggle building.daub.wattle_and_daub = builder.define(..., true) via feature() (L1323-1340); ANDed with its category toggle daub (L439, default true)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "way_sign": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 431,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L431",
+     "why": "feature toggle building.sign_post.way_sign.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "advancements"
+     ]
+    },
+    "wicker_fence": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 495,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L495",
+     "why": "feature toggle building.wicker_fence = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "wind_vane": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 244,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L244",
+     "why": "feature toggle redstone.wind_vane = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "recipes"
+     ]
+    },
+    "wrench": {
+     "default": true,
+     "file": "common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java",
+     "line": 927,
+     "url": "https://github.com/MehVahdJukaar/Supplementaries/blob/c095e8718b1e3fe68007f6375ec14e8efe7127c0/common/src/main/java/net/mehvahdjukaar/supplementaries/configs/CommonConfigs.java#L927",
+     "why": "feature toggle tools.wrench.enabled = builder.define(..., true) via feature() (L1323-1340)",
+     "used_in": [
+      "advancements",
+      "recipes"
+     ]
+    }
+   }
+  },
+  {
+   "mod": "mythicmetals",
+   "version": "0.24.6+1.21",
+   "loader": "fabric",
+   "condition": "mythicmetals:nuggets_enabled",
+   "argument": null,
+   "repo": "https://github.com/Noaaan/MythicMetals",
+   "commit": "7332378b515fa0048bec5bd7efac9865b309bf2d",
+   "pinning": "git tag 0.24.6+1.21 (Modrinth fKQ4feyG)",
+   "registration": {
+    "file": "src/main/java/com/mythicmetals/conditions/NuggetsLoadedCondition.java",
+    "line": 20,
+    "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/conditions/NuggetsLoadedCondition.java#L20",
+    "why": "test() returns MythicMetals.CONFIG.enableNuggets()"
+   },
+   "flags": {
+    "": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 65,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L65",
+     "why": "owo config model field `public boolean enableNuggets = true;`"
+    }
+   }
+  },
+  {
+   "mod": "mythicmetals",
+   "version": "0.24.6+1.21",
+   "loader": "fabric",
+   "condition": "mythicmetals:dust_enabled",
+   "argument": null,
+   "repo": "https://github.com/Noaaan/MythicMetals",
+   "commit": "7332378b515fa0048bec5bd7efac9865b309bf2d",
+   "pinning": "git tag 0.24.6+1.21 (Modrinth fKQ4feyG)",
+   "registration": {
+    "file": "src/main/java/com/mythicmetals/conditions/DustLoadedCondition.java",
+    "line": 20,
+    "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/conditions/DustLoadedCondition.java#L20",
+    "why": "test() returns MythicMetals.CONFIG.enableDusts()"
+   },
+   "flags": {
+    "": {
+     "default": false,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 63,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L63",
+     "why": "owo config model field `public boolean enableDusts = false;`"
+    }
+   }
+  },
+  {
+   "mod": "mythicmetals",
+   "version": "0.24.6+1.21",
+   "loader": "fabric",
+   "condition": "mythicmetals:anvils_enabled",
+   "argument": null,
+   "repo": "https://github.com/Noaaan/MythicMetals",
+   "commit": "7332378b515fa0048bec5bd7efac9865b309bf2d",
+   "pinning": "git tag 0.24.6+1.21 (Modrinth fKQ4feyG)",
+   "registration": {
+    "file": "src/main/java/com/mythicmetals/conditions/AnvilsLoadedCondition.java",
+    "line": 20,
+    "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/conditions/AnvilsLoadedCondition.java#L20",
+    "why": "test() returns MythicMetals.CONFIG.enableAnvils()"
+   },
+   "flags": {
+    "": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 67,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L67",
+     "why": "owo config model field `public boolean enableAnvils = true;`"
+    }
+   }
+  },
+  {
+   "mod": "farmersdelight",
+   "version": "1.3.4",
+   "loader": "neoforge",
+   "condition": "farmersdelight:vanilla_crates_enabled",
+   "argument": null,
+   "repo": "https://github.com/vectorwing/FarmersDelight",
+   "commit": "dd8b9b0bfec916a2da88a6d64e3a37f4a02c3259",
+   "pinning": "branch 1.21, 'Update version and changelog' (gradle.properties mod_version=1.3.4), the last commit before Modrinth XTVZDOol was published",
+   "registration": {
+    "file": "src/main/java/vectorwing/farmersdelight/common/crafting/condition/VanillaCrateEnabledCondition.java",
+    "line": 19,
+    "url": "https://github.com/vectorwing/FarmersDelight/blob/dd8b9b0bfec916a2da88a6d64e3a37f4a02c3259/src/main/java/vectorwing/farmersdelight/common/crafting/condition/VanillaCrateEnabledCondition.java#L19",
+    "why": "returns Configuration.ENABLE_VANILLA_CROP_CRATES.get()"
+   },
+   "flags": {
+    "": {
+     "default": true,
+     "file": "src/main/java/vectorwing/farmersdelight/common/Configuration.java",
+     "line": 83,
+     "url": "https://github.com/vectorwing/FarmersDelight/blob/dd8b9b0bfec916a2da88a6d64e3a37f4a02c3259/src/main/java/vectorwing/farmersdelight/common/Configuration.java#L83",
+     "why": "ENABLE_VANILLA_CROP_CRATES = COMMON_BUILDER...define(\"enableVanillaCropCrates\", true)"
+    }
+   }
+  },
+  {
+   "mod": "farmersdelight",
+   "version": "26.1-3.6.28+refabricated",
+   "loader": "fabric",
+   "condition": "farmersdelight:vanilla_crates_enabled",
+   "argument": null,
+   "repo": "https://github.com/MehVahdJukaar/FarmersDelightRefabricated",
+   "commit": "a8cb49ed05f3ed5ab857dffe64d8c70309b7d7be",
+   "pinning": "branch fabric/latest/26.1 (gradle.properties mod_version=3.6.28), the last commit before Modrinth DDCRIV2Z was published; Configuration.java identical at the version-bump commit 3860907c",
+   "registration": {
+    "file": "src/main/java/vectorwing/farmersdelight/common/crafting/condition/VanillaCrateEnabledCondition.java",
+    "line": 32,
+    "url": "https://github.com/MehVahdJukaar/FarmersDelightRefabricated/blob/a8cb49ed05f3ed5ab857dffe64d8c70309b7d7be/src/main/java/vectorwing/farmersdelight/common/crafting/condition/VanillaCrateEnabledCondition.java#L32",
+    "why": "returns Configuration.ENABLE_VANILLA_CROP_CRATES.get()"
+   },
+   "flags": {
+    "": {
+     "default": true,
+     "file": "src/main/java/vectorwing/farmersdelight/common/Configuration.java",
+     "line": 83,
+     "url": "https://github.com/MehVahdJukaar/FarmersDelightRefabricated/blob/a8cb49ed05f3ed5ab857dffe64d8c70309b7d7be/src/main/java/vectorwing/farmersdelight/common/Configuration.java#L83",
+     "why": "ENABLE_VANILLA_CROP_CRATES = COMMON_BUILDER...define(\"enableVanillaCropCrates\", true)"
+    }
+   }
+  },
+  {
+   "mod": "tconstruct",
+   "version": "3.12.1.231",
+   "loader": "forge",
+   "condition": "tconstruct:config",
+   "argument": "prop",
+   "repo": "https://github.com/SlimeKnights/TinkersConstruct",
+   "commit": "a5a0324954f71b7620f766fadea0a0adf2984ae0",
+   "pinning": "git tag v3.12.1.231 (Modrinth Fv0zTUuh)",
+   "registration": {
+    "file": "src/main/java/slimeknights/tconstruct/common/json/ConfigEnabledCondition.java",
+    "line": 71,
+    "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/json/ConfigEnabledCondition.java#L71",
+    "why": "read(): PROPS.get(prop); an unknown prop is a JsonSyntaxException (the recipe fails to load)"
+   },
+   "flags": {
+    "gravel_to_flint": {
+     "default": true,
+     "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
+     "line": 107,
+     "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L107",
+     "why": "ConfigEnabledCondition L118: add(\"gravel_to_flint\", Config.COMMON.addGravelToFlintRecipe); addGravelToFlintRecipe = builder...define(..., true)"
+    },
+    "cheaper_netherite_alloy": {
+     "default": true,
+     "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
+     "line": 113,
+     "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L113",
+     "why": "ConfigEnabledCondition L119: add(\"cheaper_netherite_alloy\", Config.COMMON.cheaperNetheriteAlloy); cheaperNetheriteAlloy = builder...define(..., true)"
+    },
+    "slime_recipe_fix": {
+     "default": true,
+     "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
+     "line": 130,
+     "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L130",
+     "why": "ConfigEnabledCondition L124: add(\"slime_recipe_fix\", Config.COMMON.glassRecipeFix); glassRecipeFix = builder...define(..., true)"
+    },
+    "glass_recipe_fix": {
+     "default": true,
+     "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
+     "line": 130,
+     "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L130",
+     "why": "ConfigEnabledCondition L125: add(\"glass_recipe_fix\", Config.COMMON.glassRecipeFix); glassRecipeFix = builder...define(..., true)"
+    },
+    "allow_ingotless_alloys": {
+     "default": true,
+     "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
+     "line": 186,
+     "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L186",
+     "why": "ConfigEnabledCondition L126: add(\"allow_ingotless_alloys\", Config.COMMON.allowIngotlessAlloys); allowIngotlessAlloys = builder...define(..., true)"
+    },
+    "force_integration_materials": {
+     "default": false,
+     "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
+     "line": 205,
+     "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L205",
+     "why": "ConfigEnabledCondition L127: add(\"force_integration_materials\", Config.COMMON.forceIntegrationMaterials); forceIntegrationMaterials = builder...define(..., false)"
+    },
+    "slimy_loot_chests": {
+     "default": true,
+     "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
+     "line": 169,
+     "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L169",
+     "why": "ConfigEnabledCondition L128: add(\"slimy_loot_chests\", Config.COMMON.slimyLootChests); slimyLootChests = builder...define(..., true)"
+    }
+   }
+  }
+ ]
+}
