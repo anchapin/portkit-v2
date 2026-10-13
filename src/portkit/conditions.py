@@ -29,6 +29,19 @@ not load. This module decides each file against the conversion context:
   one note per mod); a cited ``false`` fails ("disabled by default config");
   a flag or version with no citation is undecidable ("unknown load condition"),
   never guessed. See docs/decisions.md, 2026-10-13.
+- **User config** (``portkit convert --config <mod>.<flag>=<true|false>``,
+  ``--config-file``): the conversion-time stand-in for a Java player editing
+  the mod's config file. A flag the user sets is decided by that setting instead
+  of its cited default, both ways, cited or not ("set by user config"); a file
+  it turns off is residue "disabled by user config: <flag>". Names are the flag
+  as the conditions spell it or the option's own config key where the data file
+  cites one (``mythicmetals.enableDusts``); an unknown mod or flag is a
+  :class:`ConfigError` listing the valid ones, never a silent ignore. See
+  docs/decisions.md, 2026-10-13 (config overrides).
+- **Gated registrations**: ids the mod's code registers only while a flag is on
+  (``registers`` in the data file, cited), such as Mythic Metals' ``*_dust``
+  items under ``enableDusts``; :meth:`LoadContext.gated_item` decides them the
+  same way, so the item converter leaves them out when the flag is off.
 
 A false condition and an undecidable one both make the file residue: the first
 because Java doesn't load it, the second because shipping it would be a guess.
@@ -40,10 +53,13 @@ are read here.
 """
 from __future__ import annotations
 
+import fnmatch
 import json
+import tomllib
 from dataclasses import dataclass, field
 from functools import lru_cache
 from importlib import resources
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -100,8 +116,9 @@ class FlagDefault:
     version: str
     condition: str
     flag: str  # "" for a condition with no argument
-    default: bool
+    default: bool  # the value the verdict used: the cited default, or the user's setting
     url: str
+    user: bool = False  # set by user config rather than read from the cited default
 
 
 @lru_cache(maxsize=1)
@@ -127,10 +144,13 @@ class Verdict:
     disabled: list[str] = field(default_factory=list)  # flags off by default that make it false
     unknown: list[str] = field(default_factory=list)  # "<type>/<flag>" with no cited default
     assumed: list[FlagDefault] = field(default_factory=list)  # cited defaults a true verdict uses
+    user_disabled: list[str] = field(default_factory=list)  # flags the user's config turned off
 
     def reason(self) -> str:
         """The residue reason for a verdict that isn't True."""
         if self.passes is False:
+            if self.user_disabled:
+                return f"disabled by user config: {', '.join(dict.fromkeys(self.user_disabled))}"
             if self.disabled:
                 return f"disabled by default config: {', '.join(dict.fromkeys(self.disabled))}"
             if self.absent:
@@ -161,10 +181,13 @@ class LoadContext:
     """
 
     def __init__(self, mod: "SourceMod", tags: "TagResolver | None" = None,
-                 table: dict | None = None):
+                 table: dict | None = None, overrides: dict[tuple[str, str], bool] | None = None):
         self.mod = mod
         self._tags = tags
         self._table = table
+        # (condition type, flag) -> the user's setting (``--config``), which
+        # replaces the cited default; see :func:`resolve_config`.
+        self.overrides = dict(overrides or {})
         self.assumed: dict[tuple[str, str], FlagDefault] = {}
 
     # -- the conversion context --------------------------------------------
@@ -266,6 +289,7 @@ class LoadContext:
             for p in decisive:
                 out.absent += p.absent
                 out.disabled += p.disabled
+                out.user_disabled += p.user_disabled
                 out.assumed += p.assumed
             return out
         unknown = [p for p in parts if p.passes is None]
@@ -279,6 +303,7 @@ class LoadContext:
         for p in parts:
             out.absent += p.absent
             out.disabled += p.disabled
+            out.user_disabled += p.user_disabled
             out.assumed += p.assumed
         return out
 
@@ -297,10 +322,11 @@ class LoadContext:
             if inner.passes is None:
                 return inner
             flags = [f"{f.condition}/{f.flag}" if f.flag else f.condition for f in inner.assumed]
+            how = "set by user config" if any(f.user for f in inner.assumed) else "by default"
             if flags and inner.passes:
-                why = f"loads only when {', '.join(flags)} is off, and it is on by default"
+                why = f"loads only when {', '.join(flags)} is off, and it is on {how}"
             elif flags:
-                why = f"loads when {', '.join(flags)} is off, as it is by default"
+                why = f"loads when {', '.join(flags)} is off, as it is {how}"
             else:
                 why = f"not ({inner.why})"
             # not(...) of an absent mod passes; not(...) of a present one rests
@@ -417,6 +443,15 @@ class LoadContext:
             return Verdict(None, f"{label}: not a single named flag", unknown=[label])
         flag = next(iter(args.values()), "") if args else ""
         label = f"{kind}/{flag}" if flag else kind
+        if (kind, flag) in self.overrides:
+            # The user's config decides it, cited default or not.
+            on = self.overrides[(kind, flag)]
+            found = FlagDefault(kind.partition(":")[0], (self.mod.mods or {}).get(kind.partition(":")[0], ""),
+                                kind, flag, on, "", user=True)
+            if on:
+                return Verdict(True, f"{label} (on, set by user config)", assumed=[found])
+            return Verdict(False, f"{label} (off, set by user config)", user_disabled=[label],
+                           assumed=[found])
         found = self.flag(kind, flag)
         if isinstance(found, str):
             return Verdict(None, f"{label}: {found}", unknown=[label])
@@ -462,7 +497,39 @@ class LoadContext:
         for v in failed:
             out.absent += v.absent
             out.disabled += v.disabled
+            out.user_disabled += v.user_disabled
         return None, out
+
+    def gated_item(self, ident: str) -> Verdict | None:
+        """Whether the mod's code registers ``ident``, when a config flag decides it.
+
+        None when no cited ``registers`` pattern for this mod version names the
+        id; otherwise the flag's verdict (the user's setting or the cited
+        default), with ``passes`` False when Java doesn't register the item.
+        """
+        for entry in flag_entries(self._table):
+            version = (self.mod.mods or {}).get(entry.get("mod"))
+            if version is None or str(entry.get("version")) != version:
+                continue
+            kind = entry.get("condition")
+            gates = []
+            if isinstance(entry.get("registers"), dict) and entry.get("argument") is None:
+                gates.append(("", entry["registers"]))
+            for flag, found in (entry.get("flags") or {}).items():
+                if isinstance(found, dict) and isinstance(found.get("registers"), dict):
+                    gates.append((flag, found["registers"]))
+            for flag, registers in gates:
+                patterns = [p for p in registers.get("items") or [] if isinstance(p, str)]
+                if not any(fnmatch.fnmatchcase(ident, p) for p in patterns):
+                    continue
+                cond = {"type": kind, **({entry["argument"]: flag} if flag and entry.get("argument") else {})}
+                verdict = self._flag(kind, cond)
+                label = f"{kind}/{flag}" if flag else kind
+                verdict.why = f"Java registers {ident} only while {label} is on: {verdict.why}"
+                if verdict.passes:
+                    self.remember(verdict)
+                return verdict
+        return None
 
     def remember(self, verdict: Verdict) -> None:
         for found in verdict.assumed:
@@ -470,10 +537,11 @@ class LoadContext:
 
     def note(self) -> str | None:
         """One line naming every flag the conversion assumed at its cited default."""
-        if not self.assumed:
+        assumed = {k: f for k, f in self.assumed.items() if not f.user}
+        if not assumed:
             return None
         by_mod: dict[str, dict[bool, list[str]]] = {}
-        for (kind, flag), found in sorted(self.assumed.items()):
+        for (kind, flag), found in sorted(assumed.items()):
             by_mod.setdefault(f"{found.mod} {found.version}", {}).setdefault(found.default, []).append(
                 f"{kind}/{flag}" if flag else kind)
         parts = []
@@ -484,3 +552,266 @@ class LoadContext:
                 "the mod's own source (portkit/data/config_flag_defaults.json); a pack that changes "
                 "these options would load a different set. Assumed " + "; ".join(parts))
 
+
+    def user_note(self) -> str | None:
+        """One line naming the user-config flags that decided a file here."""
+        used = sorted((k, f) for k, f in self.assumed.items() if f.user)
+        if not used:
+            return None
+        said = ", ".join(f"{kind}/{flag}={'on' if f.default else 'off'}" if flag
+                         else f"{kind}={'on' if f.default else 'off'}" for (kind, flag), f in used)
+        return ("files gated on mod config flags set by user config (portkit convert --config) were "
+                f"decided by that setting, not the cited default: {said}")
+
+
+# -- user config (``portkit convert --config``) ------------------------------------
+
+class ConfigError(ValueError):
+    """A ``--config`` setting that is malformed or names no known flag."""
+
+
+_TRUE = {"true", "on", "yes", "1"}
+_FALSE = {"false", "off", "no", "0"}
+
+
+@dataclass(frozen=True)
+class ConfigRequest:
+    """One setting as the user wrote it: ``<mod>.<name>=<value>``."""
+
+    mod: str
+    name: str
+    value: bool
+    origin: str  # "--config" or the --config-file path
+
+
+def _bool(value, where: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in _TRUE | _FALSE:
+        return value.strip().lower() in _TRUE
+    raise ConfigError(f"{where}: value {value!r} is not true or false")
+
+
+def _split_key(key: str, where: str) -> tuple[str, str]:
+    mod, dot, name = key.strip().partition(".")
+    if not dot or not mod or not name:
+        raise ConfigError(f"{where}: expected <mod>.<flag>, e.g. mythicmetals.enableDusts, not {key!r}")
+    return mod, name
+
+
+def parse_config_arg(text: str) -> ConfigRequest:
+    """``<mod>.<flag>=<true|false>`` from the command line."""
+    key, sep, value = text.partition("=")
+    where = f"--config {text!r}"
+    if not sep:
+        raise ConfigError(f"{where}: expected <mod>.<flag>=<true|false>")
+    mod, name = _split_key(key, where)
+    return ConfigRequest(mod, name, _bool(value, where), "--config")
+
+
+def load_config_file(path: Path | str) -> list[ConfigRequest]:
+    """Settings from a JSON or TOML file.
+
+    Either nested (``{"mythicmetals": {"enableDusts": true}}``; in TOML a
+    ``[mythicmetals]`` table) or flat (``{"mythicmetals.enableDusts": true}``).
+    A ``.toml`` suffix reads TOML, anything else JSON. Top-level keys starting
+    with ``_`` are ignored, so the ``config-overrides.json`` a run writes (its
+    ``_settings`` key records what each setting replaced) reads back as is.
+    """
+    path = Path(path)
+    where = f"--config-file {path}"
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        raise ConfigError(f"{where}: {exc.strerror or exc}") from None
+    try:
+        data = tomllib.loads(text) if path.suffix.lower() == ".toml" else json.loads(text)
+    except (tomllib.TOMLDecodeError, json.JSONDecodeError) as exc:
+        raise ConfigError(f"{where}: not valid {'TOML' if path.suffix.lower() == '.toml' else 'JSON'}: {exc}") from None
+    if not isinstance(data, dict):
+        raise ConfigError(f"{where}: expected a mapping of <mod> to {{<flag>: true|false}}")
+    out = []
+    for key, value in data.items():
+        if str(key).startswith("_"):
+            continue
+        if isinstance(value, dict):
+            if "." in key:
+                raise ConfigError(f"{where}: {key!r} holds a table; use a mod id as the table name")
+            for name, setting in value.items():
+                out.append(ConfigRequest(key, str(name), _bool(setting, f"{where} {key}.{name}"), str(path)))
+        else:
+            mod, name = _split_key(key, where)
+            out.append(ConfigRequest(mod, name, _bool(value, f"{where} {key}"), str(path)))
+    return out
+
+
+@dataclass
+class KnownFlag:
+    """A config flag this conversion can be told about."""
+
+    condition: str
+    flag: str  # "" for a condition with no argument
+    mods: set[str]  # names accepted before the dot: the mod id and the condition namespace
+    config_key: str | None = None  # the option's name in the mod's config file, cited
+    default: bool | None = None  # cited default for this jar's version, when there is one
+    url: str = ""
+
+    @property
+    def name(self) -> str:
+        """The canonical name: the flag, or the condition's own name when it takes none."""
+        return self.flag or _local(self.condition)
+
+    @property
+    def label(self) -> str:
+        return f"{self.condition}/{self.flag}" if self.flag else self.condition
+
+
+_BUILTIN_NS = ("forge", "neoforge", "fabric", "minecraft")
+
+
+def _walk_conditions(cond, found: dict) -> None:
+    if isinstance(cond, list):
+        for c in cond:
+            _walk_conditions(c, found)
+        return
+    if not isinstance(cond, dict):
+        return
+    kind = _kind(cond)
+    if kind is None or ":" not in kind:
+        return
+    ns, local = kind.split(":", 1)
+    if ns in _BUILTIN_NS:
+        if local == "not":
+            _walk_conditions(cond.get("value"), found)
+        elif local in ("and", "or"):
+            _walk_conditions(cond.get("values"), found)
+        return
+    args = {k: v for k, v in cond.items() if k not in ("type", "condition")}
+    if not args:
+        found.setdefault((kind, ""), True)
+    elif len(args) == 1 and isinstance(next(iter(args.values())), str):
+        found.setdefault((kind, next(iter(args.values()))), True)
+
+
+def referenced_flags(root: Path) -> set[tuple[str, str]]:
+    """(condition, flag) of every mod config condition the jar's recipes and loot tables use."""
+    found: dict = {}
+    data = Path(root) / "data"
+    for ns_dir in sorted(p for p in data.iterdir() if p.is_dir()) if data.is_dir() else []:
+        for lane in ("recipes", "recipe", "loot_tables", "loot_table"):
+            # A loot table's top-level "conditions" is never a load condition.
+            keys = _LOOT_ALL if lane.startswith("loot") else _ALL_KEYS
+            base = ns_dir / lane
+            for path in sorted(base.rglob("*.json")) if base.is_dir() else []:
+                try:
+                    body = json.loads(path.read_text(encoding="utf-8-sig"))
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+                if not isinstance(body, dict):
+                    continue
+                for key in keys:
+                    if key in body:
+                        _walk_conditions(body[key], found)
+                if body.get("type") in CONDITIONAL_TYPES and isinstance(body.get("recipes"), list):
+                    for entry in body["recipes"]:
+                        if isinstance(entry, dict):
+                            _walk_conditions(entry.get("conditions"), found)
+                            inner = entry.get("recipe")
+                            for key in _ALL_KEYS:
+                                if isinstance(inner, dict) and key in inner:
+                                    _walk_conditions(inner[key], found)
+    return set(found)
+
+
+def known_flags(root: Path, mods: dict[str, str] | None, namespaces=(),
+                table: dict | None = None) -> list[KnownFlag]:
+    """The flags a ``--config`` setting may name for this jar.
+
+    Every flag the data file cites for a mod the jar declares (or ships a
+    namespace for), at any version, with its config-key alias; plus every mod
+    config condition the jar's own files use, cited or not.
+    """
+    owners = set(mods or ()) | set(namespaces)
+    known: dict[tuple[str, str], KnownFlag] = {}
+    for entry in flag_entries(table):
+        if entry.get("mod") not in owners:
+            continue
+        kind = str(entry.get("condition"))
+        version_matches = str(entry.get("version")) == (mods or {}).get(entry.get("mod"))
+        for flag, found in (entry.get("flags") or {}).items():
+            if not isinstance(found, dict):
+                continue
+            k = known.setdefault((kind, flag), KnownFlag(kind, flag, {entry["mod"], kind.partition(":")[0]}))
+            if isinstance(found.get("config_key"), str):
+                k.config_key = k.config_key or found["config_key"]
+            if version_matches and isinstance(found.get("default"), bool):
+                k.default, k.url = found["default"], str(found.get("url", ""))
+    for kind, flag in referenced_flags(root):
+        known.setdefault((kind, flag), KnownFlag(kind, flag, {kind.partition(":")[0]}))
+    return [known[k] for k in sorted(known)]
+
+
+def resolve_config(requests: list[ConfigRequest], known: list[KnownFlag]) -> tuple[dict, list[dict]]:
+    """The settings as ``{(condition, flag): bool}``, and one record per flag set.
+
+    Later requests win (``--config`` after ``--config-file``). A name matches a
+    flag's canonical name or its cited config key (one key can stand for
+    several flags, as Tinkers' ``glassRecipeFix`` does); an unknown mod or flag
+    raises :class:`ConfigError` naming the valid ones.
+    """
+    overrides: dict[tuple[str, str], bool] = {}
+    records: dict[tuple[str, str], dict] = {}
+    mods_with_flags = sorted({m for k in known for m in k.mods})
+    for req in requests:
+        where = f"{req.origin} {req.mod}.{req.name}"
+        candidates = [k for k in known if req.mod in k.mods]
+        if not candidates:
+            have = (f"mods with config flags here: {', '.join(mods_with_flags)}" if mods_with_flags
+                    else "this jar has no known mod config flags")
+            raise ConfigError(f"{where}: no config flags are known for mod {req.mod!r} ({have})")
+        matches = [k for k in candidates if req.name in (k.name, k.config_key)]
+        if not matches:
+            folded = req.name.lower()
+            matches = [k for k in candidates
+                       if folded in (k.name.lower(), (k.config_key or "").lower())]
+        if not matches:
+            valid = ", ".join(f"{k.name} ({k.config_key})" if k.config_key and k.config_key != k.name
+                              else k.name for k in candidates)
+            raise ConfigError(f"{where}: unknown config flag for {req.mod}; valid flags: {valid}")
+        for k in matches:
+            overrides[(k.condition, k.flag)] = req.value
+            records[(k.condition, k.flag)] = {
+                "mod": req.mod,
+                "flag": k.name,
+                "condition": k.label,
+                "value": req.value,
+                "as_written": f"{req.mod}.{req.name}",
+                "config_key": k.config_key,
+                "cited_default": k.default,
+                "default_source": k.url or None,
+                "origin": req.origin,
+            }
+    return overrides, [records[k] for k in sorted(records)]
+
+
+def config_record(records: list[dict]) -> dict:
+    """The settings as a ``--config-file`` mapping, canonical names: reproduces the run."""
+    out: dict[str, dict[str, bool]] = {}
+    for r in records:
+        out.setdefault(r["mod"], {})[r["flag"]] = r["value"]
+    return out
+
+
+def config_note(records: list[dict]) -> str | None:
+    """One line for the conversion notes listing every user config setting."""
+    if not records:
+        return None
+    parts = []
+    for r in records:
+        default = ("uncited default" if r["cited_default"] is None
+                   else f"default {'on' if r['cited_default'] else 'off'}")
+        alias = f" via {r['as_written']}" if r["as_written"] != f"{r['mod']}.{r['flag']}" else ""
+        parts.append(f"{r['condition']}={'on' if r['value'] else 'off'} ({default}{alias})")
+    return ("converted with mod config set by user config, which replaces the cited defaults "
+            "(written to config-overrides.json; pass it back with --config-file to reproduce "
+            "this output): " + "; ".join(parts))
