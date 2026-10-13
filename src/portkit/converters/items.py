@@ -11,8 +11,21 @@ same flat icon plus ``minecraft:hand_equipped: true``, so Bedrock renders it in
 the hand like a tool, and a note says that its mining, attack and durability
 behavior, which Java keeps in compiled code, is not converted: no damage,
 durability or tool tier is written (no fabrication, #87). A bow
-(``item/template_bow``), a model that swaps its look on item properties
-(``overrides``), and a model that draws its own ``elements`` stay residue.
+(``item/template_bow``) and a model that draws its own ``elements`` stay
+residue.
+
+A flat icon with ``overrides`` converts as its base icon. Java draws the base
+model whenever no override matches, which for an item at rest (not in use,
+undamaged, no special data, no special day) is the item's ordinary look, so
+the base icon is a faithful static default; a note lists the alternate looks
+dropped and what they showed. That holds only when every override predicate
+is a known kind whose no-match state is the resting state (see
+``_OVERRIDE_KINDS``). A live readout (``time``, ``angle``, ``radiation``,
+``speed``, ``in_chunk``: a clock, compass, gauge or locator whose look *is*
+the reading) and a
+predicate this module does not know stay residue: a frozen frame of a reading
+would state a false one, and an unknown predicate may not have a resting
+state at all.
 
 The parent chain is followed through the mod's own intermediate models
 (``mymod:item/tool_base`` -> ``minecraft:item/handheld``) the way the block
@@ -66,6 +79,39 @@ _BEHAVIOR_PARENTS = {
 _ITEM_FORMAT = "1.20.10"
 _HELD_FORMAT = "1.20.30"
 
+# Item model override predicates by what Java's base model (no override
+# matching) shows, keyed by the predicate's name without its namespace: mods
+# register their own (``supplementaries:pull``, ``mekanism:encoded``) and
+# Forge-era mods put some under ``minecraft:`` (Alex's Mobs ``silly``). Each
+# kind's phrase says what the dropped alternate looks showed. The names are
+# vanilla 1.21.1's item properties plus the mod-specific ones the corpus uses
+# (2026-10-12, docs/decisions.md); a predicate not listed stays residue.
+_OVERRIDE_KINDS = {
+    "occasion": ("a special-day or easter-egg look", (
+        "funny_day", "silly", "wrapping",
+    )),
+    "use": ("the look while in use (drawn, charging, cast, blocking, active)", (
+        "pull", "pulling", "charged", "firework", "cast", "throwing", "blocking", "tooting",
+        "brushing", "cooldown", "using", "active", "is_active",
+    )),
+    "wear": ("the damaged or broken look", ("broken", "damage", "damaged")),
+    "state": ("looks picked by the item's stored data (trim, dye, mode, contents, count)", (
+        "custom_model_data", "trim_type", "filled", "dye", "encoded", "invalid",
+        "mode", "clipboard_type", "midas_gold_count", "is_primed",
+    )),
+    "context": ("the look in another render context (left hand, placed in the world)", (
+        "lefthanded", "in_world",
+    )),
+}
+_OVERRIDE_KIND = {name: kind for kind, (_, names) in _OVERRIDE_KINDS.items() for name in names}
+
+# Predicates whose look is a live reading: the base icon is one frame of a
+# dial, so a static icon would show a false reading. These stay residue.
+_READOUT_PREDICATES = {
+    "time": "a clock face", "angle": "a compass needle", "radiation": "a radiation gauge",
+    "speed": "a speed gauge", "in_chunk": "a locator that lights up near its target",
+}
+
 _MENU_CATEGORY = "items"
 _DEFAULT_STACK_SIZE = 64
 
@@ -107,8 +153,8 @@ def _chain(mod: SourceMod, model: dict) -> tuple[dict | None, list, str]:
     when no model in it names one), ``textures`` the merged map (a child's
     key wins over its parent's, as in Java), and ``elements``/``overrides``
     whether the chain has elements (the nearest model that has them wins in Java,
-    so any of them makes it 3D) and whether the item's own model has overrides
-    (Java does not inherit overrides from a parent).
+    so any of them makes it 3D) and the item's own model's ``overrides`` (falsy
+    when it has none; Java does not inherit overrides from a parent).
     """
     textures: dict = {}
     elements = overrides = False
@@ -122,7 +168,7 @@ def _chain(mod: SourceMod, model: dict) -> tuple[dict | None, list, str]:
         if current is model:
             # Java reads overrides from the item's own model only; a parent's
             # are not inherited (unlike textures and elements).
-            overrides = bool(current.get("overrides"))
+            overrides = current.get("overrides") or False
         parent = current.get("parent")
         if not isinstance(parent, str):
             return {"parent": None, "textures": textures, "elements": elements,
@@ -169,6 +215,64 @@ def _held_note(namespace: str, names: list[str]) -> str:
         "tool (minecraft:hand_equipped). Mining speed, attack damage, durability and tool "
         "tier live in Java code, not in the model, so none is written: in Bedrock "
         f"{'they behave' if many else 'it behaves'} like a plain item until that is added by hand."
+    )
+
+
+def _override_looks(overrides) -> tuple[list | None, str]:
+    """Check an item model's ``overrides`` for a faithful base-icon default.
+
+    Returns ``(looks, "")`` when every predicate is a known kind whose
+    no-match state is the item at rest, ``looks`` being ``(kind, predicate,
+    model)`` per predicate key, or ``(None, reason)`` for the residue."""
+    if not isinstance(overrides, list):
+        return None, "item model overrides is not a list"
+    looks = []
+    for entry in overrides:
+        predicate = entry.get("predicate") if isinstance(entry, dict) else None
+        if not isinstance(predicate, dict) or not predicate:
+            return None, "an item model override has no predicate"
+        target = entry.get("model")
+        for key in predicate:
+            local = key.rpartition(":")[2] if isinstance(key, str) else ""
+            if local in _READOUT_PREDICATES:
+                return None, (
+                    f"model swaps texture on {key!r}, {_READOUT_PREDICATES[local]} whose look is a "
+                    "live reading; one frozen frame as a static icon would show a false reading, "
+                    "and Bedrock item icons cannot change with it"
+                )
+            if local not in _OVERRIDE_KIND:
+                return None, (
+                    f"model swaps texture on item property {key!r}, which portkit does not know; "
+                    "without knowing the property it cannot tell whether the base look is the "
+                    "item's resting look"
+                )
+            looks.append((_OVERRIDE_KIND[local], key, target if isinstance(target, str) else None))
+    return looks, ""
+
+
+def _override_note(namespace: str, converted: list[tuple[str, list]]) -> str:
+    """One note per mod for the items whose override looks were dropped."""
+    parts = []
+    kinds: list[str] = []
+    for name, looks in converted:
+        keys = sorted({key for _, key, _ in looks})
+        models_ = sorted({m.rpartition(":")[2].removeprefix("item/") for _, _, m in looks if m})
+        alt = f"{len(models_)} alternate look{'s' if len(models_) != 1 else ''}"
+        shown = ", ".join(models_[:3]) + (", ..." if len(models_) > 3 else "")
+        parts.append(f"{name} ({', '.join(keys)} -> {alt}{': ' + shown if shown else ''})")
+        for kind, _, _ in looks:
+            if kind not in kinds:
+                kinds.append(kind)
+    many = len(converted) > 1
+    lost = "; ".join(_OVERRIDE_KINDS[k][0] for k in sorted(kinds))
+    return (
+        f"{namespace}: {len(converted)} item{'s' if many else ''} with model overrides "
+        f"{'convert' if many else 'converts'} as {'their' if many else 'its'} base icon, the look "
+        f"Java draws when no override applies (the item at rest): {'; '.join(parts)}. Bedrock's "
+        "minecraft:icon is one texture per item, so nothing switches to the alternate looks, "
+        f"which showed {lost}. Their models and textures are handled as before (variant models "
+        "are noted, textures ship); the code that picks them is not converted. An item whose "
+        "base icon texture itself did not convert is withdrawn to the residue, naming that texture."
     )
 
 
@@ -228,6 +332,7 @@ def convert(mod: SourceMod) -> ConversionResult:
     registered: set[str] = set()  # ...and their Bedrock ids under the converter's mapping
     variants: list[tuple[str, str]] = []  # (model name, texture) of skipped variants
     held_names: list[str] = []  # emitted items held like a tool
+    override_items: list[tuple[str, list]] = []  # emitted base icons whose override looks were dropped
     for path in sorted(src.glob("*.json")):
         name = path.stem
         if name in blocks:
@@ -279,16 +384,22 @@ def convert(mod: SourceMod) -> ConversionResult:
                 Unhandled(rel, "item", f"item model parent {shown!r}{via} is not a flat icon")
             )
             continue
-        if flat["overrides"]:
+        looks: list = []
+        if flat["overrides"] and flat["elements"]:
             result.unhandled.append(
                 Unhandled(
                     rel,
                     "item",
-                    "model swaps texture on item properties (damage, pulling), "
-                    "which Bedrock expresses in code",
+                    "model draws its own elements and swaps them on item properties "
+                    "(overrides), a 3D shape rather than a flat icon",
                 )
             )
             continue
+        if flat["overrides"]:
+            looks, why = _override_looks(flat["overrides"])
+            if looks is None:
+                result.unhandled.append(Unhandled(rel, "item", why))
+                continue
         if flat["elements"]:
             result.unhandled.append(
                 Unhandled(
@@ -344,6 +455,8 @@ def convert(mod: SourceMod) -> ConversionResult:
         if held:
             components["minecraft:hand_equipped"] = True
             held_names.append(name)
+        if looks:
+            override_items.append((name, looks))
         for parent_file in parents:
             result.claim(mod, parent_file)
         result.files[f"items/{name}.json"] = {
@@ -358,6 +471,8 @@ def convert(mod: SourceMod) -> ConversionResult:
         }
     if held_names:
         result.notes.append(_held_note(mod.namespace, held_names))
+    if override_items:
+        result.notes.append(_override_note(mod.namespace, override_items))
     if variants:
         result.notes.extend(_variant_notes(mod, src, variants, java or set()))
     return result
