@@ -182,14 +182,16 @@ export function _stoveBlock(dimension, { typeId = "farmersdelight:stove", facing
 }
 
 /** An entity standing somewhere, recording the damage it takes. */
-export function _entity(location, { typeId = "minecraft:zombie", living = true, sneaking = false, onGround = true } = {}) {
+export function _entity(location, { typeId = "minecraft:zombie", living = true, sneaking = false, onGround = true,
+  inanimate = false } = {}) {
   return {
     typeId,
     location,
     isSneaking: sneaking,
     isOnGround: onGround,
     damage: [],
-    getComponent(id) { return id === "minecraft:health" && living ? { currentValue: 20 } : undefined; },
+    getComponent(id) { return id === "minecraft:health" && (living || inanimate) ? { currentValue: 20 } : undefined; },
+    matches(options) { return !!inanimate && (options.families || []).includes("inanimate"); },
     applyDamage(amount, options) { this.damage.push({ amount, ...options }); return true; },
   };
 }
