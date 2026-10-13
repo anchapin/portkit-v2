@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-13: feasts serve portions through a scripted block; serving counts and leftovers come from the blockstate and loot table, the serving item and container from cited FD code
 
-- **Status:** proposed (PR #PRNUM, Hark). Not merged; Alex decides. The
+- **Status:** proposed (PR #196, Hark). Not merged; Alex decides. The
   numbered picks below are the open decisions.
 - **Decision:** Farmer's Delight's six feasts (roast chicken, stuffed
   pumpkin, honey glazed ham, shepherd's pie, gleaming salad, rice roll
@@ -73,8 +73,10 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **2. Serving state (pick: Bedrock integer state `farmersdelight:servings`,
   values top..0, full first).** Bedrock's default is the list's first value,
   so a placed feast is full as in Java; integer states are what Microsoft's
-  own custom-component example uses for a counting block (crop_age 0-4 with
-  per-permutation loot), and vanilla's cake has an integer `bite_counter`.
+  own custom-component example uses for a counting block (`starter:crop_age`
+  0-4 with per-permutation `minecraft:loot`, learn.microsoft.com "Building
+  with Custom Components"), and vanilla's cake has an integer
+  `bite_counter`.
   `blocks.py` gains `FacingBlock.int_state` (unquoted Molang tests).
   *Rejected:* strings like the pot's `support` / stove's `lit` (a count is a
   number; scripts would parse it).
@@ -127,7 +129,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   Banked: FD NeoForge 37.0 → 38.5 (814 → 840 files, residue 1388 → 1343), FD
   Fabric 32.1 → 33.4 (816 → 842, 1726 → 1681); no other mod changed. mct 0
   errors on both.
-- **Links:** #177; PRs #189, #191, #192, #193 (the station pattern), #PRNUM.
+- **Links:** #177; PRs #189, #191, #192, #193 (the station pattern), #196.
 
 ## 2026-10-13: an item named like a block that did not convert ships as a plain item; its block placing is left out
 
