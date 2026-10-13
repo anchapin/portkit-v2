@@ -27,6 +27,49 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: an item named like a block that did not convert ships as a plain item; its block placing is left out
+
+- **Decision:** the item converter skips an item model named like a
+  blockstate only when that block was emitted (Bedrock then makes the
+  block's item). When the block is residue, Bedrock has no item at all, so
+  the item converts as a plain item (icon, stack 64) when (1) its model is a
+  flat icon the converter already accepts (generated/handheld chain, no
+  elements, resting-state overrides) and (2) the source evidences an *item*:
+  an `item.<ns>.<name>` lang key, or a recipe, item tag or loot entry naming
+  it (`registry.registered_ids(items_only=True)`). A blockstate, a `block.`
+  lang key, a block loot table's file name or an item model alone don't
+  count: BCLib writes item models for every block (BetterEnd
+  `end_portal_block` has one and no item). An item with no `item.` key but a
+  `block.` one gets `minecraft:display_name` = the block's `tile.` line, as
+  Java's `BlockItem#getDescriptionId` names it (FD Refabricated sets this
+  explicitly: `registerBlockWithTab` calls `useBlockDescriptionPrefix()`,
+  ModItems.java L61-66 @a8cb49e, used for `wild_rice` at L346; NeoForge's
+  `DoubleHighBlockItem` inherits it from `BlockItem`). One note per mod
+  lists the items and says what is left out: whatever the Java item does in
+  code, most often placing the block (seed, sign, door, sapling); in Bedrock
+  it places nothing. A block-model item (`parent: <ns>:block/...`) still stays
+  with its block's residue.
+- **Why:** Farmer's Delight registers its rice seed under the crop block's id
+  (`registerWithTab("rice", () -> new RiceItem(ModBlocks.RICE_CROP.get(), ...))`,
+  NeoForge ModItems.java L276 @dd8b9b0; `BLOCKS.register("rice", ...)`
+  ModBlocks.java L323), and the 8-state crop block is residue, so the rule
+  "a block's item is Bedrock's to make" left `farmersdelight:rice` with no
+  definition anywhere: 5 cooking-pot recipes (`c:crops/rice`) and the
+  rice_panicle cutting recipe were residue for want of it. The item itself
+  is fully stated by the source (registered, named, iconed); only its code is
+  missing, the same partial conversion held items take (2026-10-12 entry).
+  Across the corpus the same gap had left ~290 already-emitted recipes and
+  ~250 block loot tables naming items no file declared (validator `xref.item`
+  warnings, now gone with no new warning on any mod).
+- **Rejected:** an FD special case for rice (the gap is generic: signs,
+  doors, saplings, pies, wild crops); a `minecraft:block_placer` pointing at
+  the residue block (no such block exists in the pack: invented behaviour);
+  treating the blockstate as item evidence (ships items Java never registers,
+  e.g. portals); leaving the items out until their blocks convert (keeps ~400 items
+  and the recipes and drops that need them dead).
+- **Links:** #177; PR (this one). Found alongside: #194 (bare `"#tag"`
+  recipe ingredients written as items).
+
 ## 2026-10-13: the stove is a scripted station cooking vanilla's and the jar's campfire recipes; lit, it heats the cooking pot
 
 - **Decision:** Farmer's Delight's stove takes the station split (cutting
