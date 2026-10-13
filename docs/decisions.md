@@ -27,6 +27,44 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: the residue agent follows the conversion's mod config; gated-off items' assets keep shipping
+
+- **Decision:** the residue agent's guards decide config-gated items with the
+  same `LoadContext` the converters use (cited flag defaults replaced by
+  `--config` / `--config-file`): `pipeline.convert` hands `ResidueAgent.run`
+  that context (built by the shared `SourceMod.from_metadata`), and the agent
+  asks `LoadContext.gated_item`, the code the item converter uses, so there is
+  one rule and one config. Run without a context, the agent builds one from
+  the mod's metadata at the cited defaults. While a flag is off, an item it
+  gates (a cited `registers` pattern, e.g. `mythicmetals:*_dust`) may not be
+  defined by the agent (`agent.unknown_item`, message "item gated off by
+  config flag mythicmetals:dust_enabled (disabled by default config: ...);
+  enable with --config mythicmetals.enableDusts=true") nor named anywhere in a
+  file the session writes: recipe inputs and outputs, loot entries, any JSON
+  id, a `.lang` key (`agent.gated_item`, outcome field `gated_items`). Either
+  rolls the group back. With the flag on, both pass. An id the pack already
+  defines outside the session, or that the file held before the session,
+  isn't the session's. No other agent guard reads the registered set: the
+  stat, state, trim and namespace guards don't decide whether an item exists,
+  and the recipe ref guard (`agent.unresolved_ref`) is covered by the new
+  rule. Gated-off items' textures, `item_texture.json` entries and lang lines
+  keep shipping (Mythic Metals: 27 dust textures, their atlas keys, and their
+  lang lines, 28 in en_US).
+- **Why:** since #186 the converter leaves gated items out, but the agent's
+  registered set still held them (a lang key or a gated recipe names them),
+  so a session on any other residue group could write back content Java
+  doesn't register. Assets: Alex's keep-source-assets rule (2026-10-11, the
+  unused Tinkers textures, #122); an unreferenced texture, atlas key or lang
+  line has no effect in game, and keeping them makes the resource pack the
+  same for every config, so a `--config` run differs only in behaviour files
+  and default output stays byte-identical.
+- **Rejected:** a second gating check in the agent (two rules that can drift);
+  removing gated ids from `registry.registered_ids` (it reads the source, not
+  a config, and has no context); dropping the dust textures/atlas/lang lines
+  when gated off (against the asset policy, and churns every baseline for no
+  in-game change).
+- **Links:** #187.
+
 ## 2026-10-13: users can override mod config flags at conversion time; flag-gated items follow the flag
 
 - **Decision:** `portkit convert --config <mod>.<flag>=<true|false>`
