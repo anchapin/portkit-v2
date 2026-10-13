@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .conditions import ConfigRequest, config_note, config_record, known_flags, resolve_config
+from .conditions import ConfigRequest, LoadContext, config_note, config_record, known_flags, resolve_config
 from .converters import convert_all
 from .icon import resolve as resolve_icon
 from .ingest import ingest
@@ -335,10 +335,7 @@ def convert(
             overrides, records = resolve_config(list(config), known)
             meta.notes.append(config_note(records))
         per_namespace = {
-            ns: convert_all(SourceMod(root=staged.root, namespace=ns, loader=meta.loader,
-                                     minecraft=meta.minecraft, mods=meta.mods,
-                                     requires=frozenset(meta.requires) if meta.requires is not None else None),
-                            overrides=overrides or None)
+            ns: convert_all(SourceMod.from_metadata(staged.root, ns, meta), overrides=overrides or None)
             for ns in selected
         }
         result = merge_namespaces(per_namespace)
@@ -362,7 +359,12 @@ def convert(
         file_count = len(result.files)
         agent_run = None
         if agent is not None and unhandled:
-            agent_run = agent.run(staged.root, tree, unhandled, namespace, meta)
+            # The agent's guards decide config-gated items with the same
+            # settings the converters used (cited defaults + --config), so it
+            # can't write back an item the converters left out (#187).
+            context = LoadContext(SourceMod.from_metadata(staged.root, namespace, meta),
+                                  overrides=overrides or None)
+            agent_run = agent.run(staged.root, tree, unhandled, namespace, meta, context=context)
             unhandled = agent_run.remaining
             file_count += agent_run.files_written
         report = validate_tree(tree)
