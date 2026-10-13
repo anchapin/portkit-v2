@@ -9,7 +9,7 @@
     "betterend": {
       "coverage": 35.2,
       "files": 3405,
-      "residue": 6260,
+      "residue": 6264,
       "errors": 0
     },
     "create": {
@@ -19,9 +19,9 @@
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 33.4,
-      "files": 842,
-      "residue": 1681,
+      "coverage": 34.0,
+      "files": 861,
+      "residue": 1670,
       "errors": 0
     },
     "farmers_delight_neoforge": {

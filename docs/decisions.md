@@ -29,8 +29,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-13: feasts serve portions through a scripted block; serving counts and leftovers come from the blockstate and loot table, the serving item and container from cited FD code
 
-- **Status:** proposed (PR #196, Hark). Not merged; Alex decides. The
-  numbered picks below are the open decisions.
+- **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR
+  #196): the numbered picks below, and the code/data cross-check under
+  "Where each value comes from" (pick 10).
 - **Decision:** Farmer's Delight's six feasts (roast chicken, stuffed
   pumpkin, honey glazed ham, shepherd's pie, gleaming salad, rice roll
   medley) take the station split: a generated table
@@ -127,9 +128,30 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   popping (`PushReaction.DESTROY`), Java's `isSameItem` beyond the item id.
 - **Coverage:** both FD jars convert all six feasts and their loot tables.
   Banked: FD NeoForge 37.0 → 38.5 (814 → 840 files, residue 1388 → 1343), FD
-  Fabric 32.1 → 33.4 (816 → 842, 1726 → 1681); no other mod changed. mct 0
-  errors on both.
+  Fabric 32.7 → 34.0 (835 → 861, 1715 → 1670; on top of the #194 bare-tag
+  fix, the feasts add the same +26 files / -45 residue as before it); no other
+  mod changed. mct 0 errors on both.
 - **Links:** #177; PRs #189, #191, #192, #193 (the station pattern), #196.
+
+## 2026-10-13: a bare "#tag" recipe ingredient is the tag; a "#" item id is a validator error
+
+- **Decision:** A 1.21.2+ bare-string ingredient starting with `#` (`"#c:crops/wheat"`)
+  converts exactly as `{"tag": "c:crops/wheat"}` does (pass-through Bedrock tag,
+  one-member resolve, native tag, per-member recipes, residue with the same
+  reason), in crafting keys and ingredient lists, furnace inputs and smithing
+  slots; any other string is the item. Lists get the same per-entry reading, so a
+  list holding a tag stays residue as it does in object form. The validator gains
+  `xref.item_tag`: an `item` (or furnace/smithing slot) naming a `#...` id is an
+  **error**, unlike `xref.item`, which stays a warning.
+- **Why:** `{"item": "#..."}` names no item on Bedrock in any pack, so the recipe
+  can never be crafted (99 dead recipes, 66 FD Refabricated + 33 BetterEnd, plus 3
+  FD furnace and 4 BetterEnd smithing recipes). `xref.item` warns because an
+  unknown id is usually a definition that was refused on purpose; a `#` id is
+  never that, only a converter bug, so it should fail the run.
+- **Rejected:** a warning (these 106 recipes already shipped under the `xref.item` warning);
+  letting the agent or a fallback pick one member for a multi-member tag in a
+  slot Bedrock can't express (#87: residue, not a guess).
+- **Links:** #194.
 
 ## 2026-10-13: an item named like a block that did not convert ships as a plain item; its block placing is left out
 
