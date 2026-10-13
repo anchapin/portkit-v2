@@ -36,7 +36,12 @@ mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶
    namespace, a converter may only replace an earlier converter's file when
    both declare the same identifier; any other second write keeps the first
    and is an `output_collision` (`ConversionResult.merge`). Recipes sharing a
-   file name in different folders are named by their path (#163).
+   file name in different folders are named by their path (#163). Recipes and
+   loot tables whose load conditions don't hold with only this mod loaded
+   (another mod's compat content, a config flag off by default) or can't be
+   decided are `conditional_recipe` / `conditional_loot_table` residue
+   (`conditions.py`, #183); mod config flags are decided at their defaults,
+   cited in `data/config_flag_defaults.json`.
 4. **Unowned files.** Any staged file that no converter `claim`ed becomes an
    `unowned` residue entry, grouped by directory. A file nobody opened is the
    one outcome the pipeline never allows silently.

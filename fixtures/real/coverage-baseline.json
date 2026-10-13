@@ -13,9 +13,9 @@
       "errors": 0
     },
     "create": {
-      "coverage": 29.3,
-      "files": 3943,
-      "residue": 9515,
+      "coverage": 29.0,
+      "files": 3901,
+      "residue": 9558,
       "errors": 0
     },
     "farmers_delight_fabric": {
@@ -37,9 +37,9 @@
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 47.8,
-      "files": 1763,
-      "residue": 1922,
+      "coverage": 46.8,
+      "files": 1726,
+      "residue": 1959,
       "errors": 0
     },
     "silent_gear_1165": {
@@ -61,15 +61,15 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 26.2,
-      "files": 1440,
-      "residue": 4061,
+      "coverage": 25.5,
+      "files": 1404,
+      "residue": 4097,
       "errors": 0
     },
     "tinkers_construct": {
       "coverage": 42.6,
-      "files": 13519,
-      "residue": 18207,
+      "files": 13521,
+      "residue": 18205,
       "errors": 0
     },
     "waystones": {

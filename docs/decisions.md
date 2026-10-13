@@ -27,6 +27,53 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: load conditions are decided against the conversion; mod config flags at their defaults cited from source
+
+- **Decision:** a recipe or block loot table whose load conditions
+  (`conditions` on Forge, `neoforge:conditions`, `fabric:load_conditions`)
+  don't hold with only this mod loaded is `conditional_recipe` /
+  `conditional_loot_table` residue (`src/portkit/conditions.py`). The context is
+  the mods the jar's metadata declares, its required dependencies, and the
+  platform; every other mod is absent. `mod_loaded`, `not`/`and`/`or`,
+  `tag_empty`, `item_exists`, Fabric `all_mods_loaded`/`any_mods_loaded`/
+  `tags_populated`/`registry_contains`, Mantle `tag_filled`/
+  `tag_combination_filled` and `mekanism:mod_version_loaded` are evaluated; a
+  tag counts as filled from the jar's tag files plus the fetched loader and
+  vanilla data, and anything undecidable (unknown membership, a non-item
+  registry, whether this mod's code registers an item) is residue. A mod's own
+  config flag (`supplementaries:flag`, `mythicmetals:{nuggets,dust,anvils}_enabled`,
+  `farmersdelight:vanilla_crates_enabled`, `tconstruct:config`) is decided at
+  its default, read from the mod's source at the version its metadata
+  declares and recorded with file, line and commit URL in
+  `src/portkit/data/config_flag_defaults.json`: a cited `true` passes (one
+  note per mod lists the flags assumed), a cited `false` is residue "disabled
+  by default config: <flag>", and a flag or mod version with no citation is
+  residue "unknown load condition <type>/<flag>". A `forge:conditional`
+  wrapper converts the first entry whose conditions hold. Residue that rests
+  on an absent mod says "compat for <mod>". `conditions` inside loot pools and
+  entries, loot modifiers (`moonlight:iconditions`) and Silent Gear trait data
+  are loot predicates or the mod's own logic, not load conditions.
+- **Why:** Java doesn't load these files with the mod on its own, so shipping
+  them is content the mod doesn't have (Create's 42 and Supplementaries' 18
+  compat recipes for absent mods, Supplementaries' 18 "flax off" alternatives,
+  Mythic Metals' 37 dust recipes with `enableDusts = false`). Defaults are the
+  config a player gets, and citing them from the pinned source keeps the call
+  checkable: Supplementaries 1.20-3.1.43 (100 flags, all `true`:
+  `CommonConfigs.isEnabled` at c095e871, unregistered keys default `true`),
+  Mythic Metals 0.24.6+1.21 (`enableDusts` false, nuggets and anvils true),
+  Farmer's Delight 1.3.4 and 3.6.28 refabricated (`enableVanillaCropCrates`
+  true), Tinkers 3.12.1.231 (6 true, `forceIntegrationMaterials` false).
+- **Rejected:** (A) every mod-specific flag as residue: drops 350 recipes Java
+  loads under the default config (Supplementaries 232, Mythic Metals 109,
+  Farmer's Delight 3+3, Tinkers 3) and Mythic Metals' 24 anvil loot tables,
+  while the blocks and items the same flags gate still ship, so the pack would
+  contradict itself. (B) treat the mod's
+  own flags as "on, as shipped" without reading them: wrong for Mythic
+  Metals' `dust_enabled` (off by default) and Tinkers'
+  `force_integration_materials`, and a guess the decision log couldn't defend.
+- **Links:** #183; #171 (multi-jar conversion would add other mods to the
+  context).
+
 ## 2026-10-12: item-list ingredients convert one recipe per item; Alloy Forgery forging recipes stay residue
 
 - **Decision:** an ingredient written as a JSON list of items (Java's "any of

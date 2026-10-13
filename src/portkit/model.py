@@ -16,6 +16,11 @@ class SourceMod:
     # game version's tag data completes its shared tags (#160).
     loader: str | None = None
     minecraft: str | None = None
+    # Every mod id the jar's metadata declares, with its version, and the mods
+    # it declares as required (Java can't load it without them); None without
+    # metadata. Load conditions are decided against them (#183).
+    mods: dict[str, str] | None = None
+    requires: frozenset[str] | None = None
 
     @property
     def assets(self) -> Path:
