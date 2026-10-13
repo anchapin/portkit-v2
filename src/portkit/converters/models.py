@@ -438,7 +438,7 @@ def texture_shortname(reference: str, namespace: str) -> tuple[str | None, str]:
     """Java texture reference -> the terrain_texture shortname the pack uses.
 
     The textures converter keys its index as "<namespace>:<subpath>", the path
-    below block/ or item/ with "/" flattened to "_", so a reference into this
+    below block/ or item/ with "/" and "-" flattened to "_", so a reference into this
     mod resolves. A reference into another namespace
     (vanilla, or a sibling mod) does not: Bedrock's own shortnames are named
     differently and picking one would be a guess.
