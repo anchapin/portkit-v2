@@ -236,11 +236,13 @@ test("a lit stove burns who stands on it, not sneakers or items", () => {
   const zombie = _entity(top);
   const sneaker = _entity(top, { typeId: "minecraft:player", sneaking: true });
   const item = _entity(top, { typeId: "minecraft:item", living: false });
-  block.dimension.entities.push(zombie, sneaker, item);
+  const boat = _entity(top, { typeId: "minecraft:boat", living: false, inanimate: true });
+  block.dimension.entities.push(zombie, sneaker, item, boat);
   withRandom(0.99, () => tickTimes(block, 2));
   assert.deepEqual(zombie.damage, [{ amount: 1, cause: "campfire" }, { amount: 1, cause: "campfire" }]);
   assert.deepEqual(sneaker.damage, []);
   assert.deepEqual(item.damage, []);
+  assert.deepEqual(boat.damage, []);
   block.setPermutation(block.permutation.withState("farmersdelight:lit", "false"));
   withRandom(0.99, () => tickTimes(block, 1));
   assert.equal(zombie.damage.length, 2);
