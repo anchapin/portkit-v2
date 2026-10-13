@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 
+from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod, Unhandled
 
 # Java put block tables under data/<ns>/loot_tables/blocks/ up to 1.20 and
@@ -146,8 +147,18 @@ def _convert_table(data: dict) -> tuple[dict | None, str | None]:
     return {"pools": [{"rolls": 1, "entries": [bedrock_entry]}]}, None
 
 
-def convert(mod: SourceMod) -> ConversionResult:
+def convert(mod: SourceMod, context: LoadContext | None = None) -> ConversionResult:
+    """Convert the mod's block loot tables.
+
+    A table whose own load conditions (``neoforge:conditions``,
+    ``fabric:load_conditions``; never the pool and entry ``conditions``, which
+    are loot predicates) are false or undecidable here is
+    ``conditional_loot_table`` residue (#183).
+    """
     result = ConversionResult()
+    own_context = context is None
+    if context is None:
+        context = LoadContext(mod)
     for dirname in _TABLE_DIRS:
         src = mod.data / dirname / "blocks"
         if not src.is_dir():
@@ -159,6 +170,13 @@ def convert(mod: SourceMod) -> ConversionResult:
             except json.JSONDecodeError as exc:
                 result.unhandled.append(Unhandled(rel, "loot", f"invalid JSON: {exc}"))
                 continue
+            if not isinstance(data, dict):
+                result.unhandled.append(Unhandled(rel, "loot", "loot table is not a JSON object"))
+                continue
+            verdict = context.gate(data, "loot")
+            if verdict.passes is not True:
+                result.unhandled.append(Unhandled(rel, "conditional_loot_table", verdict.reason()))
+                continue
 
             table, reason = _convert_table(data)
             if table is None:
@@ -167,4 +185,7 @@ def convert(mod: SourceMod) -> ConversionResult:
 
             name = path.relative_to(src).with_suffix("").as_posix()
             result.files[f"loot_tables/blocks/{name}.json"] = table
+    note = context.note() if own_context else None
+    if note:
+        result.notes.append(note)
     return result
