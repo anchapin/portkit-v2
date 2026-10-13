@@ -22,7 +22,8 @@ pinned commits (:data:`stations.FD_NEO`, :data:`stations.FD_FAB`):
   ``heat_conductors`` and ``tray_heat_sources`` block tags, read from the jar
   (HeatableBlockEntity#isHeated; CookingPotBlock#getTrayState), each Java
   block mapped to the Bedrock block and state of the same meaning
-  (:data:`BEDROCK_BLOCKS`);
+  (:data:`BEDROCK_BLOCKS`; a converted stove by its lit state,
+  :data:`portkit.converters.stove.HEAT_RULES`);
 * ``farmersdelight:serving_containers``, the item tag that routes a held
   container to the container slot (CookingPotMenu#quickMoveStack).
 """
@@ -301,11 +302,29 @@ def _heat_blocks(mod: SourceMod, name: str, emitted_blocks: set, notes: list, se
     return list(dict.fromkeys(out))
 
 
+def _station_rules(files: dict) -> dict[str, list[dict]]:
+    """Heat rules for converted station blocks that carry a lit state (the
+    stove, :data:`portkit.converters.stove.HEAT_RULES`), when the emitted block
+    really has that state."""
+    from .stove import HEAT_RULES
+
+    rules: dict[str, list[dict]] = {}
+    for java, rule in HEAT_RULES.items():
+        body = files.get(f"blocks/{java.split(':', 1)[1]}.json")
+        block = body.get("minecraft:block", {}) if isinstance(body, dict) else {}
+        if block.get("description", {}).get("identifier") != rule["id"]:
+            continue
+        states = block.get("description", {}).get("states") or {}
+        if all(value in (states.get(name) or []) for name, value in rule["lit"].items()):
+            rules[java] = [dict(rule)]
+    return rules
+
+
 def _bedrock_rules(java_ids: list[str], emitted_blocks: set, notes: list, role: str,
-                   with_lit: bool) -> list[dict]:
+                   with_lit: bool, station_rules: dict | None = None) -> list[dict]:
     rules: list[dict] = []
     for java in java_ids:
-        mapped = BEDROCK_BLOCKS.get(java)
+        mapped = BEDROCK_BLOCKS.get(java) or (station_rules or {}).get(java)
         if mapped is None and java in emitted_blocks:
             notes.append(f"cooking pot: {role} {java} is a converted block, but its Java lit state has no "
                          "Bedrock state this conversion can read; left out")
@@ -487,7 +506,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     used = {item for e in kept for slot in e["ingredients"] for item in slot}
     remainders = {k: v for k, v in sorted(remainders.items()) if k in used}
 
-    # Heat: FD's block tags from this jar.
+    # Heat: FD's block tags from this jar; a converted stove heats while lit.
+    station_rules = _station_rules(files)
     heat = {}
     for role, tag, lit in (("sources", "heat_sources", True), ("conductors", "heat_conductors", False),
                            ("tray", "tray_heat_sources", False)):
@@ -499,7 +519,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         path = mod.data / "tags" / "block" / f"{tag}.json"
         result.claim(mod, path)
         heat[role] = _bedrock_rules(java, emitted_blocks, notes, f"heat {role[:-1] if role != 'tray' else 'tray'}"
-                                    f" block", lit)
+                                    f" block", lit, station_rules)
     notes = list(dict.fromkeys(notes))
 
     serving = context.tags.members(f"{mod.namespace}:serving_containers")
@@ -587,6 +607,11 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         "slab and legs, pick-block of a filled pot, a custom name, and recipe unlocking. Stored stacks keep "
         "their id, count, name, lore, durability damage and enchantments only."
     )
+    for java in sorted(station_rules):
+        result.notes.append(
+            f"{identifier}: a lit {java} under the pot heats it, as Java's farmersdelight:heat_sources tag says "
+            f"(read from the stove's {', '.join(station_rules[java][0]['lit'])} state, which the stove runtime "
+            "sets when it is lit or put out)")
     entry = (
         'import { registerCookingPot } from "./cooking_pot.js";\n'
         f'import cookingPotTable from "./data/{mod.namespace}_cooking_pot.js";\n'
