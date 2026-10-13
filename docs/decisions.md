@@ -27,6 +27,92 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: the stove is a scripted station cooking vanilla's and the jar's campfire recipes; lit, it heats the cooking pot
+
+- **Decision:** Farmer's Delight's stove takes the station split (cutting
+  board and cooking pot entries below): a generated table
+  (`scripts/portkit/data/<ns>_stove.js`: every `minecraft:campfire_cooking`
+  recipe as ingredient item ids, result and cookingtime; the items that light
+  it and put it out; sounds; the burn) read by a fixed runtime
+  (`portkit/runtime/stove.js` + `stove_core.js`, Script API
+  `@minecraft/server` 2.0.0, unchanged, `minecraft:tick` every 10 ticks,
+  `station_storage.js` reused), every behaviour cited to FD's
+  `AbstractStoveBlock` / `AbstractStoveBlockEntity` / `StoveBlock` /
+  `StoveBlockEntity` at the pinned commits.
+- **Recipes:** `StoveBlockEntity` runs `RecipeType.CAMPFIRE_COOKING`, so the
+  table is vanilla's own campfire recipes, fetched like the other Mojang
+  reference data (`portkit reference fetch`: misode/mcmeta `<mc>-summary`
+  `data/recipe/data.json` for 1.21.1 and 26.1 at the commits the vanilla tag
+  sets pin, campfire recipes only, sha256-pinned, never vendored; the set
+  nearest the jar's game version), plus the jar's campfire recipes whose load
+  conditions pass. The jar's recipes are a *shared* station type: they still
+  convert as Bedrock campfire recipes (`recipes.STATION_SHARED_TYPES`) and the
+  stove reads them too; a jar recipe with a vanilla recipe's id replaces it.
+  Refused (a jar recipe: `station_recipe` residue; a vanilla one: a note):
+  unconverted items, no `cookingtime` (Java's default is Minecraft's code),
+  recipes that share an ingredient item (Java's recipe-manager order). No
+  experience: the stove gives none in Java either.
+- **Interaction:** Java's own gestures, nothing invented. A lit stove is put
+  out by an item that can `shovel_dig` (read as `#minecraft:shovels` plus
+  Bedrock's `minecraft:is_shovel`, as the cutting board reads abilities; 1
+  durability, with Unbreaking) or a `c:buckets/water` item (the hand then
+  holds its crafting remainder: water bucket → bucket, minecraft.wiki
+  "Hardcoded item properties (Java Edition)"; a member without a citable
+  remainder is left out, with a note). An unlit one is lit by flint and steel
+  (1 durability) or a fire charge (used up): vanilla's items of those Java
+  classes. A food a campfire recipe takes goes, one item at a time, onto the
+  first of six free spots unless the top is covered or all six are taken
+  (creative keeps the stack). Placed lit. While lit each spot cooks for its
+  recipe's cookingtime (exact in 10-tick runs for every corpus recipe, 600)
+  and pops the result out on top with FD's velocity; unlit, progress falls by
+  2 a tick. Covering the top drops the food. A living entity standing on a lit
+  stove without sneaking takes 1 damage every 10 ticks, Bedrock cause
+  `campfire` (FD's `stove_burn` is vanilla's campfire damage type field for
+  field and sits in the same damage tags; Java's every-tick stepOn deals one
+  hit per 10 ticks under the 10-tick invulnerability timer). The crackle (FD's
+  event plays `block.campfire.crackle`) at Java's 1 in 10 per tick. Light 13
+  while lit. No way to take food back off: Java has none.
+- **Item display:** Java draws the food with a block-entity renderer.
+  Bedrock custom blocks have none, and without entities the honest
+  substitute is text: every use of the stove (any hand) shows lit or unlit,
+  each item's cook %, free spots and "top covered" in the action bar.
+- **Block:** facing × `lit` → custom state `farmersdelight:lit` (`"false"`,
+  `"true"`: Java's default first, player placement sets `"true"`); the two
+  plain `orientable_with_bottom` cubes → Bedrock's `full_block` geometry with
+  material instances per lit value, light per value, the cube turned by
+  `minecraft:transformation` per cardinal direction (uvlock off), one
+  permutation per (facing, lit). Lit, the stove is a cooking-pot heat source
+  (`{"id": "farmersdelight:stove", "states": {"farmersdelight:lit": "true"}}`,
+  only when the emitted block has that state).
+- **Why:** The same split as the other stations. Every rule that doesn't need
+  a renderer or a block shape is Java's own; the two that do are stated
+  approximations. "Covered" is any block above that isn't air or a liquid
+  (scripts can't read shapes; Java tests the shape against a 10×1×10 px
+  grilling area, so a top slab, an open or top trapdoor, a ladder, wall
+  torch or button on a side, or the light block covers it on Bedrock but not
+  in Java). The burn reads the feet over the stove's column on the ground
+  (Java also needs the entity's box to overlap the grilling area, which every
+  entity at least 6 px wide standing there does). String state values rather
+  than Bedrock booleans keep the Molang conditions in the form the pot uses.
+- **Rejected:** *Item display entities* (floating item entities or a display
+  entity per spot): entities to keep in sync with a dynamic property, with
+  pickup and despawn rules to fight. *An empty-hand "take back"*: Java has no
+  such action. *Vendoring vanilla's nine campfire recipes*: Mojang's data,
+  fetched and pinned like the rest. *Moving the jar's campfire recipes into
+  the table only*: they are real Bedrock campfire recipes too. *Flame and
+  smoke particles*: cosmetic, left out for now.
+- **Not carried over (conversion note):** the food drawn on top, smoke and
+  flame particles, the items when something other than a player destroys the
+  stove, the exact covered and burn shapes (above), the pathfinding penalty,
+  dispensers and hoppers, mod flint-and-steel or fire-charge subclasses, the
+  result's feature-flag check, the shovel level event's own volume and pitch
+  (Bedrock's defaults).
+- **Scope:** the FD versions read (NeoForge 1.3.4 @dd8b9b0, Refabricated
+  26.1-3.6.28 @a8cb49e); other versions keep the stove block as residue, and
+  their campfire recipes convert as plain Bedrock campfire recipes.
+- **Links:** #177 (skillet and feasts remain), #191 (its decision 7: the stove
+  as a heat source once it converts), #87.
+
 ## 2026-10-13: the cooking pot is a scripted station worked by hand (no container UI); heat from FD's own block tags
 
 - **Decision:** `farmersdelight:cooking` recipes (28 per FD jar) take the
@@ -67,6 +153,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   `extinguished` false); vanilla block tags from misode/mcmeta summaries
   (1.21.1, 26.1). The stove doesn't convert (its blockstate is residue), so it
   doesn't heat the pot, with a note; `create:chute` is optional and absent.
+  *Update (the stove entry above, 2026-10-13):* the stove now converts with
+  a `farmersdelight:lit` state, and a lit stove is a heat source rule like a
+  lit campfire; the note says so.
 - **Remainders and containers:** the serving container is the recipe's
   `container`, else the result's crafting remainder from FD's ModItems
   (`bowlFoodItem`/`drinkItem`/explicit `craftRemainder`, every FD item listed
