@@ -525,7 +525,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     :data:`RECIPE_TYPES` or :data:`SHARED_TYPES` type whose load conditions
     passed; the recipes are split by type and each station converter writes its
     own table, runtime and block. The stove runs whenever its block converted,
-    since vanilla's own campfire recipes fill its table too. The entry :data:`ENTRY` imports every station that shipped.
+    since vanilla's own campfire recipes fill its table too. The entry
+    :data:`ENTRY` imports every station that shipped.
     """
     from . import cooking_pot, stove
 
