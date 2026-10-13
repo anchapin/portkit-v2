@@ -16,11 +16,11 @@
 //     takes that item with that tool.
 //
 // Custom blocks have no inventory, so the stored stack lives in a world
-// dynamic property per board position: its id, count, name, lore, durability
-// damage and enchantments. Other item data is not kept while it sits on the
-// board.
+// dynamic property per board position (station_storage.js): its id, count,
+// name, lore, durability damage and enchantments. Other item data is not kept
+// while it sits on the board.
 
-import { BlockTypes, EnchantmentTypes, EquipmentSlot, GameMode, ItemStack, system, world } from "@minecraft/server";
+import { BlockTypes, EquipmentSlot, GameMode, ItemStack, system } from "@minecraft/server";
 import {
   amountToAdd,
   findRecipe,
@@ -30,54 +30,18 @@ import {
   storageKey,
   takesDamage,
 } from "./cutting_board_core.js";
+import { centre, describe, give, loadStored, play, rebuild, saveStored } from "./station_storage.js";
 
 function keyOf(table, block) {
   return storageKey(table.component, block.dimension.id, block.location);
 }
 
 function load(table, block) {
-  const raw = world.getDynamicProperty(keyOf(table, block));
-  if (typeof raw !== "string") return undefined;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
+  return loadStored(keyOf(table, block));
 }
 
 function save(table, block, stored) {
-  world.setDynamicProperty(keyOf(table, block), stored && stored.amount > 0 ? JSON.stringify(stored) : undefined);
-}
-
-function describe(stack, amount) {
-  const stored = { id: stack.typeId, amount };
-  if (stack.nameTag) stored.nameTag = stack.nameTag;
-  const lore = stack.getLore();
-  if (lore.length > 0) stored.lore = lore;
-  const durability = stack.getComponent("minecraft:durability");
-  if (durability && durability.damage > 0) stored.damage = durability.damage;
-  const enchantable = stack.getComponent("minecraft:enchantable");
-  const enchantments = enchantable ? enchantable.getEnchantments() : [];
-  if (enchantments.length > 0) stored.enchantments = enchantments.map((e) => ({ id: e.type.id, level: e.level }));
-  return stored;
-}
-
-function rebuild(stored, amount) {
-  const stack = new ItemStack(stored.id, amount);
-  if (stored.nameTag) stack.nameTag = stored.nameTag;
-  if (stored.lore) stack.setLore(stored.lore);
-  if (stored.damage) {
-    const durability = stack.getComponent("minecraft:durability");
-    if (durability) durability.damage = stored.damage;
-  }
-  if (stored.enchantments) {
-    const enchantable = stack.getComponent("minecraft:enchantable");
-    for (const e of stored.enchantments) {
-      const type = EnchantmentTypes.get(e.id);
-      if (enchantable && type) enchantable.addEnchantment({ type, level: e.level });
-    }
-  }
-  return stack;
+  saveStored(keyOf(table, block), stored && stored.amount > 0 ? stored : undefined);
 }
 
 function enchantLevel(stack, id) {
@@ -86,31 +50,11 @@ function enchantLevel(stack, id) {
   return found ? found.level : 0;
 }
 
-function play(dimension, location, sound) {
-  if (!sound || !sound.id) return;
-  dimension.playSound(sound.id, location, { volume: sound.volume, pitch: sound.pitch });
-}
-
-function centre(block, dy = 0.5) {
-  return { x: block.location.x + 0.5, y: block.location.y + dy, z: block.location.z + 0.5 };
-}
-
 function say(table, player, role, count) {
   const key = table.messages[role];
   if (!key) return;
   const text = count === undefined ? { translate: key } : { translate: key, with: [String(count)] };
   player.onScreenDisplay.setActionBar({ rawtext: [text] });
-}
-
-/**
- * Give a stack to the player; what doesn't fit drops at their feet. (Java's
- * Inventory#add leaves what doesn't fit in the removed stack, which nothing
- * keeps, so it is lost there; dropping it here is a deliberate difference.)
- */
-function give(player, stack) {
-  const container = player.getComponent("minecraft:inventory").container;
-  const left = container.addItem(stack);
-  if (left) player.dimension.spawnItem(left, player.location);
 }
 
 function spawnStacks(dimension, item, count, at, velocity) {

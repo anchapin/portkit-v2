@@ -77,7 +77,7 @@ from .tags import MultiMembers, TagResolver
 
 # Recipe types a station runtime writes into a data table (stations.RECIPE_TYPES;
 # kept here as a literal so this module doesn't import the station converter).
-STATION_TYPES = frozenset({"farmersdelight:cutting"})
+STATION_TYPES = frozenset({"farmersdelight:cutting", "farmersdelight:cooking"})
 
 # Most members a single-slot tag ingredient is expanded into, one recipe each.
 # 16 covers a full dye-colour set; a bigger tag is a family (every drawer, every
