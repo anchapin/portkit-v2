@@ -259,10 +259,12 @@ def station_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
     if _unsupported(mod) is not None:
         return {}
     from .cooking_pot import COOKING_POT_BLOCKS
+    from .skillet import SKILLET_BLOCKS
     from .stove import STOVE_BLOCKS
 
     blocks = {}
-    for block in (CUTTING_BOARD_BLOCKS[mod.loader], COOKING_POT_BLOCKS[mod.loader], STOVE_BLOCKS[mod.loader]):
+    for block in (CUTTING_BOARD_BLOCKS[mod.loader], COOKING_POT_BLOCKS[mod.loader], STOVE_BLOCKS[mod.loader],
+                  SKILLET_BLOCKS[mod.loader]):
         blocks[block.name] = block
     return blocks
 
@@ -525,10 +527,11 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     :data:`RECIPE_TYPES` or :data:`SHARED_TYPES` type whose load conditions
     passed; the recipes are split by type and each station converter writes its
     own table, runtime and block. The stove runs whenever its block converted,
-    since vanilla's own campfire recipes fill its table too. The entry
-    :data:`ENTRY` imports every station that shipped.
+    since vanilla's own campfire recipes fill its table too; the skillet
+    cooks the same table. The entry :data:`ENTRY` imports every station that
+    shipped.
     """
-    from . import cooking_pot, stove
+    from . import cooking_pot, skillet, stove
 
     result = ConversionResult()
     entries: list[str] = []
@@ -537,7 +540,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     campfire = [d for d in deferred if d[1].get("type") == CAMPFIRE]
     for converted, entry in (_convert_cutting(mod, cutting, files, context),
                              cooking_pot.convert(mod, cooking, files, context),
-                             stove.convert(mod, campfire, files, context)):
+                             stove.convert(mod, campfire, files, context),
+                             skillet.convert(mod, campfire, files, context)):
         result = result.merge(converted)
         if entry:
             entries.append(entry)
