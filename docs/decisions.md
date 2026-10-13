@@ -27,6 +27,55 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: users can override mod config flags at conversion time; flag-gated items follow the flag
+
+- **Decision:** `portkit convert --config <mod>.<flag>=<true|false>`
+  (repeatable) and `--config-file <path>` (JSON or TOML, nested
+  `{mod: {flag: bool}}` or flat `{"mod.flag": bool}`; `--config` wins over the
+  file, later settings win) set a mod config flag for the conversion, the
+  stand-in for a Java player or server editing the mod's config file. A
+  setting replaces the cited default wherever a load condition reads the flag,
+  both ways: on converts what the default left out (Mythic Metals
+  `enableDusts=true`: 37 dust recipes), off sends what it gates to residue as
+  "disabled by user config: <flag>". A flag is named as the conditions spell it
+  (`dust_enabled`, `flax`, `force_integration_materials`) or by the option's
+  own config key where `config_flag_defaults.json` cites it (`config_key`:
+  Mythic Metals `enableDusts`/`enableNuggets`/`enableAnvils`, Farmer's
+  Delight `enableVanillaCropCrates`, Tinkers' Config.java keys, where
+  `glassRecipeFix` sets both `glass_recipe_fix` and `slime_recipe_fix` as in
+  Java). Flags with no cited default can be set when the jar's own recipes or
+  loot tables use them ("set by user config"). An unknown mod or flag is an
+  error, exit 2 before anything is written, listing the valid flags. The
+  settings go into the summary (`config`), the notes, `portkit report`, and
+  `config-overrides.json` next to the tree, which `--config-file` reads back to
+  reproduce the run. Items the mod's code registers only while a flag is on
+  are recorded as a cited `registers` pattern on the flag; the item converter
+  makes them `conditional_item` residue (the agent skips it) when the flag is
+  off, by default or by the user. Cited so far: Mythic Metals 0.24.6+1.21
+  `*_dust` (ItemSet L64/CopperSet L29, `enableDusts`) and `*_nugget` (ItemSet
+  L61/CopperSet L26, `enableNuggets`). `eval` and `corpus` take no `--config`:
+  they check the default conversion against its baseline.
+- **Why:** Java has the config and Bedrock doesn't, so content a pack can
+  switch on in Java had no way into a conversion once flags were decided at
+  their defaults (2026-10-13 entry below). Typos must fail loudly, since a
+  silently ignored setting gives the default output while the user believes
+  otherwise. Mythic Metals registers its dust items only with `enableDusts`, so
+  shipping them by default was the same "content the mod doesn't have" problem
+  the dust recipes had; default output drops the 27 dust items (1726 -> 1699
+  files, 46.8% -> 46.1%), and `--config mythicmetals.enableDusts=true` gives
+  1763 files, 37 recipes and 27 items more, mct 0 errors. No other mod's
+  default output changes.
+- **Rejected:** a per-mod config-file parser reading the user's real
+  `config/*.toml`/`json5` (each mod's format and nesting differ; a named flag
+  covers it); silently ignoring unknown names; refusing uncited flags (the
+  user's explicit choice decides them); Supplementaries config-path aliases
+  (its toggles nest under categories whose parents AND into children, and
+  `globe_sepia`/`key` are computed, so the TOML path isn't a one-to-one name for
+  a condition flag; its condition flag names are accepted); gating Mythic
+  Metals' anvil blocks under `enableAnvils` (on by default, and the anvil
+  blocks are residue regardless, so it changes nothing today).
+- **Links:** #185, PR (this one); builds on #183 / #184.
+
 ## 2026-10-13: load conditions are decided against the conversion; mod config flags at their defaults cited from source
 
 - **Decision:** a recipe or block loot table whose load conditions
