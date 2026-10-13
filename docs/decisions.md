@@ -27,8 +27,80 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: a flat item icon with `overrides` converts as its base icon when every predicate has a resting state
+
+- **Decision:** an item model whose chain is a flat icon (`item/generated` or
+  the held parents, no `elements`) and that has its own `overrides` now
+  converts like one without them: the base icon, which is the look Java draws
+  when no override matches. This holds when every predicate key, read by its
+  name without the namespace (`mythicmetals:funny_day` -> `funny_day`), is one
+  of five known kinds whose no-match state is the item at rest:
+  *occasion* (`funny_day`, `silly`, `wrapping`: an easter egg or a special
+  day), *use* (`pull`, `pulling`, `charged`, `firework`, `cast`, `throwing`,
+  `blocking`, `tooting`, `brushing`, `cooldown`, `using`, `active`,
+  `is_active`: not in use), *wear* (`broken`, `damage`, `damaged`: intact),
+  *state* (`custom_model_data`, `trim_type`, `filled`, `dye`,
+  `encoded`, `invalid`, `mode`, `clipboard_type`, `midas_gold_count`,
+  `is_primed`: no special stored data) and *context* (`lefthanded`,
+  `in_world`: the ordinary inventory/right-hand look). The names are vanilla
+  1.21.1's item properties plus the mod-specific ones the corpus uses. One
+  note per mod lists each converted item, its predicate keys, the alternate
+  looks dropped, and what those looks showed (so a bow-like item's draw
+  animation is named as lost); nothing is written for the behavior (#87).
+  Still residue: a *readout* predicate (`time`, `angle`, `radiation`, `speed`,
+  `in_chunk`: a clock, compass, gauge or locator whose look is the reading,
+  where one frozen frame would show a false reading), any predicate not in the
+  table (no way to know its resting state), malformed overrides, overrides on
+  a model with `elements` (now said as such), and every non-flat base (Tinkers'
+  `forge:item/default` loader models, `block/block` presents, shields on
+  `builtin/entity`, vanilla `item/bow`). An empty `overrides` list is no
+  overrides. Override target models and their textures are handled exactly as
+  before (unregistered variant models get their note, textures ship).
+- **Why:** `durasteel_ingot` (Mythic Metals) is a plain ingot whose only
+  override swaps in the `dura-chan` easter-egg sprite when
+  `mythicmetals:funny_day` is set, and refusing the ingot left 15 recipe
+  warnings that the ingot is missing. Survey of all 13 corpus mods
+  (`corpus fetch --include-optional`): 119 item models have `overrides` (9
+  mods); 30 have a flat base: 26 convert under this rule (occasion 5, use 5,
+  wear 2, state 13, context+state 1) and 4 are readouts kept as residue
+  (`mythicmetals:platinum_watch` time, `mekanism:geiger_counter` radiation,
+  `supplementaries:speedometer` speed, `alexsmobs:pupfish_locator`
+  in_chunk); the other 89 have no flat base and stay residue on that ground.
+  Of the 26, `create:clipboard` is a block item (the block converter owns
+  it) and three Mythic Metals items (`legendary_banglum_pickaxe`,
+  `legendary_banglum_shovel`, `unobtainium`) are withdrawn by
+  `drop_untextured` because their base textures are animated with per-frame
+  timings; 22 new item definitions ship. Recipes no longer warning about a
+  missing item: Mythic Metals 41 (mostly osmium_ingot and durasteel_ingot),
+  Supplementaries 35 (bunting), Mekanism 5, Create 4, Alex's Mobs 2,
+  Waystones 1. Bedrock has no stable way to carry most of these:
+  `minecraft:icon` is a static texture map per item (`default`, plus armor
+  trim textures and palettes)
+  (https://learn.microsoft.com/en-us/minecraft/creator/reference/content/itemreference/examples/itemcomponents/minecraft_icon),
+  with no Molang or state selection. Two partial mechanisms exist and are
+  follow-ups, not built here: an attachable with a render controller can
+  switch the *held* model on `query.main_hand_item_use_duration`, as
+  Microsoft's custom bow tutorial does
+  (https://learn.microsoft.com/en-us/minecraft/creator/documents/custom_projectiles,
+  "Create a custom bow and arrow"; reference
+  https://learn.microsoft.com/en-us/minecraft/creator/reference/content/attachablereference/examples/attachabledefinitions/attachable),
+  which could carry the *use* kind in hand (not the inventory icon); and the
+  icon map's armor-trim keys might carry `trim_type` (Create's cardboard
+  armor), unverified for custom items.
+- **Rejected:** keep refusing every model with overrides (loses items whose
+  JSON fully states their ordinary look, and every recipe that uses them);
+  convert any flat base regardless of predicate (a watch or gauge would ship
+  a frozen, false reading, and an unknown predicate may have no resting
+  state); emit the alternate looks as extra items (they are not registered
+  items, #158); build attachables or trim icons now (each needs geometry or
+  per-item verification; follow-ups).
+- **Links:** #87, #158, #167, #168.
+
 ## 2026-10-12: held items (`item/handheld`, `_rod`, `_mace`) convert as flat icons with `minecraft:hand_equipped`
 
+- **Superseded in part by** the 2026-10-12 `overrides` entry above: a flat
+  icon with its own `overrides` now converts when every predicate has a
+  resting state.
 - **Decision:** an item model whose parent chain ends in vanilla
   `item/handheld`, `item/handheld_rod` or `item/handheld_mace` converts like an
   `item/generated` one: the same single-layer icon through
