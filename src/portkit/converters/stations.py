@@ -524,9 +524,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     entries: list[str] = []
     cutting = [d for d in deferred if d[1].get("type") == CUTTING]
     cooking = [d for d in deferred if d[1].get("type") == COOKING]
-    for part, runs in ((_convert_cutting(mod, cutting, files, context), cutting),
-                       (cooking_pot.convert(mod, cooking, files, context), cooking)):
-        converted, entry = part
+    for converted, entry in (_convert_cutting(mod, cutting, files, context),
+                             cooking_pot.convert(mod, cooking, files, context)):
         result = result.merge(converted)
         if entry:
             entries.append(entry)
