@@ -334,6 +334,19 @@ class TagResolver:
                     found.append(other)
         return found
 
+    def context_members(self, tag: str) -> list[str] | None:
+        """Every id the tag names, nested tags expanded, or None when unknown.
+
+        For load conditions (#183): whether a tag has members once this mod
+        loads with only the loader and vanilla. Unlike :meth:`members`, other
+        mods' ids are kept (the caller decides which of them exist), and another
+        mod's nested tag is kept as ``#<tag>``.
+        """
+        full = self._full(tag)
+        if isinstance(full, _NotKnown):
+            return None
+        return [*full.members, *full.dropped_tags]
+
     def unknown_reason(self, tag: str) -> str | None:
         """Why the tag's full membership is unknown, or None when it is known."""
         full = self._full(tag)
