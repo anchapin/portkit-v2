@@ -46,7 +46,13 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   model only, so a parent's do not count); any model in the chain with
   `elements` (a 3D shape, now said as such instead of "not a flat icon");
   two or more `layerN` textures (same as generated icons, no compositing);
-  a chain that leaves the mod's namespace. The agent_mod fixture's steel
+  a chain that leaves the mod's namespace or its folder. An empty
+  `"elements": []` counts as none (Java inherits the parent's), and `#name`
+  texture variables resolve through the merged map. `pack.engine_floor` now
+  reads item definitions too, so a pack with a held item declares
+  `min_engine_version` 1.20.30 (Mythic Metals, Waystones, both Storage
+  Drawers), and Mekanism's tagged items (1.20.50) lift its floor from
+  1.20.20, a gap that predates this change. The agent_mod fixture's steel
   sword gained a one-box `elements` list so it stays the agent's
   stat-fabrication probe; item_defs_mod's pickaxe gained a lang key so it is
   a registered item, and it now converts.
