@@ -23,6 +23,7 @@ A from-scratch layout for the Java -> Bedrock converter. Three ideas:
 pip install -e ".[dev]"
 pytest -q                      # unit tests + golden-fixture parity
 portkit convert fixtures/simple_block_mod/input /tmp/out
+portkit convert mythicmetals.jar /tmp/mm --config mythicmetals.enableDusts=true  # set a mod config option (docs/getting-started.md)
 portkit validate /tmp/out
 portkit eval                   # run every fixture, print a coverage table, fail if any fixture drops below fixtures/coverage-baseline.json
 portkit eval --update-baseline # bank an improvement (or a deliberate step down) in the baseline
