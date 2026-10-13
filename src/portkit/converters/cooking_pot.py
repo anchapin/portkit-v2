@@ -90,7 +90,7 @@ COOKING_POT_BLOCKS = {
 
 # Crafting remainders FD gives its own items (common/registry/ModItems.java,
 # the registration line; bowlFoodItem / drinkItem add craftRemainder(BOWL /
-# GLASS_BOTTLE): NeoForge L51-57, Refabricated L114-131). Every FD item
+# GLASS_BOTTLE): NeoForge L51-57, Refabricated L114-133). Every FD item
 # registered with a remainder is listed, so an FD item that isn't has none.
 FD_CRAFT_REMAINDERS = {
     "neoforge": {
@@ -251,7 +251,8 @@ def _sources(loader: str) -> tuple[str, ...]:
         _blk(repo, lines["use"]),
         *(_be(repo, lines[k]) for k in ("tick", "can", "cook", "eject", "xp", "move", "stored", "serve",
                                         "valid", "limit")),
-        _src(repo, "common/crafting/CookingPotRecipe.java", "100-L112" if neo else "67-L80"),
+        _src(repo, "common/crafting/CookingPotRecipe.java", "100-L112" if neo else "147-L149"),  # matches
+        _src(repo, "common/crafting/CookingPotRecipe.java", "45-L51" if neo else "67-L79"),  # container
         _src(repo, "common/block/entity/container/CookingPotMenu.java", "114-L151" if neo else "116-L153"),
     )
 
@@ -580,7 +581,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         "hand to hang it on or off its handle; the action bar shows what is inside. Not carried over: the "
         "menu itself and its recipe book, hoppers and other automation (Bedrock custom blocks have no "
         "inventory), the meal kept inside the dropped pot item (the meal drops as items instead), the "
-        "experience orbs (awarded straight to the player who takes the output or breaks the pot), the "
+        "contents when something other than a player destroys the pot (no break event for that in script API "
+        "2.0.0), the experience orbs (awarded straight to the player who takes the output or breaks the pot), the "
         "bubble and steam particles, the comparator signal, waterlogging, the heating tray's collision "
         "slab and legs, pick-block of a filled pot, a custom name, and recipe unlocking. Stored stacks keep "
         "their id, count, name, lore, durability damage and enchantments only."
