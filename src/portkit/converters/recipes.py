@@ -78,6 +78,10 @@ from .tags import MultiMembers, TagResolver
 # Recipe types a station runtime writes into a data table (stations.RECIPE_TYPES;
 # kept here as a literal so this module doesn't import the station converter).
 STATION_TYPES = frozenset({"farmersdelight:cutting", "farmersdelight:cooking"})
+# Recipe types a station also reads while they convert as usual (stations.SHARED_TYPES):
+# the Farmer's Delight stove cooks campfire recipes, which still become
+# Bedrock campfire recipes of their own.
+STATION_SHARED_TYPES = frozenset({"minecraft:campfire_cooking"})
 
 # Most members a single-slot tag ingredient is expanded into, one recipe each.
 # 16 covers a full dye-colour set; a bigger tag is a family (every drawer, every
@@ -590,7 +594,8 @@ def convert(mod: SourceMod, emitted: dict | None = None,
     With a ``deferred`` list, a recipe of a station type
     (:data:`portkit.converters.stations.RECIPE_TYPES`) whose load conditions
     pass is appended to it as (source path, recipe) instead of being refused:
-    the station converter writes it into its data table (#177).
+    the station converter writes it into its data table (#177). A recipe of a
+    :data:`STATION_SHARED_TYPES` type is appended too, and still converts.
     """
     result = ConversionResult()
     for lane in ("recipes", "recipe"):
@@ -662,6 +667,8 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         if deferred is not None and java_type in STATION_TYPES:
             deferred.append((rel, recipe))
             continue
+        if deferred is not None and java_type in STATION_SHARED_TYPES:
+            deferred.append((rel, recipe))  # and convert it below as well
         if java_type == "minecraft:smithing_transform":
             converted = _smithing(recipe, f"{mod.namespace}:{name}", rel, result, tag_resolver)
             if converted is not None:

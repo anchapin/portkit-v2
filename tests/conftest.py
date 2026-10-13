@@ -27,6 +27,8 @@ def _offline_vanilla_sounds(request, monkeypatch):
     monkeypatch.setenv("PORTKIT_REFERENCE_CACHE", str(request.getfixturevalue("tmp_path_factory").mktemp("reference")))
     # Loader and vanilla tag data (#160): none unless a test points at its own.
     monkeypatch.delenv("PORTKIT_TAG_REFERENCE", raising=False)
+    # Vanilla campfire recipes (the stove, #177): none unless a test points at its own.
+    monkeypatch.delenv("PORTKIT_RECIPE_REFERENCE", raising=False)
 
 
 @pytest.fixture(autouse=True)

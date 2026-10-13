@@ -62,6 +62,10 @@ RESIDUE_KIND = "station_recipe"
 CUTTING = "farmersdelight:cutting"
 COOKING = "farmersdelight:cooking"
 RECIPE_TYPES = frozenset({CUTTING, COOKING})
+# Recipe types a station reads while they also convert as ordinary recipes
+# (recipes.STATION_SHARED_TYPES): the stove cooks campfire recipes.
+CAMPFIRE = "minecraft:campfire_cooking"
+SHARED_TYPES = frozenset({CAMPFIRE})
 
 FD_NEO = ("https://github.com/vectorwing/FarmersDelight", "dd8b9b0bfec916a2da88a6d64e3a37f4a02c3259")
 FD_FAB = ("https://github.com/MehVahdJukaar/FarmersDelightRefabricated",
@@ -95,6 +99,9 @@ class FacingBlock:
     java_state: str | None = None
     values: tuple[str, ...] = ()
     state: str | None = None
+    # Block components the mod's code gives one value of that state (the
+    # stove's light level while lit), by value. None when there are none.
+    value_components: dict | None = None
 
 
 # Farmer's Delight's cutting board, both corpus builds: FACING is
@@ -252,9 +259,10 @@ def station_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
     if _unsupported(mod) is not None:
         return {}
     from .cooking_pot import COOKING_POT_BLOCKS
+    from .stove import STOVE_BLOCKS
 
     blocks = {}
-    for block in (CUTTING_BOARD_BLOCKS[mod.loader], COOKING_POT_BLOCKS[mod.loader]):
+    for block in (CUTTING_BOARD_BLOCKS[mod.loader], COOKING_POT_BLOCKS[mod.loader], STOVE_BLOCKS[mod.loader]):
         blocks[block.name] = block
     return blocks
 
@@ -514,18 +522,22 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     """Each station's data table and runtime for the recipes ``deferred`` holds.
 
     ``deferred`` is (source path, recipe) for every recipe of a
-    :data:`RECIPE_TYPES` type whose load conditions passed; the recipes are
-    split by type and each station converter writes its own table, runtime
-    and block. The entry :data:`ENTRY` imports every station that shipped.
+    :data:`RECIPE_TYPES` or :data:`SHARED_TYPES` type whose load conditions
+    passed; the recipes are split by type and each station converter writes its
+    own table, runtime and block. The stove runs whenever its block converted,
+    since vanilla's own campfire recipes fill its table too. The entry
+    :data:`ENTRY` imports every station that shipped.
     """
-    from . import cooking_pot
+    from . import cooking_pot, stove
 
     result = ConversionResult()
     entries: list[str] = []
     cutting = [d for d in deferred if d[1].get("type") == CUTTING]
     cooking = [d for d in deferred if d[1].get("type") == COOKING]
+    campfire = [d for d in deferred if d[1].get("type") == CAMPFIRE]
     for converted, entry in (_convert_cutting(mod, cutting, files, context),
-                             cooking_pot.convert(mod, cooking, files, context)):
+                             cooking_pot.convert(mod, cooking, files, context),
+                             stove.convert(mod, campfire, files, context)):
         result = result.merge(converted)
         if entry:
             entries.append(entry)

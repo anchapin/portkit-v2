@@ -455,6 +455,9 @@ def _convert_station_states(
     Block Visuals", custom block limitations), and such parts (the cooking
     pot's heating tray legs, 16 px down) push a model past it. A note names them.
     """
+    if not uvlock and all(_plain_cube(mod, ref) for ref in by_value.values()):
+        _convert_station_cube(mod, result, rel, name, by_value, station)
+        return
     textures: dict = {}
     parts = []
     dropped: dict[str, list[str]] = {}
@@ -540,6 +543,65 @@ def _convert_station_states(
             f"{name}: {station.java_state}={value} is drawn without {', '.join(names)}, which sit wholly "
             "in the block below; with them the model is taller than Bedrock's 30-pixel limit for "
             "custom block geometry.")
+
+
+def _plain_cube(mod: SourceMod, model_ref: str) -> bool:
+    """Whether a model is a plain full cube (no elements of its own, a vanilla
+    parent :data:`models.PARENTS` maps face by face), read without claiming."""
+    path = models.model_path(mod, model_ref)
+    if path is None or not path.is_file():
+        return False
+    try:
+        flat, _, why = models.resolve(mod, json.loads(path.read_text()))
+    except json.JSONDecodeError:
+        return False
+    return not why and not flat.get("elements") and flat.get("parent") in models.PARENTS
+
+
+def _station_permutations(station, by_value_instances: dict | None) -> list[dict]:
+    """One permutation per (facing, value): the facing's turn, and the value's
+    material instances (when they differ by value) and components."""
+    extra = getattr(station, "value_components", None) or {}
+    permutations = []
+    for direction in _CARDINALS:
+        for value in station.values:
+            components = {"minecraft:transformation": {"rotation": [0, _BEDROCK_Y_TURN[direction], 0]}}
+            if by_value_instances is not None:
+                components["minecraft:material_instances"] = by_value_instances[value]
+            components.update(json.loads(json.dumps(extra.get(value, {}))))
+            permutations.append({
+                "condition": (f"q.block_state('minecraft:cardinal_direction') == '{direction}' && "
+                              f"q.block_state('{station.state}') == '{value}'"),
+                "components": components,
+            })
+    return permutations
+
+
+def _convert_station_cube(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                          by_value: dict, station) -> None:
+    """A station block that is a plain full cube per value of its extra state
+    (the stove: an orientable cube whose front and top textures change with
+    ``lit``), uvlock off: Bedrock's own full_block geometry, its material
+    instances per value from the value's model, and the whole cube turned per
+    ``minecraft:cardinal_direction`` by ``minecraft:transformation`` (Java
+    turns the model, textures included, without uvlock). Components the
+    station gives a value (the stove's light when lit) ride on the same
+    permutations."""
+    by_value_instances: dict[str, dict] = {}
+    for value, model_ref in by_value.items():
+        identifier, instances, _, why = _model_block(mod, result, model_ref, f"{name}_{value}")
+        if identifier != "minecraft:geometry.full_block" or not instances:
+            result.unhandled.append(Unhandled(rel, "block", f"{station.java_state}={value} model: {why}"))
+            return
+        by_value_instances[value] = instances
+    definition = _facing_definition(mod.namespace, name, "minecraft:geometry.full_block",
+                                    by_value_instances[station.values[0]], station)
+    block = definition["minecraft:block"]
+    block["description"]["states"] = {station.state: list(by_value)}
+    block["components"]["minecraft:geometry"] = "minecraft:geometry.full_block"
+    same = len({json.dumps(i, sort_keys=True) for i in by_value_instances.values()}) == 1
+    block["permutations"] = _station_permutations(station, None if same else by_value_instances)
+    result.files[f"blocks/{name}.json"] = definition
 
 
 def _flat_model(mod: SourceMod, result: ConversionResult, model_ref: str) -> tuple[dict | None, str]:
