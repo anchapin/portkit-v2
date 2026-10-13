@@ -147,6 +147,69 @@ def _check_manifest(report: ValidationReport, path: Path, rel: str) -> None:
         if mid in seen:
             report.add(rel, "manifest.uuid_unique", f"modules[{i}].uuid duplicates another UUID")
         seen.add(mid)
+        if module.get("type") == "script":
+            _check_script_module(report, rel, i, module, path.parent)
+    for i, dep in enumerate(data.get("dependencies") or []):
+        if isinstance(dep, dict) and "module_name" in dep:
+            _check_module_dependency(report, rel, i, dep)
+
+
+# Script modules (#177). learn.microsoft.com, Pack Manifest: a "script" module
+# says its language ("the only supported value is javascript") and names the
+# file Bedrock runs ("entry"); a dependency on a built-in script module names
+# it by "module_name" (e.g. @minecraft/server) with a version string.
+_SEMVER = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$")
+_SCRIPT_IMPORT = re.compile(r"""^\s*import\b[^'"]*?(?:from\s*)?['"]([^'"]+)['"]""", re.M)
+# Block JSON reads a namespaced custom component key from format 1.21.90
+# (minecraft.net, "Minecraft 1.21.90 Bedrock Changelog": "Custom components v2
+# is available in JSON versions 1.21.90 and higher").
+_CUSTOM_COMPONENT_FORMAT = (1, 21, 90)
+
+
+def _check_script_module(report: ValidationReport, rel: str, i: int, module: dict, pack_root: Path) -> None:
+    if module.get("language") != "javascript":
+        report.add(rel, "manifest.script", f"modules[{i}] is a script module without language \"javascript\"")
+    entry = module.get("entry")
+    if not isinstance(entry, str) or not entry.endswith(".js"):
+        report.add(rel, "manifest.script", f"modules[{i}] needs an entry naming a .js file")
+    elif not (pack_root / entry).is_file():
+        report.add(rel, "manifest.script", f"modules[{i}].entry {entry!r} is not a file in this pack")
+
+
+def _check_module_dependency(report: ValidationReport, rel: str, i: int, dep: dict) -> None:
+    name, version = dep.get("module_name"), dep.get("version")
+    if not isinstance(name, str) or not name.startswith("@minecraft/"):
+        report.add(rel, "manifest.dependency", f"dependencies[{i}].module_name {name!r} is not a built-in script module")
+    if not isinstance(version, str) or not _SEMVER.match(version):
+        report.add(rel, "manifest.dependency", f"dependencies[{i}] needs a version string like \"2.0.0\"")
+
+
+def _check_scripts(report: ValidationReport, pack_root: Path, prefix: str) -> None:
+    """Every import in the pack's scripts resolves: a relative path to a file in
+    the pack, or a built-in module the manifest declares a dependency on."""
+    scripts = sorted((pack_root / "scripts").rglob("*.js"))
+    if not scripts:
+        return
+    declared: set[str] = set()
+    has_script_module = False
+    try:
+        manifest = json.loads((pack_root / "manifest.json").read_text())
+        declared = {d.get("module_name") for d in manifest.get("dependencies") or [] if isinstance(d, dict)}
+        has_script_module = any(isinstance(m, dict) and m.get("type") == "script" for m in manifest.get("modules") or [])
+    except (OSError, json.JSONDecodeError, AttributeError):
+        pass
+    if not has_script_module:
+        report.add(f"{prefix}/manifest.json", "manifest.script",
+                   "the pack ships scripts/ but has no script module, so Bedrock never runs them", "warning")
+    for path in scripts:
+        rel = f"{prefix}/{path.relative_to(pack_root).as_posix()}"
+        for target in _SCRIPT_IMPORT.findall(path.read_text(encoding="utf-8", errors="replace")):
+            if target.startswith("."):
+                if not (path.parent / target).resolve().is_file():
+                    report.add(rel, "script.import", f"imports {target!r}, which is not a file in this pack")
+            elif target not in declared:
+                report.add(rel, "script.import",
+                           f"imports {target!r}, which the manifest declares no dependency on")
 
 
 def _is_empty(value) -> bool:
@@ -261,6 +324,13 @@ _MENU_CATEGORIES = {
 }
 
 
+def _format_tuple(value) -> tuple[int, ...]:
+    try:
+        return tuple(int(p) for p in str(value).split("."))
+    except ValueError:
+        return ()
+
+
 def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path) -> None:
     data = _load(report, path, rel)
     if data is None:
@@ -288,6 +358,10 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
     components = body.get("components") or {}
     if not components:
         report.add(rel, "block.components", "block has no components")
+    custom = [c for c in components if ":" in c and not c.startswith("minecraft:")]
+    if custom and _format_tuple(data.get("format_version")) < _CUSTOM_COMPONENT_FORMAT:
+        report.add(rel, "block.custom_component",
+                   f"custom component {custom[0]!r} needs block format_version 1.21.90 or later")
     instances = components.get("minecraft:material_instances")
     if instances is None:
         return
@@ -455,6 +529,8 @@ def validate_pack(pack_root: Path) -> ValidationReport:
     for path in sorted((pack_root / "recipes").glob("*.json")):
         _check_recipe(report, path, f"{prefix}/recipes/{path.name}")
 
+    _check_scripts(report, pack_root, prefix)
+
     for path in sorted((pack_root / "blocks").glob("*.json")):
         _check_block(report, path, f"{prefix}/blocks/{path.name}", pack_root)
 
@@ -511,6 +587,8 @@ def _check_dependencies(report: ValidationReport, packs: list[Path]) -> None:
     for pack, data in manifests:
         rel = f"{pack.name}/manifest.json"
         for i, dep in enumerate(data.get("dependencies") or []):
+            if isinstance(dep, dict) and "module_name" in dep:
+                continue  # a built-in script module, checked with the manifest
             uid = str(dep.get("uuid"))
             if uid == str((data.get("header") or {}).get("uuid")):
                 report.add(rel, "manifest.dependency", f"dependencies[{i}] points at this pack")
