@@ -306,9 +306,15 @@ def test_pipeline_records_overrides_in_notes_summary_file_and_report(tmp_path):
 
 
 def test_pipeline_without_overrides_writes_no_record(tmp_path):
-    run = pipeline.convert(_source(tmp_path), tmp_path / "out", emit_addon=False)
-    assert "config" not in run.summary()
+    src = _source(tmp_path)
+    pipeline.convert(src, tmp_path / "out", emit_addon=False,
+                     config=[ConfigRequest("mythicmetals", "dust_enabled", True, "--config")])
+    assert (tmp_path / "out" / pipeline.CONFIG_RECORD).exists()
+    # A later default run into the same folder doesn't keep the stale record.
+    pipeline.convert(src, tmp_path / "out", emit_addon=False)
     assert not (tmp_path / "out" / pipeline.CONFIG_RECORD).exists()
+    run = pipeline.convert(src, tmp_path / "fresh", emit_addon=False)
+    assert "config" not in run.summary()
     assert not (run.tree / "behavior_pack" / "recipes" / "from_dust.json").exists()
     assert "Mod config set by user config" not in report.render(run.tree)
 
