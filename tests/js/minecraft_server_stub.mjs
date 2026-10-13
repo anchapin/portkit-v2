@@ -72,6 +72,8 @@ export function _dimension() {
     id: "minecraft:overworld",
     sounds: [],
     spawned: [],
+    entities: [],
+    getEntities() { return this.entities; },
     playSound(id, location, options) { this.sounds.push({ id, location, ...options }); },
     spawnItem(stack, location) {
       const entity = { stack, location, impulses: [], clearVelocity() {}, applyImpulse(v) { this.impulses.push(v); } };
@@ -154,4 +156,40 @@ export function _potBlock(dimension, { typeId = "farmersdelight:cooking_pot", fa
     return { typeId: entry.id, permutation: _permutation(entry.id, entry.states ?? {}) };
   };
   return block;
+}
+
+// -- stove additions ------------------------------------------------------------
+
+export const EntityDamageCause = { campfire: "campfire", fire: "fire" };
+
+/**
+ * A placed stove: `lit` is the custom state's string value; `above` is the
+ * block on top ({ isAir, isLiquid }, air by default); `entities` are what
+ * dimension.getEntities returns near it.
+ */
+export function _stoveBlock(dimension, { typeId = "farmersdelight:stove", facing = "north", lit = "true",
+  above = { isAir: true, isLiquid: false }, location = { x: 2, y: 64, z: 5 } } = {}) {
+  const block = {
+    dimension,
+    location,
+    typeId,
+    above: () => above,
+    permutation: _permutation(typeId, { "minecraft:cardinal_direction": facing, "farmersdelight:lit": lit }),
+    setPermutation(p) { this.permutation = p; },
+    setAbove(next) { above = next; },
+  };
+  return block;
+}
+
+/** An entity standing somewhere, recording the damage it takes. */
+export function _entity(location, { typeId = "minecraft:zombie", living = true, sneaking = false, onGround = true } = {}) {
+  return {
+    typeId,
+    location,
+    isSneaking: sneaking,
+    isOnGround: onGround,
+    damage: [],
+    getComponent(id) { return id === "minecraft:health" && living ? { currentValue: 20 } : undefined; },
+    applyDamage(amount, options) { this.damage.push({ amount, ...options }); return true; },
+  };
 }
