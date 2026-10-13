@@ -151,12 +151,18 @@ def test_elements_inherited_from_an_intermediate_stay_residue(tmp_path):
     assert "elements" in u.reason
 
 
-def test_a_handheld_model_with_overrides_stays_residue(tmp_path):
+def test_a_handheld_model_with_a_cast_override_converts_as_its_base_icon(tmp_path):
+    """A fishing rod at rest is the uncast rod: the base icon is its look."""
     model = _held("fishing_rod", "item/handheld_rod",
                   overrides=[{"predicate": {"cast": 1}, "model": "examplemod:item/fishing_rod_cast"}])
-    result = items.convert(build(tmp_path, {"fishing_rod": model}))
-    assert result.files == {}
-    assert "item properties" in result.unhandled[0].reason
+    result = items.convert(build(tmp_path, {"fishing_rod": model}, registered=["fishing_rod"]))
+    assert result.unhandled == []
+    components = result.files["items/fishing_rod.json"]["minecraft:item"]["components"]
+    assert components["minecraft:icon"] == "examplemod:fishing_rod"
+    assert components["minecraft:hand_equipped"] is True
+    [note] = [n for n in result.notes if "model overrides" in n]
+    assert "fishing_rod (cast -> 1 alternate look: fishing_rod_cast)" in note
+    assert "in use" in note
 
 
 def test_a_two_layer_handheld_icon_is_refused_like_a_generated_one(tmp_path):
@@ -176,11 +182,12 @@ def test_a_two_layer_icon_is_refused(tmp_path):
     assert "2 texture layers" in result.unhandled[0].reason
 
 
-def test_a_model_with_property_overrides_is_refused(tmp_path):
-    model = {**GENERATED, "overrides": [{"predicate": {"damaged": 1}, "model": "x"}]}
+def test_a_model_overriding_on_an_unknown_property_is_refused(tmp_path):
+    model = {**GENERATED, "overrides": [{"predicate": {"examplemod:heat": 1}, "model": "x"}]}
     result = items.convert(build(tmp_path, {"steel_ingot": model}))
     assert result.files == {}
-    assert "item properties" in result.unhandled[0].reason
+    [u] = result.unhandled
+    assert "'examplemod:heat'" in u.reason and "does not know" in u.reason
 
 
 def test_a_block_item_is_left_to_the_block_but_still_claimed(tmp_path):
@@ -337,8 +344,11 @@ def test_a_parents_overrides_are_not_inherited(tmp_path):
         "rod_cast": {"parent": "examplemod:item/rod", "textures": {"layer0": "examplemod:item/rod_cast"}},
     }, registered=["rod", "rod_cast"])
     result = items.convert(mod)
-    assert sorted(result.files) == ["items/rod_cast.json"]
-    assert [u.source.rsplit("/", 1)[1] for u in result.unhandled] == ["rod.json"]
+    assert sorted(result.files) == ["items/rod.json", "items/rod_cast.json"]
+    [note] = [n for n in result.notes if "model overrides" in n]
+    # rod_cast extends rod but has no overrides of its own
+    assert "1 item with model overrides converts" in note and "rod (cast" in note
+    assert "rod_cast (" not in note
 
 
 def test_a_chain_to_a_model_built_in_code_is_not_a_flat_icon(tmp_path):
@@ -436,3 +446,128 @@ def test_a_held_item_raises_the_engine_floor_to_its_format():
     assert pack.engine_floor({"items/steel_pickaxe.json": held}) == (1, 20, 30)
     plain = {"format_version": "1.20.10", "minecraft:item": {}}
     assert pack.engine_floor({"items/steel_ingot.json": plain}) == pack.ENGINE_FLOOR
+
+
+# -- model overrides: the base icon is the item at rest ---------------------
+
+
+DURASTEEL = {
+    "parent": "item/generated",
+    "textures": {"layer0": "examplemod:item/durasteel_ingot"},
+    "overrides": [{"predicate": {"examplemod:funny_day": 1}, "model": "examplemod:item/dura-chan"}],
+}
+
+
+def test_a_cosmetic_override_converts_the_base_icon_with_a_note(tmp_path):
+    """Mythic Metals' durasteel_ingot: an easter-egg look on a special day."""
+    mod = build(tmp_path, {
+        "durasteel_ingot": DURASTEEL,
+        "dura-chan": {"parent": "item/generated", "textures": {"layer0": "examplemod:item/dura-chan"}},
+    }, registered=["durasteel_ingot"])
+    result = items.convert(mod)
+    assert result.unhandled == []
+    assert sorted(result.files) == ["items/durasteel_ingot.json"]
+    doc = result.files["items/durasteel_ingot.json"]
+    assert doc["format_version"] == "1.20.10"
+    assert doc["minecraft:item"]["components"] == {
+        "minecraft:icon": "examplemod:durasteel_ingot", "minecraft:max_stack_size": 64,
+    }
+    [note] = [n for n in result.notes if "model overrides" in n]
+    assert "durasteel_ingot (examplemod:funny_day -> 1 alternate look: dura-chan)" in note
+    assert "special-day" in note and "nothing switches" in note
+    # the override target is still explained as an unregistered variant
+    assert any("dura-chan is not a registered item" in n for n in result.notes)
+
+
+def test_a_bow_style_pull_override_converts_the_unpulled_icon(tmp_path):
+    """A slingshot: pull/pulling select the drawn looks; at rest it is undrawn."""
+    model = {
+        "parent": "item/generated",
+        "textures": {"layer0": "examplemod:item/slingshot"},
+        "overrides": [
+            {"predicate": {"examplemod:pulling": 1}, "model": "examplemod:item/slingshot_pulling_0"},
+            {"predicate": {"examplemod:pulling": 1, "examplemod:pull": 0.65},
+             "model": "examplemod:item/slingshot_pulling_1"},
+        ],
+    }
+    result = items.convert(build(tmp_path, {"slingshot": model}))
+    assert result.unhandled == []
+    assert result.files["items/slingshot.json"]["minecraft:item"]["components"]["minecraft:icon"] == (
+        "examplemod:slingshot")
+    [note] = [n for n in result.notes if "model overrides" in n]
+    assert ("slingshot (examplemod:pull, examplemod:pulling -> 2 alternate looks: "
+            "slingshot_pulling_0, slingshot_pulling_1)") in note
+    assert "in use" in note
+
+
+@pytest.mark.parametrize("key", ["damaged", "minecraft:trim_type", "custom_model_data", "lefthanded"])
+def test_vanilla_override_properties_with_a_resting_state_convert(tmp_path, key):
+    model = {**GENERATED, "overrides": [{"predicate": {key: 1}, "model": "examplemod:item/alt"}]}
+    result = items.convert(build(tmp_path, {"steel_ingot": model}))
+    assert result.unhandled == []
+    assert "items/steel_ingot.json" in result.files
+
+
+@pytest.mark.parametrize("key", ["time", "minecraft:angle", "examplemod:radiation", "speed"])
+def test_a_live_readout_override_stays_residue(tmp_path, key):
+    """A clock, compass or gauge: one frozen frame would show a false reading."""
+    model = {**GENERATED, "overrides": [{"predicate": {key: 0.5}, "model": "examplemod:item/alt"}]}
+    result = items.convert(build(tmp_path, {"watch": model}))
+    assert result.files == {}
+    [u] = result.unhandled
+    assert "live reading" in u.reason and repr(key) in u.reason
+    assert result.notes == []
+
+
+def test_one_readout_predicate_keeps_the_whole_item_residue(tmp_path):
+    model = {**GENERATED, "overrides": [
+        {"predicate": {"damaged": 1}, "model": "examplemod:item/a"},
+        {"predicate": {"time": 0.5}, "model": "examplemod:item/b"},
+    ]}
+    result = items.convert(build(tmp_path, {"watch": model}))
+    assert result.files == {}
+    assert "live reading" in result.unhandled[0].reason
+
+
+def test_overrides_on_a_model_with_elements_stay_residue(tmp_path):
+    model = _held("steel_shield", elements=[{"from": [0, 0, 0], "to": [16, 16, 1], "faces": {}}],
+                  overrides=[{"predicate": {"blocking": 1}, "model": "examplemod:item/steel_shield_blocking"}])
+    result = items.convert(build(tmp_path, {"steel_shield": model}))
+    assert result.files == {}
+    [u] = result.unhandled
+    assert "elements" in u.reason and "overrides" in u.reason
+
+
+def test_overrides_on_a_model_without_a_flat_parent_stay_residue(tmp_path):
+    model = {"parent": "minecraft:builtin/entity",
+             "overrides": [{"predicate": {"blocking": 1}, "model": "examplemod:item/shield_blocking"}]}
+    result = items.convert(build(tmp_path, {"shield": model}))
+    assert result.files == {}
+    assert "not a flat icon" in result.unhandled[0].reason
+
+
+@pytest.mark.parametrize("overrides, why", [
+    ({"predicate": {"damaged": 1}}, "not a list"),
+    ([{"model": "examplemod:item/a"}], "no predicate"),
+    ([{"predicate": {}, "model": "examplemod:item/a"}], "no predicate"),
+])
+def test_malformed_overrides_stay_residue(tmp_path, overrides, why):
+    result = items.convert(build(tmp_path, {"steel_ingot": {**GENERATED, "overrides": overrides}}))
+    assert result.files == {}
+    assert why in result.unhandled[0].reason
+
+
+def test_an_empty_overrides_list_is_no_overrides(tmp_path):
+    result = items.convert(build(tmp_path, {"steel_ingot": {**GENERATED, "overrides": []}}))
+    assert sorted(result.files) == ["items/steel_ingot.json"]
+    assert result.notes == []
+
+
+def test_one_override_note_per_mod(tmp_path):
+    cosmetic = {**GENERATED, "overrides": [{"predicate": {"funny_day": 1}, "model": "examplemod:item/a"}]}
+    worn = {**GENERATED, "overrides": [{"predicate": {"broken": 1}, "model": "examplemod:item/b"}]}
+    result = items.convert(build(tmp_path, {"steel_ingot": cosmetic, "elytra": worn}))
+    [note] = [n for n in result.notes if "model overrides" in n]
+    assert note.startswith("examplemod: 2 items with model overrides convert as their base icon")
+    assert "elytra (broken" in note and "steel_ingot (funny_day" in note
+    assert "damaged or broken" in note and "special-day" in note
