@@ -74,7 +74,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   a condition flag; its condition flag names are accepted); gating Mythic
   Metals' anvil blocks under `enableAnvils` (on by default, and the anvil
   blocks are residue regardless, so it changes nothing today).
-- **Links:** #185, PR (this one); builds on #183 / #184.
+- **Links:** #185, #186; builds on #183 / #184.
 
 ## 2026-10-13: load conditions are decided against the conversion; mod config flags at their defaults cited from source
 
