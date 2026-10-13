@@ -32,7 +32,18 @@ The parent chain is followed through the mod's own intermediate models
 converter follows block models; the leaf's textures win over a parent's.
 
 Block items are skipped rather than refused: Bedrock registers an item for a
-custom block automatically, so emitting one here would fight the block.
+custom block automatically, so emitting one here would fight the block. That
+holds only for a block the conversion wrote. An item named like a block that
+stayed residue (Farmer's Delight's ``rice``, a crop's seed, which Java
+registers under the crop block's own id) has no Bedrock item at all, so a flat
+icon converts as a plain item. What the Java item does in code, most often
+placing that block, is not converted (one note per mod). The item must be
+evidenced as an item (an ``item.`` lang key, or a recipe, item tag or loot
+entry naming it): a blockstate says only that the block exists, and many
+blocks (a portal, a wall sign) have no item even when a generator wrote them
+an item model. A block item whose look is the block's model stays with the
+block's residue. With no ``item.`` lang key but a ``block.`` one, the item
+names itself by the block's line, as Java's ``BlockItem`` does.
 
 An item model alone is not an item (#158). A 1.12 mod ships one model per
 metadata variant (``upgrade_storage_obsidian``) and a modern mod ships override
@@ -322,13 +333,66 @@ def _variant_notes(mod: SourceMod, src, variants: list[tuple[str, str]], java: s
     return notes
 
 
-def convert(mod: SourceMod, context: LoadContext | None = None) -> ConversionResult:
+def _flat_icon(mod: SourceMod, path) -> bool:
+    """Whether an item model is a flat icon this converter would emit: its
+    chain ends in a flat or held vanilla parent, draws no elements, and any
+    overrides have a resting look."""
+    try:
+        model = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(model, dict):
+        return False
+    flat, _, _ = _chain(mod, model)
+    if flat is None or flat["elements"]:
+        return False
+    if flat["parent"] not in _FLAT_PARENTS and flat["parent"] not in _HELD_PARENTS:
+        return False
+    return not flat["overrides"] or _override_looks(flat["overrides"])[0] is not None
+
+
+def _lang_keys(mod: SourceMod) -> set[str]:
+    """The keys of the mod's ``en_us.json`` (empty when it has none)."""
+    path = mod.assets / "lang" / "en_us.json"
+    try:
+        lang = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return set()
+    return set(lang) if isinstance(lang, dict) else set()
+
+
+def _placer_note(namespace: str, names: list[str]) -> str:
+    """One note per mod for items emitted without the block they place."""
+    many = len(names) > 1
+    return (
+        f"{namespace}: {len(names)} item{'s' if many else ''} ({', '.join(names)}) "
+        f"{'share their ids' if many else 'shares its id'} with a block that did not convert "
+        f"(see {'each' if many else 'its'} block's own residue entry), so Bedrock makes no item "
+        f"for {'them' if many else 'it'}; {'each converts' if many else 'it converts'} as a plain "
+        "item with its icon, usable in recipes, loot and inventories. Whatever the Java item does "
+        "in code is not converted, most often placing that block (a seed, a sign, a door, a "
+        f"sapling): in Bedrock {'they place' if many else 'it places'} nothing. Once the block "
+        "converts, Bedrock's own item for it takes this item's place."
+    )
+
+
+def convert(mod: SourceMod, context: LoadContext | None = None,
+            emitted_blocks: set[str] | None = None) -> ConversionResult:
     """Convert the mod's flat item models.
 
     An item the mod's code registers only while a config flag is on (a cited
     ``registers`` pattern, such as Mythic Metals' ``*_dust`` under
     ``enableDusts``) is ``conditional_item`` residue when that flag is off,
     by its cited default or by the user's config (:meth:`LoadContext.gated_item`).
+
+    ``emitted_blocks`` holds the Bedrock ids of the blocks this conversion
+    wrote. An item model named like a blockstate is the block's item and is
+    left to Bedrock, which registers one for every custom block, only when
+    that block was emitted; when it is residue, a flat icon of an id
+    evidenced as an item converts as a plain item and a note says its
+    code (most often placing the block) was not. ``None``, a direct call
+    with no block result, keeps the old rule: every blockstate's item is the
+    block's.
     """
     result = ConversionResult()
     src = mod.assets / "models" / "item"
@@ -343,13 +407,32 @@ def convert(mod: SourceMod, context: LoadContext | None = None) -> ConversionRes
     variants: list[tuple[str, str]] = []  # (model name, texture) of skipped variants
     held_names: list[str] = []  # emitted items held like a tool
     override_items: list[tuple[str, list]] = []  # emitted base icons whose override looks were dropped
+    items_known: set[str] | None = None  # ids evidenced as items, read on first need
+    lang_keys: set[str] | None = None  # en_us keys, read on first need
+    placers: list[str] = []  # emitted plain items whose same-id block did not convert
     for path in sorted(src.glob("*.json")):
         name = path.stem
+        unplaced = False
         if name in blocks:
-            # The block converter owns this one; claiming it keeps it off the
-            # unowned list without producing a competing definition.
-            result.claim(mod, path)
-            continue
+            if emitted_blocks is None or bedrock_identifier(mod.namespace, name) in emitted_blocks:
+                # The block converter owns this one; claiming it keeps it off the
+                # unowned list without producing a competing definition.
+                result.claim(mod, path)
+                continue
+            # The block is residue, so Bedrock makes no item for it. The Java
+            # item still exists (usually the one that places it); a flat icon
+            # converts as a plain item, without its code (#177 rice). Any
+            # other look (a block model, a 3D shape) is left with the block's
+            # residue, as before.
+            if items_known is None:
+                items_known = registered_ids(mod.root, items_only=True)
+            if not _flat_icon(mod, path) or f"{mod.namespace}:{name}" not in items_known:
+                # Nothing but the blockstate (and perhaps a generated model)
+                # says Java gives this block an item: a portal or a crop with
+                # no item of its own. It stays with the block's residue.
+                result.claim(mod, path)
+                continue
+            unplaced = True
 
         rel = result.claim(mod, path)
         gated = context.gated_item(f"{mod.namespace}:{name}")
@@ -474,6 +557,16 @@ def convert(mod: SourceMod, context: LoadContext | None = None) -> ConversionRes
             override_items.append((name, looks))
         for parent_file in parents:
             result.claim(mod, parent_file)
+        if unplaced:
+            placers.append(name)
+            if lang_keys is None:
+                lang_keys = _lang_keys(mod)
+            if (f"item.{mod.namespace}.{name}" not in lang_keys
+                    and f"block.{mod.namespace}.{name}" in lang_keys):
+                # Java names a block's item by the block's key when the item
+                # has none (BlockItem#getDescriptionId); Bedrock looks up the
+                # item's own key, so point it at the block's line.
+                components["minecraft:display_name"] = {"value": f"tile.{mod.namespace}:{name}.name"}
         result.files[f"items/{name}.json"] = {
             "format_version": _HELD_FORMAT if held else _ITEM_FORMAT,
             "minecraft:item": {
@@ -488,6 +581,8 @@ def convert(mod: SourceMod, context: LoadContext | None = None) -> ConversionRes
         result.notes.append(_held_note(mod.namespace, held_names))
     if override_items:
         result.notes.append(_override_note(mod.namespace, override_items))
+    if placers:
+        result.notes.append(_placer_note(mod.namespace, placers))
     if variants:
         result.notes.extend(_variant_notes(mod, src, variants, java or set()))
     return result
