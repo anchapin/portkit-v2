@@ -145,6 +145,12 @@ class Verdict:
     unknown: list[str] = field(default_factory=list)  # "<type>/<flag>" with no cited default
     assumed: list[FlagDefault] = field(default_factory=list)  # cited defaults a true verdict uses
     user_disabled: list[str] = field(default_factory=list)  # flags the user's config turned off
+    # For a gated registration (:meth:`LoadContext.gated_item`): the flag that
+    # decides it ("<condition>" or "<condition>/<flag>"), and the
+    # ``portkit convert --config`` setting that turns it on, e.g.
+    # "mythicmetals.enableDusts=true" (the cited config key when there is one).
+    gate: str = ""
+    enable: str = ""
 
     def reason(self) -> str:
         """The residue reason for a verdict that isn't True."""
@@ -526,6 +532,10 @@ class LoadContext:
                 verdict = self._flag(kind, cond)
                 label = f"{kind}/{flag}" if flag else kind
                 verdict.why = f"Java registers {ident} only while {label} is on: {verdict.why}"
+                cited = (entry.get("flags") or {}).get(flag)
+                key = cited.get("config_key") if isinstance(cited, dict) else None
+                verdict.gate = label
+                verdict.enable = f"{entry['mod']}.{key if isinstance(key, str) else flag or _local(kind)}=true"
                 if verdict.passes:
                     self.remember(verdict)
                 return verdict
