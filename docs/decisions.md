@@ -27,6 +27,27 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: Tinkers' Construct is an optional corpus mod; Mythic Metals takes its default slot
+
+- **Decision:** `fixtures/real/mods.toml` entries can be `optional = true`:
+  pinned and baselined, but left out of the default `portkit corpus fetch`,
+  `portkit eval --corpus` and the realmods gate, and run with
+  `--include-optional` (or `--fixture <name>` for any one mod). A skipped
+  optional mod's baseline entry is neither "missing" nor dropped on re-bank.
+  Tinkers' Construct moves to optional. Mythic Metals (Fabric 1.21.1) joins the
+  default set; Alex's Mobs (entities) and Mekanism (fluids, machines, custom
+  recipe types) join as optional.
+- **Why:** Tinkers' 11,752 generated tool sprites make it a file-count outlier
+  (13,512 of the corpus's files, 87% of them sprites; #122), so it dominates
+  run time and pack-size numbers without exercising anything new. Silent Gear
+  already covers material-built tools. Mythic Metals adds armor, tool and ore
+  (worldgen) content the default set lacked. Mythic Metals publishes only beta
+  builds on Modrinth, so its pin is the newest 1.21.1 beta rather than a release.
+- **Rejected:** dropping Tinkers entirely (it is still the corpus's v1 zero-output
+  case with custom recipe types and fluids, and keeping the pin keeps its numbers
+  ratcheted whenever someone runs it).
+- **Links:** #122, #21.
+
 ## 2026-10-12: recipes that share a file name are named by their path; no output is written twice
 
 - **Decision:** A Java recipe is written to `recipes/<name>.json` with the
