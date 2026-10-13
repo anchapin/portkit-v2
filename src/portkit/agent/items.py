@@ -220,6 +220,7 @@ def unknown_items(
     checked = valid_namespaces(source_root, namespace) - {_VANILLA}
     java = _registered
     allowed: set[str] | None = None  # built on the first item that needs it
+    defined: set[str] = set()  # ...and what the pack defines outside the session
     bad: list[UnknownItem] = []
     for rel in targets:
         ident = _item_identifier(_load(out_tree / rel))
@@ -233,11 +234,14 @@ def unknown_items(
             if java is None:
                 java = registered_ids(source_root)
             off = {g.java for g in gated.values()}
-            allowed = bedrock_ids(java - off, namespace) | _pack_defined(out_tree, set(normalised))
-        if ident in allowed:
-            continue
-        if ident in gated:
+            defined = _pack_defined(out_tree, set(normalised))
+            allowed = bedrock_ids(java - off, namespace) | defined
+        if ident in gated and ident not in defined:
+            # Checked first: another namespace's id with the same path (mapped
+            # under the conversion namespace) must not let a gated one through.
             bad.append(UnknownItem(rel, ident, gated[ident].java, gated[ident]))
+            continue
+        if ident in allowed:
             continue
         bad.append(UnknownItem(rel, ident, closest_id(ident, java)))
     return bad
