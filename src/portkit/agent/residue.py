@@ -89,6 +89,8 @@ SKIP_KINDS = {
                            "can't be decided), so converting it would ship content the mod doesn't have"),
     "conditional_loot_table": ("Java doesn't load this loot table with only this mod (or whether it "
                                "does can't be decided), so converting it would ship content the mod doesn't have"),
+    "conditional_item": ("Java doesn't register this item with the mod config this conversion holds "
+                         "(a config flag gates it), so converting it would ship content the mod doesn't have"),
 }
 
 # Where Bedrock keeps each kind of content. A hint, not a constraint: the
