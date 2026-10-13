@@ -849,8 +849,9 @@ def _reference_sets(args):
 
 def cmd_reference(args) -> int:
     """``portkit reference fetch|list``: reference data fetched on demand: Mojang's
-    vanilla sound list (#124), the loaders' and vanilla's item tags (#160) and
-    the vanilla block model templates stairs, slabs and walls are built from."""
+    vanilla sound list (#124), the loaders' and vanilla's item tags (#160),
+    the vanilla block model templates stairs, slabs and walls are built from and
+    vanilla's campfire recipes the Farmer's Delight stove cooks (#177)."""
     from . import data
     from .data import tags
 
@@ -860,12 +861,16 @@ def cmd_reference(args) -> int:
         chosen = ", ".join(s.id for s in sets) or "none"
         print(f"{args.mod}: loader {meta.loader or '?'}, minecraft {meta.minecraft or '?'} -> tag data: {chosen}")
     from .data import models as model_data
+    from .data import recipes as recipe_data
 
     if args.action == "list":
         state = "cached" if data.cached_sounds(cache) else "missing"
         print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
         state = "cached" if model_data.cached(cache) else "missing"
         print(f"{model_data.SET_ID:28} {model_data.LABEL} {state}")
+        for recipe_set in recipe_data.SETS:
+            state = "cached" if recipe_data.cached(recipe_set, cache) else "missing"
+            print(f"{recipe_set.id:28} {recipe_set.label} {state}")
         for tag_set in sets:
             state = "cached" if tags.cached(tag_set, cache) else "missing"
             print(f"{'tags-' + tag_set.id:28} {tag_set.label} {state}")
@@ -883,6 +888,14 @@ def cmd_reference(args) -> int:
     except data.ReferenceDataError as exc:
         print(f"FAILED {exc}", file=sys.stderr)
         failed += 1
+    for recipe_set in recipe_data.SETS:
+        try:
+            path, downloaded = recipe_data.fetch(recipe_set, cache)
+        except data.ReferenceDataError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} {recipe_set.id} -> {path}")
     for tag_set in sets:
         try:
             path, downloaded = tags.fetch(tag_set, cache)
