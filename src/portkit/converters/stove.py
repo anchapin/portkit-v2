@@ -30,6 +30,7 @@ reads.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 
 from ..conditions import LoadContext
 from ..data import FETCH_COMMAND
@@ -196,6 +197,65 @@ def _sound(bedrock: str | None, volume: float, pitch: float, **extra) -> dict | 
     return {"id": bedrock, "volume": volume, "pitch": pitch, **extra} if bedrock else None
 
 
+
+@dataclass
+class CampfireTable:
+    """Every campfire recipe a station can state exactly (the stove's table; the
+    skillet cooks the same one): the jar's whose load conditions passed, then
+    vanilla's from the fetched reference unless the jar replaces one by id."""
+
+    kept: list[dict]
+    jar_kept: int
+    residue: list[tuple[str, str]]  # (jar recipe path, why it isn't in the table)
+    notes: list[str]
+    vanilla: dict | None
+    chosen: object
+
+
+def campfire_table(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict, context: LoadContext,
+                   label: str) -> CampfireTable:
+    """The campfire recipe table, with notes prefixed by the station ``label``."""
+    resolve = _Resolver(mod, context.tags, emitted_definitions(files))
+    notes: list[str] = []
+    residue: list[tuple[str, str]] = []
+    candidates: list[tuple[str | None, str, dict]] = []
+    for rel, recipe in sorted(deferred, key=lambda d: d[0]):
+        candidates.append((rel, _recipe_id(mod, rel), recipe))
+    vanilla, chosen = campfire_recipes(mod.minecraft)
+    jar_ids = {ident for _, ident, _ in candidates}
+    if vanilla is None:
+        notes.append(f"{label}: vanilla's campfire recipes aren't cached (run `{FETCH_COMMAND}`), so the {label} "
+                     "cooks only this jar's own campfire recipes")
+    else:
+        for ident, recipe in sorted(vanilla.items()):
+            if ident not in jar_ids:
+                candidates.append((None, ident, recipe))
+
+    entries: list[tuple[str | None, dict]] = []
+    for rel, ident, recipe in candidates:
+        try:
+            entries.append((rel, _entry(ident, recipe, resolve)))
+        except _Refuse as refusal:
+            if rel is None:
+                notes.append(f"{label}: vanilla campfire recipe {ident} isn't in the table: {refusal}")
+            else:
+                residue.append((rel, str(refusal)))
+    clash = _overlaps([e for _, e in entries])
+    kept = []
+    for rel, entry in entries:
+        if entry["id"] not in clash:
+            kept.append(entry)
+            continue
+        why = (f"another campfire recipe ({', '.join(sorted(clash[entry['id']]))}) takes the same item; "
+               "Java cooks whichever its recipe manager finds first, an order no file states")
+        if rel is None:
+            notes.append(f"{label}: vanilla campfire recipe {entry['id']} isn't in the table: {why}")
+        else:
+            residue.append((rel, why))
+    jar_kept = sum(1 for e in kept if e["id"] in jar_ids)
+    return CampfireTable(kept, jar_kept, residue, notes, vanilla, chosen)
+
+
 def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             context: LoadContext) -> tuple[ConversionResult, str]:
     """The stove's data table and runtime, when this jar's stove block converted."""
@@ -218,45 +278,11 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
 
     emitted = emitted_definitions(files)
     resolve = _Resolver(mod, context.tags, emitted)
-    notes: list[str] = []
-
-    # The jar's campfire recipes (load conditions passed), then vanilla's,
-    # unless the jar replaces one by id.
-    candidates: list[tuple[str | None, str, dict]] = []
-    for rel, recipe in sorted(deferred, key=lambda d: d[0]):
-        candidates.append((rel, _recipe_id(mod, rel), recipe))
-    vanilla, chosen = campfire_recipes(mod.minecraft)
-    jar_ids = {ident for _, ident, _ in candidates}
-    if vanilla is None:
-        notes.append(f"stove: vanilla's campfire recipes aren't cached (run `{FETCH_COMMAND}`), so the stove "
-                     "cooks only this jar's own campfire recipes")
-    else:
-        for ident, recipe in sorted(vanilla.items()):
-            if ident not in jar_ids:
-                candidates.append((None, ident, recipe))
-
-    entries: list[tuple[str | None, dict]] = []
-    for rel, ident, recipe in candidates:
-        try:
-            entries.append((rel, _entry(ident, recipe, resolve)))
-        except _Refuse as refusal:
-            if rel is None:
-                notes.append(f"stove: vanilla campfire recipe {ident} isn't in the table: {refusal}")
-            else:
-                result.unhandled.append(Unhandled(rel, RESIDUE_KIND, str(refusal)))
-    clash = _overlaps([e for _, e in entries])
-    kept = []
-    for rel, entry in entries:
-        if entry["id"] not in clash:
-            kept.append(entry)
-            continue
-        why = (f"another campfire recipe ({', '.join(sorted(clash[entry['id']]))}) takes the same item; "
-               "Java cooks whichever its recipe manager finds first, an order no file states")
-        if rel is None:
-            notes.append(f"stove: vanilla campfire recipe {entry['id']} isn't in the table: {why}")
-        else:
-            result.unhandled.append(Unhandled(rel, RESIDUE_KIND, why))
-    jar_kept = sum(1 for e in kept if e["id"] in jar_ids)
+    table_ = campfire_table(mod, deferred, files, context, "stove")
+    kept, jar_kept, vanilla, chosen = table_.kept, table_.jar_kept, table_.vanilla, table_.chosen
+    notes: list[str] = list(table_.notes)
+    for rel, why in table_.residue:
+        result.unhandled.append(Unhandled(rel, RESIDUE_KIND, why))
 
     # Lighting and putting out (AbstractStoveBlock#tryToIgnite / #tryToExtinguish).
     try:
