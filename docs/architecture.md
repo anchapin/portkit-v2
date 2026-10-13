@@ -41,7 +41,10 @@ mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶
    (another mod's compat content, a config flag off by default) or can't be
    decided are `conditional_recipe` / `conditional_loot_table` residue
    (`conditions.py`, #183); mod config flags are decided at their defaults,
-   cited in `data/config_flag_defaults.json`.
+   cited in `data/config_flag_defaults.json`, unless the user sets them
+   (`portkit convert --config`, recorded in `config-overrides.json`). Items the
+   mod's code registers only while a flag is on (a cited `registers` pattern)
+   are `conditional_item` residue when it is off.
 4. **Unowned files.** Any staged file that no converter `claim`ed becomes an
    `unowned` residue entry, grouped by directory. A file nobody opened is the
    one outcome the pipeline never allows silently.
