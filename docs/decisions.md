@@ -27,6 +27,43 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-12: item-list ingredients convert one recipe per item; Alloy Forgery forging recipes stay residue
+
+- **Decision:** an ingredient written as a JSON list of items (Java's "any of
+  these", e.g. Mythic Metals' `[{"item": "mythicmetals:deepslate_adamantite_ore"},
+  {"item": "mythicmetals:adamantite_ore"}]`, or bare id strings) is a membership
+  the recipe states outright, so it takes the multi-member tag rule's form 3:
+  one recipe per item (`<recipe>__<item>.json`), when every listed item is
+  vanilla or emitted by this conversion, it is the recipe's only multi-item
+  ingredient, it fills one grid slot, and it has at most `EXPANSION_CAP` (16)
+  items. A one-entry list is its item. A list gets no tag of its own, since the
+  mod declared none. Anything else stays residue with a reason naming the
+  failed condition (slots, a second multi ingredient, the cap, unconverted
+  members, or a tag/non-item entry in the list). `alloy_forgery:forging`
+  recipes stay residue, now with a reason that names the missing forge.
+- **Why:** a list is exactly as known as a fully resolved tag, and vanilla
+  Bedrock writes its armour -> nugget furnace recipes the same way, one per
+  piece (Mojang/bedrock-samples `behavior_pack/recipes/furnace_iron_helmet.json`);
+  Bedrock's furnace input is one item id (learn.microsoft.com, Furnace Recipe).
+  Corpus: Mythic Metals 42 furnace recipes (ore and armour lists, every one of
+  the 42 "tag or item list" residues), Mekanism 8, Tinkers 3, BetterEnd,
+  Create, Farmer's Delight (both), Supplementaries 1 each. The forging format
+  (wisp-forest/alloy-forgery 1.21.1 @ 48e309f, `RawAlloyForgeRecipe`) is up to
+  10 counted inputs, `min_forge_tier`, `fuel_per_tick` and tier-range output
+  overrides (`"3+": 3`), run in a multiblock forge whose controller blocks,
+  tiers and fuels Alloy Forgery's own jar defines (`data/alloy_forgery/alloy_forge/`);
+  no corpus jar ships them (Mythic Metals carries only stray assets for an
+  `alloy_forgery:adamantite_block_forge_controller`, with no definition).
+- **Rejected:** forging as crafting-table or furnace recipes (drops the fuel
+  and tier gates and the tier bonus, so cheaper than Java: a gameplay change);
+  an invented "alloy forge" block with `minecraft:crafting_table`
+  `crafting_tags` (no source jar defines it: fabrication, #87); a synthetic
+  native tag for a list (the mod declared no tag); multi-jar conversion of
+  Alloy Forgery itself (a large feature, and a crafting-table station still
+  could not express fuel, tiers or counted inputs above 1 per slot): left for
+  Alex to choose.
+- **Links:** #87, #160, #161.
+
 ## 2026-10-12: a flat item icon with `overrides` converts as its base icon when every predicate has a resting state
 
 - **Decision:** an item model whose chain is a flat icon (`item/generated` or
