@@ -177,6 +177,7 @@ function tick(table, event) {
     }
   }
   if (!pot) return;
+  const before = JSON.stringify(pot);
   const done = step(pot, {
     heated: hot,
     recipes: table.recipes,
@@ -193,7 +194,9 @@ function tick(table, event) {
       entity.applyImpulse({ x: offset.vx, y: offset.vy, z: offset.vz });
     }
   }
-  save(table, block, pot);
+  // Only write the dynamic property when the pot changed (a cold, idle pot
+  // with contents ticks without writing).
+  if (JSON.stringify(pot) !== before) save(table, block, pot);
 }
 
 function broken(table, event) {
