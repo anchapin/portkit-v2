@@ -220,6 +220,16 @@ def _check_recipes(report: ValidationReport, behavior: Path, index: Index) -> No
             if not key.startswith("minecraft:recipe_") or not isinstance(body, dict):
                 continue
             for where, ident in _recipe_item_refs(body):
+                if isinstance(ident, str) and ident.startswith("#"):
+                    # A Java tag string written as an item id (#194): no item
+                    # has that name, so the recipe can never be crafted.
+                    report.add(
+                        rel,
+                        "xref.item_tag",
+                        f"{where} names {ident!r} as an item; a '#' name is a Java tag, "
+                        f"which Bedrock takes as {{\"tag\": \"{ident[1:]}\"}} or not at all",
+                    )
+                    continue
                 if not _is_custom(ident) or ident in obtainable:
                     continue
                 report.add(

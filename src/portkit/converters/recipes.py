@@ -204,8 +204,27 @@ def resolve_tag(tag: str) -> str | None:
     return None
 
 
+def _ingredient(spec):
+    """A 1.21.2+ bare-string ingredient in the older object form (#194).
+
+    Since Minecraft 1.21.2 an ingredient may be a bare string: ``"#ns:path"``
+    names a tag, any other string an item. A tag string becomes ``{"tag":
+    "ns:path"}`` so it takes the same path as the object form (pass-through,
+    single-member resolve, membership, residue reason); an item string stays as
+    it is, which :func:`_item` and :func:`_listed_items` already read as the
+    item. List entries are normalized the same way.
+    """
+    if isinstance(spec, str) and spec.startswith("#"):
+        return {"tag": spec[1:]}
+    if isinstance(spec, list):
+        return [_ingredient(entry) for entry in spec]
+    return spec
+
+
 def _item(spec, tags: TagResolver | None = None) -> dict | None:
     """Java item specs come in several shapes. Only translate the unambiguous ones."""
+    if isinstance(spec, str) and spec.startswith("#"):
+        return _item(_ingredient(spec), tags)  # a tag, never an item id (#194)
     if isinstance(spec, str):
         return {"item": spec}
     listed = _listed_items(spec)
@@ -293,7 +312,7 @@ def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult,
     """
     slots = {}
     for slot in ("template", "base", "addition"):
-        spec = recipe.get(slot)
+        spec = _ingredient(recipe.get(slot))
         if spec in (None, "", {}, []):
             continue
         item = _smithing_item(spec, tags)
@@ -701,11 +720,11 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             pattern = recipe.get("pattern", [])
             used = "".join(row for row in pattern if isinstance(row, str))
             key_specs = list((recipe.get("key") or {}).items())
-            positions = [(spec, used.count(symbol)) for symbol, spec in key_specs]
+            positions = [(_ingredient(spec), used.count(symbol)) for symbol, spec in key_specs]
         elif java_type == "minecraft:crafting_shapeless":
-            positions = [(spec, 1) for spec in recipe.get("ingredients", [])]
+            positions = [(_ingredient(spec), 1) for spec in recipe.get("ingredients", [])]
         else:  # stonecutting and the furnace family: one input
-            positions = [(recipe.get("ingredient"), 1)]
+            positions = [(_ingredient(recipe.get("ingredient")), 1)]
         furnace = java_type in _FURNACE_TYPES
 
         mapped = [_item(spec, tag_resolver) for spec, _ in positions]
