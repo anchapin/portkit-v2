@@ -19,15 +19,15 @@
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 31.9,
-      "files": 810,
-      "residue": 1729,
+      "coverage": 32.1,
+      "files": 816,
+      "residue": 1726,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 36.7,
-      "files": 808,
-      "residue": 1391,
+      "coverage": 37.0,
+      "files": 814,
+      "residue": 1388,
       "errors": 0
     },
     "mekanism": {

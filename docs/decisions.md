@@ -70,6 +70,121 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **Links:** #177; PR #195. Found alongside: #194 (bare `"#tag"`
   recipe ingredients written as items).
 
+## 2026-10-13: the skillet cooks the stove's campfire table placed and held; held cooking takes the skillet in the off-hand; the item is an iron-tier weapon from cited numbers
+
+- **Status:** approved (Alex, 2026-10-13): all six of Hark's picks from PR
+  #193 (decisions 1–5 below; 6: durability loss left to Bedrock's
+  `minecraft:durability`, in the note below).
+- **Decision:** Farmer's Delight's skillet takes the station split with the
+  approved patterns: a generated table (`scripts/portkit/data/<ns>_skillet.js`:
+  the stove's campfire recipes, `stove.campfire_table`, so vanilla's fetched
+  ones plus the jar's; the skillet's cook-time rule; the cooking pot's heat
+  rules; sounds; FD's messages) read by a fixed runtime
+  (`portkit/runtime/skillet.js` + `skillet_core.js`, Script API
+  `@minecraft/server` 2.0.0 unchanged, `minecraft:tick` every 10 ticks,
+  `station_storage.js` and `cooking_pot_core.js`'s heat helpers reused), every
+  behaviour cited to FD's `SkilletBlock` / `SkilletBlockEntity` /
+  `SkilletItem` / `CopySkilletFunction` at the pinned commits. No list
+  narrowing; ids plus `minecraft:is_*` tags are not needed (no tool test).
+- **Recipes:** the stove's table exactly (16 per corpus jar: 7 of the jar's,
+  9 of vanilla's), so a recipe the stove can't state is the stove's
+  `station_recipe` residue and the skillet adds none. A recipe under 60
+  ticks would stay off the skillet with a note (`Mth.clamp` with min above
+  max is Minecraft's code); no corpus recipe is. Cook time:
+  `getSkilletCookingTime` (a fifth of the recipe's time in whole seconds, 5
+  points less per Fire Aspect level, at least 60 ticks, float maths as Java),
+  so 600 → 120 / 80 / 60 ticks at Fire Aspect 0 / I / II. No experience (FD's
+  skillet awards none).
+- **Placed:** Java's gestures. Sneak to place (`SkilletItem#place`; a
+  non-sneaking place is cancelled in `beforeOnPlayerPlace` and treated as a
+  main-hand use). Using a campfire input on an empty skillet puts the whole
+  stack in (up to 64 or the item's stack size; creative keeps it), lantern
+  place sound 0.7/1.0, FD's add_food 0.8/1.0 when heated; an empty hand takes
+  the stack out (creative: removed, not given, as Java). Anything else:
+  NeoForge shows `block.farmersdelight.skillet.invalid_item`, Refabricated
+  does nothing (its block only calls `addItemToCook` for an empty skillet and
+  a campfire input). Heated by the cooking pot's rule (`heat_sources` lit,
+  `heat_conductors`, a lit stove), it cooks one item per cook time and throws
+  the result clockwise of its facing (0.08 sideways, 0.25 up, from 0.3 above
+  the floor); off heat the counter falls 2 a tick. The sizzle 1 in 10 ticks
+  while cooking. `support` → custom state `farmersdelight:support`
+  (`"false"`/`"true"`) from `tray_heat_sources` below, at placement and on
+  every tick (no neighbour hook in 2.0.0). Facing is the player's own
+  (`getHorizontalDirection()`, placement offset 0). The placed skillet
+  remembers the item it came from (`setSkilletItem`): its Fire Aspect sets the
+  cook time, and a player's break swaps the block's plain self-drop for that
+  item (copy_skillet), found as an item entity the tick after.
+- **Held (decision 1, pick: off-hand skillet):** Java cooks with the skillet
+  in either hand and the food in the *other* hand while the use button is held
+  (`use` / `releaseUsing` / `finishUsingItem`). Bedrock's off-hand takes only a
+  few vanilla items (never food), and a right click always uses the main-hand
+  item. So: skillet in the off-hand (`minecraft:allow_off_hand`), food in the
+  main hand; `world.beforeEvents.itemUse` on a campfire input, near heat
+  (`isPlayerNearHeatSource`: on fire, or a `heat_sources` block in the 3×3×3
+  around the player, the tag alone, so an unlit campfire counts), cancels the
+  eat and moves one item into a cooking session (player dynamic property).
+  Underwater (head block is water): FD's underwater message. The skillet
+  used from the main hand near heat shows FD's `how_to_cook` message.
+  *Rejected:* skillet in the main hand taking the food from a hotbar slot
+  (invented, not discoverable); leaving held cooking out (FD's headline
+  feature, and the off-hand mapping keeps "the food in the other hand").
+- **Held (decision 2, pick: keep it in the off-hand):** a script can't see the
+  use button held on an item with no use animation (Microsoft's item docs
+  describe `minecraft:use_modifiers` as timing use "in combination with
+  components such as Shooter, Throwable, or Food"), so "hold to cook" becomes "keep
+  the skillet in the off-hand": a `system.runInterval` loop every 10 ticks
+  advances the session, gives the result after the skillet's cook time (Fire
+  Aspect of the off-hand skillet; inventory, else at the feet), and gives the
+  food back if the skillet leaves the off-hand first (`releaseUsing`). FD's
+  sizzle 1 in 50 ticks; action-bar progress. *Rejected:* a fixed
+  `use_duration` (one length for every recipe and Fire Aspect level, and
+  whether its start/stop events fire on a non-food item is unverified).
+- **Weapon (decision 3, pick: cited numbers on the item JSON):** the skillet
+  item (`items/skillet.json`, format 1.21.50, the block's own item via
+  `replace_block_item`, the shelf_mushroom pattern): `max_stack_size` 1
+  (`stacksTo(1)`); `durability` 250 (iron tier uses); `damage` 8 (FD's
+  `createAttributes(tier, 5.0F, -3.1F)`: attack_damage modifier 5 + iron's 2
+  on a player's base 1; the agent stat guard's same base-1 rule);
+  `enchantable` slot `sword`, value 14 (iron's enchantability; FD tags it
+  durability/weapon/sharp_weapon/fire_aspect/sword enchantable and refuses
+  sweeping edge, which Bedrock's sword slot doesn't have);
+  `repairable` iron ingot (NeoForge: iron's repair item; Refabricated:
+  `minecraft:iron_tool_materials` from fetched 26.1 tags) at 25% a unit
+  (minecraft.wiki, Item repair); `can_destroy_in_creative` false on NeoForge
+  only (`canAttackBlock`; Refabricated has no override); `hand_equipped`.
+  Iron's numbers are Minecraft code, cited to minecraft.wiki "Tiers"
+  (oldid 3830017) and consistent with the fetched item components (iron
+  sword: max_damage 250, enchantable 14). Attack speed −3.1 and knockback +1
+  have no Bedrock item component: left out, in the note. *Rejected:* no stats
+  (#167's held-item rule) — those items had no stats in any file; here FD's
+  code states them, so leaving them out would drop sourced gameplay.
+- **Hit sound (decision 4, pick: always the strong sound):**
+  `world.afterEvents.entityHitEntity` with the skillet in a player's main hand
+  plays FD's `item.skillet.attack.strong` at 1.0, pitch 0.9–1.1. Java plays the
+  weak sound for an under-charged player swing; Bedrock has no attack charge.
+  Fires on every hit, not only damaging ones (Java: `LivingDamageEvent.Pre`).
+- **Drop (decision 5, pick: swap the self-drop):** keep Bedrock's default
+  self-drop (a plain skillet; so explosions still drop one, close to
+  `survives_explosion`) and swap it for the remembered item on a player's
+  break. *Rejected:* an empty block loot table with a scripted drop (every
+  non-player destruction would lose the skillet); no swap (enchantments and
+  wear reset on every pick-up, a free repair).
+- **Not carried over (conversion note):** attack speed and knockback; the weak
+  hit sound; the food drawn in the skillet, the flip animation and the
+  cooking item model (renderers); steam and enchanted-hit particles;
+  waterlogging and its flooded rules (custom blocks can't hold water); the
+  tray's collision slab below the block (a box can't reach below its block)
+  and the tray model's parts in the block below (blocks.py note); holding the
+  use button; eating first when hungry (Java tries the main-hand food first);
+  the placed skillet's data and food on non-player destruction; hoppers;
+  advancements. Durability loss per hit and per mined block is Bedrock's own
+  handling of `minecraft:durability` (not scripted, to avoid double damage),
+  unverified in game.
+- **Scope:** the FD versions read (NeoForge 1.3.4 @dd8b9b0, Refabricated
+  26.1-3.6.28 @a8cb49e); other versions keep the skillet block as residue.
+- **Links:** #177 (feasts remain), #193, #192 (campfire table), #191 (heat
+  rule), #87.
+
 ## 2026-10-13: the stove is a scripted station cooking vanilla's and the jar's campfire recipes; lit, it heats the cooking pot
 
 - **Decision:** Farmer's Delight's stove takes the station split (cutting

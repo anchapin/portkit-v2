@@ -342,6 +342,39 @@ def _bedrock_rules(java_ids: list[str], emitted_blocks: set, notes: list, role: 
     return rules
 
 
+
+def heat_table(mod: SourceMod, files: dict, result: ConversionResult, notes: list,
+               unlit_sources: bool = False) -> dict:
+    """FD's heat rules as Bedrock block rules: ``sources`` (lit, where a source
+    can be unlit), ``conductors`` and ``tray`` from this jar's block tags
+    (HeatableBlockEntity#isHeated, getTrayState); with ``unlit_sources`` also
+    ``nearby``, the heat sources without the lit test (SkilletItem's
+    isPlayerNearHeatSource tests the tag only). The tag files are claimed on
+    ``result``; notes say what didn't map."""
+    emitted_blocks = {
+        body["minecraft:block"]["description"]["identifier"]
+        for path, body in files.items()
+        if path.startswith("blocks/") and isinstance(body, dict) and "minecraft:block" in body
+    }
+    station_rules = _station_rules(files)
+    heat = {}
+    roles = [("sources", "heat_sources", True), ("conductors", "heat_conductors", False),
+             ("tray", "tray_heat_sources", False)]
+    if unlit_sources:
+        roles.append(("nearby", "heat_sources", False))
+    for role, tag, lit in roles:
+        java = _heat_blocks(mod, tag, emitted_blocks, notes)
+        if java is None:
+            notes.append(f"cooking pot: {mod.namespace}:{tag} is not in this jar; no {role}")
+            heat[role] = []
+            continue
+        path = mod.data / "tags" / "block" / f"{tag}.json"
+        result.claim(mod, path)
+        kind = {"sources": "source", "conductors": "conductor", "tray": "tray", "nearby": "source"}[role]
+        heat[role] = _bedrock_rules(java, emitted_blocks, notes, f"heat {kind} block", lit, station_rules)
+    return heat
+
+
 def _remainder(item: str, loader: str) -> str | None:
     """The leftover processCooking ejects when ``item`` is used up."""
     fd = FD_CRAFT_REMAINDERS[loader].get(item)
@@ -479,11 +512,6 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         return result, ""
 
     emitted = emitted_definitions(files)
-    emitted_blocks = {
-        body["minecraft:block"]["description"]["identifier"]
-        for path, body in files.items()
-        if path.startswith("blocks/") and isinstance(body, dict) and "minecraft:block" in body
-    }
     resolve = _Resolver(mod, context.tags, emitted)
     notes: list[str] = []
     remainders: dict[str, str] = {}
@@ -508,18 +536,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
 
     # Heat: FD's block tags from this jar; a converted stove heats while lit.
     station_rules = _station_rules(files)
-    heat = {}
-    for role, tag, lit in (("sources", "heat_sources", True), ("conductors", "heat_conductors", False),
-                           ("tray", "tray_heat_sources", False)):
-        java = _heat_blocks(mod, tag, emitted_blocks, notes)
-        if java is None:
-            notes.append(f"cooking pot: {mod.namespace}:{tag} is not in this jar; no {role}")
-            heat[role] = []
-            continue
-        path = mod.data / "tags" / "block" / f"{tag}.json"
-        result.claim(mod, path)
-        heat[role] = _bedrock_rules(java, emitted_blocks, notes, f"heat {role[:-1] if role != 'tray' else 'tray'}"
-                                    f" block", lit, station_rules)
+    heat = heat_table(mod, files, result, notes)
     notes = list(dict.fromkeys(notes))
 
     serving = context.tags.members(f"{mod.namespace}:serving_containers")
