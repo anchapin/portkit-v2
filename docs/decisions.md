@@ -27,6 +27,26 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: a bare "#tag" recipe ingredient is the tag; a "#" item id is a validator error
+
+- **Decision:** A 1.21.2+ bare-string ingredient starting with `#` (`"#c:crops/wheat"`)
+  converts exactly as `{"tag": "c:crops/wheat"}` does (pass-through Bedrock tag,
+  one-member resolve, native tag, per-member recipes, residue with the same
+  reason), in crafting keys and ingredient lists, furnace inputs and smithing
+  slots; any other string is the item. Lists get the same per-entry reading, so a
+  list holding a tag stays residue as it does in object form. The validator gains
+  `xref.item_tag`: an `item` (or furnace/smithing slot) naming a `#...` id is an
+  **error**, unlike `xref.item`, which stays a warning.
+- **Why:** `{"item": "#..."}` names no item on Bedrock in any pack, so the recipe
+  can never be crafted (99 dead recipes, 66 FD Refabricated + 33 BetterEnd, plus 3
+  FD furnace and 4 BetterEnd smithing recipes). `xref.item` warns because an
+  unknown id is usually a definition that was refused on purpose; a `#` id is
+  never that, only a converter bug, so it should fail the run.
+- **Rejected:** a warning (these 106 recipes already shipped under the `xref.item` warning);
+  letting the agent or a fallback pick one member for a multi-member tag in a
+  slot Bedrock can't express (#87: residue, not a guess).
+- **Links:** #194.
+
 ## 2026-10-13: an item named like a block that did not convert ships as a plain item; its block placing is left out
 
 - **Decision:** the item converter skips an item model named like a
