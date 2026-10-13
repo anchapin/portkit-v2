@@ -99,6 +99,19 @@ def _mod_name(tree: Path) -> str:
     return tree.name
 
 
+def _config_settings(tree: Path) -> list[dict]:
+    """The user config settings the conversion recorded next to the tree, if any."""
+    path = tree / "config-overrides.json"
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    settings = data.get("_settings") if isinstance(data, dict) else None
+    return [s for s in settings if isinstance(s, dict)] if isinstance(settings, list) else []
+
+
 def _table(rows: list[tuple[str, ...]], headers: tuple[str, ...]) -> list[str]:
     lines = ["| " + " | ".join(headers) + " |"]
     lines.append("|" + "|".join(" --- " for _ in headers) + "|")
@@ -176,6 +189,26 @@ def render(tree: Path) -> str:
 
     lines += ["## Validator findings", ""]
     lines += _findings_section(report.findings)
+
+    settings = _config_settings(tree)
+    if settings:
+        lines += [
+            "## Mod config set by user config",
+            "",
+            "This tree was converted with these mod config settings in place of the "
+            "defaults cited from the mod's source (`portkit convert --config`). "
+            "`config-overrides.json` next to the tree reproduces the run with "
+            "`--config-file`.",
+            "",
+        ]
+        lines += _table(
+            [(f"`{s.get('condition')}`", "on" if s.get("value") else "off",
+              "uncited" if s.get("cited_default") is None else ("on" if s.get("cited_default") else "off"),
+              f"`{s.get('as_written')}`")
+             for s in settings],
+            ("Flag", "Set to", "Cited default", "As written"),
+        )
+        lines.append("")
 
     lines += [
         "## What to do with this",
