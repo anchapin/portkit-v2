@@ -31,6 +31,7 @@ _CONTENT_TYPES = {
     "textures": "textures",
     "texts": "translations",
     "sounds": "sounds",
+    "scripts": "station runtimes",
 }
 _SEVERITY_ORDER = {"error": 0, "warning": 1}
 
