@@ -117,7 +117,8 @@ def _chain(mod: SourceMod, model: dict) -> tuple[dict | None, list, str]:
     for _ in range(models._MAX_PARENT_DEPTH):
         if isinstance(current.get("textures"), dict):
             textures = {**current["textures"], **textures}
-        elements = elements or "elements" in current
+        # Java treats an empty elements list as "inherit the parent's".
+        elements = elements or bool(current.get("elements"))
         if current is model:
             # Java reads overrides from the item's own model only; a parent's
             # are not inherited (unlike textures and elements).
@@ -133,16 +134,31 @@ def _chain(mod: SourceMod, model: dict) -> tuple[dict | None, list, str]:
         path = models.model_path(mod, parent)
         if path is None:
             return None, seen, f"item model extends {parent!r}, a model from another namespace"
-        if not path.is_file():
+        if not path.resolve().is_relative_to(mod.root.resolve()) or not path.is_file():
             return None, seen, f"item model extends {parent!r}, which is not in this mod"
         seen.append(path)
         try:
             current = json.loads(path.read_text())
-        except json.JSONDecodeError as exc:
-            return None, seen, f"parent model {parent!r} is invalid JSON: {exc}"
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return None, seen, f"parent model {parent!r} could not be read as JSON: {exc}"
         if not isinstance(current, dict):
             return None, seen, f"parent model {parent!r} is not a JSON object"
     return None, seen, "item model parent chain is deeper than we follow"
+
+
+def _resolve_alias(textures: dict, reference):
+    """Follow ``#name`` texture variables through the merged map, as Java does.
+
+    Returns the concrete reference, or the last ``#`` reference when the
+    variable is never filled (``texture_shortname`` then says so)."""
+    for _ in range(len(textures) + 1):
+        if not (isinstance(reference, str) and reference.startswith("#")):
+            return reference
+        target = textures.get(reference[1:])
+        if target is None:
+            return reference
+        reference = target
+    return reference
 
 
 def _held_note(namespace: str, names: list[str]) -> str:
@@ -223,7 +239,7 @@ def convert(mod: SourceMod) -> ConversionResult:
         rel = result.claim(mod, path)
         try:
             model = json.loads(path.read_text())
-        except json.JSONDecodeError as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             result.unhandled.append(Unhandled(rel, "item", f"invalid JSON: {exc}"))
             continue
 
@@ -299,7 +315,7 @@ def convert(mod: SourceMod) -> ConversionResult:
             )
             continue
 
-        reference = textures[layers[0]]
+        reference = _resolve_alias(textures, textures[layers[0]])
         if not isinstance(reference, str):
             result.unhandled.append(Unhandled(rel, "item", f"{layers[0]} is not a texture reference"))
             continue
