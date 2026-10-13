@@ -22,6 +22,19 @@ class SourceMod:
     mods: dict[str, str] | None = None
     requires: frozenset[str] | None = None
 
+    @classmethod
+    def from_metadata(cls, root: Path, namespace: str, meta) -> "SourceMod":
+        """The mod one namespace of a staged jar stands for, under its metadata.
+
+        One construction for the converters (``pipeline.convert``) and the
+        residue agent's guards, so both decide load conditions and config
+        gating against the same declared mods (#183, #185).
+        """
+        requires = getattr(meta, "requires", None)
+        return cls(root=root, namespace=namespace, loader=getattr(meta, "loader", None),
+                   minecraft=getattr(meta, "minecraft", None), mods=getattr(meta, "mods", None),
+                   requires=frozenset(requires) if requires is not None else None)
+
     @property
     def assets(self) -> Path:
         return self.root / "assets" / self.namespace

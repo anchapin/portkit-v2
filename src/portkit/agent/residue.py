@@ -24,7 +24,10 @@ state it declares or tests is one the Java blockstate has, with a value Java
 lists (see ``states.py``, #149), and every trim recipe it wrote names only
 vanilla ``minecraft:`` template and addition slots (see ``trim.py``, #86),
 and every item it defines in the mod's or the conversion's namespace is one
-the Java source registers (see ``items.py``, #86).
+the Java source registers (see ``items.py``, #86), under the mod config the
+conversion holds: an item a config flag gates off (cited default or
+``--config``) is neither defined nor named in any file it writes
+(``items.py``, #187).
 A group that ends
 with any kind of fabrication is rolled back, with the reason listed.
 Declaring victory in prose is not enough, and neither is a session that wrote nothing because the Java behaviour
@@ -50,12 +53,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..conditions import LoadContext
 from ..meta import ModMetadata
-from ..model import Unhandled
+from ..model import SourceMod, Unhandled
 from ..pack import ENGINE_FLOOR, manifest
 from ..validate import validate_tree
 from .budget import Budget, Spend
-from .items import UnknownItem, registered_ids, unknown_items
+from .items import (
+    GatedItem,
+    UnknownItem,
+    gated_finding,
+    gated_ids,
+    gated_refs,
+    registered_ids,
+    unknown_items,
+)
 from .items import finding as item_finding
 from .loop import AgentSession, LLMClient
 from .refs import (
@@ -220,12 +232,17 @@ def build_task(group: ResidueGroup, source_root: Path, out_tree: Path, namespace
 class _TrackingToolBox(ToolBox):
     """A ToolBox that remembers what each write replaced, so a group can roll back."""
 
-    def __init__(self, source: Path, out_tree: Path, namespace: str | None = None):
+    def __init__(self, source: Path, out_tree: Path, namespace: str | None = None,
+                 context: LoadContext | None = None):
         super().__init__(source, out_tree)
         self.originals: dict[str, bytes | None] = {}
         self.namespace = namespace
+        # The conversion's mod config (cited defaults + --config), for gated
+        # items (#187); None checks no gating.
+        self.context = context
         self._source_ids: set[str] | None = None  # the source does not change mid-session
         self._registered: set[str] | None = None  # likewise, for the item guard
+        self._gated: dict[str, GatedItem] | None = None  # likewise, for gated items
 
     def _before_write(self, target: Path) -> None:
         rel = str(target.resolve().relative_to(self.out_tree.resolve()))
@@ -270,14 +287,42 @@ class _TrackingToolBox(ToolBox):
         """Written trim recipes whose template or addition is not vanilla (#86)."""
         return fabricated_trims(self.out_tree, list(self.originals), self.source)
 
+    def gated(self) -> dict[str, GatedItem]:
+        """Bedrock id -> gated-off Java item under the conversion's config (#187)."""
+        if self._gated is None:
+            if self.context is None:
+                self._gated = {}
+            else:
+                if self._registered is None:
+                    self._registered = registered_ids(self.source)
+                if self._source_ids is None:
+                    self._source_ids = source_items(self.source)
+                self._gated = gated_ids(self._registered | self._source_ids,
+                                        self.context.gated_item, self.namespace)
+        return self._gated
+
     def unknown_items(self) -> list[UnknownItem]:
-        """Items this session defined that the Java source never registers (#86)."""
+        """Items this session defined that the Java source never registers (#86),
+        including ones a config flag gates off here (#187)."""
         if self._registered is None:
             self._registered = registered_ids(self.source)
         return unknown_items(
             self.out_tree, list(self.originals), self.source, self.namespace, self.originals,
-            _registered=self._registered,
+            gated=self.gated(), _registered=self._registered,
         )
+
+    def gated_refs(self, items: list[UnknownItem] | None = None) -> list[Ref]:
+        """Mentions of a gated-off item in this session's files (#187).
+
+        An item definition the item guard already reports is left to it.
+        """
+        gated = self.gated()
+        if not gated:
+            return []
+        if items is None:
+            items = self.unknown_items()
+        return gated_refs(self.out_tree, list(self.originals), gated, self.originals,
+                          exclude={(i.path, i.ident) for i in items})
 
     def validate(self) -> dict:
         # The structural validator only warns on an undeclared item, and does not
@@ -292,7 +337,9 @@ class _TrackingToolBox(ToolBox):
         extra += [stat_finding(stat) for stat in self.fabricated()]
         extra += [state_finding(bad) for bad in self.invented()]
         extra += [trim_finding(trim) for trim in self.unresolved_trims()]
-        extra += [item_finding(item) for item in self.unknown_items()]
+        items = self.unknown_items()
+        extra += [item_finding(item) for item in items]
+        extra += [gated_finding(ref, self.gated()) for ref in self.gated_refs(items)]
         if extra:
             report["findings"] = [*report["findings"], *extra]
             report["error_count"] += len(extra)
@@ -338,6 +385,8 @@ class GroupOutcome:
     # Items the session defined whose id the Java source never registers, e.g.
     # a per-variant item (#86); rolled back too.
     unknown_items: list[str] = field(default_factory=list)
+    # Mentions of an item a mod config flag gates off here (#187); rolled back too.
+    gated_items: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -356,6 +405,7 @@ class GroupOutcome:
             "invented_states": self.invented_states,
             "unresolved_trims": self.unresolved_trims,
             "unknown_items": self.unknown_items,
+            "gated_items": self.gated_items,
             "note": self.note,
         }
 
@@ -481,14 +531,21 @@ class ResidueAgent:
         unhandled: list[Unhandled],
         namespace: str,
         meta: ModMetadata | None = None,
+        context: LoadContext | None = None,
     ) -> ResidueRun:
-        scaffolded = _scaffold_manifests(out_tree, namespace, meta or ModMetadata())
+        """``context`` is the conversion's mod config (cited flag defaults plus
+        ``--config``), the one the converters decided with; the guards hold the
+        agent to it (#187). Without one, the defaults for ``meta``'s mods."""
+        meta = meta or ModMetadata()
+        if context is None:
+            context = LoadContext(SourceMod.from_metadata(source_root, namespace, meta))
+        scaffolded = _scaffold_manifests(out_tree, namespace, meta)
         outcomes: list[GroupOutcome] = []
         remaining: list[Unhandled] = []
         spent = Spend()
         try:
             for group in group_residue(unhandled):
-                outcome = self._run_group(group, source_root, out_tree, namespace, spent)
+                outcome = self._run_group(group, source_root, out_tree, namespace, spent, context)
                 outcomes.append(outcome)
                 if outcome.status != "resolved":
                     remaining.extend(group.items)
@@ -503,6 +560,7 @@ class ResidueAgent:
         out_tree: Path,
         namespace: str,
         spent: Spend,
+        context: LoadContext | None = None,
     ) -> GroupOutcome:
         outcome = GroupOutcome(group.key, group.kind, group.source, "skipped")
         model_text = ""
@@ -516,7 +574,7 @@ class ResidueAgent:
             return outcome
 
         before = _error_set(out_tree)
-        box = _TrackingToolBox(source_root, out_tree, namespace)
+        box = _TrackingToolBox(source_root, out_tree, namespace, context)
         session = AgentSession(
             self.client, box, self.system, budget=self.budget, run_spend=spent
         )
@@ -565,12 +623,15 @@ class ResidueAgent:
         # item for what Java keeps in block state or NBT (#86).
         bad_items = box.unknown_items() if box.originals else []
         outcome.unknown_items = [item.describe() for item in bad_items]
+        # And any mention of an item a mod config flag gates off here (#187).
+        gated = box.gated_refs(bad_items) if box.originals else []
+        outcome.gated_items = [f"{ref.describe()} ({box.gated()[ref.ident].explain()})" for ref in gated]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
         introduced = sorted(_error_set(out_tree) - before) if box.originals else []
         if box.originals and (
             unresolved or fabricated or foreign or states or bad_trims or bad_items
-            or introduced
+            or gated or introduced
         ):
             box.rollback()
             outcome.status = "rolled_back"
@@ -597,6 +658,10 @@ class ResidueAgent:
             if bad_items:
                 reasons.append(
                     f"item(s) the Java source does not register: {'; '.join(outcome.unknown_items)}"
+                )
+            if gated:
+                reasons.append(
+                    f"item(s) gated off by mod config: {'; '.join(outcome.gated_items)}"
                 )
             if introduced:
                 # Name what broke, so a stub that never validated reads as one (#141).
