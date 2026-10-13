@@ -108,6 +108,7 @@ def merge_namespaces(results: dict[str, "ConversionResult"]) -> "ConversionResul
         merged.consumed |= result.consumed
         merged.unhandled.extend(result.unhandled)
         merged.notes.extend(result.notes)
+        merged.stations.update(result.stations)
         for path, value in result.files.items():
             if path not in merged.files:
                 merged.files[path] = value
@@ -243,6 +244,10 @@ class PipelineResult:
     # per flag set; empty for a run at the cited defaults.
     config: list[dict] = field(default_factory=list)
 
+    # Station runtimes (#177): recipe type -> recipes in its data table and
+    # recipes left as station_recipe residue, with the table's path.
+    stations: dict[str, dict] = field(default_factory=dict)
+
     @property
     def notes(self) -> list[str]:
         """Things worth saying about the mod itself, not about its files.
@@ -283,6 +288,7 @@ class PipelineResult:
             "notes": self.notes,
             "mcaddon": self.addon.name if self.addon else None,
             **({"config": config_record(self.config)} if self.config else {}),
+            **({"stations": self.stations} if self.stations else {}),
             **({"agent": self.agent.summary()} if self.agent else {}),
         }
 
@@ -399,4 +405,5 @@ def convert(
             reductions=result.notes,
             agent=agent_run,
             config=records,
+            stations=result.stations,
         )
