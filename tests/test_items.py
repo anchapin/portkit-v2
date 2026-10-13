@@ -348,3 +348,91 @@ def test_a_chain_to_a_model_built_in_code_is_not_a_flat_icon(tmp_path):
     }, registered=["gun"])
     [u] = [u for u in items.convert(mod).unhandled if u.source.endswith("/gun.json")]
     assert "names no vanilla parent and no elements" in u.reason
+
+
+def test_an_empty_elements_list_is_still_a_flat_icon(tmp_path):
+    """Java reads "elements": [] as "inherit the parent's", not as a shape."""
+    result = items.convert(build(tmp_path, {"steel_axe": _held("steel_axe", elements=[])}))
+    assert sorted(result.files) == ["items/steel_axe.json"]
+
+
+def test_a_texture_variable_resolves_through_the_chain(tmp_path):
+    mod = build(tmp_path, {
+        "tool_base": {"parent": "item/handheld", "textures": {"layer0": "#blade"}},
+        "steel_axe": {"parent": "examplemod:item/tool_base",
+                      "textures": {"blade": "examplemod:item/steel_axe"}},
+    }, registered=["steel_axe"])
+    components = items.convert(mod).files["items/steel_axe.json"]["minecraft:item"]["components"]
+    assert components["minecraft:icon"] == "examplemod:steel_axe"
+
+
+def test_an_unreadable_parent_is_residue_not_a_crash(tmp_path):
+    mod = build(tmp_path, {"steel_axe": {"parent": "examplemod:item/base",
+                                         "textures": {"layer0": "examplemod:item/steel_axe"}}})
+    (mod.assets / "models" / "item" / "base.json").write_bytes(b"\xff\xfe\x00bad")
+    reasons = {u.source.rsplit("/", 1)[1]: u.reason for u in items.convert(mod).unhandled}
+    assert "could not be read as JSON" in reasons["steel_axe.json"]
+
+
+def test_a_parent_outside_the_mod_is_not_followed(tmp_path):
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"parent": "item/handheld"}))
+    mod = build(tmp_path / "mod", {"steel_axe": {
+        "parent": "examplemod:../../../../outside",
+        "textures": {"layer0": "examplemod:item/steel_axe"}}})
+    result = items.convert(mod)
+    assert result.files == {}
+    assert "not in this mod" in result.unhandled[0].reason
+
+
+def test_a_held_item_raises_the_engine_floor_to_its_format():
+    from portkit import pack
+
+    held = {"format_version": "1.20.30", "minecraft:item": {}}
+    assert pack.engine_floor({"items/steel_pickaxe.json": held}) == (1, 20, 30)
+    plain = {"format_version": "1.20.10", "minecraft:item": {}}
+    assert pack.engine_floor({"items/steel_ingot.json": plain}) == pack.ENGINE_FLOOR
+
+
+def test_an_empty_elements_list_is_still_a_flat_icon(tmp_path):
+    """Java reads "elements": [] as "inherit the parent's", not as a shape."""
+    result = items.convert(build(tmp_path, {"steel_axe": _held("steel_axe", elements=[])}))
+    assert sorted(result.files) == ["items/steel_axe.json"]
+
+
+def test_a_texture_variable_resolves_through_the_chain(tmp_path):
+    mod = build(tmp_path, {
+        "tool_base": {"parent": "item/handheld", "textures": {"layer0": "#blade"}},
+        "steel_axe": {"parent": "examplemod:item/tool_base",
+                      "textures": {"blade": "examplemod:item/steel_axe"}},
+    }, registered=["steel_axe"])
+    components = items.convert(mod).files["items/steel_axe.json"]["minecraft:item"]["components"]
+    assert components["minecraft:icon"] == "examplemod:steel_axe"
+
+
+def test_an_unreadable_parent_is_residue_not_a_crash(tmp_path):
+    mod = build(tmp_path, {"steel_axe": {"parent": "examplemod:item/base",
+                                         "textures": {"layer0": "examplemod:item/steel_axe"}}})
+    (mod.assets / "models" / "item" / "base.json").write_bytes(b"\xff\xfe\x00bad")
+    reasons = {u.source.rsplit("/", 1)[1]: u.reason for u in items.convert(mod).unhandled}
+    assert "could not be read as JSON" in reasons["steel_axe.json"]
+
+
+def test_a_parent_outside_the_mod_is_not_followed(tmp_path):
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps({"parent": "item/handheld"}))
+    mod = build(tmp_path / "mod", {"steel_axe": {
+        "parent": "examplemod:../../../../outside",
+        "textures": {"layer0": "examplemod:item/steel_axe"}}})
+    result = items.convert(mod)
+    assert result.files == {}
+    assert "not in this mod" in result.unhandled[0].reason
+
+
+def test_a_held_item_raises_the_engine_floor_to_its_format():
+    from portkit import pack
+
+    held = {"format_version": "1.20.30", "minecraft:item": {}}
+    assert pack.engine_floor({"items/steel_pickaxe.json": held}) == (1, 20, 30)
+    plain = {"format_version": "1.20.10", "minecraft:item": {}}
+    assert pack.engine_floor({"items/steel_ingot.json": plain}) == pack.ENGINE_FLOOR
