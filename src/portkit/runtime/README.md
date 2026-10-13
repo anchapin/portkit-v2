@@ -20,6 +20,13 @@ entry `scripts/portkit/main.js` that wires the two.
   the burn test), no imports.
 - `stove.js`: its Bedrock binding (lighting and putting out, placing food,
   `onTick` cooking, burning and the crackle, the covered-top drop, breaking).
+- `skillet_core.js`: Farmer's Delight skillet logic (the skillet cook time
+  with Fire Aspect, one stack cooking item by item, cooling off heat, the
+  thrown result, held cooking sessions, the near-heat test), no imports.
+- `skillet.js`: its Bedrock binding (the placed skillet's use, `onTick`, tray
+  state, sneak-only placement, breaking; held cooking with the skillet in the
+  off-hand through `world.beforeEvents.itemUse` and a `system.runInterval`
+  loop; the hit sound). It imports the heat helpers of `cooking_pot_core.js`.
 - `station_storage.js`: helpers the bindings share (world dynamic property
   storage, stored stacks, giving and dropping items, sounds).
 
