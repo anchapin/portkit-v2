@@ -67,7 +67,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   treating the blockstate as item evidence (ships items Java never registers,
   e.g. portals); leaving the items out until their blocks convert (keeps ~400 items
   and the recipes and drops that need them dead).
-- **Links:** #177; PR (this one). Found alongside: #194 (bare `"#tag"`
+- **Links:** #177; PR #195. Found alongside: #194 (bare `"#tag"`
   recipe ingredients written as items).
 
 ## 2026-10-13: the stove is a scripted station cooking vanilla's and the jar's campfire recipes; lit, it heats the cooking pot
