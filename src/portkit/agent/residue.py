@@ -85,6 +85,10 @@ SKIP_KINDS = {
     "nested_jar": "nested jars are not unpacked, so there is nothing to read",
     "namespace_collision": "a collision is a packaging decision, not a file to convert",
     "output_collision": "two converters wrote one output path; a converter bug, not a file to convert",
+    "conditional_recipe": ("Java doesn't load this recipe with only this mod (or whether it does "
+                           "can't be decided), so converting it would ship content the mod doesn't have"),
+    "conditional_loot_table": ("Java doesn't load this loot table with only this mod (or whether it "
+                               "does can't be decided), so converting it would ship content the mod doesn't have"),
 }
 
 # Where Bedrock keeps each kind of content. A hint, not a constraint: the
