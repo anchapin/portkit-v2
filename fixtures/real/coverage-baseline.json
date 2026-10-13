@@ -8,38 +8,38 @@
     },
     "betterend": {
       "coverage": 34.4,
-      "files": 3278,
-      "residue": 6261,
+      "files": 3280,
+      "residue": 6260,
       "errors": 0
     },
     "create": {
       "coverage": 29.3,
-      "files": 3939,
-      "residue": 9516,
+      "files": 3943,
+      "residue": 9515,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 28.2,
-      "files": 735,
-      "residue": 1869,
+      "coverage": 28.3,
+      "files": 737,
+      "residue": 1868,
       "errors": 0
     },
     "farmers_delight_neoforge": {
       "coverage": 31.1,
-      "files": 701,
-      "residue": 1556,
+      "files": 703,
+      "residue": 1555,
       "errors": 0
     },
     "mekanism": {
-      "coverage": 11.9,
-      "files": 1216,
-      "residue": 9020,
+      "coverage": 12.0,
+      "files": 1232,
+      "residue": 9012,
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 45.2,
-      "files": 1619,
-      "residue": 1964,
+      "coverage": 47.8,
+      "files": 1763,
+      "residue": 1922,
       "errors": 0
     },
     "silent_gear_1165": {
@@ -61,15 +61,15 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 26.1,
-      "files": 1438,
-      "residue": 4062,
+      "coverage": 26.2,
+      "files": 1440,
+      "residue": 4061,
       "errors": 0
     },
     "tinkers_construct": {
       "coverage": 42.6,
-      "files": 13513,
-      "residue": 18210,
+      "files": 13519,
+      "residue": 18207,
       "errors": 0
     },
     "waystones": {
