@@ -626,9 +626,11 @@ def _corpus_cases(args):
     except (OSError, corpus.CorpusError) as exc:
         print(f"cannot read corpus manifest: {exc}", file=sys.stderr)
         return 2
-    if args.fixture:
-        wanted = set(args.fixture)
-        mods = [m for m in mods if m.name in wanted]
+    try:
+        mods = corpus.select(mods, args.fixture or (), getattr(args, "include_optional", False))
+    except corpus.CorpusError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     cases, missing = [], []
     for mod in mods:
         try:
@@ -706,6 +708,11 @@ def _corpus_verdict(args, baseline_path: Path, measured, error_counts: dict[str,
         data = _json.loads(bl.dump(measured))
         for name, entry in data["fixtures"].items():
             entry["errors"] = error_counts[name]
+        # Optional mods this run skipped keep their entries; mods no longer in
+        # the manifest drop out.
+        for name, entry in _skipped_baseline(args, baseline_path, error_counts).items():
+            data["fixtures"][name] = entry
+        data["fixtures"] = dict(sorted(data["fixtures"].items()))
         baseline_path.write_text(_json.dumps(data, indent=2) + "\n")
         print(f"\nbaseline written: {baseline_path}")
         return 0
@@ -722,6 +729,9 @@ def _corpus_verdict(args, baseline_path: Path, measured, error_counts: dict[str,
         return 2
     if args.fixture:  # a subset run: mods left out are not "dropped"
         regressions = [r for r in regressions if r.fixture in error_counts]
+    else:  # optional mods this run skipped are not "dropped" either
+        skipped = set(_skipped_baseline(args, baseline_path, error_counts, base))
+        regressions = [r for r in regressions if r.fixture not in skipped]
     for name, count in sorted(error_counts.items()):
         before = (base.get(name) or {}).get("errors")
         if before is not None and count > int(before):
@@ -744,6 +754,23 @@ def _corpus_verdict(args, baseline_path: Path, measured, error_counts: dict[str,
     return 0
 
 
+def _skipped_baseline(args, baseline_path: Path, ran, base=None) -> dict:
+    """Baseline entries for the manifest's optional mods this run left out:
+    kept on --update-baseline, never counted as missing."""
+    import json as _json
+
+    from . import corpus
+
+    manifest = Path(args.manifest) if args.manifest else corpus.MANIFEST
+    try:
+        optional = {m.name for m in corpus.load(manifest) if m.optional}
+        if base is None:
+            base = _json.loads(baseline_path.read_text())["fixtures"] if baseline_path.is_file() else {}
+    except (OSError, ValueError, KeyError, corpus.CorpusError):
+        return {}
+    return {name: entry for name, entry in base.items() if name in optional and name not in ran}
+
+
 def cmd_corpus(args) -> int:
     """``portkit corpus fetch|list``: the pinned real-mod jars (#21)."""
     from . import corpus
@@ -755,13 +782,22 @@ def cmd_corpus(args) -> int:
         print(f"cannot read corpus manifest: {exc}", file=sys.stderr)
         return 2
     cache = corpus.cache_dir()
+    try:
+        chosen = corpus.select(mods, args.fixture or (), args.include_optional)
+    except corpus.CorpusError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    hidden = [m.name for m in mods if m.optional and m not in chosen]
     if args.action == "list":
-        for mod in mods:
+        for mod in chosen:
             state = "cached" if corpus.cached(mod, cache) else "missing"
-            print(f"{mod.name:28} {mod.loader:9} {mod.minecraft:8} {mod.license:6} {state}")
+            flag = "optional" if mod.optional else "default"
+            print(f"{mod.name:28} {mod.loader:9} {mod.minecraft:8} {mod.license:6} {flag:8} {state}")
+        if hidden and not args.fixture:
+            print(f"({len(hidden)} optional, not shown: {', '.join(hidden)}; add --include-optional)")
         return 0
     failed = 0
-    for mod in mods:
+    for mod in chosen:
         try:
             path, downloaded = corpus.fetch(mod, cache)
         except corpus.CorpusError as exc:
@@ -769,6 +805,8 @@ def cmd_corpus(args) -> int:
             failed += 1
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} {mod.name} -> {path}")
+    if hidden and not args.fixture:
+        print(f"skipped {len(hidden)} optional: {', '.join(hidden)} (add --include-optional)")
     return 1 if failed else 0
 
 
@@ -956,6 +994,9 @@ def main(argv=None) -> int:
     c.add_argument("--manifest", metavar="PATH", help="corpus manifest (default fixtures/real/mods.toml)")
     c.add_argument("--fetch", action="store_true",
                    help="with --corpus, download missing jars and the vanilla sound list first")
+    c.add_argument("--include-optional", action="store_true",
+                   help="with --corpus, also run the mods marked optional in the manifest "
+                        "(skipped by default; --fixture NAME runs any one mod)")
     c.add_argument(
         "--mct", action="store_true",
         help="also run Mojang's `mct validate` (@minecraft/creator-tools) on each converted tree "
@@ -991,6 +1032,10 @@ def main(argv=None) -> int:
     p = sub.add_parser("corpus", help="fetch or list the pinned real-mod jars (#21)")
     p.add_argument("action", choices=["fetch", "list"])
     p.add_argument("--manifest", metavar="PATH", help="corpus manifest (default fixtures/real/mods.toml)")
+    p.add_argument("--include-optional", action="store_true",
+                   help="also the mods marked optional in the manifest (skipped by default)")
+    p.add_argument("--fixture", action="append", metavar="NAME",
+                   help="only these mods, optional or not (repeatable)")
     p.set_defaults(func=cmd_corpus)
 
     p = sub.add_parser(

@@ -3,6 +3,10 @@
 #   portkit eval --corpus     # coverage per mod, ratcheted by fixtures/real/coverage-baseline.json
 # To add or bump a mod, pin its Modrinth version id, primary file url and sha512
 # (api.modrinth.com/v2/version/<id>), then re-run eval --corpus --update-baseline.
+#
+# `optional = true` pins a mod without putting it in the default fetch, eval and
+# realmods gate; run it with --include-optional (or --fixture <name>). Its
+# baseline entry is ratcheted when it runs and ignored when it's skipped.
 
 [[mod]]
 name = "farmers_delight_neoforge"
@@ -93,7 +97,21 @@ license = "MIT"
 source = "https://github.com/SlimeKnights/TinkersConstruct"
 url = "https://cdn.modrinth.com/data/rxIIYO6c/versions/Fv0zTUuh/TConstruct-1.20.1-3.12.1.231.jar"
 sha512 = "e8b78225f379249b0edf0ddcb2b84aed4bf8712e1fb1a5faae9a17c0ac6ff2c697a684c0dd9b5ea4af1e0e2bfb3eeb206e1c16f4900a38d270592ced6115adea"
-notes = "v1 audit (portkit#1105): zero output, non-standard asset root. Custom recipe types, fluids"
+notes = "v1 audit (portkit#1105): zero output, non-standard asset root. Custom recipe types, fluids. Optional since 2026-10-12: 11,752 generated tool sprites make it a file-count outlier (#122); Silent Gear covers material tools"
+optional = true
+
+[[mod]]
+name = "mythicmetals"
+project = "mythicmetals"
+version_id = "fKQ4feyG"
+version = "0.24.6+1.21"
+loader = "fabric"
+minecraft = "1.21.1"
+license = "MIT"
+source = "https://github.com/Noaaan/MythicMetals"
+url = "https://cdn.modrinth.com/data/bAWzYNRd/versions/fKQ4feyG/mythicmetals-0.24.6%2B1.21.jar"
+sha512 = "a2541b6d59415be34715e6c23aa47c91af102fc1ef433e4b9f0074dad34be205fd3a48f089426648f8e759a1b7ad5e94ff17c9baf1f9e3fd099c3570286f73bc"
+notes = "Fabric 1.21.1: armor, tools and ores (worldgen) for dozens of metals; replaced Tinkers in the default set 2026-10-12. Modrinth has no release-type builds, so this is the newest 1.21.1 beta"
 
 [[mod]]
 name = "silent_gear_1165"
@@ -133,3 +151,31 @@ source = "https://github.com/jaquadro/StorageDrawers"
 url = "https://cdn.modrinth.com/data/guitPqEi/versions/MYiIvcYr/StorageDrawers-1.12.2-5.5.2.jar"
 sha512 = "276064f5c60f444454ec3d098a112561111c3137c6011aea10d7ea6540845fce6cc7e01d3845789231fcdfbb04ebe417677bbfc476fb19ab7d156a5e8d7d8839"
 notes = "Same mod on Forge 1.12.2: pre-flattening layout, recipes under assets/, mcmod.info"
+
+[[mod]]
+name = "alexs_mobs"
+project = "alexs-mobs"
+version_id = "XoIASRVU"
+version = "1.22.9"
+loader = "forge"
+minecraft = "1.20.1"
+license = "GPL-3.0-only"
+source = "https://github.com/AlexModGuy/AlexsMobs"
+url = "https://cdn.modrinth.com/data/2cMuAZAp/versions/XoIASRVU/alexsmobs-1.22.9.jar"
+sha512 = "b50280057926d750f9ffbf6a8df36deb37529356895f6bf59f25d272ecf69afccec65ec1a5c3a8bfad24f9475c15b93c5ec4666447b1fce26a90c41445bbfb04"
+notes = "Forge 1.20.1: ~90 entities (models, animations, spawns, loot); the corpus's entity mod. Optional"
+optional = true
+
+[[mod]]
+name = "mekanism"
+project = "mekanism"
+version_id = "5KzzycBT"
+version = "10.7.19.85"
+loader = "neoforge"
+minecraft = "1.21.1"
+license = "MIT"
+source = "https://github.com/mekanism/Mekanism"
+url = "https://cdn.modrinth.com/data/Ce6I4WUE/versions/5KzzycBT/Mekanism-1.21.1-10.7.19.85.jar"
+sha512 = "66745825330a98f3e4a5ea3a44aff8b00870f715c144edc38dd2f61b4240589600b58ae89efac3b54dbb5aa430b1059dac1a28fd71cac5cc9002bbeb5ba3f22b"
+notes = "NeoForge 1.21.1 main jar (not Generators/Tools): fluids and chemicals, machines, custom recipe types. Optional"
+optional = true

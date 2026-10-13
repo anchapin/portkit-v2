@@ -3,10 +3,18 @@ name: real-mods
 # The real-mod corpus (#21). Jars are pinned in fixtures/real/mods.toml and
 # downloaded here, never committed. Nightly and on demand; the PR gate stays
 # the hand-built fixtures in ci.yml until this job has been stable a while.
+# The nightly run covers the default set; mods marked `optional = true` in the
+# manifest (Tinkers' Construct, Alex's Mobs, Mekanism) run only when a manual
+# dispatch asks for them.
 on:
   schedule:
     - cron: "17 7 * * *"
   workflow_dispatch:
+    inputs:
+      include_optional:
+        description: "Also fetch and evaluate the optional mods (Tinkers' Construct, Alex's Mobs, Mekanism)"
+        type: boolean
+        default: false
 
 jobs:
   corpus:
@@ -17,6 +25,8 @@ jobs:
       # (#160), fetched rather than committed. The corpus baseline is measured
       # with them, so vanilla sound refs survive and shared tags resolve.
       PORTKIT_REFERENCE_CACHE: ${{ github.workspace }}/.reference-cache
+      # Empty on the nightly schedule, so only the default set runs.
+      OPTIONAL_FLAG: ${{ inputs.include_optional && '--include-optional' || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,10 +40,12 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .corpus-cache
-          key: real-mods-${{ hashFiles('fixtures/real/mods.toml') }}
+          key: real-mods-${{ inputs.include_optional && 'all' || 'default' }}-${{ hashFiles('fixtures/real/mods.toml') }}
+          restore-keys: |
+            real-mods-${{ inputs.include_optional && 'all' || 'default' }}-
 
       - name: Fetch pinned jars (sha512-checked)
-        run: portkit corpus fetch
+        run: portkit corpus fetch $OPTIONAL_FLAG
 
       # The pins live in src/portkit/data/__init__.py (sound list) and
       # src/portkit/data/tags.py (loader and vanilla item tags, #160).
@@ -61,7 +73,7 @@ jobs:
           mct --version
 
       - name: Corpus coverage (fails on regression against fixtures/real/coverage-baseline.json; mct findings are report-only)
-        run: portkit eval --corpus --mct --json corpus-eval.json
+        run: portkit eval --corpus $OPTIONAL_FLAG --mct --json corpus-eval.json
 
       - name: Upload corpus eval (coverage rows + mct findings)
         if: always()

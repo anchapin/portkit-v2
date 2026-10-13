@@ -262,8 +262,12 @@ portkit reference fetch
 portkit eval --corpus
 ```
 
+That's the default set. A few slow or niche mods (Tinkers' Construct, Alex's
+Mobs, Mekanism) are pinned as optional and run with `--include-optional` on
+both commands, or one at a time with `--fixture <name>`.
+
 See [fixtures/real/README.md](fixtures/real/README.md). A nightly workflow runs
-the corpus against its own baseline.
+the default set against its own baseline.
 
 `portkit eval --corpus --mct` adds Mojang's own validator (`mct validate` from
 `@minecraft/creator-tools`, Node 22+) as a second, report-only oracle: its
