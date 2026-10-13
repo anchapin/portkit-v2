@@ -381,6 +381,10 @@ def convert(
             # reproduces this run, plus what each setting replaced.
             (out_dir / CONFIG_RECORD).write_text(json.dumps(
                 {**config_record(records), "_settings": records}, indent=2) + "\n")
+        elif (out_dir / CONFIG_RECORD).is_file():
+            # A record left by an earlier run into the same folder would make
+            # this default-config tree read as overridden.
+            (out_dir / CONFIG_RECORD).unlink()
         return PipelineResult(
             tree,
             namespace,
