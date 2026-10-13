@@ -109,7 +109,9 @@ export function _dimension() {
     sounds: [],
     spawned: [],
     entities: [],
+    commands: [],
     getEntities() { return this.entities; },
+    runCommand(command) { this.commands.push(command); return { successCount: 1 }; },
     playSound(id, location, options) { this.sounds.push({ id, location, ...options }); },
     spawnItem(stack, location) {
       const entity = { stack, location, impulses: [], clearVelocity() {}, applyImpulse(v) { this.impulses.push(v); } };

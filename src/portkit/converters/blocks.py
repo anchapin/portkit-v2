@@ -432,6 +432,40 @@ def _facing_state_variants(blockstate: dict, java_state: str,
     return {v: by_value[v] for v in values}, uvlocks.pop()
 
 
+def _state_values(station, by_value) -> list:
+    """The custom state's Bedrock values: ints for an integer Java property
+    (the feasts' ``servings``, like vanilla Bedrock's cake ``bite_counter``),
+    else the Java strings."""
+    return [int(v) for v in by_value] if getattr(station, "int_state", False) else list(by_value)
+
+
+def _state_test(station, value) -> str:
+    """Molang testing the station's custom state for one Java value."""
+    if getattr(station, "int_state", False):
+        return f"q.block_state('{station.state}') == {int(value)}"
+    return f"q.block_state('{station.state}') == '{value}'"
+
+
+def _face_keys(elements: list) -> set[str]:
+    """Texture keys the elements' faces draw (``#key`` references)."""
+    keys = set()
+    for element in elements:
+        for spec in (element.get("faces") or {}).values():
+            if isinstance(spec, dict) and isinstance(spec.get("texture"), str):
+                keys.add(spec["texture"].lstrip("#"))
+    return keys
+
+
+def _rekey(element: dict, key: str, own: str) -> dict:
+    """``element`` with its faces drawing texture ``key`` drawing ``own`` instead."""
+    faces = {}
+    for face, spec in (element.get("faces") or {}).items():
+        if isinstance(spec, dict) and isinstance(spec.get("texture"), str) and spec["texture"].lstrip("#") == key:
+            spec = {**spec, "texture": f"#{own}"}
+        faces[face] = spec
+    return {**element, "faces": faces}
+
+
 def _below_block(element: dict) -> bool:
     """Whether an element lies wholly in the block below (top at or under y 0)."""
     start, end = element.get("from"), element.get("to")
@@ -466,17 +500,27 @@ def _convert_station_states(
         if flat is None:
             result.unhandled.append(Unhandled(rel, "block", f"{station.java_state}={value} model: {why}"))
             return
-        for key, ref in (flat.get("textures") or {}).items():
-            if textures.setdefault(key, ref) != ref:
-                result.unhandled.append(Unhandled(
-                    rel, "block", f"{station.java_state} models disagree about their {key!r} texture"))
-                return
         kept = []
         for element in flat.get("elements") or []:
             if _below_block(element):
                 dropped.setdefault(value, []).append(str(element.get("name") or "unnamed"))
             else:
                 kept.append(element)
+        used = _face_keys(kept)
+        for key, ref in (flat.get("textures") or {}).items():
+            if textures.setdefault(key, ref) == ref or key not in used:
+                # Agreeing, or a key this value's faces never draw (the
+                # particle texture): nothing to reconcile.
+                continue
+            # One value draws a different texture under the same key (a
+            # feast's eaten top): that value's faces get a key of their own.
+            prefix = f"{key}_{station.java_state}_"
+            own = next((k for k, r in textures.items() if r == ref and k.startswith(prefix)), f"{prefix}{value}")
+            if textures.setdefault(own, ref) != ref:
+                result.unhandled.append(Unhandled(
+                    rel, "block", f"{station.java_state} models disagree about their {key!r} texture"))
+                return
+            kept = [_rekey(element, key, own) for element in kept]
         if not kept:
             result.unhandled.append(Unhandled(rel, "block", f"{station.java_state}={value} model has no elements"))
             return
@@ -519,14 +563,19 @@ def _convert_station_states(
 
     definition = _facing_definition(mod.namespace, name, identifier, instances, station)
     block = definition["minecraft:block"]
-    block["description"]["states"] = {station.state: list(by_value)}
+    block["description"]["states"] = {station.state: _state_values(station, by_value)}
     block["components"]["minecraft:geometry"]["bone_visibility"] = {
-        bone: (f"q.block_state('{station.state}') == '{value}'" if direction is None else
+        bone: (_state_test(station, value) if direction is None else
                f"q.block_state('minecraft:cardinal_direction') == '{direction}' && "
-               f"q.block_state('{station.state}') == '{value}'")
+               f"{_state_test(station, value)}")
         for bone, value, direction, _ in parts
     }
-    if not uvlock:
+    if getattr(station, "value_components", None):
+        # Components the station gives one value (a feast's box per serving
+        # count): one permutation per (facing, value), each with the facing's
+        # turn when the model turns whole, so no two permutations overlap.
+        block["permutations"] = _station_permutations(station, None, turn=not uvlock)
+    elif not uvlock:
         # A model facing north turned to each cardinal direction (Bedrock-OSS
         # wiki docs/blocks/block-orientation.md, cardinal_direction table:
         # north 0, west 90, south 180, east -90 about y); Java's y turn is
@@ -558,20 +607,23 @@ def _plain_cube(mod: SourceMod, model_ref: str) -> bool:
     return not why and not flat.get("elements") and flat.get("parent") in models.PARENTS
 
 
-def _station_permutations(station, by_value_instances: dict | None) -> list[dict]:
-    """One permutation per (facing, value): the facing's turn, and the value's
-    material instances (when they differ by value) and components."""
+def _station_permutations(station, by_value_instances: dict | None, turn: bool = True) -> list[dict]:
+    """One permutation per (facing, value): the facing's turn (unless
+    ``turn`` is false: a uvlocked model has one bone per facing instead), and
+    the value's material instances (when they differ by value) and components."""
     extra = getattr(station, "value_components", None) or {}
     permutations = []
     for direction in _CARDINALS:
         for value in station.values:
-            components = {"minecraft:transformation": {"rotation": [0, _BEDROCK_Y_TURN[direction], 0]}}
+            components = {}
+            if turn:
+                components["minecraft:transformation"] = {"rotation": [0, _BEDROCK_Y_TURN[direction], 0]}
             if by_value_instances is not None:
                 components["minecraft:material_instances"] = by_value_instances[value]
             components.update(json.loads(json.dumps(extra.get(value, {}))))
             permutations.append({
                 "condition": (f"q.block_state('minecraft:cardinal_direction') == '{direction}' && "
-                              f"q.block_state('{station.state}') == '{value}'"),
+                              f"{_state_test(station, value)}"),
                 "components": components,
             })
     return permutations
@@ -597,7 +649,7 @@ def _convert_station_cube(mod: SourceMod, result: ConversionResult, rel: str, na
     definition = _facing_definition(mod.namespace, name, "minecraft:geometry.full_block",
                                     by_value_instances[station.values[0]], station)
     block = definition["minecraft:block"]
-    block["description"]["states"] = {station.state: list(by_value)}
+    block["description"]["states"] = {station.state: _state_values(station, by_value)}
     block["components"]["minecraft:geometry"] = "minecraft:geometry.full_block"
     same = len({json.dumps(i, sort_keys=True) for i in by_value_instances.values()}) == 1
     block["permutations"] = _station_permutations(station, None if same else by_value_instances)

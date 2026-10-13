@@ -27,6 +27,108 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: feasts serve portions through a scripted block; serving counts and leftovers come from the blockstate and loot table, the serving item and container from cited FD code
+
+- **Status:** proposed (PR #PRNUM, Hark). Not merged; Alex decides. The
+  numbered picks below are the open decisions.
+- **Decision:** Farmer's Delight's six feasts (roast chicken, stuffed
+  pumpkin, honey glazed ham, shepherd's pie, gleaming salad, rice roll
+  medley) take the station split: a generated table
+  (`scripts/portkit/data/<ns>_feast.js`: per feast block, its serving item
+  per serving count, the container the player must hold, whether it lingers
+  at 0, its top count; sounds; FD's `use_container` message) read by a fixed
+  runtime (`portkit/runtime/feast.js` + `feast_core.js`, Script API
+  `@minecraft/server` 2.0.0 unchanged, one custom component on every feast
+  block, `onPlayerInteract` only, no tick, no stored data). Behaviour is
+  `FeastBlock#takeServing` at the pinned commits (NeoForge dd8b9b0 L103-138,
+  Refabricated a8cb49e L110-144): the right container in the main hand gives
+  one serving (inventory, else dropped at the player), counts `servings`
+  down and is used up (not in creative); a serving with no container (the
+  medley's rolls) serves to any hand; the wrong item shows "You need a %s to
+  eat this." with the container's Bedrock name; at 0 a feast with leftovers
+  is cleared by one more use (wood break 0.8/0.8) and drops its loot; one
+  without leftovers (stuffed pumpkin) goes with its last serving. The
+  take-portion sound is `armor.equip_generic` 1.0/1.0 on both loaders
+  (NeoForge's FD event plays that vanilla event per FD's sounds.json).
+- **Where each value comes from (no fabrication):** which blocks: FD's own
+  `farmersdelight:feasts` block tag, intersected with the six feasts whose
+  code was read (`feasts.FEASTS`); serving counts: the blockstate's
+  `servings` values (0-4, the medley 0-8), the top one Java's default state;
+  leftovers and break drops: the jar's loot table (pools gated on `servings`
+  = full or its inversion), decided per count. Only in Java code, cited
+  narrowly per loader: the serving item and `hasLeftovers` (`ModBlocks`
+  constructor arguments), the container (`ModItems.bowlFoodItem`:
+  `craftRemainder(Items.BOWL)`; the rolls are `foodItem`, none), the
+  medley's per-count rolls (`RiceRollMedleyBlock.riceRollServings`), shapes
+  (`FeastBlock.SHAPES`, `BlockShapes`, `GleamingSaladBlock.SHAPE`,
+  `RiceRollMedleyBlock` shapes) and the salad's light (`servings * 3`). Code
+  and data are cross-checked: a feast whose loot drops something at 0 must be
+  a lingering one and vice versa, every serving item and loot drop must be an
+  emitted or vanilla item; any miss leaves that feast's loot table as `feast`
+  residue and the block placeable but not serving (a note says so).
+- **1. Feast set (pick: FD's feasts tag x the code-read specs).**
+  *Rejected:* every block with a `servings` state (a guess from a state
+  name; the tag is the mod's own word for "feast", and FD's pies are another
+  class with `bites`, not part of this).
+- **2. Serving state (pick: Bedrock integer state `farmersdelight:servings`,
+  values top..0, full first).** Bedrock's default is the list's first value,
+  so a placed feast is full as in Java; integer states are what Microsoft's
+  own custom-component example uses for a counting block (crop_age 0-4 with
+  per-permutation loot), and vanilla's cake has an integer `bite_counter`.
+  `blocks.py` gains `FacingBlock.int_state` (unquoted Molang tests).
+  *Rejected:* strings like the pot's `support` / stove's `lit` (a count is a
+  number; scripts would parse it).
+- **3. Drops (pick: the jar's loot table per serving count, `minecraft:loot`
+  per permutation; the runtime clears with `setblock ... destroy`).** One
+  Bedrock table per distinct drop set (`<name>.json` for the full feast,
+  `<name>_servings_<lo>_to_<hi>.json` for the rest, vanilla's
+  `loot_tables/empty.json` for none), so breaking, clearing the leftovers and
+  the stuffed pumpkin vanishing all drop through the same data, as Java's
+  `destroyBlock(pos, true)` does. First station to read a loot table:
+  `loot.convert` hands a feast's table to the station
+  (`stations.station_loot`) instead of refusing it ("table has 3 pools").
+  *Rejected:* spawning drops in script (a second path; a player's break would
+  still drop the block); swapping the self-drop on `onPlayerBreak` like the
+  skillet (misses explosions and the clear).
+- **4. Box (pick: per serving count, the box that holds Java's shape at every
+  facing).** Bedrock's box is one cuboid and the block turns by
+  `minecraft:transformation`, so each count gets the facing-independent
+  bounds of its Java shape (tray 14x2 at 0, chicken to 8 px; stuffed pumpkin
+  2, 2, 4, 6, 8 px tall). *Rejected:* one box for all counts (an eaten feast
+  as tall as a full one); exact per-facing boxes (how a permutation's box and
+  its transformation combine is not verified).
+- **5. Support (pick: `minecraft:placement_filter` on the top face).**
+  `FeastBlock#canSurvive`/`updateShape`: a feast needs a block below and
+  breaks, with drops, when it goes; the filter does both. It accepts any
+  block's top face, not just a rigid one (noted). *Rejected:* nothing
+  (floating feasts); a per-tick script check (no neighbour hook in 2.0.0).
+- **6. Hands (pick: main hand only).** Java tries the off-hand when the main
+  hand can't serve; Bedrock's block use is the main hand's. *Rejected:*
+  reading the off-hand in script (the off-hand takes no bowl on Bedrock).
+- **7. Per-stage textures (pick: a value that draws a different texture under
+  the same key gets its own key, `<key>_servings_<n>`).** The stuffed
+  pumpkin's eaten top and every feast's per-stage `particle` made the station
+  geometry path refuse ("models disagree"); keys no face draws (particle) are
+  ignored, and a drawn one is re-keyed for that value only (stations with
+  agreeing textures are unchanged). *Rejected:* residue (all six blocks
+  would stay residue).
+- **8. Item (pick: the block's own item, `replace_block_item`, stack 1, the
+  flat icon).** `ModItems`: `PlaceableItem`, `basicItem().stacksTo(1)`;
+  before this the item shipped as a plain stack-64 item that placed nothing.
+- **9. Geometry (pick: one geometry, a bone per serving count shown by the
+  state).** mct reports its >50-cubes performance warning on three feasts.
+  *Rejected:* one geometry per count via permutation `minecraft:geometry`
+  (more files, same cubes drawn).
+- **Not carried over:** the off-hand try, serving particles and the salad's
+  sparkles, the comparator signal, the item-used statistic and the
+  place-feast advancement, exact Java shapes, the rigid-support test, piston
+  popping (`PushReaction.DESTROY`), Java's `isSameItem` beyond the item id.
+- **Coverage:** both FD jars convert all six feasts and their loot tables.
+  Banked: FD NeoForge 37.0 → 38.5 (814 → 840 files, residue 1388 → 1343), FD
+  Fabric 32.1 → 33.4 (816 → 842, 1726 → 1681); no other mod changed. mct 0
+  errors on both.
+- **Links:** #177; PRs #189, #191, #192, #193 (the station pattern), #PRNUM.
+
 ## 2026-10-13: an item named like a block that did not convert ships as a plain item; its block placing is left out
 
 - **Decision:** the item converter skips an item model named like a
