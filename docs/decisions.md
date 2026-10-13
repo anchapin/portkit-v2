@@ -27,6 +27,100 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: the cooking pot is a scripted station worked by hand (no container UI); heat from FD's own block tags
+
+- **Decision:** `farmersdelight:cooking` recipes (28 per FD jar) take the
+  cutting board's split (entry below): a generated table
+  (`scripts/portkit/data/<ns>_cooking_pot.js`: per recipe the ingredient slots
+  as resolved item ids, result, serving container, cookingtime, experience; the
+  ingredient remainders; the heat rules; `farmersdelight:serving_containers`)
+  read by a fixed runtime (`portkit/runtime/cooking_pot.js` +
+  `cooking_pot_core.js`, Script API `@minecraft/server` 2.0.0, unchanged), with
+  every behaviour cited to FD's `CookingPotBlockEntity` / `CookingPotBlock` /
+  `CookingPotMenu` / `CookingPotRecipe` at the pinned commits. Storage and
+  give/drop/sound helpers are shared with the cutting board
+  (`station_storage.js`). **Interaction model** (Bedrock custom blocks have no
+  container screen): sneak + empty hand toggles the handle (Java's own);
+  using the meal's container on a pot with a meal serves one portion (Java's
+  own, `useHeldItemOnMeal`, container used up in creative too); any other held
+  item goes in, a serving container (or the meal's container) to the container
+  slot as `quickMoveStack` routes it, anything else whole into the first empty
+  ingredient slot, onto the same item only when no slot is empty; an empty
+  hand takes out the output (paying the experience owed, as the result slot
+  does), else the last ingredient stack, else the containers; the action bar
+  shows the contents as plain text (item ids, cook %, heated or not). Cooking
+  runs in a block `minecraft:tick` every 10 ticks, advancing Java's per-tick
+  counters by 10 (exact for cookingtime multiples of 10: every corpus recipe
+  is 100/200/400), cooling by 2 a tick off the heat, one cook per run, meals
+  without a container to the output, meals with one served into stored
+  containers, ingredient remainders ejected at FD's offset and velocity.
+- **Heat:** read from the jar's own `farmersdelight:heat_sources`,
+  `heat_conductors` and `tray_heat_sources` block tags (both builds: magma
+  block, lava cauldron, stove, `#tray_heat_sources` = lava, `#minecraft:campfires`,
+  `#minecraft:fire`; conductor hopper and optional `create:chute`), rule from
+  `HeatableBlockEntity#isHeated` (a source with `lit` counts only lit; a
+  conductor counts with a source under it) and `CookingPotBlock#getTrayState`
+  (tray over a tray source, lit or not). Java blocks map to Bedrock blocks and
+  states of the same meaning from bedrock-samples `mojang-blocks.json`
+  (magma_block → magma; lava → lava + flowing_lava; lava_cauldron → cauldron
+  with `cauldron_liquid` lava and `fill_level` > 0; campfire lit →
+  `extinguished` false); vanilla block tags from misode/mcmeta summaries
+  (1.21.1, 26.1). The stove doesn't convert (its blockstate is residue), so it
+  doesn't heat the pot, with a note; `create:chute` is optional and absent.
+- **Remainders and containers:** the serving container is the recipe's
+  `container`, else the result's crafting remainder from FD's ModItems
+  (`bowlFoodItem`/`drinkItem`/explicit `craftRemainder`, every FD item listed
+  per loader, so an unlisted FD item has none), and on Refabricated also
+  `INGREDIENT_REMAINDER_OVERRIDES` (its `CookingPotRecipe.container()`). An
+  ingredient's remainder is its crafting remainder (FD's, or the milk bucket's
+  bucket, minecraft.wiki "Cake") else the overrides map. A recipe whose
+  vanilla result has no `container` and no cited remainder, or whose
+  ingredients include a vanilla item that may carry an uncited remainder
+  (water/lava bucket, honey bottle, dragon's breath), stays residue.
+- **Block:** the pot's facing × `support` (none/handle/tray) blockstate converts
+  for station blocks only: one bone per support value, a custom state
+  `farmersdelight:support` (Java's default `none` first), turned per
+  `minecraft:cardinal_direction` by `minecraft:transformation` (uvlock is off,
+  so Java turns the textures with the model, as transformation does; rotated
+  elements like the spoon stay as they are), placement offset 180
+  (`getHorizontalDirection().getOpposite()`), box from `SHAPE`. Handle when
+  placed against a ceiling (`beforeOnPlayerPlace` face Down), tray/none from
+  the block below on placement and every tick unless on the handle.
+- **Why:** Same as the cutting board: the recipe data is complete, the
+  behaviour is one piece of code read once. The hand model keeps every Java
+  rule that doesn't need a screen (heat, timing, matching, stacking limits,
+  containers, remainders, experience), and where a screen action has to be
+  replaced it takes the menu's own routing. First-empty-slot insertion (not
+  shift-click's merge-first) because otherwise recipes that need the same item
+  in two slots (apple cider, hot cocoa, tomato sauce, onion soup, beetroot
+  soup) could never be filled by hand.
+- **Rejected:** *A `@minecraft/server-ui` form as the menu*: a second module
+  dependency for what the action bar and three hand gestures cover, and forms
+  can't show item icons or take drag-and-drop. *Shift-click insertion*: makes
+  duplicate-ingredient recipes unreachable. *system.runInterval over a list
+  of pots*: needs a registry of pot positions that breaks when chunks unload;
+  `minecraft:tick` runs only where the block is ticking, as Java's block
+  entity does. *Per-(support, facing) bones*: `turn_y` can't turn the
+  rotated spoon, and turned textures are what Java does without uvlock.
+  *Drawing the tray legs*: they sit wholly in the block below and push the
+  model past Bedrock's 30-pixel geometry limit (learn.microsoft.com, Advanced
+  Block Visuals), so the tray bone drops them (and the grate at y -0.001),
+  with a note. *Heat from a hand-typed block list*: FD's tags are the source.
+- **Not carried over (conversion note):** the menu and recipe book, hoppers and
+  other automation (no block inventory), the meal kept inside the dropped pot
+  item (`copy_components`; the meal drops as items instead), the contents
+  when something other than a player destroys the pot, experience orbs
+  (paid straight to the player who takes the output or breaks the pot; lost
+  when the pot is destroyed otherwise), bubble/steam particles, comparator
+  signal, waterlogging, the tray's collision slab and legs, pick-block of a
+  filled pot, custom names, recipe unlocking. Boil sounds play with the
+  chance that 1 in 10 per tick gives over 10 ticks. Stored stacks keep id,
+  count, name, lore, durability damage, enchantments.
+- **Scope:** the FD versions read (NeoForge 1.3.4 @dd8b9b0, Refabricated
+  26.1-3.6.28 @a8cb49e); other versions stay residue. `food_serving` and
+  `dough` are other recipe types (crafting specials), not part of this.
+- **Links:** #177 (skillet, stove, feasts remain), #87, #190.
+
 ## 2026-10-13: station recipes become a generated data table run by a fixed Script API runtime (cutting board pilot)
 
 - **Decision:** A recipe type whose behaviour is a block's Java code (pilot:
