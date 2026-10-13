@@ -40,6 +40,9 @@ _CONNECTION_FORMAT = "1.26.0"
 _CARDINALS = ("north", "east", "south", "west")
 # The y turn Java uses to aim one side part at each neighbour.
 _CARDINAL_TURN = {"north": 0, "east": 90, "south": 180, "west": 270}
+# minecraft:transformation y rotation that turns a north-facing geometry to
+# each cardinal direction (Bedrock-OSS wiki, docs/blocks/block-orientation.md).
+_BEDROCK_Y_TURN = {"north": 0, "east": -90, "south": 180, "west": 90}
 
 
 # Java writes a pillar as three variants, one per axis, and Bedrock has no axis
@@ -403,6 +406,142 @@ def _facing_variants(blockstate: dict) -> tuple[str | None, bool]:
     return models_seen.pop(), uvlocks.pop()
 
 
+def _facing_state_variants(blockstate: dict, java_state: str,
+                           values: tuple) -> tuple[dict | None, bool]:
+    """({value: model}, uvlock) when the blockstate is ``facing`` x one more
+    state, each value one model turned to each facing by Java's y (north 0,
+    east 90, south 180, west 270), no x. Only station blocks whose extra state
+    the mod's code sets take this path (the cooking pot's ``support``)."""
+    variants = blockstate.get("variants")
+    wanted = {f"facing={d},{java_state}={v}" for d in _CARDINALS for v in values}
+    if not isinstance(variants, dict) or set(variants) != wanted:
+        return None, False
+    by_value: dict[str, str] = {}
+    uvlocks = set()
+    for key, entry in variants.items():
+        facing, state = (part.split("=", 1)[1] for part in key.split(","))
+        if not isinstance(entry, dict) or not isinstance(entry.get("model"), str) or entry.get("x"):
+            return None, False
+        if (entry.get("y") or 0) != _CARDINAL_TURN[facing]:
+            return None, False
+        if by_value.setdefault(state, entry["model"]) != entry["model"]:
+            return None, False
+        uvlocks.add(bool(entry.get("uvlock")))
+    if len(uvlocks) != 1:
+        return None, False
+    return {v: by_value[v] for v in values}, uvlocks.pop()
+
+
+def _below_block(element: dict) -> bool:
+    """Whether an element lies wholly in the block below (top at or under y 0)."""
+    start, end = element.get("from"), element.get("to")
+    try:
+        return max(float(start[1]), float(end[1])) <= 0
+    except (TypeError, ValueError, IndexError):
+        return False
+
+
+def _convert_station_states(
+    mod: SourceMod, result: ConversionResult, rel: str, name: str,
+    by_value: dict, uvlock: bool, station,
+) -> None:
+    """A station block with facing and one more state the mod's code sets
+    (#177): one bone per (value, facing), shown by the placement_direction
+    state and a custom ``station.state`` listing the Java values (the first,
+    Java's default, is Bedrock's default too).
+
+    Elements wholly inside the block below are not drawn: Bedrock custom block
+    geometry must fit in 30 pixels per axis (learn.microsoft.com, "Advanced
+    Block Visuals", custom block limitations), and such parts (the cooking
+    pot's heating tray legs, 16 px down) push a model past it. A note names them.
+    """
+    textures: dict = {}
+    parts = []
+    dropped: dict[str, list[str]] = {}
+    for value, model_ref in by_value.items():
+        flat, why = _flat_model(mod, result, model_ref)
+        if flat is None:
+            result.unhandled.append(Unhandled(rel, "block", f"{station.java_state}={value} model: {why}"))
+            return
+        for key, ref in (flat.get("textures") or {}).items():
+            if textures.setdefault(key, ref) != ref:
+                result.unhandled.append(Unhandled(
+                    rel, "block", f"{station.java_state} models disagree about their {key!r} texture"))
+                return
+        kept = []
+        for element in flat.get("elements") or []:
+            if _below_block(element):
+                dropped.setdefault(value, []).append(str(element.get("name") or "unnamed"))
+            else:
+                kept.append(element)
+        if not kept:
+            result.unhandled.append(Unhandled(rel, "block", f"{station.java_state}={value} model has no elements"))
+            return
+        if not uvlock:
+            # Without uvlock Java turns the whole model, textures included,
+            # which is what minecraft:transformation does to a geometry; so
+            # one bone per value, turned by permutation (rotated elements
+            # like the pot's spoon stay as they are).
+            parts.append((value, value, None, kept))
+            continue
+        for direction in _CARDINALS:
+            turned = []
+            for element in kept:
+                moved, why = models.turn_y(element, _CARDINAL_TURN[direction], uvlock)
+                if moved is None:
+                    result.unhandled.append(Unhandled(
+                        rel, "block", f"{station.java_state}={value}, facing={direction}: {why}"))
+                    return
+                turned.append(moved)
+            parts.append((f"{value}_facing_{direction}", value, direction, turned))
+
+    combined = {"textures": textures, "elements": [e for *_, els in parts for e in els]}
+    by_face, why = models.element_materials(combined)
+    tag_faces = by_face is None and "disagree" in why
+    if tag_faces:
+        by_face, why = models.tagged_materials(combined)
+    if by_face is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+    instances, why = _instances(mod, by_face, textures, tag_faces)
+    if instances is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+    identifier = f"geometry.{mod.namespace}.{name}"
+    geo, why = models.geometry_bones([(bone, els) for bone, _, _, els in parts], identifier,
+                                     tag_faces=tag_faces)
+    if geo is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+
+    definition = _facing_definition(mod.namespace, name, identifier, instances, station)
+    block = definition["minecraft:block"]
+    block["description"]["states"] = {station.state: list(by_value)}
+    block["components"]["minecraft:geometry"]["bone_visibility"] = {
+        bone: (f"q.block_state('{station.state}') == '{value}'" if direction is None else
+               f"q.block_state('minecraft:cardinal_direction') == '{direction}' && "
+               f"q.block_state('{station.state}') == '{value}'")
+        for bone, value, direction, _ in parts
+    }
+    if not uvlock:
+        # A model facing north turned to each cardinal direction (Bedrock-OSS
+        # wiki docs/blocks/block-orientation.md, cardinal_direction table:
+        # north 0, west 90, south 180, east -90 about y); Java's y turn is
+        # clockwise seen from above (east 90), the same turn.
+        block["permutations"] = [
+            {"condition": f"q.block_state('minecraft:cardinal_direction') == '{d}'",
+             "components": {"minecraft:transformation": {"rotation": [0, _BEDROCK_Y_TURN[d], 0]}}}
+            for d in _CARDINALS
+        ]
+    result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = definition
+    for value, names in dropped.items():
+        result.notes.append(
+            f"{name}: {station.java_state}={value} is drawn without {', '.join(names)}, which sit wholly "
+            "in the block below; with them the model is taller than Bedrock's 30-pixel limit for "
+            "custom block geometry.")
+
+
 def _flat_model(mod: SourceMod, result: ConversionResult, model_ref: str) -> tuple[dict | None, str]:
     model_file = models.model_path(mod, model_ref)
     if model_file is None or not model_file.is_file():
@@ -654,7 +793,12 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             continue
 
         station = (stations or {}).get(name)
-        if station is not None:
+        if station is not None and getattr(station, "state", None):
+            by_value, station_uvlock = _facing_state_variants(blockstate, station.java_state, station.values)
+            if by_value is not None:
+                _convert_station_states(mod, result, rel, name, by_value, station_uvlock, station)
+                continue
+        elif station is not None:
             station_ref, station_uvlock = _facing_variants(blockstate)
             if station_ref is not None:
                 _convert_facing_block(mod, result, rel, name, station_ref, station_uvlock, [], station)
