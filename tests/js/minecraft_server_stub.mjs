@@ -1,7 +1,7 @@
 // A minimal stand-in for @minecraft/server: just what the cutting board runtime
 // touches, recording what it did so tests can check it. Not the real API.
 
-export const EquipmentSlot = { Mainhand: "Mainhand" };
+export const EquipmentSlot = { Mainhand: "Mainhand", Offhand: "Offhand" };
 export const GameMode = { Creative: "Creative", Survival: "Survival" };
 
 const BLOCK_ITEMS = new Set(["minecraft:gravel", "minecraft:acacia_log", "minecraft:oak_door"]);
@@ -47,16 +47,52 @@ export class ItemStack {
 }
 
 const properties = new Map();
+// World events a runtime subscribes to (skillet: itemUse, entityHitEntity),
+// by name; tests fire them through _fire.
+const subscribed = { before: {}, after: {} };
+function events(side) {
+  return new Proxy({}, {
+    get: (_, name) => ({ subscribe: (fn) => { (subscribed[side][name] ??= []).push(fn); return fn; } }),
+  });
+}
+const players = [];
 export const world = {
   getDynamicProperty: (key) => properties.get(key),
   setDynamicProperty: (key, value) => (value === undefined ? properties.delete(key) : properties.set(key, value)),
   _properties: properties,
+  beforeEvents: events("before"),
+  afterEvents: events("after"),
+  getPlayers: () => [...players],
+  _players: players,
 };
 
+/** Fire a subscribed world event ("before" | "after", name) with `event`. */
+export function _fire(side, name, event) {
+  for (const fn of subscribed[side][name] ?? []) fn(event);
+  return event;
+}
+
 const startup = [];
+// system.run callbacks wait in _queue until a test calls _flush(); intervals
+// are kept with their period and run by _runIntervals().
+const queue = [];
+const intervals = [];
 export const system = {
   beforeEvents: { startup: { subscribe: (fn) => startup.push(fn) } },
+  run: (fn) => { queue.push(fn); return queue.length; },
+  runInterval: (fn, period) => { intervals.push({ fn, period }); return intervals.length; },
 };
+
+/** Run every queued system.run callback. */
+export function _flush() {
+  while (queue.length) queue.shift()();
+}
+
+/** Run every registered interval once; returns their periods. */
+export function _runIntervals() {
+  for (const { fn } of intervals) fn();
+  return intervals.map((i) => i.period);
+}
 
 /** Run startup and return {componentId: component} as registered. */
 export function _startup() {
