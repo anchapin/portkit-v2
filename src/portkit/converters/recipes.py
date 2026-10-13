@@ -75,6 +75,10 @@ from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
 from .tags import MultiMembers, TagResolver
 
+# Recipe types a station runtime writes into a data table (stations.RECIPE_TYPES;
+# kept here as a literal so this module doesn't import the station converter).
+STATION_TYPES = frozenset({"farmersdelight:cutting"})
+
 # Most members a single-slot tag ingredient is expanded into, one recipe each.
 # 16 covers a full dye-colour set; a bigger tag is a family (every drawer, every
 # cast) whose recipe would flood the recipe book, so it stays residue.
@@ -569,7 +573,8 @@ def _member_suffix(member: str) -> str:
 
 
 def convert(mod: SourceMod, emitted: dict | None = None,
-            context: LoadContext | None = None) -> ConversionResult:
+            context: LoadContext | None = None,
+            deferred: list | None = None) -> ConversionResult:
     """Convert the mod's recipes.
 
     ``emitted`` maps identifier -> (kind, path, body) for the blocks and items the
@@ -581,6 +586,11 @@ def convert(mod: SourceMod, emitted: dict | None = None,
     converts the entry Java would load (see :mod:`portkit.conditions`, #183).
     ``context`` is shared with the other converters of the namespace; without
     one the recipes get their own, and the config-flag note with it.
+
+    With a ``deferred`` list, a recipe of a station type
+    (:data:`portkit.converters.stations.RECIPE_TYPES`) whose load conditions
+    pass is appended to it as (source path, recipe) instead of being refused:
+    the station converter writes it into its data table (#177).
     """
     result = ConversionResult()
     for lane in ("recipes", "recipe"):
@@ -649,6 +659,9 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             recipe = chosen
 
         java_type = recipe.get("type")
+        if deferred is not None and java_type in STATION_TYPES:
+            deferred.append((rel, recipe))
+            continue
         if java_type == "minecraft:smithing_transform":
             converted = _smithing(recipe, f"{mod.namespace}:{name}", rel, result, tag_resolver)
             if converted is not None:
