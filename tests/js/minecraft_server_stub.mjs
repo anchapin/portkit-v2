@@ -87,6 +87,9 @@ export function _player(dimension, held, { creative = false, inventoryRoom = 100
   const player = {
     dimension,
     location: { x: 0, y: 64, z: 0 },
+    isSneaking: false,
+    experience: 0,
+    addExperience(n) { this.experience += n; return this.experience; },
     actionbar: [],
     inventory,
     getGameMode: () => (creative ? GameMode.Creative : GameMode.Survival),
@@ -116,4 +119,39 @@ export function _player(dimension, held, { creative = false, inventoryRoom = 100
 
 export function _block(dimension, facing = "north", location = { x: 10, y: 64, z: -3 }) {
   return { dimension, location, permutation: { getState: (s) => (s === "minecraft:cardinal_direction" ? facing : undefined) } };
+}
+
+// -- cooking pot additions ------------------------------------------------------
+
+export const Direction = { Down: "Down", Up: "Up", North: "North", South: "South", East: "East", West: "West" };
+
+/** A permutation: a block type id plus states, with withState like Bedrock's. */
+export function _permutation(typeId, states = {}) {
+  return {
+    type: { id: typeId },
+    states: { ...states },
+    getState(name) { return this.states[name]; },
+    withState(name, value) { return _permutation(typeId, { ...this.states, [name]: value }); },
+  };
+}
+
+/**
+ * A placed block whose neighbours below are `below` ([{ id, states }] from the
+ * block under it downward). setPermutation records the change.
+ */
+export function _potBlock(dimension, { typeId = "farmersdelight:cooking_pot", facing = "north", support = "none",
+  below = [], location = { x: 4, y: 70, z: 8 } } = {}) {
+  const block = {
+    dimension,
+    location,
+    typeId,
+    permutation: _permutation(typeId, { "minecraft:cardinal_direction": facing, "farmersdelight:support": support }),
+    setPermutation(p) { this.permutation = p; },
+  };
+  block.below = (steps = 1) => {
+    const entry = below[steps - 1];
+    if (!entry) return { typeId: "minecraft:air", permutation: _permutation("minecraft:air") };
+    return { typeId: entry.id, permutation: _permutation(entry.id, entry.states ?? {}) };
+  };
+  return block;
 }
