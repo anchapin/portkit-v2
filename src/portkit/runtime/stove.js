@@ -170,8 +170,11 @@ function burnStanding(table, block, dimension) {
   }
   for (const entity of entities) {
     try {
+      // Java's LivingEntity: a Bedrock entity with health that isn't an item
+      // or of the "inanimate" family (boats, minecarts).
       const view = {
-        living: entity.getComponent("minecraft:health") !== undefined && entity.typeId !== "minecraft:item",
+        living: entity.typeId !== "minecraft:item" && entity.getComponent("minecraft:health") !== undefined
+          && !entity.matches({ families: ["inanimate"] }),
         sneaking: !!entity.isSneaking,
         onGround: !!entity.isOnGround,
         feet: entity.location,
