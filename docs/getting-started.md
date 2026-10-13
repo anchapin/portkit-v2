@@ -75,9 +75,12 @@ Each refusal is an `Unhandled` entry in `unhandled.json`:
 
 There are three common kinds:
 
-- **Something Java does in code.** Held tools, multipart blockstates whose
-  states the mod's Java sets, and compiled classes. There is no file to translate,
-  so that behaviour has to be written by hand or by the agent.
+- **Something Java does in code.** Bows and items that swap their look on
+  item properties, multipart blockstates whose states the mod's Java sets,
+  and compiled classes. There is no file to translate, so that behaviour has
+  to be written by hand or by the agent. (A held tool converts as its icon,
+  held like a tool; a note says its mining, attack and durability behaviour
+  was not converted.)
 - **A real choice.** A recipe over a tag with several members, or an armour
   trim. portkit won't pick for you.
 - **`unowned`.** Files no converter claims yet. These are the best candidates
