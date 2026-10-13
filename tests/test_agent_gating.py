@@ -111,6 +111,19 @@ def test_the_override_allows_it(tmp_path):
                          gated=_gated(src, DUST_ON)) == []
 
 
+def test_a_same_path_id_in_another_namespace_does_not_ungate_it(tmp_path):
+    src, out = _source(tmp_path), tmp_path / "out"
+    # A recipe naming c:tin_dust makes it a "registered" id whose path maps
+    # under the conversion namespace to mythicmetals:tin_dust.
+    _write(src, "data/mythicmetals/recipes/x.json",
+           {"type": "minecraft:crafting_shapeless", "ingredients": [{"item": "c:tin_dust"}],
+            "result": {"item": "minecraft:stick"}})
+    _write(out, "behavior_pack/items/tin_dust.json", _item("mythicmetals:tin_dust"))
+    bad = unknown_items(out, ["behavior_pack/items/tin_dust.json"], src, "mythicmetals",
+                        gated=_gated(src))
+    assert [b.ident for b in bad] == ["mythicmetals:tin_dust"] and bad[0].gated is not None
+
+
 def test_a_user_off_setting_says_so(tmp_path):
     src = _source(tmp_path)
     gated = _gated(src, {("mythicmetals:dust_enabled", ""): False})
