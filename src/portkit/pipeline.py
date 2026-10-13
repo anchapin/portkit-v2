@@ -312,7 +312,8 @@ def convert(
 
         per_namespace = {
             ns: convert_all(SourceMod(root=staged.root, namespace=ns, loader=meta.loader,
-                                     minecraft=meta.minecraft))
+                                     minecraft=meta.minecraft, mods=meta.mods,
+                                     requires=frozenset(meta.requires) if meta.requires is not None else None))
             for ns in selected
         }
         result = merge_namespaces(per_namespace)
