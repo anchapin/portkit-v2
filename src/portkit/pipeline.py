@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .conditions import ConfigRequest, config_note, config_record, known_flags, resolve_config
 from .converters import convert_all
 from .icon import resolve as resolve_icon
 from .ingest import ingest
@@ -23,6 +24,9 @@ if TYPE_CHECKING:
 # How deep a leftover path is grouped before reporting. assets/<ns>/models/block/x.json
 # groups as assets/<ns>/models, which keeps a 300-model mod to one line.
 _GROUP_DEPTH = 3
+
+# The user's mod config settings, written next to the tree when there are any.
+CONFIG_RECORD = "config-overrides.json"
 
 
 def unowned(root: Path, consumed: set[str]) -> list[Unhandled]:
@@ -235,6 +239,10 @@ class PipelineResult:
     # What the residue agent did, when one ran (``convert(..., agent=...)``).
     agent: "ResidueRun | None" = None
 
+    # The user's mod config settings (``convert(..., config=...)``), one record
+    # per flag set; empty for a run at the cited defaults.
+    config: list[dict] = field(default_factory=list)
+
     @property
     def notes(self) -> list[str]:
         """Things worth saying about the mod itself, not about its files.
@@ -274,6 +282,7 @@ class PipelineResult:
             },
             "notes": self.notes,
             "mcaddon": self.addon.name if self.addon else None,
+            **({"config": config_record(self.config)} if self.config else {}),
             **({"agent": self.agent.summary()} if self.agent else {}),
         }
 
@@ -284,6 +293,7 @@ def convert(
     namespace: str | None = None,
     emit_addon: bool = True,
     agent: "ResidueAgent | None" = None,
+    config: "list[ConfigRequest] | None" = None,
 ) -> PipelineResult:
     """Convert a mod directory or .jar into a Bedrock pack tree under out_dir.
 
@@ -294,6 +304,15 @@ def convert(
     while the staged source is still on disk. Validation and the addon both run
     on the tree as the agent left it; residue the agent resolved drops out of
     ``unhandled`` and its files count as converted.
+
+    ``config`` holds the user's mod config settings (``--config``), the
+    conversion-time stand-in for editing the mod's config file in Java: each is
+    resolved against the flags this jar knows (an unknown one raises
+    :class:`portkit.conditions.ConfigError` before anything is written), and
+    replaces that flag's cited default. The settings are recorded in the notes
+    and in ``config-overrides.json`` next to the tree, which ``--config-file``
+    reads back to reproduce the run. Without settings the output is the
+    default-config conversion.
     """
     out_dir = Path(out_dir)
     with tempfile.TemporaryDirectory(prefix="portkit-ingest-") as staging:
@@ -310,10 +329,16 @@ def convert(
             selected.insert(0, meta.mod_id)
             namespace = meta.mod_id
 
+        overrides, records = {}, []
+        if config:
+            known = known_flags(staged.root, meta.mods, selected)
+            overrides, records = resolve_config(list(config), known)
+            meta.notes.append(config_note(records))
         per_namespace = {
             ns: convert_all(SourceMod(root=staged.root, namespace=ns, loader=meta.loader,
                                      minecraft=meta.minecraft, mods=meta.mods,
-                                     requires=frozenset(meta.requires) if meta.requires is not None else None))
+                                     requires=frozenset(meta.requires) if meta.requires is not None else None),
+                            overrides=overrides or None)
             for ns in selected
         }
         result = merge_namespaces(per_namespace)
@@ -351,6 +376,15 @@ def convert(
             (out_dir / "unhandled.json").write_text(
                 json.dumps([u.__dict__ for u in unhandled], indent=2) + "\n"
             )
+        if records:
+            # Next to unhandled.json, outside the packs: a --config-file that
+            # reproduces this run, plus what each setting replaced.
+            (out_dir / CONFIG_RECORD).write_text(json.dumps(
+                {**config_record(records), "_settings": records}, indent=2) + "\n")
+        elif (out_dir / CONFIG_RECORD).is_file():
+            # A record left by an earlier run into the same folder would make
+            # this default-config tree read as overridden.
+            (out_dir / CONFIG_RECORD).unlink()
         return PipelineResult(
             tree,
             namespace,
@@ -362,4 +396,5 @@ def convert(
             counts,
             reductions=result.notes,
             agent=agent_run,
+            config=records,
         )

@@ -21,13 +21,21 @@ CONVERTERS = [
 ]
 
 
-def convert_all(mod: SourceMod) -> ConversionResult:
+def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool] | None = None) -> ConversionResult:
+    """Every converter on one namespace.
+
+    ``overrides`` are the user's mod config settings (``portkit convert
+    --config``), keyed by (condition type, flag); they replace the cited
+    defaults wherever a load condition or a gated registration reads the flag.
+    """
     result = ConversionResult()
     # One load-condition context for the namespace (#183), so the config flags
     # assumed at their defaults add up to a single note.
-    context = LoadContext(mod)
+    context = LoadContext(mod, overrides=overrides)
     for fn in CONVERTERS:
-        if fn is recipes.convert:
+        if fn is items.convert:
+            converted = fn(mod, context=context)
+        elif fn is recipes.convert:
             # Recipes run after blocks and items so a multi-member tag can be
             # checked against what this conversion actually emits (#160).
             converted = fn(mod, emitted=recipes.emitted_definitions(result.files), context=context)
@@ -36,7 +44,7 @@ def convert_all(mod: SourceMod) -> ConversionResult:
         else:
             converted = fn(mod)
         result = result.merge(converted)
-    note = context.note()
-    if note:
-        result.notes.append(note)
+    for note in (context.note(), context.user_note()):
+        if note:
+            result.notes.append(note)
     return result

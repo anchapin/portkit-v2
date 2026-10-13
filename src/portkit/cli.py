@@ -7,6 +7,7 @@ import statistics
 import sys
 from pathlib import Path
 
+from .conditions import ConfigError, load_config_file, parse_config_arg
 from .ingest import IngestError
 from .pipeline import convert
 from .validate import validate_tree
@@ -202,8 +203,23 @@ def _format_repeat(summary: dict) -> str:
     return "\n".join(lines)
 
 
+def _config_requests(args):
+    """The --config-file settings, then --config ones (later settings win)."""
+    requests = []
+    if getattr(args, "config_file", None):
+        requests += load_config_file(args.config_file)
+    for text in getattr(args, "config", None) or []:
+        requests.append(parse_config_arg(text))
+    return requests
+
+
 def _convert_once(args):
     """One conversion. Returns (exit code, result or None if it never ran)."""
+    try:
+        config = _config_requests(args)
+    except ConfigError as exc:
+        print(f"bad mod config: {exc}", file=sys.stderr)
+        return 2, None
     agent = None
     if args.agent or args.agent_replay:
         try:
@@ -218,9 +234,13 @@ def _convert_once(args):
             args.namespace,
             emit_addon=not args.no_addon,
             agent=agent,
+            config=config or None,
         )
     except IngestError as exc:
         print(f"cannot read {args.source}: {exc}", file=sys.stderr)
+        return 2, None
+    except ConfigError as exc:
+        print(f"bad mod config: {exc}", file=sys.stderr)
         return 2, None
     print(json.dumps(result.summary(), indent=2))
     if result.agent:
@@ -884,6 +904,24 @@ def main(argv=None) -> int:
     p.add_argument("--namespace")
     p.add_argument(
         "--no-addon", action="store_true", help="write the pack tree only, no .mcaddon"
+    )
+    p.add_argument(
+        "--config", action="append", metavar="MOD.FLAG=true|false",
+        help=(
+            "set a mod config flag for this conversion, as a Java player would in the "
+            "mod's config file (repeatable), e.g. mythicmetals.enableDusts=true. FLAG is "
+            "the flag as the mod's load conditions name it or the option's own config "
+            "key; it replaces the default cited from the mod's source, both ways. An "
+            "unknown mod or flag is an error listing the valid ones"
+        ),
+    )
+    p.add_argument(
+        "--config-file", metavar="PATH",
+        help=(
+            "read mod config flags from a JSON or TOML file ({\"mod\": {\"flag\": true}} "
+            "or {\"mod.flag\": true}); --config settings win over it. Every run with "
+            "settings writes OUT/config-overrides.json, which reproduces it"
+        ),
     )
     p.add_argument(
         "--agent", action="store_true",

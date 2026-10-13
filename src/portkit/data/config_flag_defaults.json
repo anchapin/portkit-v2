@@ -1,5 +1,5 @@
 {
- "about": "Defaults of mod-specific recipe load-condition flags, cited from each mod's source at the pinned version (docs/decisions.md, 2026-10-13). Keyed by mod id, the exact version its metadata declares, and condition type. A flag that is not here, or a mod version that is not here, is an unknown load condition: residue, never a guess.",
+ "about": "Defaults of mod-specific recipe load-condition flags, cited from each mod's source at the pinned version (docs/decisions.md, 2026-10-13). Keyed by mod id, the exact version its metadata declares, and condition type. A flag that is not here, or a mod version that is not here, is an unknown load condition: residue, never a guess. A flag's config_key, where present, is the option's name in the mod's own config file at the cited line, accepted as an alias by `portkit convert --config`. An entry's registers lists ids the mod's code registers only while that flag is on, with a citation; the item converter leaves them out when the flag is off.",
  "entries": [
   {
    "mod": "supplementaries",
@@ -1060,8 +1060,29 @@
      "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
      "line": 65,
      "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L65",
-     "why": "owo config model field `public boolean enableNuggets = true;`"
+     "why": "owo config model field `public boolean enableNuggets = true;`",
+     "config_key": "enableNuggets"
     }
+   },
+   "registers": {
+    "items": [
+     "mythicmetals:*_nugget"
+    ],
+    "sources": [
+     {
+      "file": "src/main/java/com/mythicmetals/item/ItemSet.java",
+      "line": 61,
+      "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/item/ItemSet.java#L61",
+      "why": "if (MythicMetals.CONFIG.enableNuggets()) this.nuggetItem = makeItem(...); register() L76-80 and L89-91 register name + \"_nugget\" only when nuggetItem != null"
+     },
+     {
+      "file": "src/main/java/com/mythicmetals/item/CopperSet.java",
+      "line": 26,
+      "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/item/CopperSet.java#L26",
+      "why": "if (MythicMetals.CONFIG.enableNuggets()) this.nuggetItem = makeItem(...); register() L35-37 registers name + \"_nugget\" only when nuggetItem != null"
+     }
+    ],
+    "why": "ItemSet and CopperSet are the only code at this tag that registers an id ending in _nugget, so every mythicmetals:*_nugget item exists only while enableNuggets is on"
    }
   },
   {
@@ -1085,8 +1106,29 @@
      "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
      "line": 63,
      "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L63",
-     "why": "owo config model field `public boolean enableDusts = false;`"
+     "why": "owo config model field `public boolean enableDusts = false;`",
+     "config_key": "enableDusts"
     }
+   },
+   "registers": {
+    "items": [
+     "mythicmetals:*_dust"
+    ],
+    "sources": [
+     {
+      "file": "src/main/java/com/mythicmetals/item/ItemSet.java",
+      "line": 64,
+      "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/item/ItemSet.java#L64",
+      "why": "if (MythicMetals.CONFIG.enableDusts()) this.dustItem = makeItem(...); register() L81-83 and L92-94 register name + \"_dust\" only when dustItem != null"
+     },
+     {
+      "file": "src/main/java/com/mythicmetals/item/CopperSet.java",
+      "line": 29,
+      "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/item/CopperSet.java#L29",
+      "why": "if (MythicMetals.CONFIG.enableDusts()) this.dustItem = makeItem(...); register() L38-40 registers name + \"_dust\" only when dustItem != null"
+     }
+    ],
+    "why": "ItemSet and CopperSet are the only code at this tag that registers an id ending in _dust (LegacyIds.unobtainium_dust is a remap of a removed id, not a registration), so every mythicmetals:*_dust item exists only while enableDusts is on"
    }
   },
   {
@@ -1110,7 +1152,8 @@
      "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
      "line": 67,
      "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L67",
-     "why": "owo config model field `public boolean enableAnvils = true;`"
+     "why": "owo config model field `public boolean enableAnvils = true;`",
+     "config_key": "enableAnvils"
     }
    }
   },
@@ -1135,7 +1178,8 @@
      "file": "src/main/java/vectorwing/farmersdelight/common/Configuration.java",
      "line": 83,
      "url": "https://github.com/vectorwing/FarmersDelight/blob/dd8b9b0bfec916a2da88a6d64e3a37f4a02c3259/src/main/java/vectorwing/farmersdelight/common/Configuration.java#L83",
-     "why": "ENABLE_VANILLA_CROP_CRATES = COMMON_BUILDER...define(\"enableVanillaCropCrates\", true)"
+     "why": "ENABLE_VANILLA_CROP_CRATES = COMMON_BUILDER...define(\"enableVanillaCropCrates\", true)",
+     "config_key": "enableVanillaCropCrates"
     }
    }
   },
@@ -1160,7 +1204,8 @@
      "file": "src/main/java/vectorwing/farmersdelight/common/Configuration.java",
      "line": 83,
      "url": "https://github.com/MehVahdJukaar/FarmersDelightRefabricated/blob/a8cb49ed05f3ed5ab857dffe64d8c70309b7d7be/src/main/java/vectorwing/farmersdelight/common/Configuration.java#L83",
-     "why": "ENABLE_VANILLA_CROP_CRATES = COMMON_BUILDER...define(\"enableVanillaCropCrates\", true)"
+     "why": "ENABLE_VANILLA_CROP_CRATES = COMMON_BUILDER...define(\"enableVanillaCropCrates\", true)",
+     "config_key": "enableVanillaCropCrates"
     }
    }
   },
@@ -1185,49 +1230,56 @@
      "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
      "line": 107,
      "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L107",
-     "why": "ConfigEnabledCondition L118: add(\"gravel_to_flint\", Config.COMMON.addGravelToFlintRecipe); addGravelToFlintRecipe = builder...define(..., true)"
+     "why": "ConfigEnabledCondition L118: add(\"gravel_to_flint\", Config.COMMON.addGravelToFlintRecipe); addGravelToFlintRecipe = builder...define(..., true)",
+     "config_key": "addGravelToFlintRecipe"
     },
     "cheaper_netherite_alloy": {
      "default": true,
      "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
      "line": 113,
      "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L113",
-     "why": "ConfigEnabledCondition L119: add(\"cheaper_netherite_alloy\", Config.COMMON.cheaperNetheriteAlloy); cheaperNetheriteAlloy = builder...define(..., true)"
+     "why": "ConfigEnabledCondition L119: add(\"cheaper_netherite_alloy\", Config.COMMON.cheaperNetheriteAlloy); cheaperNetheriteAlloy = builder...define(..., true)",
+     "config_key": "cheaperNetheriteAlloy"
     },
     "slime_recipe_fix": {
      "default": true,
      "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
      "line": 130,
      "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L130",
-     "why": "ConfigEnabledCondition L124: add(\"slime_recipe_fix\", Config.COMMON.glassRecipeFix); glassRecipeFix = builder...define(..., true)"
+     "why": "ConfigEnabledCondition L124: add(\"slime_recipe_fix\", Config.COMMON.glassRecipeFix); glassRecipeFix = builder...define(..., true)",
+     "config_key": "glassRecipeFix"
     },
     "glass_recipe_fix": {
      "default": true,
      "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
      "line": 130,
      "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L130",
-     "why": "ConfigEnabledCondition L125: add(\"glass_recipe_fix\", Config.COMMON.glassRecipeFix); glassRecipeFix = builder...define(..., true)"
+     "why": "ConfigEnabledCondition L125: add(\"glass_recipe_fix\", Config.COMMON.glassRecipeFix); glassRecipeFix = builder...define(..., true)",
+     "config_key": "glassRecipeFix"
     },
     "allow_ingotless_alloys": {
      "default": true,
      "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
      "line": 186,
      "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L186",
-     "why": "ConfigEnabledCondition L126: add(\"allow_ingotless_alloys\", Config.COMMON.allowIngotlessAlloys); allowIngotlessAlloys = builder...define(..., true)"
+     "why": "ConfigEnabledCondition L126: add(\"allow_ingotless_alloys\", Config.COMMON.allowIngotlessAlloys); allowIngotlessAlloys = builder...define(..., true)",
+     "config_key": "allowIngotlessAlloys"
     },
     "force_integration_materials": {
      "default": false,
      "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
      "line": 205,
      "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L205",
-     "why": "ConfigEnabledCondition L127: add(\"force_integration_materials\", Config.COMMON.forceIntegrationMaterials); forceIntegrationMaterials = builder...define(..., false)"
+     "why": "ConfigEnabledCondition L127: add(\"force_integration_materials\", Config.COMMON.forceIntegrationMaterials); forceIntegrationMaterials = builder...define(..., false)",
+     "config_key": "forceIntegrationMaterials"
     },
     "slimy_loot_chests": {
      "default": true,
      "file": "src/main/java/slimeknights/tconstruct/common/config/Config.java",
      "line": 169,
      "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L169",
-     "why": "ConfigEnabledCondition L128: add(\"slimy_loot_chests\", Config.COMMON.slimyLootChests); slimyLootChests = builder...define(..., true)"
+     "why": "ConfigEnabledCondition L128: add(\"slimy_loot_chests\", Config.COMMON.slimyLootChests); slimyLootChests = builder...define(..., true)",
+     "config_key": "slimy_loot"
     }
    }
   }

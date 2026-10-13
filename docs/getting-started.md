@@ -89,6 +89,46 @@ There are three common kinds:
 `portkit report out/` turns a converted tree into a readable report, and
 `portkit validate out/` re-runs the validator after you edit the packs by hand.
 
+## Mod config options
+
+Some content only exists when an option in the mod's config file is on. In Java
+a player or server edits that file; a Bedrock add-on has no such file, so the
+choice is made when you convert. By default portkit uses each option's default,
+read from the mod's own source (`src/portkit/data/config_flag_defaults.json`):
+Mythic Metals' dusts, for example, are off, so its 37 dust recipes and 27 dust
+items are residue saying `disabled by default config: mythicmetals:dust_enabled`.
+
+Set an option with `--config <mod>.<option>=<true|false>` (repeatable):
+
+```bash
+portkit convert mythicmetals-0.24.6+1.21.jar out/ --config mythicmetals.enableDusts=true
+portkit convert tinkers.jar out/ --config tconstruct.forceIntegrationMaterials=true
+portkit convert supplementaries.jar out/ --config supplementaries.flax=false
+```
+
+The option is the flag as the mod's load conditions name it (`dust_enabled`,
+`flax`, `force_integration_materials`) or, where the data file cites it, the
+option's own name in the mod's config file (`enableDusts`,
+`forceIntegrationMaterials`). It works both ways: turning a default-on option
+off sends what it gates to residue as `disabled by user config: <flag>`. An
+option portkit has no cited default for can still be set when the jar's files
+use it, since your choice decides it. A misspelt option or an unknown mod is an
+error that lists the valid options; nothing is silently ignored.
+
+Several options can go in a file, JSON or TOML, passed with
+`--config-file` (settings given with `--config` win over it):
+
+```toml
+[mythicmetals]
+enableDusts = true
+enableAnvils = false
+```
+
+Every run with settings writes `out/config-overrides.json`, lists the settings
+in the summary's `config` and `notes`, and adds a table to `portkit report`.
+Pass `config-overrides.json` back with `--config-file` to reproduce the output.
+Without any setting the output is the default-config conversion.
+
 ## Optional: let an agent work the residue
 
 The agent only ever sees the residue, with the validator as a tool. Pick a
