@@ -21,6 +21,17 @@ CONVERTERS = [
 ]
 
 
+def emitted_blocks(files: dict) -> set[str]:
+    """Identifiers of the blocks among ``files``."""
+    ids = set()
+    for path, body in files.items():
+        if path.startswith("blocks/") and isinstance(body, dict):
+            ident = ((body.get("minecraft:block") or {}).get("description") or {}).get("identifier")
+            if isinstance(ident, str):
+                ids.add(ident)
+    return ids
+
+
 def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool] | None = None) -> ConversionResult:
     """Every converter on one namespace.
 
@@ -40,7 +51,9 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool] | None = 
         if fn is blocks.convert:
             converted = fn(mod, stations=stations.station_blocks(mod))
         elif fn is items.convert:
-            converted = fn(mod, context=context)
+            # Blocks ran first: an item named like a block that did not convert
+            # is the only form of that item (a crop's seed, #177 rice).
+            converted = fn(mod, context=context, emitted_blocks=emitted_blocks(result.files))
         elif fn is recipes.convert:
             # Recipes run after blocks and items so a multi-member tag can be
             # checked against what this conversion actually emits (#160).
