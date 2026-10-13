@@ -117,8 +117,17 @@ blockstate + model ──(blocks.py, placement + shape cited)──▶ blocks/<s
   floor follows. A station spec is tied to the mod versions whose code was
   read; any other version stays residue.
 
+- **Stations so far.** Farmer's Delight's cutting board (`stations.py`,
+  `cutting_board*.js`) and cooking pot (`cooking_pot.py`, `cooking_pot*.js`,
+  a timed station: block `minecraft:tick` + `onTick`, heat read from FD's
+  block tags, a facing x `support` blockstate turned by
+  `minecraft:transformation`). Both share `station_storage.js` (dynamic
+  property storage, stack describe/rebuild, give/drop, sounds); `main.js`
+  imports every station that shipped.
+
 Adding a station (Mekanism single-input machines #172, anvils #180) is a table
-writer in `stations.py`, a runtime file in `portkit/runtime/`, and the block's
+writer (in `stations.py` or its own module, dispatched from
+`stations.convert`), a runtime file in `portkit/runtime/`, and the block's
 cited placement/shape.
 
 ## The oracle (`portkit/validate/`)
