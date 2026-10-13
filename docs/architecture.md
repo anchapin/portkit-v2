@@ -121,7 +121,15 @@ blockstate + model ──(blocks.py, placement + shape cited)──▶ blocks/<s
   `cutting_board*.js`) and cooking pot (`cooking_pot.py`, `cooking_pot*.js`,
   a timed station: block `minecraft:tick` + `onTick`, heat read from FD's
   block tags, a facing x `support` blockstate turned by
-  `minecraft:transformation`). Both share `station_storage.js` (dynamic
+  `minecraft:transformation`), and the stove (`stove.py`, `stove*.js`), a
+  timed station whose recipes are a *shared* type: `minecraft:campfire_cooking`
+  recipes still convert as Bedrock campfire recipes and are also handed to the
+  stove (`recipes.STATION_SHARED_TYPES`), beside vanilla's own campfire
+  recipes from the fetched reference (`portkit/data/recipes.py`); its facing x
+  `lit` blockstate is two plain cubes, so Bedrock's `full_block` geometry with
+  material instances and light per `lit` value and the facing turn, one
+  permutation per (facing, lit). Lit, it is a cooking-pot heat source
+  (`stove.HEAT_RULES`). All three share `station_storage.js` (dynamic
   property storage, stack describe/rebuild, give/drop, sounds); `main.js`
   imports every station that shipped.
 
