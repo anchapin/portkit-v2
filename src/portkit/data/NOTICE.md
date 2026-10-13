@@ -61,3 +61,17 @@ derivation is identical for the 1.16.5, 1.19.2, 1.21.1, 1.21.8 and 26.1
 summaries, so one set serves every mod. The tests use hand-written shapes in
 `tests/data/model_templates.json`, not copies. `python -m portkit.data.models
 --pin` prints the sha256 to pin after bumping the commit.
+
+## Vanilla campfire recipes (#177, the Farmer's Delight stove)
+
+Nothing from these is stored here or shipped in the package either. `portkit
+reference fetch` downloads `data/recipe/data.json` of
+[misode/mcmeta](https://github.com/misode/mcmeta) `1.21.1-summary` at
+`7cffbcdad5fa36f22acef6bd4b869ecad4ca3fd9` and `26.1-summary` at
+`e7068326fb23dcdff9fff17c7eabcd59f46e7460` (the commits the vanilla tag sets
+pin), keeps only the `minecraft:campfire_cooking` recipes, checks the result
+against the sha256 pinned in `portkit/data/recipes.py` and caches it in the
+same reference cache. Generated from Minecraft: (c) Mojang AB, subject to the
+[Minecraft EULA](https://www.minecraft.net/en-us/eula). Without it, the stove's
+table holds only the jar's own campfire recipes, with a note saying to run the
+fetch.
