@@ -60,7 +60,8 @@ _RUNTIME_DIR = "scripts/portkit"
 RESIDUE_KIND = "station_recipe"
 
 CUTTING = "farmersdelight:cutting"
-RECIPE_TYPES = frozenset({CUTTING})
+COOKING = "farmersdelight:cooking"
+RECIPE_TYPES = frozenset({CUTTING, COOKING})
 
 FD_NEO = ("https://github.com/vectorwing/FarmersDelight", "dd8b9b0bfec916a2da88a6d64e3a37f4a02c3259")
 FD_FAB = ("https://github.com/MehVahdJukaar/FarmersDelightRefabricated",
@@ -88,6 +89,12 @@ class FacingBlock:
     placement_offset: int
     box: dict
     sources: tuple[str, ...]
+    # A second state the mod's code sets beside facing (the cooking pot's
+    # ``support``): its Java name, its values (Java's default first) and the
+    # Bedrock custom state that carries it. None for a facing-only block.
+    java_state: str | None = None
+    values: tuple[str, ...] = ()
+    state: str | None = None
 
 
 # Farmer's Delight's cutting board, both corpus builds: FACING is
@@ -178,6 +185,9 @@ VANILLA_SOUNDS = {
     "minecraft:block.wood.place": "place.wood",
     "minecraft:block.wood.hit": "hit.wood",
     "minecraft:entity.item.break": "random.break",
+    # Cooking pot (#177): the handle toggle and serving a portion.
+    "minecraft:block.lantern.place": "block.lantern.place",
+    "minecraft:item.armor.equip_generic": "armor.equip_generic",
 }
 
 
@@ -241,20 +251,24 @@ def station_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
     """Blocks of ``mod`` that a station runtime makes work, by blockstate name."""
     if _unsupported(mod) is not None:
         return {}
-    block = CUTTING_BOARD_BLOCKS[mod.loader]
-    return {block.name: block}
+    from .cooking_pot import COOKING_POT_BLOCKS
+
+    blocks = {}
+    for block in (CUTTING_BOARD_BLOCKS[mod.loader], COOKING_POT_BLOCKS[mod.loader]):
+        blocks[block.name] = block
+    return blocks
 
 
-def _unsupported(mod: SourceMod) -> str | None:
-    """Why this jar's cutting board has no runtime, or None when it has one."""
+def _unsupported(mod: SourceMod, station: str = "cutting-board", block: str = "cutting board") -> str | None:
+    """Why this jar's station has no runtime, or None when it has one."""
     if mod.namespace != "farmersdelight":
-        return (f"a Farmer's Delight cutting-board recipe in namespace {mod.namespace!r}; the "
-                "cutting board is Farmer's Delight's block, which is not in this jar")
+        return (f"a Farmer's Delight {station} recipe in namespace {mod.namespace!r}; the "
+                f"{block} is Farmer's Delight's block, which is not in this jar")
     version = (mod.mods or {}).get("farmersdelight")
     if mod.loader not in _FD_VERSIONS or version != _FD_VERSIONS[mod.loader]:
         known = ", ".join(f"{v} ({k})" for k, v in sorted(_FD_VERSIONS.items()))
         return (f"Farmer's Delight {version or '(unknown version)'} on {mod.loader or 'an unknown loader'}: "
-                f"the cutting-board runtime follows FD's code at the versions it was read from "
+                f"the {station} runtime follows FD's code at the versions it was read from "
                 f"({known}), and this one's wasn't")
     return None
 
@@ -345,6 +359,20 @@ class _Resolver:
                     )
                 tags.append(tag)
                 items += self.tag(tag, "tool")
+            elif kind == "neoforge:difference":
+                # NeoForge's DifferenceIngredient: what ``base`` matches and
+                # ``subtracted`` doesn't (neoforge 1.21.1
+                # common/crafting/DifferenceIngredient.java, "base" and
+                # "subtracted"), stated as the item list that leaves.
+                if not isinstance(entry.get("base"), (dict, list, str)) or "subtracted" not in entry:
+                    raise _Refuse(f"{role} neoforge:difference needs base and subtracted")
+                base, read = self.ingredient(entry["base"], role)
+                minus, _ = self.ingredient(entry["subtracted"], role)
+                left = [i for i in base if i not in set(minus)]
+                if not left:
+                    raise _Refuse(f"{role} neoforge:difference leaves no item")
+                items += left
+                tags += read
             elif kind == "farmersdelight:tool_action":
                 raise _Refuse(
                     f"{role} ingredient type {kind!r} is not one Farmer's Delight 1.21 registers (it registers "
@@ -483,6 +511,36 @@ def _component(mod: SourceMod) -> str:
 
 def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             context: LoadContext) -> ConversionResult:
+    """Each station's data table and runtime for the recipes ``deferred`` holds.
+
+    ``deferred`` is (source path, recipe) for every recipe of a
+    :data:`RECIPE_TYPES` type whose load conditions passed; the recipes are
+    split by type and each station converter writes its own table, runtime
+    and block. The entry :data:`ENTRY` imports every station that shipped.
+    """
+    from . import cooking_pot
+
+    result = ConversionResult()
+    entries: list[str] = []
+    cutting = [d for d in deferred if d[1].get("type") == CUTTING]
+    cooking = [d for d in deferred if d[1].get("type") == COOKING]
+    for part, runs in ((_convert_cutting(mod, cutting, files, context), cutting),
+                       (cooking_pot.convert(mod, cooking, files, context), cooking)):
+        converted, entry = part
+        result = result.merge(converted)
+        if entry:
+            entries.append(entry)
+    if entries:
+        result.files[f"{_RUNTIME_DIR}/station_storage.js"] = runtime_source("station_storage.js")
+        result.files[ENTRY] = (
+            "// Generated by portkit: wires each station's data table to its fixed runtime.\n"
+            + "".join(entries)
+        )
+    return result
+
+
+def _convert_cutting(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
+                     context: LoadContext) -> tuple[ConversionResult, str]:
     """The cutting board's data table and runtime for the recipes ``deferred`` holds.
 
     ``deferred`` is (source path, recipe) for every recipe of a
@@ -493,7 +551,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     """
     result = ConversionResult()
     if not deferred:
-        return result
+        return result, ""
     why = _unsupported(mod)
     block = CUTTING_BOARD_BLOCKS.get(mod.loader or "")
     block_path = f"blocks/{block.name}.json" if block else None
@@ -506,7 +564,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     if why is not None:
         for rel, _ in deferred:
             result.unhandled.append(Unhandled(rel, RESIDUE_KIND, why))
-        return result
+        return result, ""
 
     spec = _cutting_spec(mod.loader)
     emitted = emitted_definitions(files)
@@ -559,10 +617,9 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     result.files[data_path] = _js_module(header, table)
     result.files[f"{_RUNTIME_DIR}/cutting_board.js"] = runtime_source("cutting_board.js")
     result.files[f"{_RUNTIME_DIR}/cutting_board_core.js"] = runtime_source("cutting_board_core.js")
-    result.files[ENTRY] = (
-        "// Generated by portkit: wires each station's data table to its fixed runtime.\n"
+    entry = (
         'import { registerCuttingBoard } from "./cutting_board.js";\n'
-        f'import cuttingBoardTable from "./data/{mod.namespace}_cutting_board.js";\n\n'
+        f'import cuttingBoardTable from "./data/{mod.namespace}_cutting_board.js";\n'
         "registerCuttingBoard(cuttingBoardTable);\n"
     )
 
@@ -592,7 +649,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         f"cuttingBoardFortuneBonus overrides (the cited default {spec.fortune_bonus} is used). A stored "
         "stack keeps its id, count, name, lore, durability damage and enchantments only."
     )
-    return result
+    return result, entry
 
 
 def _shipped_sounds(files: dict) -> set[str]:
