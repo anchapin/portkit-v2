@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import json
 
+from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..registry import registered_ids, variant_of
 from . import models
@@ -321,11 +322,20 @@ def _variant_notes(mod: SourceMod, src, variants: list[tuple[str, str]], java: s
     return notes
 
 
-def convert(mod: SourceMod) -> ConversionResult:
+def convert(mod: SourceMod, context: LoadContext | None = None) -> ConversionResult:
+    """Convert the mod's flat item models.
+
+    An item the mod's code registers only while a config flag is on (a cited
+    ``registers`` pattern, such as Mythic Metals' ``*_dust`` under
+    ``enableDusts``) is ``conditional_item`` residue when that flag is off,
+    by its cited default or by the user's config (:meth:`LoadContext.gated_item`).
+    """
     result = ConversionResult()
     src = mod.assets / "models" / "item"
     if not src.is_dir():
         return result
+    if context is None:
+        context = LoadContext(mod)
 
     blocks = _block_names(mod)
     java: set[str] | None = None  # registered Java ids, read on the first item that needs them
@@ -342,6 +352,11 @@ def convert(mod: SourceMod) -> ConversionResult:
             continue
 
         rel = result.claim(mod, path)
+        gated = context.gated_item(f"{mod.namespace}:{name}")
+        if gated is not None and gated.passes is not True:
+            # Java doesn't register this item with the config the conversion holds.
+            result.unhandled.append(Unhandled(rel, "conditional_item", gated.reason()))
+            continue
         try:
             model = json.loads(path.read_text())
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
