@@ -129,9 +129,17 @@ blockstate + model ──(blocks.py, placement + shape cited)──▶ blocks/<s
   `lit` blockstate is two plain cubes, so Bedrock's `full_block` geometry with
   material instances and light per `lit` value and the facing turn, one
   permutation per (facing, lit). Lit, it is a cooking-pot heat source
-  (`stove.HEAT_RULES`). All three share `station_storage.js` (dynamic
-  property storage, stack describe/rebuild, give/drop, sounds); `main.js`
-  imports every station that shipped.
+  (`stove.HEAT_RULES`). The skillet (`skillet.py`, `skillet*.js`) cooks the
+  stove's campfire table (`stove.campfire_table`) as a placed block (facing x
+  `support`, the cooking pot's heat rule via `cooking_pot.heat_table`, whose
+  JS helpers it imports from `cooking_pot_core.js`) and as a held item: the
+  station's first item file (`items/skillet.json`, the block's own item via
+  `replace_block_item`, iron-tier weapon numbers cited) and its first
+  world-event hooks (`world.beforeEvents.itemUse` for held cooking,
+  `world.afterEvents.entityHitEntity` for the hit sound, a
+  `system.runInterval` loop over player dynamic properties). All four share
+  `station_storage.js` (dynamic property storage, stack describe/rebuild,
+  give/drop, sounds); `main.js` imports every station that shipped.
 
 Adding a station (Mekanism single-input machines #172, anvils #180) is a table
 writer (in `stations.py` or its own module, dispatched from
