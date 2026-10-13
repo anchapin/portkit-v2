@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod
-from . import blocks, items, lang, loot, recipes, sounds, textures
+from . import blocks, items, lang, loot, recipes, sounds, stations, textures
 
 CONVERTERS = [
     textures.convert,
@@ -32,18 +32,26 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool] | None = 
     # One load-condition context for the namespace (#183), so the config flags
     # assumed at their defaults add up to a single note.
     context = LoadContext(mod, overrides=overrides)
+    # Station recipes (#177) pass the recipe converter's load-condition gate,
+    # then wait for every other converter: the data table checks the block,
+    # the items and the sounds it names against what the namespace emitted.
+    deferred: list = []
     for fn in CONVERTERS:
-        if fn is items.convert:
+        if fn is blocks.convert:
+            converted = fn(mod, stations=stations.station_blocks(mod))
+        elif fn is items.convert:
             converted = fn(mod, context=context)
         elif fn is recipes.convert:
             # Recipes run after blocks and items so a multi-member tag can be
             # checked against what this conversion actually emits (#160).
-            converted = fn(mod, emitted=recipes.emitted_definitions(result.files), context=context)
+            converted = fn(mod, emitted=recipes.emitted_definitions(result.files), context=context,
+                           deferred=deferred)
         elif fn is loot.convert:
             converted = fn(mod, context=context)
         else:
             converted = fn(mod)
         result = result.merge(converted)
+    result = result.merge(stations.convert(mod, deferred, result.files, context))
     for note in (context.note(), context.user_note()):
         if note:
             result.notes.append(note)

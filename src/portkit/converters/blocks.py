@@ -287,8 +287,14 @@ def _facing_parts(blockstate: dict) -> tuple[str | None, bool, list[tuple[str, s
 def _convert_facing_block(
     mod: SourceMod, result: ConversionResult, rel: str, name: str,
     model_ref: str, uvlock: bool, dropped: list[tuple[str, str]],
+    station=None,
 ) -> None:
-    """One bone per facing, shown by the placement_direction state."""
+    """One bone per facing, shown by the placement_direction state.
+
+    ``station`` (a :class:`portkit.converters.stations.FacingBlock`) is a block
+    whose placement rule and shape the mod's code sets, read and cited there:
+    its trait offset and collision/selection box go into the definition.
+    """
     flat, why = _flat_model(mod, result, model_ref)
     if flat is None:
         result.unhandled.append(Unhandled(rel, "block", f"facing model: {why}"))
@@ -333,7 +339,7 @@ def _convert_facing_block(
             result.claim(mod, path)
 
     result.files[f"models/blocks/{name}.geo.json"] = geo
-    result.files[f"blocks/{name}.json"] = _facing_definition(mod.namespace, name, identifier, instances)
+    result.files[f"blocks/{name}.json"] = _facing_definition(mod.namespace, name, identifier, instances, station)
     if dropped:
         extras = ", ".join(f"{m.rsplit('/', 1)[-1]} when {st} is true" for st, m in dropped)
         result.notes.append(
@@ -342,31 +348,59 @@ def _convert_facing_block(
         )
 
 
-def _facing_definition(namespace: str, name: str, geometry: str, instances: dict) -> dict:
+def _facing_definition(namespace: str, name: str, geometry: str, instances: dict,
+                       station=None) -> dict:
+    trait = {"enabled_states": ["minecraft:cardinal_direction"]}
+    components = {
+        "minecraft:geometry": {
+            "identifier": geometry,
+            "bone_visibility": {
+                f"facing_{d}": f"q.block_state('minecraft:cardinal_direction') == '{d}'"
+                for d in _CARDINALS
+            },
+        },
+        "minecraft:material_instances": instances,
+    }
+    if station is not None:
+        if station.placement_offset:
+            trait["y_rotation_offset"] = station.placement_offset
+        components["minecraft:collision_box"] = dict(station.box)
+        components["minecraft:selection_box"] = dict(station.box)
     return {
         "format_version": _BLOCK_FORMAT,
         "minecraft:block": {
             "description": {
                 "identifier": f"{namespace}:{name}",
                 "menu_category": {"category": _MENU_CATEGORY},
-                "traits": {
-                    "minecraft:placement_direction": {
-                        "enabled_states": ["minecraft:cardinal_direction"]
-                    }
-                },
+                "traits": {"minecraft:placement_direction": trait},
             },
-            "components": {
-                "minecraft:geometry": {
-                    "identifier": geometry,
-                    "bone_visibility": {
-                        f"facing_{d}": f"q.block_state('minecraft:cardinal_direction') == '{d}'"
-                        for d in _CARDINALS
-                    },
-                },
-                "minecraft:material_instances": instances,
-            },
+            "components": components,
         },
     }
+
+
+def _facing_variants(blockstate: dict) -> tuple[str | None, bool]:
+    """(model, uvlock) when the blockstate is one model turned to each facing.
+
+    The shape: exactly the four ``facing=<dir>`` variants, one model, each
+    turned by the y Java uses to aim it that way (north 0, east 90, south 180,
+    west 270) and no x. Only station blocks take this path (see
+    :func:`convert`): which way Java's facing points is the block's code.
+    """
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or set(variants) != {f"facing={d}" for d in _CARDINALS}:
+        return None, False
+    models_seen, uvlocks = set(), set()
+    for key, entry in variants.items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("model"), str) or entry.get("x"):
+            return None, False
+        if (entry.get("y") or 0) != _CARDINAL_TURN[key.split("=", 1)[1]]:
+            return None, False
+        models_seen.add(entry["model"])
+        uvlocks.add(bool(entry.get("uvlock")))
+    if len(models_seen) != 1 or len(uvlocks) != 1:
+        return None, False
+    return models_seen.pop(), uvlocks.pop()
 
 
 def _flat_model(mod: SourceMod, result: ConversionResult, model_ref: str) -> tuple[dict | None, str]:
@@ -596,7 +630,15 @@ def _model_block(
     return "minecraft:geometry.full_block", instances, None, ""
 
 
-def convert(mod: SourceMod) -> ConversionResult:
+def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
+    """Convert the mod's blocks.
+
+    ``stations`` maps blockstate name -> :class:`portkit.converters.stations.FacingBlock`
+    for blocks a station runtime makes work (#177). Such a block's facing-only
+    variants convert with the placement rule and shape cited there; any other
+    block with facing-only variants stays residue, since which way its facing
+    points and whether it does anything are its code's.
+    """
     result = ConversionResult()
     src = mod.assets / "blockstates"
     if not src.is_dir():
@@ -610,6 +652,13 @@ def convert(mod: SourceMod) -> ConversionResult:
         except json.JSONDecodeError as exc:
             result.unhandled.append(Unhandled(rel, "block", f"invalid JSON: {exc}"))
             continue
+
+        station = (stations or {}).get(name)
+        if station is not None:
+            station_ref, station_uvlock = _facing_variants(blockstate)
+            if station_ref is not None:
+                _convert_facing_block(mod, result, rel, name, station_ref, station_uvlock, [], station)
+                continue
 
         by_axis, why = _axis_variants(blockstate)
         if by_axis is not None:

@@ -27,6 +27,92 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: station recipes become a generated data table run by a fixed Script API runtime (cutting board pilot)
+
+- **Decision:** A recipe type whose behaviour is a block's Java code (pilot:
+  Farmer's Delight's `farmersdelight:cutting`) is converted in three parts.
+  (1) **Data table, generated:** every recipe of the type that passes its load
+  conditions and can be stated exactly becomes one entry in a JavaScript data
+  module, `behavior_pack/scripts/portkit/data/<ns>_cutting_board.js`, written
+  deterministically (sorted, `json.dumps`) by `converters/stations.py`. Items
+  and tags resolve through the existing machinery (`TagResolver` with the
+  fetched loader/vanilla tag data; unions as `neoforge:compound` /
+  `fabric:any` / JSON lists); a recipe naming an item this conversion didn't
+  emit, an unknown ingredient type, or the same item + tool as another recipe
+  is `station_recipe` residue with the reason (never narrowed, #87). (2)
+  **Runtime, fixed:** a hand-written script checked into the package
+  (`src/portkit/runtime/cutting_board.js` + `cutting_board_core.js`, copied
+  verbatim) registers a block custom component (`<ns>:portkit_cutting_board`)
+  that does what FD's code does, each behaviour cited to FD's source at the
+  pinned commits; a generated two-line `scripts/portkit/main.js` wires table to
+  runtime. (3) **Block, from the jar:** the station block's facing-only
+  variants convert (one bone per facing, `minecraft:placement_direction`) only
+  for station blocks, with the placement rule and shape read from the block's
+  code (`y_rotation_offset` 180 because FD faces the board toward the player;
+  collision/selection box from `SHAPE`), and it carries the custom component.
+  The behavior pack gets a `script` module and a `@minecraft/server` 2.0.0
+  dependency only when it ships `scripts/portkit/main.js`; that version shipped
+  with Bedrock 1.21.90, which is also the first block format that reads a
+  namespaced custom component, so the block is written at 1.21.90 and the
+  engine floor rises with it.
+- **Tool abilities:** FD's `item_ability` reads as one Java tag per ability,
+  as Farmer's Delight Refabricated defines it (ItemAbility.java L37-45):
+  axe_dig/axe_strip → `#minecraft:axes`, hoe_dig → `#minecraft:hoes`,
+  pickaxe_dig → `#minecraft:pickaxes`, shovel_dig → `#minecraft:shovels`,
+  sword_dig → `#minecraft:swords`, shears_* → `#c:tools/shear`, knife_* →
+  `#c:tools/knife`. On NeoForge the ability is code (`canPerformAction`); its
+  vanilla holders are the classes NeoForge gives `DEFAULT_*_ACTIONS`
+  (ItemAbilities.java L152-157) and FD's own are its knives (KnifeItem
+  KNIFE_ACTIONS), the same members as those tags with only this mod loaded,
+  and every NeoForge recipe lists the tag beside the ability anyway. Except
+  on NeoForge `sword_dig` and `shears_carve`: FD's knives perform those too
+  (KNIFE_ACTIONS), so there they are more than the tag and stay residue (no
+  NeoForge 1.3.4 recipe uses either). The table
+  holds the resolved item ids; where the Java tag has a Bedrock tag of the
+  same meaning (learn.microsoft.com Vanilla Item Tags: `minecraft:is_axe`,
+  `is_hoe`, `is_pickaxe`, `is_shovel`, `is_sword`, `is_shears`) that tag is
+  accepted too, as Java accepts any mod's axe in `minecraft:axes`. Any other
+  ability or ingredient type is residue (`farmersdelight:tool_action` is not
+  registered by FD 1.21, so Java never loads such a recipe).
+- **Sounds:** a recipe's Java vanilla sound maps to the Bedrock vanilla event
+  that plays exactly the same audio files (Java: misode/mcmeta 1.21.1-assets
+  sounds.json; Bedrock: bedrock-samples sound_definitions.json; ties broken by
+  verb): item.axe.strip → use.wood, block.metal.break → dig.stone, and FD's
+  defaults (sheep shear, wood break/place/hit, item break). A recipe sound with
+  no such event is played as silence, with a note, rather than the tool's
+  default (which Java would not play).
+- **Why:** The recipe JSON already carries every number that varies; the
+  interaction is the same code for every recipe, so it is written once, read
+  from the mod's source, and reviewed once. A data table keeps the converter
+  deterministic and testable (the table is diffable output; the runtime is
+  unit-tested offline with node against a stub of `@minecraft/server`), and the
+  same split serves Mekanism single-input machines (#172) and anvil-style
+  stations (#180): a new station is a table writer plus one runtime file.
+- **Rejected:** *Generating script code per recipe or per mod*: 105-114
+  near-identical functions per jar, no single place to review behaviour against
+  the mod's source, and generated code is far harder to test than generated
+  data. *Leaving it to the residue agent*: the agent writes JSON files against
+  the validator; a scripted behaviour can't be checked by the oracle, would be
+  re-invented differently run to run, and the agent has no way to read the
+  Java code the behaviour lives in (#87). *A `minecraft:crafting_table`
+  stand-in*: drops the tool requirement and the chance outputs, a gameplay
+  change (#177 issue body).
+- **Not carried over (said in the conversion note):** the item drawn on the
+  board, sneak-placing a tool, cutting particles, comparator output,
+  waterlogging, dispenser use, the advancement/statistic, the stored item when
+  something other than a player destroys the board (`onBreak` needs script API
+  2.4.0), the block break sound for a stored block item with no recipe sound
+  (scripts can't read a block's sound type), and `cuttingBoardFortuneBonus`
+  overrides (a double; `--config` takes boolean flags only, so the cited
+  default 0.1 is used). Stored stacks keep id, count, name, lore, durability
+  damage and enchantments; other item data is not kept while on the board.
+- **Scope:** runs only for the FD versions whose code was read (NeoForge 1.3.4
+  @dd8b9b0, Refabricated 26.1-3.6.28 @a8cb49e); another version's cutting
+  recipes stay residue and its board keeps its facing residue. Supplementaries'
+  three FD cutting recipes are compat gated on Farmer's Delight
+  (`conditional_recipe`, #183) and have no board in their jar either.
+- **Links:** #177 (pilot; the cooking pot stays open), #172, #180, #87, #183.
+
 ## 2026-10-13: the residue agent follows the conversion's mod config; gated-off items' assets keep shipping
 
 - **Decision:** the residue agent's guards decide config-gated items with the

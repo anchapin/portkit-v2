@@ -18,7 +18,17 @@ from .model import ConversionResult
 # of installing beside it.
 _NS = uuid.UUID("6f0a7f1e-0a4a-4f2e-9a1b-6a5f0d1c2b3e")
 
-_BEHAVIOR_DIRS = ("recipes/", "entities/", "functions/", "loot_tables/", "blocks/", "items/")
+_BEHAVIOR_DIRS = ("recipes/", "entities/", "functions/", "loot_tables/", "blocks/", "items/", "scripts/")
+
+# A behavior pack that ships this file gets a script module running it, and a
+# dependency on the Script API version the station runtimes are written
+# against (#177; see portkit.converters.stations). Kept literal here so the
+# pack writer doesn't import the converters.
+SCRIPT_ENTRY = "scripts/portkit/main.js"
+SCRIPT_DEPENDENCY = {"module_name": "@minecraft/server", "version": "2.0.0"}
+# @minecraft/server 2.0.0 shipped with Bedrock 1.21.90 (minecraft.net,
+# "Minecraft 1.21.90 Bedrock Changelog").
+SCRIPT_ENGINE = (1, 21, 90)
 
 
 def _uuid(*parts: str) -> str:
@@ -31,6 +41,7 @@ def manifest(
     meta: ModMetadata | None = None,
     depends_on: tuple[str, ...] = (),
     min_engine: tuple[int, int, int] = (1, 20, 20),
+    script_entry: str | None = None,
 ) -> dict:
     """One Bedrock pack manifest.
 
@@ -62,6 +73,16 @@ def manifest(
             }
         ],
     }
+    if script_entry:
+        # learn.microsoft.com, Pack Manifest (modules: type "script", language
+        # "javascript"; dependencies: module_name for built-in script modules).
+        data["modules"].append({
+            "type": "script",
+            "language": "javascript",
+            "uuid": _uuid(namespace, meta.header_name(namespace, kind), kind, "script"),
+            "version": list(version),
+            "entry": script_entry,
+        })
     if depends_on:
         data["dependencies"] = [
             {
@@ -72,6 +93,8 @@ def manifest(
             }
             for other in depends_on
         ]
+    if script_entry:
+        data.setdefault("dependencies", []).append(dict(SCRIPT_DEPENDENCY))
     return data
 
 
@@ -87,6 +110,8 @@ def engine_floor(files: dict) -> tuple[int, int, int]:
     so a mod with only simple blocks and items still loads on older versions.
     """
     floor = ENGINE_FLOOR
+    if SCRIPT_ENTRY in files:
+        floor = max(floor, SCRIPT_ENGINE)
     for relpath, content in files.items():
         is_block = relpath.startswith("blocks/")
         is_item = relpath.startswith("items/")
@@ -137,8 +162,9 @@ def write_tree(
         base = out_dir / f"{kind}_pack"
         base.mkdir(parents=True, exist_ok=True)
         depends_on = ("resource",) if kind == "behavior" and has_resource else ()
+        entry = SCRIPT_ENTRY if kind == "behavior" and SCRIPT_ENTRY in files else None
         (base / "manifest.json").write_text(
-            json.dumps(manifest(namespace, kind, meta, depends_on, floor), indent=2) + "\n"
+            json.dumps(manifest(namespace, kind, meta, depends_on, floor, entry), indent=2) + "\n"
         )
         (base / ICON_NAME).write_bytes(icon)
         for relpath, content in files.items():
