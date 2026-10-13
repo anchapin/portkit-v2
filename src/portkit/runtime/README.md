@@ -15,7 +15,12 @@ entry `scripts/portkit/main.js` that wires the two.
   imports.
 - `cooking_pot.js`: its Bedrock binding (interaction by hand, `onTick`,
   placement support state, breaking).
-- `station_storage.js`: helpers both bindings share (world dynamic property
+- `stove_core.js`: Farmer's Delight stove logic (six spots, campfire recipe
+  lookup, cooking while lit and cooling while not, what using an item does,
+  the burn test), no imports.
+- `stove.js`: its Bedrock binding (lighting and putting out, placing food,
+  `onTick` cooking, burning and the crackle, the covered-top drop, breaking).
+- `station_storage.js`: helpers the bindings share (world dynamic property
   storage, stored stacks, giving and dropping items, sounds).
 
 Every behaviour is cited to the mod's source in the comments. Change these
