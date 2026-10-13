@@ -70,6 +70,7 @@ import json
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
+from ..conditions import CONDITIONAL_TYPES, LoadContext
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
 from .tags import MultiMembers, TagResolver
@@ -567,12 +568,19 @@ def _member_suffix(member: str) -> str:
     return member.replace(":", "_").replace("/", "_")
 
 
-def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
+def convert(mod: SourceMod, emitted: dict | None = None,
+            context: LoadContext | None = None) -> ConversionResult:
     """Convert the mod's recipes.
 
     ``emitted`` maps identifier -> (kind, path, body) for the blocks and items the
     earlier converters wrote (see :func:`emitted_definitions`). Without it a
     multi-member tag ingredient stays residue, as before #160.
+
+    A recipe whose load conditions are false or undecidable in this conversion
+    is ``conditional_recipe`` residue, and a ``forge:conditional`` wrapper
+    converts the entry Java would load (see :mod:`portkit.conditions`, #183).
+    ``context`` is shared with the other converters of the namespace; without
+    one the recipes get their own, and the config-flag note with it.
     """
     result = ConversionResult()
     for lane in ("recipes", "recipe"):
@@ -582,7 +590,10 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
     else:
         return result
 
-    tag_resolver = TagResolver(mod)
+    own_context = context is None
+    if context is None:
+        context = LoadContext(mod, tags=TagResolver(mod))
+    tag_resolver = context.tags
     item_tags: dict[str, set[str]] = {}  # emitted item id -> native tags it must carry
     multi_used: dict[str, MultiMembers] = {}  # tags a converted recipe kept or expanded
     sources = sorted(src.rglob("*.json"))
@@ -617,6 +628,25 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
         except json.JSONDecodeError as exc:
             result.unhandled.append(Unhandled(rel, "recipe", f"invalid JSON: {exc}"))
             continue
+        if not isinstance(recipe, dict):
+            result.unhandled.append(Unhandled(rel, "recipe", "recipe file is not a JSON object"))
+            continue
+
+        # Java loads the recipe only when its load conditions hold (#183).
+        verdict = context.gate(recipe)
+        if verdict.passes is not True:
+            result.unhandled.append(Unhandled(rel, "conditional_recipe", verdict.reason()))
+            continue
+        if recipe.get("type") in CONDITIONAL_TYPES:
+            chosen, verdict = context.choose(recipe)
+            if chosen is None:
+                result.unhandled.append(Unhandled(rel, "conditional_recipe", verdict.reason()))
+                continue
+            result.notes.append(
+                f"{rel}: {recipe['type']} wrapper; converted the entry Java loads with only this "
+                f"mod ({verdict.why})"
+            )
+            recipe = chosen
 
         java_type = recipe.get("type")
         if java_type == "minecraft:smithing_transform":
@@ -899,4 +929,7 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
             result.consumed.add(source)  # the tag files were read, so they are owned
         if found.note:
             result.notes.append(found.note)
+    note = context.note() if own_context else None
+    if note:
+        result.notes.append(note)
     return result
