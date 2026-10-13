@@ -70,7 +70,7 @@ def _walk_loot_names(node) -> Iterator[str]:
             yield from _walk_loot_names(value)
 
 
-def _legacy_lang_ids(ns: str, path: Path) -> set[str]:
+def _legacy_lang_ids(ns: str, path: Path, kinds=("item", "tile")) -> set[str]:
     """Ids a 1.12 ``.lang`` file's ``item.<ns>.<key>.name`` keys stand for."""
     found: set[str] = set()
     try:
@@ -82,7 +82,7 @@ def _legacy_lang_ids(ns: str, path: Path) -> set[str]:
         parts = key.split(".")
         if "=" not in line or len(parts) < 4 or parts[-1] != "name":
             continue
-        if parts[0] not in ("item", "tile") or parts[1] != ns:
+        if parts[0] not in kinds or parts[1] != ns:
             continue
         base = parts[2]
         found.add(f"{ns}:{base.lower()}")
@@ -90,24 +90,33 @@ def _legacy_lang_ids(ns: str, path: Path) -> set[str]:
     return found
 
 
-def registered_ids(source_root: Path) -> set[str]:
-    """Item and block ids the Java source registers (item models excluded)."""
+def registered_ids(source_root: Path, items_only: bool = False) -> set[str]:
+    """Item and block ids the Java source registers (item models excluded).
+
+    ``items_only`` keeps only the evidence that names an *item*: an item lang
+    key, and items that recipes, item tags and loot entries name. A blockstate,
+    a block lang key and a block loot table's file name say a block exists,
+    not that Java gives it an item (a portal, a crop, a wall sign has none),
+    which is what an item named like a block that did not convert must show
+    before it is written on its own (:mod:`portkit.converters.items`).
+    """
     found: set[str] = set()
+    lang_kinds = ("item",) if items_only else ("item", "block")
     assets = source_root / "assets"
     for ns_dir in sorted(p for p in assets.iterdir() if p.is_dir()) if assets.is_dir() else []:
         ns = ns_dir.name
         states = ns_dir / "blockstates"
-        if states.is_dir():
+        if states.is_dir() and not items_only:
             found.update(f"{ns}:{p.relative_to(states).with_suffix('').as_posix()}" for p in states.rglob("*.json"))
         lang = ns_dir / "lang"
         for path in sorted(lang.glob("*.json")) if lang.is_dir() else []:
             data = _load(path)
             for key in data if isinstance(data, dict) else []:
                 parts = key.split(".")
-                if len(parts) == 3 and parts[0] in ("item", "block") and parts[1] == ns:
+                if len(parts) == 3 and parts[0] in lang_kinds and parts[1] == ns:
                     found.add(f"{ns}:{parts[2]}")
         for path in sorted(lang.glob("*.lang")) if lang.is_dir() else []:
-            found |= _legacy_lang_ids(ns, path)
+            found |= _legacy_lang_ids(ns, path, ("item",) if items_only else ("item", "tile"))
     data_root = source_root / "data"
     for ns_dir in sorted(p for p in data_root.iterdir() if p.is_dir()) if data_root.is_dir() else []:
         ns = ns_dir.name
@@ -131,7 +140,7 @@ def registered_ids(source_root: Path) -> set[str]:
             if not base.is_dir():
                 continue
             blocks = base / "blocks"
-            if blocks.is_dir():
+            if blocks.is_dir() and not items_only:
                 found.update(f"{ns}:{p.relative_to(blocks).with_suffix('').as_posix()}" for p in blocks.rglob("*.json"))
             for path in sorted(base.rglob("*.json")):
                 found.update(_walk_loot_names(_load(path)))
