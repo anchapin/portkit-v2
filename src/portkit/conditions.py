@@ -195,7 +195,9 @@ class LoadContext:
         tag = ident.startswith("#")
         ident = ident[1:] if tag else ident
         ns = ident.partition(":")[0] if ":" in ident else "minecraft"
-        if ns == "minecraft" and not tag:
+        if (ns == "minecraft" or ns == self.mod.namespace) and not tag:
+            # Vanilla, or the namespace being converted (which need not be a
+            # declared mod id: the jar ships its files either way).
             return True
         loaded = self.loaded(ns)
         if loaded is False:
