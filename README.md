@@ -177,7 +177,13 @@ group back, listed in `unknown_items`. The deterministic item converter holds
 itself to the same test (#158): it writes no item for an item model alone (a
 1.12 per-metadata model or a modern override model), explains the skip in the
 summary's `notes`, and leaves the variant's texture to ship like any other
-texture. Anything unresolved
+texture. Both also follow the conversion's mod config (#187): an item the
+mod's code registers only while a config flag is on (Mythic Metals'
+`*_dust` under `enableDusts`, default off) is one the agent may neither
+define (`agent.unknown_item`, naming the flag and the `--config` setting that
+enables it) nor name in any file it writes (`agent.gated_item`, listed in
+`gated_items`) while the flag is off, by its cited default or by `--config`;
+with `--config mythicmetals.enableDusts=true` both are allowed. Anything unresolved
 stays in `unhandled.json`, and the summary's `agent` block says what each group
 did. Its `status` is `complete` (every group resolved), `partial` or `failed`
 (none did). That is separate from `valid` and from the exit code, which are
