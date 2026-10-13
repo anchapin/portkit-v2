@@ -87,6 +87,9 @@ class ConversionResult:
     # a note is a file that shipped with something lost, and it still cannot go
     # unsaid.
     notes: list[str] = field(default_factory=list)
+    # Station runtimes (#177): recipe type -> what its data table holds
+    # ({"converted": n, "residue": m, "data": path, "block": id}).
+    stations: dict[str, dict] = field(default_factory=dict)
 
     def claim(self, mod: "SourceMod", path: Path) -> str:
         """Record a source file as looked at and return its relative path."""
@@ -119,6 +122,7 @@ class ConversionResult:
         merged.unhandled.extend(other.unhandled)
         merged.consumed |= other.consumed
         merged.notes = [*self.notes, *other.notes]
+        merged.stations = {**self.stations, **other.stations}
         return merged
 
     @property
