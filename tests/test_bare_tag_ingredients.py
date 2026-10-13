@@ -249,3 +249,17 @@ def test_the_validator_flags_a_hash_item(tmp_path, fixtures_dir):
     assert found and found[0].severity == "error"
     assert "c:crops/wheat" in found[0].message
     assert not [f for f in report.findings if f.rule == "xref.item" and "#c:" in f.message]
+
+
+@pytest.mark.parametrize("result", ["#forge:rods/wooden", {"id": "#forge:rods/wooden"},
+                                    {"item": "#forge:rods/wooden"}])
+def test_a_hash_result_is_residue_never_a_resolved_member(tmp_path, reference, result):
+    """Java refuses a recipe whose result is a tag; reading one member would invent it."""
+    recipe = {**_shapeless("minecraft:stick"), "result": result}
+    converted = recipes.convert(_mod(tmp_path, recipe), emitted={})
+    assert not [k for k in converted.files if k.startswith("recipes/")]
+    assert [u.reason for u in converted.unhandled if u.kind == "recipe"] == ["unreadable result item"]
+    smithing = {"type": "minecraft:smithing_transform", "template": "minecraft:stick",
+                "base": "minecraft:stick", "addition": "minecraft:stick", "result": result}
+    converted = recipes.convert(_mod(tmp_path / "s", smithing), emitted={})
+    assert not [k for k in converted.files if k.startswith("recipes/")]

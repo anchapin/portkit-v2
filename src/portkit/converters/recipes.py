@@ -221,6 +221,18 @@ def _ingredient(spec):
     return spec
 
 
+def _result_item(spec, tags: TagResolver | None = None) -> dict | None:
+    """A recipe's result as ``{"item": id}``, or None when it isn't one item.
+
+    A result is always an item in Java; a ``#`` name there is a malformed recipe
+    Java refuses to load, so it is never read as a tag (or resolved to a member).
+    """
+    ident = spec.get("id", spec.get("item")) if isinstance(spec, dict) else spec
+    if isinstance(ident, str) and ident.startswith("#"):
+        return None
+    return _item(spec, tags)
+
+
 def _item(spec, tags: TagResolver | None = None) -> dict | None:
     """Java item specs come in several shapes. Only translate the unambiguous ones."""
     if isinstance(spec, str) and spec.startswith("#"):
@@ -320,7 +332,8 @@ def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult,
             result.unhandled.append(Unhandled(rel, "recipe", f"smithing {slot}: {_tag_reason(spec, tags)}"))
             return None
         slots[slot] = item
-    out = _smithing_item(recipe.get("result"), tags)
+    mapped_out = _result_item(recipe.get("result"), tags)
+    out = mapped_out.get("item") if mapped_out else None
     if out is None or "base" not in slots:
         result.unhandled.append(
             Unhandled(rel, "recipe", "smithing recipe has no readable base or result item")
@@ -836,7 +849,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 ))
                 continue
 
-        out = _item(recipe.get("result"), tag_resolver)
+        out = _result_item(recipe.get("result"), tag_resolver)
         if out is None:
             result.unhandled.append(Unhandled(rel, "recipe", "unreadable result item"))
             continue
