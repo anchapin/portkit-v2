@@ -137,7 +137,16 @@ blockstate + model ──(blocks.py, placement + shape cited)──▶ blocks/<s
   `replace_block_item`, iron-tier weapon numbers cited) and its first
   world-event hooks (`world.beforeEvents.itemUse` for held cooking,
   `world.afterEvents.entityHitEntity` for the hit sound, a
-  `system.runInterval` loop over player dynamic properties). All four share
+  `system.runInterval` loop over player dynamic properties). The feasts
+  (`feasts.py`, `feast*.js`) are six blocks on one component: the blocks FD's
+  `farmersdelight:feasts` tag names, facing x an *integer* `servings` state
+  (`FacingBlock.int_state`), a box (and the gleaming salad's light) per
+  serving count through `value_components`, and the first station to read a
+  loot table: `loot.convert` defers a feast's table (`stations.station_loot`)
+  and the feast converter turns it into one Bedrock table per distinct drop
+  set, set per count with `minecraft:loot` on the permutations; the runtime
+  keeps no storage (the state is the count) and clears a block with
+  `setblock ... destroy` so it drops through those tables. All of them share
   `station_storage.js` (dynamic property storage, stack describe/rebuild,
   give/drop, sounds); `main.js` imports every station that shipped.
 

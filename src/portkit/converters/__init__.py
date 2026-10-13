@@ -47,6 +47,7 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool] | None = 
     # then wait for every other converter: the data table checks the block,
     # the items and the sounds it names against what the namespace emitted.
     deferred: list = []
+    deferred_loot: list = []
     for fn in CONVERTERS:
         if fn is blocks.convert:
             converted = fn(mod, stations=stations.station_blocks(mod))
@@ -60,11 +61,14 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool] | None = 
             converted = fn(mod, emitted=recipes.emitted_definitions(result.files), context=context,
                            deferred=deferred)
         elif fn is loot.convert:
-            converted = fn(mod, context=context)
+            # A feast's loot table is read per serving count by its station
+            # (#177 feasts), so it waits like a station recipe.
+            converted = fn(mod, context=context, deferred=deferred_loot,
+                           station_tables=stations.station_loot(mod))
         else:
             converted = fn(mod)
         result = result.merge(converted)
-    result = result.merge(stations.convert(mod, deferred, result.files, context))
+    result = result.merge(stations.convert(mod, deferred, result.files, context, loot=deferred_loot))
     for note in (context.note(), context.user_note()):
         if note:
             result.notes.append(note)

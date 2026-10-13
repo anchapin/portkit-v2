@@ -147,13 +147,18 @@ def _convert_table(data: dict) -> tuple[dict | None, str | None]:
     return {"pools": [{"rolls": 1, "entries": [bedrock_entry]}]}, None
 
 
-def convert(mod: SourceMod, context: LoadContext | None = None) -> ConversionResult:
+def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list | None = None,
+            station_tables: set[str] | None = None) -> ConversionResult:
     """Convert the mod's block loot tables.
 
     A table whose own load conditions (``neoforge:conditions``,
     ``fabric:load_conditions``; never the pool and entry ``conditions``, which
     are loot predicates) are false or undecidable here is
     ``conditional_loot_table`` residue (#183).
+
+    A table named in ``station_tables`` (a block a station runtime reads the
+    table of, #177 feasts) whose load conditions pass is appended to
+    ``deferred`` as (source path, table) for that station instead.
     """
     result = ConversionResult()
     own_context = context is None
@@ -178,12 +183,15 @@ def convert(mod: SourceMod, context: LoadContext | None = None) -> ConversionRes
                 result.unhandled.append(Unhandled(rel, "conditional_loot_table", verdict.reason()))
                 continue
 
+            name = path.relative_to(src).with_suffix("").as_posix()
+            if station_tables and deferred is not None and name in station_tables:
+                deferred.append((rel, data))
+                continue
             table, reason = _convert_table(data)
             if table is None:
                 result.unhandled.append(Unhandled(rel, "loot", reason or "unsupported loot table"))
                 continue
 
-            name = path.relative_to(src).with_suffix("").as_posix()
             result.files[f"loot_tables/blocks/{name}.json"] = table
     note = context.note() if own_context else None
     if note:

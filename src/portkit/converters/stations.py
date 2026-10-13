@@ -102,6 +102,9 @@ class FacingBlock:
     # Block components the mod's code gives one value of that state (the
     # stove's light level while lit), by value. None when there are none.
     value_components: dict | None = None
+    # Whether the Java state is an IntegerProperty (a feast's ``servings``):
+    # Bedrock then gets an integer state, as vanilla's cake ``bite_counter``.
+    int_state: bool = False
 
 
 # Farmer's Delight's cutting board, both corpus builds: FACING is
@@ -259,14 +262,22 @@ def station_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
     if _unsupported(mod) is not None:
         return {}
     from .cooking_pot import COOKING_POT_BLOCKS
+    from .feasts import feast_blocks
     from .skillet import SKILLET_BLOCKS
     from .stove import STOVE_BLOCKS
 
     blocks = {}
     for block in (CUTTING_BOARD_BLOCKS[mod.loader], COOKING_POT_BLOCKS[mod.loader], STOVE_BLOCKS[mod.loader],
-                  SKILLET_BLOCKS[mod.loader]):
+                  SKILLET_BLOCKS[mod.loader], *feast_blocks(mod).values()):
         blocks[block.name] = block
     return blocks
+
+
+def station_loot(mod: SourceMod) -> set[str]:
+    """Block loot tables (names under loot_table/blocks/) a station reads."""
+    from .feasts import loot_names
+
+    return loot_names(mod)
 
 
 def _unsupported(mod: SourceMod, station: str = "cutting-board", block: str = "cutting board") -> str | None:
@@ -520,7 +531,7 @@ def _component(mod: SourceMod) -> str:
 
 
 def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
-            context: LoadContext) -> ConversionResult:
+            context: LoadContext, loot: list[tuple[str, dict]] | None = None) -> ConversionResult:
     """Each station's data table and runtime for the recipes ``deferred`` holds.
 
     ``deferred`` is (source path, recipe) for every recipe of a
@@ -528,10 +539,12 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     passed; the recipes are split by type and each station converter writes its
     own table, runtime and block. The stove runs whenever its block converted,
     since vanilla's own campfire recipes fill its table too; the skillet
-    cooks the same table. The entry :data:`ENTRY` imports every station that
-    shipped.
+    cooks the same table. ``loot`` is (source path, table) for the block loot
+    tables the loot converter left to a station (the feasts',
+    :func:`portkit.converters.feasts.loot_names`). The entry :data:`ENTRY`
+    imports every station that shipped.
     """
-    from . import cooking_pot, skillet, stove
+    from . import cooking_pot, feasts, skillet, stove
 
     result = ConversionResult()
     entries: list[str] = []
@@ -541,7 +554,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     for converted, entry in (_convert_cutting(mod, cutting, files, context),
                              cooking_pot.convert(mod, cooking, files, context),
                              stove.convert(mod, campfire, files, context),
-                             skillet.convert(mod, campfire, files, context)):
+                             skillet.convert(mod, campfire, files, context),
+                             feasts.convert(mod, loot or [], files, context)):
         result = result.merge(converted)
         if entry:
             entries.append(entry)

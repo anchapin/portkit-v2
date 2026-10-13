@@ -27,6 +27,13 @@ entry `scripts/portkit/main.js` that wires the two.
   state, sneak-only placement, breaking; held cooking with the skillet in the
   off-hand through `world.beforeEvents.itemUse` and a `system.runInterval`
   loop; the hit sound). It imports the heat helpers of `cooking_pot_core.js`.
+- `feast_core.js`: Farmer's Delight feast logic (what a use does at a
+  serving count: serve, ask for the container, clear the leftovers; the
+  medley's serving by count; the clearing command), no imports.
+- `feast.js`: its Bedrock binding (one component for every feast block,
+  `onPlayerInteract`; the serving count is the block's integer state, so
+  nothing is stored; clearing runs `setblock ... destroy`, which drops through
+  the block's `minecraft:loot`).
 - `station_storage.js`: helpers the bindings share (world dynamic property
   storage, stored stacks, giving and dropping items, sounds).
 
