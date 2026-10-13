@@ -50,6 +50,16 @@ this conversion emits (``emitted``, filled by
    per-member recipes would forbid that. Furnace recipes always take this
    form, since Bedrock's furnace input is one item id.
 
+An ingredient written as a JSON list of items (Java's "any of these"; Mythic
+Metals' ``[{"item": "...:deepslate_adamantite_ore"}, {"item":
+"...:adamantite_ore"}]``) is a membership the recipe states outright, so it
+takes form 3 under the same conditions: every listed item vanilla or emitted,
+the only such ingredient, one slot, at most :data:`EXPANSION_CAP` items. A list
+gets no tag of its own (the mod declared none). Vanilla Bedrock writes its
+"armour piece -> nugget" furnace recipes the same way, one per piece
+(bedrock-samples ``behavior_pack/recipes/furnace_iron_helmet.json``). A list
+holding a tag, or anything but plain item ids, stays residue.
+
 Anything else stays residue, and the reason names any members this conversion
 did not emit. A recipe is never narrowed to part of a tag.
 """
@@ -106,6 +116,18 @@ _KNOWN_UNSUPPORTED = {
         "trim can work on Bedrock is a judgment call"
     ),
     "minecraft:crafting_transmute": "transmute recipes have no Bedrock equivalent",
+    # wisp-forest/alloy-forgery 1.21.1 (48e309f), RawAlloyForgeRecipe: up to 10
+    # counted inputs, min_forge_tier, fuel_per_tick, tier-range output overrides.
+    # The forge (controller block, multiblock, fuels, tiers) is Alloy Forgery's,
+    # not the recipe mod's; a crafting-table or furnace stand-in would drop the
+    # fuel and tier gates and the tier bonus, and a made-up forge block is
+    # fabrication (#87). See docs/decisions.md, 2026-10-12.
+    "alloy_forgery:forging": (
+        "an Alloy Forgery forge recipe (counted inputs, minimum forge tier, fuel per tick, "
+        "tier-dependent output); it runs only in a forge the Alloy Forgery mod defines, which "
+        "is not in this jar, so there is no station on Bedrock to tag it for, and a crafting "
+        "table or furnace stand-in would drop the fuel and tier rules"
+    ),
 }
 
 # Convention tags that name exactly one vanilla item. Both loaders ship these
@@ -177,6 +199,9 @@ def _item(spec, tags: TagResolver | None = None) -> dict | None:
     """Java item specs come in several shapes. Only translate the unambiguous ones."""
     if isinstance(spec, str):
         return {"item": spec}
+    listed = _listed_items(spec)
+    if listed is not None and len(listed) == 1:
+        return {"item": listed[0]}  # "any of [x]" is x
     if isinstance(spec, dict):
         if "item" in spec:
             return {"item": spec["item"]}
@@ -228,6 +253,14 @@ def _tag_reason(spec, tags: TagResolver | None = None) -> str:
         return tags.resolve(tag).reason
     if isinstance(spec, dict) and "tag" in spec:
         return f"ingredient uses tag {spec['tag']!r}, which covers more than one item"
+    listed = _listed_items(spec)
+    if listed is not None:
+        return (f"ingredient is a list of {len(listed)} items ({', '.join(listed)}); it converts "
+                f"as one recipe per item only when every item is converted, it is the "
+                f"recipe's only such ingredient, it fills one grid slot, and it has at most "
+                f"{EXPANSION_CAP} items")
+    if isinstance(spec, list):
+        return "ingredient is a list holding a tag or a non-item entry"
     return "ingredient uses a tag or item list"
 
 
@@ -330,6 +363,9 @@ class _Multi:
     # Members a native tag can't hold, each needing its own recipe beside the
     # tag recipe: vanilla items, and blocks that already have an item file.
     extras: list = None  # type: ignore[assignment]
+    # The ingredient is a JSON list of items, not a tag: it can only be written
+    # once per member (form 3), and ``found.tag`` is a label, not a tag id.
+    listed: bool = False
 
 
 def _bedrock_equivalent(found: MultiMembers, tags: TagResolver) -> str | None:
@@ -353,8 +389,58 @@ def _bedrock_equivalent(found: MultiMembers, tags: TagResolver) -> str | None:
     return None
 
 
+def _listed_items(spec) -> list[str] | None:
+    """The item ids of a list ingredient made only of plain items, else None.
+
+    Accepts ``{"item": id}`` entries and bare id strings (the 1.21.2+ form); a
+    tag entry (``{"tag": ...}``, ``"#..."``) or anything else gives None.
+    """
+    if not isinstance(spec, list) or not spec:
+        return None
+    ids: list[str] = []
+    for entry in spec:
+        if isinstance(entry, dict) and set(entry) == {"item"} and isinstance(entry["item"], str):
+            ids.append(entry["item"])
+        elif isinstance(entry, str) and not entry.startswith("#"):
+            ids.append(entry)
+        else:
+            return None
+    return [i if ":" in i else f"minecraft:{i}" for i in dict.fromkeys(ids)]
+
+
+def _list_label(ids: list[str]) -> str:
+    return "[" + ", ".join(ids) + "]"
+
+
+def _list_reason(multi: _Multi, slots: int, others: int) -> str:
+    """Why a fully converted item-list ingredient still can't be written."""
+    ids = multi.found.members
+    head = f"ingredient is a list of {len(ids)} items ({', '.join(ids)})"
+    if slots != 1:
+        return (f"{head} filling {slots} grid slots; the player may mix items across them, "
+                "which one recipe per item would forbid, and the mod declares no tag to take")
+    if others > 1:
+        return f"{head}, beside another multi-item ingredient; one recipe per item covers only one"
+    return f"{head}, more than the {EXPANSION_CAP} recipes one per item is capped at"
+
+
+def _multi_list(spec, emitted: dict | None) -> _Multi | None:
+    """A list-of-items ingredient whose every item this addon holds, or None."""
+    ids = _listed_items(spec)
+    if emitted is None or ids is None:
+        return None
+    if any(not i.startswith("minecraft:") and i not in emitted for i in ids):
+        return None
+    if len(ids) == 1:
+        return None  # _item reads a one-entry list as its lone member
+    return _Multi(spec=spec, found=MultiMembers(tag=_list_label(ids), members=ids),
+                  taggable=False, extras=[], listed=True)
+
+
 def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
-    """The tag ingredient as a known, fully emitted membership, or None."""
+    """The tag (or item-list) ingredient as a known, fully emitted membership, or None."""
+    if isinstance(spec, list):
+        return _multi_list(spec, emitted)
     if emitted is None or not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
         return None
     found = tags.members(spec["tag"])
@@ -382,6 +468,11 @@ def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
 
 def _not_emitted(spec, tags: TagResolver, emitted: dict | None) -> list[str]:
     """Members of a known tag ingredient that this conversion did not emit."""
+    listed = _listed_items(spec)
+    if listed is not None:
+        if emitted is None:
+            return []
+        return [m for m in listed if not m.startswith("minecraft:") and m not in emitted]
     if emitted is None or not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
         return []
     found = tags.members(spec["tag"])
@@ -654,8 +745,11 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
             # first failing ingredient always had, plus which members this
             # conversion didn't emit when that is what blocks it.
             # A tag this conversion could have written isn't what blocks it.
-            bad = positions[next((i for i in failing if multis[i] is None), (rest or failing)[0])][0]
+            bad_i = next((i for i in failing if multis[i] is None), (rest or failing)[0])
+            bad = positions[bad_i][0]
             reason = _tag_reason(bad, tag_resolver)
+            if multis.get(bad_i) is not None and multis[bad_i].listed:
+                reason = _list_reason(multis[bad_i], positions[bad_i][1], len(rest))
             missing = _not_emitted(bad, tag_resolver, emitted)
             if missing:
                 reason += f"; not converted: {', '.join(missing)}"
@@ -733,7 +827,7 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
                 bedrock_type: variant,
             })
         for i, multi in multis.items():
-            if multi is None:
+            if multi is None or multi.listed:
                 continue
             multi_used[multi.found.tag] = multi.found
             if i in native:
@@ -764,6 +858,12 @@ def convert(mod: SourceMod, emitted: dict | None = None) -> ConversionResult:
                 f"{rel}: tag {member_tag!r} also holds {len(variants) - 1} of this mod's members "
                 f"that can't carry Bedrock's tag of that name, so each got its own recipe "
                 f"({name}__<member>) beside the one taking the tag"
+            )
+        elif expanded is not None and multis[expanded].listed:
+            result.notes.append(
+                f"{rel}: ingredient lists {len(variants)} items, which Bedrock can't group "
+                f"without a tag the mod never declared, so the recipe was written once per item "
+                f"({name}__<item>)"
             )
         elif expanded is not None:
             member_tag = multis[expanded].found.tag
