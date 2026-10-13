@@ -1,5 +1,11 @@
 {
   "fixtures": {
+    "alexs_mobs": {
+      "coverage": 19.7,
+      "files": 1069,
+      "residue": 4364,
+      "errors": 0
+    },
     "betterend": {
       "coverage": 34.1,
       "files": 3256,
@@ -23,6 +29,18 @@
       "files": 690,
       "residue": 1567,
       "errors": 0
+    },
+    "mekanism": {
+      "coverage": 11.8,
+      "files": 1212,
+      "residue": 9027,
+      "errors": 0
+    },
+    "mythicmetals": {
+      "coverage": 41.7,
+      "files": 1496,
+      "residue": 2090,
+      "errors": 1
     },
     "silent_gear_1165": {
       "coverage": 32.8,
