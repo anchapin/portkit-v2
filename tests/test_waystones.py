@@ -248,6 +248,9 @@ def test_requirements_parse_like_waystones():
     # enableCosts off: no xp modifier at all.
     kept, dropped = requirements(DEFAULTS, False, True)
     assert kept == [] and len(dropped) == 9
+    # A line that can never apply here is left out whatever it does.
+    kept, dropped = requirements(["[source_is_scroll] add_level_cost(5)"], True, True)
+    assert kept == [] and dropped == ["[source_is_scroll] add_level_cost(5) (never applies here)"]
     # Namespaced ids and negations of fixed conditions.
     kept, _ = requirements(["[waystones:source_is_not_warp_plate] waystones:add_xp_cost(3)"], True, True)
     assert kept == [{"when": {}, "fn": "add_xp_cost", "args": [3]}]

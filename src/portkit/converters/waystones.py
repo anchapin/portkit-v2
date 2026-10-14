@@ -340,11 +340,16 @@ def requirements(lines: list[str], enable_costs: bool, enable_cooldowns: bool) -
         functions = [(m.group(1), m.group(2)) for m in _FUNCTION.finditer(function_part)]
         if not functions:
             raise _Refuse(f"warp requirement {line!r} names no function")
+        if never:
+            # A condition this runtime decides false: whatever the line does,
+            # it never applies to a teleport here.
+            dropped.append(f"{line} (never applies here)")
+            continue
         for name, args in functions:
             fn = _local(name)
             if fn in COOLDOWN_FUNCTIONS:
-                if never or not enable_cooldowns:
-                    dropped.append(f"{line} (never applies here)" if never else f"{line} (enableCooldowns off)")
+                if not enable_cooldowns:
+                    dropped.append(f"{line} (enableCooldowns off)")
                     continue
                 raise _Refuse(f"cooldown requirement {line!r} applies here; cooldowns have no runtime")
             if fn not in XP_FUNCTIONS:
@@ -355,9 +360,6 @@ def requirements(lines: list[str], enable_costs: bool, enable_cooldowns: bool) -
                 raise _Refuse(f"{name}({args}) takes {len(kinds)} argument(s)")
             if not enable_costs:
                 dropped.append(f"{line} (enableCosts off)")
-                continue
-            if never:
-                dropped.append(f"{line} (never applies here)")
                 continue
             kept.append({"when": dict(sorted(when.items())), "fn": fn,
                          "args": [_argument(k, a) for k, a in zip(kinds, parts)]})
