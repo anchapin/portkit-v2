@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: a player who dies with an epitaph leaves a fleeting memorial, listed at the top of their menus through the waystone runtime until a teleport reaches it
 
-- **Status:** proposed (PR #209, Part of #178); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #209, Part of #178).
 - **Decision:** Waystones' fleeting memorial (`FleetingMemorialBlock`,
   `ModBlocks` L88) and the epitaph (`ModItems` L49) work through the waystone
   runtime of #198-#208: a `fleeting_memorials` section in the same data
