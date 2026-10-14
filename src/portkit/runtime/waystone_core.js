@@ -1,9 +1,10 @@
-// portkit station runtime: Waystones waystone, sharestone, portstone, warp plate and warp portal logic (#178).
+// portkit station runtime: Waystones waystone, sharestone, portstone, warp plate, warp portal, scroll, warp stone and fleeting memorial logic (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). No imports, so it runs under
 // node (tests/js/waystone.test.mjs, tests/js/warp_plate.test.mjs,
-// tests/js/warp_portal.test.mjs). The Bedrock binding is waystone.js.
+// tests/js/warp_portal.test.mjs, tests/js/memorial.test.mjs). The Bedrock
+// binding is waystone.js.
 //
 // Cited to Waystones v21.1.46 (TwelveIterations/Waystones @9d280c1a,
 // common/src/main/java/net/blay09/mods/waystones/); the data table's header
@@ -426,4 +427,47 @@ export function mayBind(emptySlots, stackableSlot, creative, heldAmount) {
  */
 export function wearBreaks(damage, maxDamage) {
   return damage + 1 >= maxDamage;
+}
+
+// -- fleeting memorials --------------------------------------------------------
+// FleetingMemorialManager (core/FleetingMemorialManager.java).
+
+/**
+ * findMemorialPos L105-122: the block above the death position first, then,
+ * for each height dy from 0 to `height` and each radius from 1 to `radius`,
+ * the square of blocks deathPos + (-r..r, dy, -r..r) in BlockPos#betweenClosed
+ * order (x fastest, then z: Minecraft 1.21.1 BlockPos$4#computeNext
+ * L600-610; y is fixed in each square), the first where canPlace(pos) holds
+ * (canPlaceMemorialAt L124-126); null when there is none.
+ */
+export function memorialPos(death, canPlace, radius, height) {
+  const preferred = { x: death.x, y: death.y + 1, z: death.z };
+  if (canPlace(preferred)) return preferred;
+  for (let dy = 0; dy <= height; dy++) {
+    for (let r = 1; r <= radius; r++) {
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const candidate = { x: death.x + dx, y: death.y + dy, z: death.z + dz };
+          if (canPlace(candidate)) return candidate;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * FleetingMemorialManager#getTargets L56-63: every stored memorial (`type`)
+ * owned by the player, in the order they were made (`order`, then uid; Java's
+ * is its manager's hash order, which no rule reproduces).
+ */
+export function memorialTargets(records, type, ownerId) {
+  return records
+    .filter((r) => r.type === type && r.owner === ownerId)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
+}
+
+/** Entity#blockPosition: the block a location is in (each coordinate floored). */
+export function blockOf(location) {
+  return { x: Math.floor(location.x), y: Math.floor(location.y), z: Math.floor(location.z) };
 }

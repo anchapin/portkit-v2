@@ -377,17 +377,24 @@ def _facing_definition(namespace: str, name: str, geometry: str, instances: dict
         # nothing collides with the block and nothing can select it.
         components["minecraft:collision_box"] = dict(station.box) if station.box is not None else False
         components["minecraft:selection_box"] = dict(station.box) if station.box is not None else False
-    return {
-        "format_version": _BLOCK_FORMAT,
-        "minecraft:block": {
-            "description": {
-                "identifier": f"{namespace}:{name}",
-                "menu_category": {"category": _MENU_CATEGORY},
-                "traits": {"minecraft:placement_direction": trait},
-            },
-            "components": components,
+    block = {
+        "description": {
+            "identifier": f"{namespace}:{name}",
+            "menu_category": {"category": _MENU_CATEGORY},
+            "traits": {"minecraft:placement_direction": trait},
         },
+        "components": components,
     }
+    boxes = getattr(station, "facing_boxes", None) if station is not None else None
+    if boxes:
+        # Java's shape by facing (the fleeting memorial's thin slab sits off
+        # the centre): one permutation per facing with its own box.
+        block["permutations"] = [
+            {"condition": f"q.block_state('minecraft:cardinal_direction') == '{d}'",
+             "components": {"minecraft:collision_box": dict(boxes[d]), "minecraft:selection_box": dict(boxes[d])}}
+            for d in _CARDINALS if d in boxes
+        ]
+    return {"format_version": _BLOCK_FORMAT, "minecraft:block": block}
 
 
 def _facing_variants(blockstate: dict) -> tuple[str | None, bool]:

@@ -183,6 +183,11 @@ class FacingBlock:
     # Fields every material instance of the block takes (the warp portal's
     # translucent render layer, set in the mod's client code). None for none.
     material: dict | None = None
+    # Per Java facing, the collision and selection box (origin/size in
+    # pixels) when Java's shape differs by facing and the block has no other
+    # state to turn it with (Waystones' fleeting memorial: a thin slab off the
+    # centre). None when ``box`` holds for every facing.
+    facing_boxes: dict | None = None
 
 
 # Farmer's Delight's cutting board, both corpus builds: FACING is

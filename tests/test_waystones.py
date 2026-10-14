@@ -1624,3 +1624,204 @@ def test_warp_stone_runtime_under_node(warp_stoned):
                 capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
             )
             assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr
+
+
+# -- fleeting memorials (#178) -------------------------------------------------------
+
+MEMORIAL_LANG = {
+    "block.waystones.fleeting_memorial": "Fleeting Memorial",
+    "item.waystones.epitaph": "Epitaph",
+    "gui.waystones.waystone_selection.epitaph_requirement": "%s",
+}
+# The jar's block/fleeting_memorial model (Blockbench; two elements carry an
+# angle-0 rotation, which moves nothing).
+MEMORIAL_MODEL = {
+    "parent": "minecraft:block/block",
+    "textures": {"1": f"{NS}:block/fleeting_memorial", "particle": "minecraft:block/deepslate"},
+    "elements": [
+        {"from": [3, 2, 8], "to": [13, 14, 9], "rotation": {"angle": 0, "axis": "y", "origin": [0, 1, 0]},
+         "faces": {f: {"uv": [0, 0, 1, 1], "texture": "#1"} for f in FACES}},
+        {"from": [5, 1, 8], "to": [12, 2, 9], "faces": {f: {"uv": [0, 0, 1, 1], "texture": "#1"} for f in FACES}},
+        {"from": [4, 14, 8], "to": [11, 15, 9], "rotation": {"angle": 0, "axis": "y", "origin": [-1, 13, 0]},
+         "faces": {f: {"uv": [0, 0, 1, 1], "texture": "#1"} for f in FACES}},
+    ],
+}
+
+
+def _with_memorial(root: Path, lang_drop=(), epitaph=True) -> Path:
+    """Waystones' fleeting memorial as the jar has it (facing variants of one
+    model) and the epitaph item, with their texts."""
+    _write(root, f"assets/{NS}/models/block/fleeting_memorial.json", MEMORIAL_MODEL)
+    _write(root, f"assets/{NS}/blockstates/fleeting_memorial.json", {"variants": {
+        f"facing={d}": {"model": f"{NS}:block/fleeting_memorial", **({"y": y} if y else {})} for d, y in TURNS}})
+    (root / f"assets/{NS}/textures/block").mkdir(parents=True, exist_ok=True)
+    (root / f"assets/{NS}/textures/block/fleeting_memorial.png").write_bytes(PNG.read_bytes())
+    if epitaph:
+        _write(root, f"assets/{NS}/models/item/epitaph.json",
+               {"parent": "minecraft:item/generated", "textures": {"layer0": f"{NS}:item/epitaph"}})
+        (root / f"assets/{NS}/textures/item").mkdir(parents=True, exist_ok=True)
+        (root / f"assets/{NS}/textures/item/epitaph.png").write_bytes(PNG.read_bytes())
+    lang = json.loads((root / f"assets/{NS}/lang/en_us.json").read_text())
+    lang.update({k: v for k, v in MEMORIAL_LANG.items() if k not in lang_drop})
+    _write(root, f"assets/{NS}/lang/en_us.json", lang)
+    return root
+
+
+@pytest.fixture
+def memorialed(tmp_path):
+    root = _with_memorial(_with_warp_stone(_with_scrolls(_with_warp_portal(_waystones_mod(tmp_path)))))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    return result, tmp_path / "out"
+
+
+FREE_TAIL = [{"args": [0.0], "fn": "multiply_xp_cost", "when": {}},
+             {"args": [0], "fn": "min_xp_cost", "when": {}}, {"args": [27], "fn": "max_xp_cost", "when": {}}]
+
+
+def test_memorial_block_is_one_model_per_facing_with_java_boxes_light_and_no_loot(memorialed):
+    _, tree = memorialed
+    block = _block(tree, "fleeting_memorial")
+    assert block["description"]["menu_category"] == {"category": "none"}
+    trait = block["description"]["traits"]["minecraft:placement_direction"]
+    assert trait == {"enabled_states": ["minecraft:cardinal_direction"], "y_rotation_offset": 180}
+    components = block["components"]
+    assert components["minecraft:light_emission"] == 6
+    assert components["minecraft:loot"] == "loot_tables/empty.json"
+    assert components["waystones:portkit_waystone"] == {}
+    boxes = {p["condition"].split("'")[3]: p["components"] for p in block["permutations"]}
+    # FleetingMemorialBlock SHAPES by facing: x 3-13 (z 3-13 turned), y 1-15, a one-pixel slab off the centre.
+    assert boxes["north"]["minecraft:collision_box"] == {"origin": [-5, 1, 0], "size": [10, 14, 1]}
+    assert boxes["south"]["minecraft:collision_box"] == {"origin": [-5, 1, -1], "size": [10, 14, 1]}
+    assert boxes["east"]["minecraft:selection_box"] == {"origin": [-1, 1, -5], "size": [1, 14, 10]}
+    assert boxes["west"]["minecraft:selection_box"] == {"origin": [0, 1, -5], "size": [1, 14, 10]}
+    bones = _bones(tree, "fleeting_memorial")
+    assert set(bones) == {"facing_north", "facing_east", "facing_south", "facing_west"}
+    assert all(len(cubes) == 3 for cubes in bones.values())
+
+
+def test_memorial_table_holds_the_cited_rules(memorialed):
+    result, tree = memorialed
+    table = _table(tree)
+    mem = table["fleeting_memorials"]
+    assert mem["blocks"] == ["waystones:fleeting_memorial"]
+    assert mem["epitaphs"] == ["waystones:epitaph"]
+    assert mem["type"] == "waystones:fleeting_memorial"
+    assert (mem["search_radius"], mem["search_height"]) == (2, 3)
+    assert mem["epitaph_style"] == "\u00a7d"
+    assert mem["drop_radius"] == 2
+    # Free from every menu that lists one (target_is_fleeting_memorial multiplies by 0).
+    assert set(mem["requirements"]) == {"waystones:waystone", "waystones:orange_sharestone"}
+    for rules in mem["requirements"].values():
+        assert rules[-3:] == FREE_TAIL
+    assert table["warp_portals"]["memorial_requirements"][-3:] == FREE_TAIL
+    assert table["warp_portals"]["scroll"]["memorial_requirements"][-3:] == FREE_TAIL
+    scrolls = table["scrolls"]["items"]
+    assert "waystones:fleeting_memorial" in scrolls["waystones:warp_scroll"]["requirements"]
+    assert "waystones:fleeting_memorial" in scrolls["waystones:bound_scroll"]["requirements"]
+    assert "waystones:fleeting_memorial" not in scrolls["waystones:return_scroll"]["requirements"]
+    stone = table["warp_stones"]["items"]["waystones:warp_stone"]["requirements"]
+    assert stone["waystones:fleeting_memorial"][-3:] == FREE_TAIL
+    # Names under the Bedrock keys the lang converter ships; the requirement line under its Java key.
+    assert table["messages"]["memorial_name"] == "tile.waystones:fleeting_memorial.name"
+    assert table["messages"]["epitaph"] == "item.waystones:epitaph.name"
+    assert table["messages"]["epitaph_requirement"] == "gui.waystones.waystone_selection.epitaph_requirement"
+    assert table["sounds"]["epitaph"] == {"id": "random.totem", "volume": 1.0, "pitch": 1.0}
+    # A memorial is no menu's own network and no placeable waystone.
+    assert "waystones:fleeting_memorial" not in table["block_types"]
+    assert "waystones:fleeting_memorial" not in table["blocks"]
+    text = (tree / DATA).read_text()
+    assert "fleeting memorial, epitaph, loot tables" in text.splitlines()[0]
+    assert "core/FleetingMemorialManager.java#L24-L126" in text
+    assert "handler/EpitaphDeathHandler.java#L12-L31" in text
+    assert "BlockPos$4#computeNext L600-610" in text
+    assert "(from all but the teleports to a fleeting memorial)" in text
+    notes = result.notes
+    note = next(n for n in notes if "fleeting memorial block(s) work" in n)
+    assert "dies with an epitaph" in note and "within 2 blocks of where the player died (not from Java)" in note
+    ways = next(n for n in notes if "waystone block(s) work" in n)
+    assert "Village and wild waystone generation, warp plates, shards and the feather are not converted" in ways
+    assert "the warp stone and fleeting memorials have their own notes" in ways
+    assert not any("fleeting memorials and twinbound" in n for n in notes)
+
+
+def test_memorial_texts_ship_and_names_keep_their_bedrock_keys(memorialed):
+    _, tree = memorialed
+    lang = (tree / "resource_pack/texts/en_US.lang").read_text()
+    assert "gui.waystones.waystone_selection.epitaph_requirement=%s" in lang
+    assert "tile.waystones:fleeting_memorial.name=Fleeting Memorial" in lang
+    assert "item.waystones:epitaph.name=Epitaph" in lang
+
+
+def test_epitaph_holds_one(memorialed):
+    _, tree = memorialed
+    epitaph = _item(tree, "epitaph")
+    assert epitaph["components"]["minecraft:max_stack_size"] == 1
+    assert epitaph["description"]["menu_category"] == {"category": "items"}
+
+
+def test_a_memorial_without_the_epitaph_item_stays_residue(tmp_path):
+    root = _with_memorial(_waystones_mod(tmp_path), epitaph=False)
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    assert "fleeting_memorials" not in _table(tmp_path / "out")
+    why = [u for u in result.unhandled if u.source.endswith("blockstates/fleeting_memorial.json") and u.kind == "waystone"]
+    assert why and "epitaph item did not convert" in why[0].reason
+    # The plan for it is dropped too: no line left out names a memorial teleport.
+    assert "fleeting memorial" not in (tmp_path / "out" / DATA).read_text().split("Sources:")[0]
+    assert "to a fleeting memorial" not in (tmp_path / "out" / DATA).read_text()
+
+
+def test_a_missing_memorial_text_leaves_the_memorial_inert(tmp_path):
+    root = _with_memorial(_waystones_mod(tmp_path), lang_drop=("gui.waystones.waystone_selection.epitaph_requirement",))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    assert "fleeting_memorials" not in _table(tmp_path / "out")
+    assert any("fleeting_memorial: places but does nothing" in n and "epitaph_requirement" in n for n in result.notes)
+
+
+def test_memorials_without_portals_or_scrolls(tmp_path):
+    root = _with_memorial(_waystones_mod(tmp_path))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    table = _table(tmp_path / "out")
+    assert "warp_portals" not in table and "scrolls" not in table
+    assert set(table["fleeting_memorials"]["requirements"]) == {"waystones:waystone", "waystones:orange_sharestone"}
+    note = next(n for n in result.notes if "fleeting memorial block(s) work" in n)
+    assert "warp portal" not in note and "blank scroll" not in note
+    assert "top of their waystone and sharestone menus (not a portstone's)" in note
+    ways = next(n for n in result.notes if "waystone block(s) work" in n)
+    assert ("warp plates, warp portals, the warp stone, scrolls, shards and the feather are not converted "
+            "(fleeting memorials have their own note).") in ways
+
+
+def test_memorial_conditions_are_decided_for_a_memorial_target():
+    fixed = waystones.fixed_conditions(waystones.WAYSTONE_TYPE, to_memorial=True)
+    assert fixed["target_is_fleeting_memorial"] is True
+    assert fixed["target_is_waystone"] is False and fixed["target_is_global"] is False
+    assert fixed["source_is_waystone"] is True
+    kept, _ = requirements(DEFAULTS, True, True, waystones.WAYSTONE_TYPE, to_memorial=True)
+    assert kept[-3:] == FREE_TAIL
+    assert waystones.fixed_conditions(waystones.WAYSTONE_TYPE)["target_is_fleeting_memorial"] is False
+
+
+def test_a_zero_degree_element_rotation_turns_like_an_unrotated_element():
+    from portkit.converters import models
+
+    element = MEMORIAL_MODEL["elements"][0]
+    turned, why = models.turn_y(element, 90, False)
+    assert why == "" and "rotation" not in turned
+    plain = {k: v for k, v in element.items() if k != "rotation"}
+    assert turned == models.turn_y(plain, 90, False)[0]
+    tilted = {**element, "rotation": {"angle": 22.5, "axis": "y", "origin": [8, 8, 8]}}
+    assert models.turn_y(tilted, 90, False)[0] is None
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_memorial_runtime_under_node(memorialed):
+    _, tree = memorialed
+    js = ROOT / "tests" / "js"
+    for test in ("memorial.test.mjs", "warp_stone.test.mjs", "scrolls.test.mjs", "warp_portal.test.mjs",
+                 "waystone.test.mjs"):
+        for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
+            proc = subprocess.run(
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
+            )
+            assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr

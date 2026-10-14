@@ -1,4 +1,4 @@
-// portkit station runtime: Waystones waystones, sharestones, portstones, warp plates, warp portals, scrolls and the warp stone, Bedrock binding (#178).
+// portkit station runtime: Waystones waystones, sharestones, portstones, warp plates, warp portals, scrolls, the warp stone and fleeting memorials, Bedrock binding (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). The generated entry
@@ -7,7 +7,8 @@
 // beforeOnPlayerPlace, onPlayerInteract, onPlayerBreak, onTick; world, entity
 // and item stack dynamic properties; Entity.teleport; Dimension.getEntities;
 // system.runInterval; world.afterEvents.playerPlaceBlock) and
-// @minecraft/server-ui 2.0.0 (ActionFormData, ModalFormData).
+// @minecraft/server-ui 2.0.0 (ActionFormData, ModalFormData); fleeting
+// memorials also use world.afterEvents.entityDie.
 //
 // Storage: a waystone is one world dynamic property keyed by its dimension
 // and lower-half position (JSON: uid, type, order, dimension, pos, facing,
@@ -54,6 +55,14 @@
 // timer, it opens the warp scroll's menu; each teleport from it takes one
 // durability from the warp stone in the slot it was used from (not in
 // creative), breaking it at its maximum.
+//
+// Fleeting memorials (table.fleeting_memorials): a player who dies with an
+// epitaph (world.afterEvents.entityDie; the epitaph is looked for in the
+// inventory and among the items dropped where they died) leaves a memorial
+// block nearby, a record of type fleeting_memorial owned by them. It lists at
+// the top of their waystone, sharestone, portal scroll, warp scroll and warp
+// stone menus; a teleport that reaches it (from a menu, a bound scroll or a
+// warp portal) removes it.
 
 import { BlockPermutation, EquipmentSlot, GameMode, ItemStack, system, world } from "@minecraft/server";
 import { ActionFormData, FormCancelationReason, ModalFormData } from "@minecraft/server-ui";
@@ -258,6 +267,10 @@ function rename(table, player, record) {
 function interact(table, event) {
   const { block, dimension, player } = event;
   if (!player) return;
+  if (isMemorial(table, block.typeId)) {
+    memorialInteract(table, event);
+    return;
+  }
   const permutation = block.permutation;
   if (permutation.getState(table.half_state) === "upper") {
     const below = block.below();
@@ -307,6 +320,8 @@ function interact(table, event) {
       requirements: network(table, record).requirements,
       title: { translate: table.messages.title },
       from: record,
+      // getTargetsForWaystone L313: the player's fleeting memorials.
+      memorials: true,
     }));
     return;
   }
@@ -339,6 +354,13 @@ function menu(table, player, source) {
   // The warp scroll's menu has it too (getTargetsForItem L299-304).
   const back = (from || source.back) && table.warp_portals ? returnPortal(table, player) : undefined;
   if (back) list.push(back);
+  // FleetingMemorialManager#getTargets L56-63 in getTargetsForPlayer /
+  // getTargetsForWaystone (L292-320): the player's memorials, pinned to the
+  // top of the list (WaystoneSelectionScreenBase#pinReturnPortalFirst
+  // L447-450, isReturnPortal L246-249).
+  if (source.memorials && table.fleeting_memorials) {
+    list.unshift(...core.memorialTargets(records(table), table.fleeting_memorials.type, player.id));
+  }
   const body = [];
   if (from) body.push(message(table, "current_location", [core.nameText(from.name, table.messages.unnamed)]));
   if (list.length === 0) {
@@ -350,6 +372,13 @@ function menu(table, player, source) {
     const points = core.cost(requirementsTo(table, source, target), context(player, target));
     const label = [core.nameText(target.name, table.messages.unnamed)];
     if (points > 0) label.push({ text: "\n" }, message(table, "xp_cost", [{ text: String(points) }]));
+    // EpitaphRequirement#appendHoverText L28-32: "%s" with the epitaph's name, LIGHT_PURPLE.
+    if (isMemorialRecord(table, target)) {
+      label.push({ text: "\n" }, { text: table.fleeting_memorials.epitaph_style }, {
+        translate: table.messages.epitaph_requirement,
+        with: { rawtext: [{ translate: table.messages.epitaph }] },
+      });
+    }
     form.button({ rawtext: label });
   }
   show(form, player).then((response) => {
@@ -368,6 +397,7 @@ function requirementsTo(table, source, target) {
   if (table.warp_portals && target.type === table.warp_portals.type) {
     return table.warp_portals.return_requirements[source.type] || [];
   }
+  if (isMemorialRecord(table, target)) return table.fleeting_memorials.requirements[source.type] || [];
   return source.requirements;
 }
 
@@ -384,11 +414,11 @@ function teleport(table, player, source, target) {
   const current = loadStored(key);
   // "Return to Portal" names a warp portal's waystone, not one of the menu's type.
   const toPortal = !!table.warp_portals && target.type === table.warp_portals.type;
-  const wanted = toPortal ? table.warp_portals.type : source.type;
+  const wanted = toPortal ? table.warp_portals.type : isMemorialRecord(table, target) ? target.type : source.type;
   if (!current || current.uid !== target.uid || typeOf(table, current) !== wanted) return fail("missing");
   const dimension = world.getDimension(current.dimension);
   const lower = blockAt(dimension, current.pos);
-  if (lower && (toPortal ? !isPortal(table, lower.typeId) : table.block_types[lower.typeId] !== typeOf(table, current))) {
+  if (lower && !blockMatches(table, current, lower)) {
     // The block went without a player breaking it; Java's onRemove drops it.
     saveStored(key, undefined);
     return fail("missing");
@@ -399,6 +429,34 @@ function teleport(table, player, source, target) {
   // consumeRequirements L490-494: giveExperiencePoints(-points), creative too.
   if (points > 0) player.addExperience(-points);
   land(table, player, current, lower, dimension);
+  arrived(table, current);
+}
+
+/**
+ * Whether the loaded block at a stored waystone's position is still its
+ * block (WaystoneImpl#isValidInLevel): a portal's a portal, a memorial's a
+ * memorial, any other the block of its type.
+ */
+function blockMatches(table, record, lower) {
+  if (table.warp_portals && record.type === table.warp_portals.type) return isPortal(table, lower.typeId);
+  if (isMemorialRecord(table, record)) return isMemorial(table, lower.typeId);
+  return table.block_types[lower.typeId] === typeOf(table, record);
+}
+
+/**
+ * After a teleport that reached `target` (WaystoneTeleportEvent.Complete,
+ * FleetingMemorialManager#handleTeleportComplete L78-97): a fleeting memorial
+ * is used up (removeAfterUse L65-76: destroyBlock without drops when its block
+ * is still there, and its waystone forgotten).
+ */
+function arrived(table, target) {
+  if (!isMemorialRecord(table, target)) return;
+  const key = core.recordKey(table.namespace, target.dimension, target.pos);
+  saveStored(key, undefined);
+  const dimension = world.getDimension(target.dimension);
+  const block = dimension ? blockAt(dimension, target.pos) : undefined;
+  // destroyBlock(pos, false): the break effects, no drops (its loot is empty).
+  if (block && isMemorial(table, block.typeId)) dimension.runCommand(core.destroyCommand(target.pos));
 }
 
 /**
@@ -436,6 +494,13 @@ function land(table, entity, current, lower, dimension) {
  */
 function broken(table, event) {
   const { block, brokenBlockPermutation: permutation, dimension, player } = event;
+  if (isMemorial(table, permutation.type.id)) {
+    // onRemove L217-237: the memorial's waystone goes with its block.
+    const key = core.recordKey(table.namespace, dimension.id, { ...block.location });
+    const record = loadStored(key);
+    if (record && record.type === table.fleeting_memorials.type) saveStored(key, undefined);
+    return;
+  }
   const half = permutation.getState(table.half_state);
   const other = half === "upper" ? block.below() : block.above();
   const pos = half === "upper" ? { ...block.location, y: block.location.y - 1 } : { ...block.location };
@@ -908,8 +973,13 @@ function scrollFinished(table, player) {
   system.run(() => menu(table, player, {
     type: scroll.network,
     requirements: scroll.requirements,
+    // A memorial's own cost from the scroll's menu (target_is_fleeting_memorial).
+    requirementsFor: (target) => (isMemorialRecord(table, target) ? scroll.memorial_requirements || []
+      : scroll.requirements),
     title: { translate: scroll.title },
     from: null,
+    // withTargetsForPlayer (getTargetsForPlayer L292-297): the player's memorials too.
+    memorials: true,
     select: (target) => openPortal(table, player, target),
   }));
 }
@@ -987,7 +1057,8 @@ function closePortal(table, dimension, pos) {
 function portalTarget(table, record) {
   if (!record.target) return undefined;
   const type = table.warp_portals.scroll.network;
-  return records(table).find((r) => r.uid === record.target && typeOf(table, r) === type);
+  // The scroll's menu also lists the player's fleeting memorials.
+  return records(table).find((r) => r.uid === record.target && (typeOf(table, r) === type || isMemorialRecord(table, r)));
 }
 
 /**
@@ -1015,13 +1086,14 @@ function enterPortal(table, dimension, record, entity) {
   const player = isPlayer(entity);
   const targetDimension = world.getDimension(target.dimension);
   const lower = blockAt(targetDimension, target.pos);
-  if (lower && table.block_types[lower.typeId] !== typeOf(table, target)) {
+  if (lower && !blockMatches(table, target, lower)) {
     // isValidInLevel fails (WaystoneImpl L145-148): the waystone is missing.
     saveStored(core.recordKey(table.namespace, target.dimension, target.pos), undefined);
     if (player) entity.onScreenDisplay.setActionBar(portalError(table, "missing"));
     return false;
   }
-  const points = core.cost(portals.requirements, context(entity, target));
+  const rules = isMemorialRecord(table, target) ? portals.memorial_requirements || [] : portals.requirements;
+  const points = core.cost(rules, context(entity, target));
   if (player && !core.canAfford(entity.getTotalXp(), points, creative(entity))) {
     entity.onScreenDisplay.setActionBar(portalError(table, "not_enough_xp"));
     return false;
@@ -1029,6 +1101,7 @@ function enterPortal(table, dimension, record, entity) {
   if (player && points > 0) entity.addExperience(-points);
   land(table, entity, target, lower, targetDimension);
   if (player && record.uid) entity.setDynamicProperty(portals.return_property, record.uid);
+  arrived(table, target);
   return false;
 }
 
@@ -1156,6 +1229,8 @@ function scrollItemFinished(table, player, typeId) {
       title: { translate: scrolls.title },
       from: null,
       back: true,
+      // getTargetsForItem L299-304 (getTargetsForPlayer): the player's memorials too.
+      memorials: true,
       select: (target) => scrollTeleport(table, player, typeId, target, true),
     }));
     return;
@@ -1220,10 +1295,10 @@ function itemTeleport(table, player, item, target, style) {
   const current = loadStored(key);
   if (!current || current.uid !== target.uid) return false;
   const toPortal = !!table.warp_portals && current.type === table.warp_portals.type;
-  if (!toPortal && !table.networks[typeOf(table, current)]) return false;
+  if (!toPortal && !isMemorialRecord(table, current) && !table.networks[typeOf(table, current)]) return false;
   const dimension = world.getDimension(current.dimension);
   const lower = blockAt(dimension, current.pos);
-  if (lower && (toPortal ? !isPortal(table, lower.typeId) : table.block_types[lower.typeId] !== typeOf(table, current))) {
+  if (lower && !blockMatches(table, current, lower)) {
     // The block went without a player breaking it (isValidInLevel fails).
     saveStored(key, undefined);
     return fail("missing");
@@ -1232,6 +1307,7 @@ function itemTeleport(table, player, item, target, style) {
   if (!core.canAfford(player.getTotalXp(), points, creative(player))) return fail("not_enough_xp");
   if (points > 0) player.addExperience(-points);
   land(table, player, current, lower, dimension);
+  arrived(table, current);
   return true;
 }
 
@@ -1254,6 +1330,8 @@ function warpStoneFinished(table, player, typeId) {
     title: { translate: stones.title },
     from: null,
     back: true,
+    // getTargetsForItem L299-304 (getTargetsForPlayer): the player's memorials too.
+    memorials: true,
     select: (target) => {
       if (itemTeleport(table, player, item, target, stones.error_style)) wearWarpStone(table, player, typeId, slot);
     },
@@ -1312,6 +1390,189 @@ function bind(table, player, record, held) {
   if (left) player.dimension.spawnItem(left, player.location);
 }
 
+// -- fleeting memorials ------------------------------------------------------------
+
+function isMemorial(table, typeId) {
+  return !!table.fleeting_memorials && table.fleeting_memorials.blocks.includes(typeId);
+}
+
+function isMemorialRecord(table, record) {
+  return !!table.fleeting_memorials && !!record && record.type === table.fleeting_memorials.type;
+}
+
+/**
+ * The memorial stored at a position, made when there is none (a memorial
+ * block no death made: WaystoneBlockEntityBase initializes a waystone with
+ * no owner, which no player's menu lists).
+ */
+function memorialAt(table, dimension, block) {
+  const pos = { ...block.location };
+  const key = core.recordKey(table.namespace, dimension.id, pos);
+  let record = loadStored(key);
+  if (!isMemorialRecord(table, record)) {
+    record = {
+      uid: newUid(),
+      type: table.fleeting_memorials.type,
+      order: nextOrder(table),
+      dimension: dimension.id,
+      pos,
+      facing: block.permutation.getState("minecraft:cardinal_direction") || "north",
+      name: { translate: table.messages.memorial_name },
+      owner: null,
+      owner_name: null,
+      origin: "UNKNOWN",
+    };
+    saveStored(key, record);
+  }
+  return record;
+}
+
+/**
+ * Using a memorial: FleetingMemorialBlock gives no edit action and no
+ * activation (L98-102; handleActivation returns null), so nothing happens,
+ * except that a blank scroll in hand binds a bound scroll to it
+ * (WaystoneBlockBase#useItemOn L257-262, BlankScrollItem#useOn L20-43: the
+ * memorial's block entity is a WaystoneBlockEntityBase).
+ */
+function memorialInteract(table, event) {
+  const { block, dimension, player } = event;
+  const held = heldItem(player);
+  if (held && table.scrolls && table.scrolls.blank.includes(held.typeId) && table.scrolls.bound) {
+    bind(table, player, memorialAt(table, dimension, block), held);
+  }
+}
+
+/** Squared distance between two locations. */
+function far(a, b) {
+  return (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2;
+}
+
+/**
+ * EpitaphDeathHandler#trySpawnMemorial L20-31: the first epitaph the dying
+ * player carries. Java looks through the inventory before anything drops; a
+ * script hears of the death after Bedrock dropped it (unless keepInventory),
+ * so the inventory (then the off hand) comes first and then the epitaph items
+ * lying within drop_radius of where the player died, nearest first. Returns a
+ * function that uses one up, or undefined.
+ */
+function findEpitaph(table, player) {
+  const mem = table.fleeting_memorials;
+  const inventory = player.getComponent("minecraft:inventory");
+  const container = inventory && inventory.container;
+  const size = container ? container.size ?? 0 : 0;
+  for (let slot = 0; slot < size; slot++) {
+    let stack;
+    try {
+      stack = container.getItem(slot);
+    } catch {
+      stack = undefined;
+    }
+    if (stack && mem.epitaphs.includes(stack.typeId)) {
+      return () => {
+        // itemStack.shrink(1).
+        if (stack.amount > 1) {
+          stack.amount -= 1;
+          container.setItem(slot, stack);
+        } else {
+          container.setItem(slot, undefined);
+        }
+      };
+    }
+  }
+  const equippable = player.getComponent("minecraft:equippable");
+  const off = equippable ? equippable.getEquipment(EquipmentSlot.Offhand) : undefined;
+  if (off && mem.epitaphs.includes(off.typeId)) {
+    return () => {
+      if (off.amount > 1) {
+        off.amount -= 1;
+        equippable.setEquipment(EquipmentSlot.Offhand, off);
+      } else {
+        equippable.setEquipment(EquipmentSlot.Offhand, undefined);
+      }
+    };
+  }
+  let dropped = [];
+  try {
+    dropped = player.dimension.getEntities({ type: "minecraft:item", location: player.location, maxDistance: mem.drop_radius });
+  } catch {
+    dropped = [];
+  }
+  const found = dropped
+    .map((entity) => {
+      const item = entity.getComponent ? entity.getComponent("minecraft:item") : undefined;
+      return { entity, stack: item ? item.itemStack : undefined };
+    })
+    .filter((e) => e.stack && mem.epitaphs.includes(e.stack.typeId) && (e.entity.isValid === undefined || e.entity.isValid))
+    .sort((a, b) => far(player.location, a.entity.location) - far(player.location, b.entity.location));
+  if (found.length === 0) return undefined;
+  const { entity, stack } = found[0];
+  return () => {
+    // An item entity's stack can't be changed in place: the rest is spawned again.
+    const location = { ...entity.location };
+    entity.remove();
+    if (stack.amount > 1) {
+      const rest = stack.clone();
+      rest.amount = stack.amount - 1;
+      player.dimension.spawnItem(rest, location);
+    }
+  };
+}
+
+/**
+ * FleetingMemorialManager#spawnMemorial L27-54: a memorial at the place
+ * findMemorialPos picks around the player's block position (only air and
+ * liquid count as replaceable; inside the dimension's height), facing the
+ * way the player looks turned round (Direction.fromYRot(yaw).getOpposite()),
+ * its waystone owned by the player (initializeWaystone with the player,
+ * WaystoneOrigin.PLAYER) and named "Fleeting Memorial". Returns whether one
+ * was made.
+ */
+function spawnMemorial(table, player) {
+  const mem = table.fleeting_memorials;
+  const dimension = player.dimension;
+  const range = dimension.heightRange;
+  const death = core.blockOf(player.location);
+  const pos = core.memorialPos(death, (p) => {
+    if (range && (p.y < range.min || p.y >= range.max)) return false;
+    return free(blockAt(dimension, p));
+  }, mem.search_radius, mem.search_height);
+  if (!pos) return false;
+  const block = blockAt(dimension, pos);
+  if (!block) return false;
+  const facing = core.portalFacing(player.getRotation().y);
+  block.setPermutation(BlockPermutation.resolve(mem.blocks[0], { "minecraft:cardinal_direction": facing }));
+  saveStored(core.recordKey(table.namespace, dimension.id, pos), {
+    uid: newUid(),
+    type: mem.type,
+    order: nextOrder(table),
+    dimension: dimension.id,
+    pos,
+    facing,
+    name: { translate: table.messages.memorial_name },
+    owner: player.id,
+    owner_name: player.name,
+    origin: "PLAYER",
+  });
+  return true;
+}
+
+/**
+ * EpitaphDeathHandler L12-31: a player who dies carrying an epitaph leaves a
+ * memorial; when one was made, the epitaph is used up and the player hears
+ * the totem sound (ClientEpitaphActivationHandler#playEffects L12-15, for
+ * them alone).
+ */
+function playerDied(table, event) {
+  const player = event.deadEntity;
+  if (!player || player.typeId !== "minecraft:player") return;
+  const take = findEpitaph(table, player);
+  if (!take) return;
+  if (!spawnMemorial(table, player)) return;
+  take();
+  const sound = table.sounds.epitaph;
+  if (sound && player.playSound) player.playSound(sound.id, { volume: sound.volume, pitch: sound.pitch });
+}
+
 /** Register the waystones' custom component for one mod's data table. */
 export function registerWaystones(table) {
   system.beforeEvents.startup.subscribe((init) => {
@@ -1334,6 +1595,9 @@ export function registerWaystones(table) {
     }
   });
   world.afterEvents.playerPlaceBlock.subscribe((event) => placed(table, event));
+  if (table.fleeting_memorials) {
+    world.afterEvents.entityDie.subscribe((event) => playerDied(table, event), { entityTypes: ["minecraft:player"] });
+  }
   if (table.warp_plates) system.runInterval(() => entityTicks(table), 1);
   if (table.warp_portals || table.scrolls || table.warp_stones) {
     world.afterEvents.itemUse.subscribe((event) => scrollUsed(table, event));

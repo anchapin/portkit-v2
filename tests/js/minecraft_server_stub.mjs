@@ -16,6 +16,8 @@ const MAX = {
   "waystones:bound_scroll": 1,
   // The warp stone (WarpStoneItem: properties.durability(128), one per stack).
   "waystones:warp_stone": 1,
+  // The epitaph (ModItems: stacksTo(1)).
+  "waystones:epitaph": 1,
 };
 const DURABILITY = { "minecraft:iron_shovel": 250, "farmersdelight:iron_knife": 250, "minecraft:wooden_shovel": 59,
   "waystones:warp_stone": 128 };
@@ -33,6 +35,12 @@ export class ItemStack {
     this._durability = DURABILITY[typeId] ? { damage: 0, maxDurability: DURABILITY[typeId] } : undefined;
   }
   getLore() { return [...this._lore]; }
+  clone() {
+    const copy = new ItemStack(this.typeId, this.amount);
+    copy.nameTag = this.nameTag;
+    copy._lore = [...this._lore];
+    return copy;
+  }
   // Like Bedrock: dynamic properties only on non-stackable items.
   getDynamicProperty(key) { return (this._props ?? {})[key]; }
   setDynamicProperty(key, value) {
