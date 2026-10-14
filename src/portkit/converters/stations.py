@@ -79,10 +79,11 @@ def _src(repo: tuple[str, str], path: str, line: str) -> str:
 @dataclass(frozen=True)
 class Overlay:
     """A model the mod's client code draws over a station block, tinted
-    (Waystones' sharestone runes, #178): Java renders it from a block entity
-    renderer, so no blockstate names it; Bedrock gets it as extra bones of the
-    block's own geometry wearing a texture baked at convert time
-    (:class:`DerivedTexture`) in the colour the code multiplies it by.
+    (Waystones' waystone, sharestone and portstone runes, #178): Java renders
+    it from a block entity renderer, so no blockstate names it; Bedrock gets it
+    as extra bones of the block's own geometry wearing a texture baked at
+    convert time (:class:`DerivedTexture`) in the colour the code multiplies it
+    by (or the jar's own texture, for a colour of white).
 
     ``model`` is the Java model and ``texture`` the one texture reference all
     its faces must draw. ``offsets`` maps each value of the station's state to
@@ -109,6 +110,10 @@ class Overlay:
     item_value: str
     item_turn: int
     sources: tuple[str, ...]
+    # A boolean Bedrock state (default false) the overlay shows only when on,
+    # set by the station's runtime (a waystone's runes once it is activated),
+    # or None for an overlay always drawn.
+    shown_by: str | None = None
 
 
 @dataclass(frozen=True)

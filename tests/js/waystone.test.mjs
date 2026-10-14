@@ -68,6 +68,8 @@ const FALLBACK = {
   },
   range_sq: 64,
   restricted_origins: ["PLAYER"],
+  rune_blocks: ["waystones:mossy_waystone", "waystones:waystone"],
+  rune_state: "waystones:runes",
   sounds: {
     activate: { id: "random.levelup", pitch: 1.0, volume: 0.2 },
     arrive: { id: "portal.travel", pitch: 1.0, volume: 0.05 },
@@ -744,4 +746,62 @@ test("breaking a portstone's upper half destroys the lower one with its drops", 
   component.onPlayerBreak({ block: upper, brokenBlockPermutation: permutation, dimension: overworld, player: alex });
   assert.deepEqual(overworld.commands, ["setblock 0 64 0 air destroy"]);
   assert.equal(overworld.typeAt({ x: 0, y: 64, z: 0 }), "minecraft:air");
+});
+
+// -- runes ---------------------------------------------------------------------
+
+const RUNES = table.rune_state;
+// A generated table whose jar has no waystone rune model lists no rune blocks.
+const NO_RUNES = !(table.rune_blocks || []).includes(TYPE) && "this table's waystones have no runes";
+
+test("placing a waystone turns its runes on, both halves (activated for the placer)", { skip: NO_RUNES }, async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  _respond({ canceled: false, formValues: ["A"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 }, "south");
+  for (const y of [64, 65]) {
+    const permutation = overworld.blockAt({ x: 0, y, z: 0 }).permutation;
+    assert.equal(permutation.getState(RUNES), true);
+    assert.equal(permutation.getState("minecraft:cardinal_direction"), "south");
+  }
+  assert.equal(overworld.blockAt({ x: 0, y: 65, z: 0 }).permutation.getState(HALF), "upper");
+});
+
+test("a waystone nobody activated has no runes until a player activates it", { skip: NO_RUNES }, async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const sam = makePlayer(overworld, { id: "2" });
+  // Not placed by a player (no owner, nothing activated).
+  overworld.set({ x: 0, y: 64, z: 0 }, TYPE, { "minecraft:cardinal_direction": "north", [HALF]: "lower", [RUNES]: false });
+  overworld.set({ x: 0, y: 65, z: 0 }, TYPE, { "minecraft:cardinal_direction": "north", [HALF]: "upper", [RUNES]: false });
+  use(overworld, sam, { x: 0, y: 65, z: 0 });
+  assert.equal(sam.messages[0].rawtext[0].translate, table.messages.activated);
+  assert.equal(overworld.blockAt({ x: 0, y: 64, z: 0 }).permutation.getState(RUNES), true);
+  assert.equal(overworld.blockAt({ x: 0, y: 65, z: 0 }).permutation.getState(RUNES), true);
+});
+
+test("an activated waystone whose runes went off gets them back on its next use", { skip: NO_RUNES }, async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  _respond({ canceled: false, formValues: ["A"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 });
+  overworld.set({ x: 0, y: 65, z: 0 }, TYPE, { "minecraft:cardinal_direction": "north", [HALF]: "upper", [RUNES]: false });
+  _respond({ canceled: true });
+  use(overworld, alex, { x: 0, y: 64, z: 0 });
+  assert.equal(overworld.blockAt({ x: 0, y: 65, z: 0 }).permutation.getState(RUNES), true);
+});
+
+test("sharestones and portstones never get a runes state (theirs are always drawn)", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  _respond({ canceled: false, formValues: ["S"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 }, "north", ORANGE);
+  await place(overworld, alex, { x: 4, y: 64, z: 0 }, "north", ORANGE_PORT);
+  for (const [x, y] of [[0, 64], [0, 65], [4, 64], [4, 65]]) {
+    assert.equal(overworld.blockAt({ x, y, z: 0 }).permutation.getState(RUNES), undefined);
+  }
+  assert.ok(!table.rune_blocks.includes(ORANGE) && !table.rune_blocks.includes(ORANGE_PORT));
 });

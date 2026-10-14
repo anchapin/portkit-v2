@@ -44,12 +44,15 @@ Where each value comes from (no fabrication, #87):
   ``ACTIVATION`` visibility, or at a sharestone and ends at one of its colour);
   what is left is evaluated by the runtime.
   An unknown condition or function means no runtime (residue), never a guess.
-* **A sharestone's colour**: the jar's ``block/sharestone_runes`` model,
-  which Java's ``SharestoneRenderer`` draws tinted, as extra bones of the
-  block's geometry (:class:`portkit.converters.stations.Overlay`), on textures
-  baked at convert time with the colour's ``DyeColor`` values
-  (:data:`DYE_COLORS`, cited): the texture diffuse colour for the block, the
-  text colour for the item (``minecraft:item_visual``).
+* **Runes**: the jar's ``block/sharestone_runes``, ``block/portstone_runes``
+  and ``block/waystone_runes`` models, which Java's renderers draw tinted, as
+  extra bones of the block's geometry
+  (:class:`portkit.converters.stations.Overlay`), on textures baked at
+  convert time: a sharestone's and portstone's with the colour's ``DyeColor``
+  values (:data:`DYE_COLORS`, cited; texture diffuse colour for the block,
+  text colour for the item through ``minecraft:item_visual``), a waystone's
+  with its style's rune colour (:data:`WAYSTONE_RUNE_COLORS`), shown through
+  :data:`RUNE_STATE` once a player activates it (the runtime sets it).
 * **Texts**: the jar's own lang keys (:data:`MESSAGES`), shipped under their
   Java key (:func:`portkit.converters.lang.convert` ``runtime_keys``).
 """
@@ -166,23 +169,58 @@ def portstone_target(name: str) -> str:
 
 
 # -- runes -------------------------------------------------------------------------
-# A sharestone's colour is drawn by code, not by its block model (whose faces
-# have no tintindex): SharestoneRenderer (L39-52) renders the model
-# block/sharestone_runes (ModModels L11-L17) from the lower half's block entity
-# (L34-36), turned by FACING.toYRot() about the block's centre (L42-44), through
-# RuneRenderUtil (L12-19): cutout, the colour's getTextureDiffuseColor()
-# multiplied into the faces that have a tintindex, at full brightness unless
-# the client config disableTextGlow is set (default false,
-# WaystonesConfigData L201). The item's model tints the same runes with
-# getTextColor() instead (ModRenderers L27-28, the item colour handler).
-RUNE_MODEL = f"{NS}:block/sharestone_runes"
-RUNE_SOURCES = (
-    _src("client/render/SharestoneRenderer.java", "31-L53"),
+# A waystone's, sharestone's and portstone's runes are drawn by code, not by
+# their block models (whose faces have no tintindex). Each family's block
+# entity renderer draws its own model (ModModels L11-L17:
+# block/waystone_runes, block/sharestone_runes, block/portstone_runes) from
+# the lower half (WaystoneRenderer L29-31, SharestoneRenderer L34-36,
+# PortstoneRenderer L30-32), turned by FACING.toYRot() about the block's
+# centre (WaystoneRenderer L39-42, SharestoneRenderer L42-44, PortstoneRenderer
+# L36-39), through RuneRenderUtil (L12-19): cutout, a colour multiplied into the
+# faces that have a tintindex, at full brightness unless the client config
+# disableTextGlow is set (default false, WaystonesConfigData L201).
+# * sharestone, portstone: the colour's getTextureDiffuseColor()
+#   (SharestoneRenderer L49, PortstoneRenderer L43); their item models
+#   (item/sharestone, item/portstone) tint the same runes with getTextColor()
+#   (ModRenderers L27-28, L31-32, the item colour handlers).
+# * waystone: its WaystoneStyle's rune colour (WaystoneRenderer L43-47:
+#   WaystoneStyles.getStyle(block).getRuneColor(), 0xFFFFFFFF without a style),
+#   and only while the client's player has activated that waystone
+#   (WaystoneRenderer L33-37, PlayerWaystoneManager#isWaystoneActivated). Its
+#   item model (item/waystone) has no runes.
+RUNE_SOURCES = {
+    "sharestone": (
+        _src("client/render/SharestoneRenderer.java", "31-L53"),
+        _src("client/ModRenderers.java", "25-L28"),
+    ),
+    "portstone": (
+        _src("client/render/PortstoneRenderer.java", "26-L47"),
+        _src("client/ModRenderers.java", "29-L32"),
+    ),
+    "waystone": (
+        _src("client/render/WaystoneRenderer.java", "26-L51"),
+        _src("api/WaystoneStyle.java", "11-L28"),
+        _src("api/WaystoneStyles.java", "16-L25"),
+        _src("core/PlayerWaystoneManager.java", "32-L34"),
+    ),
+}
+RUNE_COMMON_SOURCES = (
     _src("client/render/RuneRenderUtil.java", "12-L20"),
     _src("client/ModModels.java", "11-L17"),
-    _src("client/ModRenderers.java", "25-L28"),
     _src("config/WaystonesConfigData.java", "199-L202"),
 )
+# A waystone style's rune colour (0xAARRGGBB; RuneRenderUtil L13-15 reads only
+# red, green and blue): WaystoneStyles L19 BLACKSTONE withRuneColor(0xFF993333),
+# L21 END_STONE withRuneColor(0xFF7200FF); every other style keeps
+# WaystoneStyle's default 0xFFFFFFFF (WaystoneStyle L11), which multiplies the
+# texture by 1, i.e. leaves it as the jar has it.
+WAYSTONE_RUNE_COLORS = {"blackstone_waystone": 0x993333, "end_stone_waystone": 0x7200FF}
+WAYSTONE_RUNE_DEFAULT = 0xFFFFFF
+# The Bedrock state that shows a waystone's runes, turned on by the runtime
+# when a player activates the waystone (a Bedrock block looks the same to
+# every player, so "activated by the client's player" becomes "activated by
+# any player").
+RUNE_STATE = f"{NS}:runes"
 # DyeColor's (textureDiffuseColor, textColor) per colour, Minecraft 1.21.1 (the
 # game Waystones 21.1.46 is built for): the constructor arguments in
 # net.minecraft.world.item.DyeColor's static initializer, read from Mojang's
@@ -221,15 +259,46 @@ TO_Y_ROT = {"south": 0, "west": 90, "north": 180, "east": 270}
 # Bedrock material field (material_instances: texture, render_method,
 # face_dimming, ambient_occlusion, tint_method for biome tints only;
 # MicrosoftDocs/minecraft-creator minecraftBlock_material_instances.md).
-# The renderer draws from the lower half (SharestoneRenderer L34-36): the
-# model's upper block is 16 pixels up.
+# The renderers draw from the lower half: the model's upper block is 16 pixels up.
 RUNE_OFFSETS = {"lower": 0, "upper": 16}
 RUNE_BLOCK_MATERIAL = {"render_method": "alpha_test", "face_dimming": False, "ambient_occlusion": False}
 RUNE_ITEM_MATERIAL = {"render_method": "alpha_test"}
 
 
-def _rune_subpath(color: str, item: bool = False) -> str:
-    return f"{color}_sharestone_runes" + ("_item" if item else "")
+def _family(name: str) -> str | None:
+    """Which renderer draws ``name``'s runes: "waystone", "sharestone",
+    "portstone", or None for a block with none."""
+    if name in SHARESTONE_BLOCKS:
+        return "sharestone"
+    if name in PORTSTONE_BLOCKS:
+        return "portstone"
+    if name in WAYSTONE_BLOCKS:
+        return "waystone"
+    return None
+
+
+def _rune_model(family: str) -> str:
+    return f"{NS}:block/{family}_runes"
+
+
+# Kept for the sharestone note's wording (PR #203).
+RUNE_MODEL = _rune_model("sharestone")
+
+
+def rune_colors(name: str) -> tuple[int, int | None] | None:
+    """(the placed block's rune colour, the item's or None) for ``name``, as
+    0xRRGGBB, or None for a block whose colour is not known."""
+    family = _family(name)
+    if family == "waystone":
+        return WAYSTONE_RUNE_COLORS.get(name, WAYSTONE_RUNE_DEFAULT), None
+    if family is None:
+        return None
+    color = name[:-len(f"_{family}")]
+    return DYE_COLORS.get(color)
+
+
+def _rune_subpath(name: str, item: bool = False) -> str:
+    return f"{name}_runes" + ("_item" if item else "")
 
 
 def _jar_block_texture_keys(mod: SourceMod) -> set[str]:
@@ -242,30 +311,44 @@ def _jar_block_texture_keys(mod: SourceMod) -> set[str]:
     return keys
 
 
-def _runes(mod: SourceMod) -> tuple[str | None, str]:
+def _derived(name: str) -> list[tuple[str, int]]:
+    """(subpath, colour) of each texture baked for ``name``'s runes: the
+    block's (none when its colour is white, which leaves the jar's texture as
+    it is) and the item's when its item tints them."""
+    colors = rune_colors(name)
+    if colors is None:
+        return []
+    block, item = colors
+    out = [] if block == 0xFFFFFF else [(_rune_subpath(name), block)]
+    if item is not None:
+        out.append((_rune_subpath(name, True), item))
+    return out
+
+
+def _runes(mod: SourceMod, family: str = "sharestone") -> tuple[str | None, str]:
     """(the rune texture's path below the mod root, "") when this jar's
-    sharestones can wear tinted runes, else (None, why)."""
-    path = mod.assets / "models" / "block" / "sharestone_runes.json"
+    ``family`` blocks can wear their runes, else (None, why)."""
+    from .blocks import _overlay_pieces
+
+    ref = _rune_model(family)
+    path = mod.assets / "models" / "block" / f"{family}_runes.json"
     try:
         model = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
-        return None, f"no readable {RUNE_MODEL} model in the jar"
+        return None, f"no readable {ref} model in the jar"
     refs = model.get("textures") or {}
     used = {spec.get("texture", "").lstrip("#") for element in model.get("elements") or []
             for spec in (element.get("faces") or {}).values() if isinstance(spec, dict)}
     for element in model.get("elements") or []:
-        try:
-            low, high = sorted((float(element["from"][1]), float(element["to"][1])))
-        except (KeyError, TypeError, ValueError, IndexError):
-            return None, f"{RUNE_MODEL} has an element without usable from/to"
-        if not any(base <= low and high <= base + 16 for base in RUNE_OFFSETS.values()):
-            return None, f"{RUNE_MODEL} element {element.get('name') or 'unnamed'} lies across two blocks"
+        pieces, why = _overlay_pieces(element, tuple(RUNE_OFFSETS), RUNE_OFFSETS)
+        if pieces is None:
+            return None, f"{ref} element {element.get('name') or 'unnamed'} {why}"
     textures = {refs.get(key) for key in used}
     if len(textures) != 1 or not isinstance(next(iter(textures)), str):
-        return None, f"{RUNE_MODEL} does not draw one texture"
+        return None, f"{ref} does not draw one texture"
     ns, _, sub = next(iter(textures)).rpartition(":")
     if ns != NS or not sub.startswith("block/"):
-        return None, f"{RUNE_MODEL}'s texture is not one of the jar's block textures"
+        return None, f"{ref}'s texture is not one of the jar's block textures"
     rel = f"assets/{NS}/textures/{sub}.png"
     try:
         readable = decode_rgba((mod.root / rel).read_bytes()) is not None
@@ -274,10 +357,11 @@ def _runes(mod: SourceMod) -> tuple[str | None, str]:
     if not readable:
         return None, f"no readable {rel} in the jar"
     taken = _jar_block_texture_keys(mod)
-    for color in SHARESTONE_COLORS:
-        for item in (False, True):
-            if shortname(_rune_subpath(color, item), mod.namespace) in taken:
-                return None, f"the jar has its own {_rune_subpath(color, item)} texture"
+    names = {"sharestone": SHARESTONE_BLOCKS, "portstone": PORTSTONE_BLOCKS, "waystone": WAYSTONE_BLOCKS}[family]
+    for name in names:
+        for subpath, _ in _derived(name):
+            if shortname(subpath, mod.namespace) in taken:
+                return None, f"the jar has its own {subpath} texture"
     return rel, ""
 
 
@@ -293,40 +377,49 @@ def _rune_turns(mod: SourceMod, name: str) -> dict | None:
 
 
 def _rune_overlay(mod: SourceMod, name: str) -> Overlay | None:
-    color = name[:-len("_sharestone")]
-    rel, _ = _runes(mod)
+    family = _family(name)
+    colors = rune_colors(name)
+    if family is None or colors is None:
+        return None
+    rel, _ = _runes(mod, family)
     turns = _rune_turns(mod, name)
-    if rel is None or turns is None or color not in DYE_COLORS:
+    if rel is None or turns is None:
         return None
     sub = rel[len(f"assets/{NS}/textures/"):-len(".png")]
+    block, item = colors
+    # A white rune colour multiplies by 1: the jar's own texture, which the
+    # textures converter ships under its own key.
+    block_key = shortname(sub[len("block/"):] if block == 0xFFFFFF else _rune_subpath(name), mod.namespace)
     return Overlay(
-        name="runes", model=RUNE_MODEL, texture=f"{NS}:{sub}",
+        name="runes", model=_rune_model(family), texture=f"{NS}:{sub}",
         offsets=dict(RUNE_OFFSETS), turns=turns,
-        block_texture=shortname(_rune_subpath(color), mod.namespace),
+        block_texture=block_key,
         block_material=dict(RUNE_BLOCK_MATERIAL),
-        item_texture=shortname(_rune_subpath(color, True), mod.namespace),
+        item_texture=shortname(_rune_subpath(name, True), mod.namespace) if item is not None else None,
         item_material=dict(RUNE_ITEM_MATERIAL),
-        # The item model (item/sharestone) draws the runes unturned; Bedrock's
-        # item shows the lower half (as the waystones' does).
+        # The item models (item/sharestone, item/portstone) draw the runes
+        # unturned; Bedrock's item shows the lower half (as the waystones' does).
         item_value="lower", item_turn=0,
-        sources=RUNE_SOURCES,
+        sources=RUNE_SOURCES[family] + RUNE_COMMON_SOURCES,
+        shown_by=RUNE_STATE if family == "waystone" else None,
     )
 
 
 def derived_textures(mod: SourceMod) -> list[DerivedTexture]:
-    """The sharestones' tinted rune textures, two per colour this jar's
-    runtime converts: the placed block's (textureDiffuseColor) and the item's
-    (textColor)."""
-    rel, _ = _runes(mod)
-    if rel is None:
-        return []
+    """The runes' tinted textures for every block this jar's runtime converts
+    with an overlay: the placed block's (unless white) and the item's (when
+    Java's item tints them)."""
     out = []
+    rels: dict[str, str | None] = {}
     for name, block in waystone_blocks(mod).items():
-        if block.overlay is None:
+        family = _family(name)
+        if block.overlay is None or family is None:
             continue
-        diffuse, text = DYE_COLORS[name[:-len("_sharestone")]]
-        out.append(DerivedTexture(rel, _rune_subpath(name[:-len("_sharestone")]), diffuse))
-        out.append(DerivedTexture(rel, _rune_subpath(name[:-len("_sharestone")], True), text))
+        if family not in rels:
+            rels[family] = _runes(mod, family)[0]
+        if rels[family] is None:
+            continue
+        out.extend(DerivedTexture(rels[family], subpath, rgb) for subpath, rgb in _derived(name))
     return out
 
 
@@ -602,7 +695,7 @@ def waystone_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
     names = [n for n in _tagged(mod) if n in WAYSTONE_BLOCKS]
     names += [n for n in _tagged(mod, SHARESTONE_TAG) if n in SHARESTONE_BLOCKS]
     names += [n for n in _tagged(mod, PORTSTONE_TAG) if n in PORTSTONE_BLOCKS]
-    return {name: _block(name, _rune_overlay(mod, name) if name in SHARESTONE_BLOCKS else None)
+    return {name: _block(name, _rune_overlay(mod, name))
             for name in names if (mod.assets / "blockstates" / f"{name}.json").is_file()}
 
 
@@ -948,6 +1041,16 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     kept_share = [i for i in kept if i.split(":", 1)[1] in SHARESTONE_BLOCKS]
     kept_ways = [i for i in kept if i not in kept_port and i not in kept_share]
     block_types = {i: waystone_type(i.split(":", 1)[1]) for i in kept if i not in kept_port}
+    def _states(ident: str) -> dict:
+        return ((files.get(f"blocks/{ident.split(':', 1)[1]}.json") or {}).get("minecraft:block", {})
+                .get("description", {}).get("states") or {})
+
+    def _has_runes(ident: str) -> bool:
+        return "runes" in ((files.get(f"blocks/{ident.split(':', 1)[1]}.json") or {})
+                           .get("minecraft:block", {}).get("components", {})
+                           .get("minecraft:material_instances") or {})
+
+    rune_blocks = [i for i in kept_ways if RUNE_STATE in _states(i) and _has_runes(i)]
     messages = dict(MESSAGES)
     if kept_share:
         messages.update(SHARESTONE_MESSAGES)
@@ -965,6 +1068,10 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         "portstones": {i: _portstone(i.split(":", 1)[1], plan) for i in kept_port},
         "range_sq": RANGE_SQ,
         "restricted_origins": sorted(values["general.restrictedWaystones"]),
+        # Waystones whose runes the runtime turns on when a player activates
+        # them (WaystoneRenderer L33-37), through this boolean state.
+        "rune_blocks": rune_blocks,
+        "rune_state": RUNE_STATE,
         "sounds": SOUNDS,
     }
     data_path = f"{_RUNTIME_DIR}/data/{NS}_waystone.js"
@@ -1009,6 +1116,25 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "block": ", ".join(kept_port),
         }
     result.notes.extend(dict.fromkeys(notes))
+    if rune_blocks:
+        coloured = sorted(i for i in rune_blocks if i.split(":", 1)[1] in WAYSTONE_RUNE_COLORS)
+        ways_runes = (
+            f"Its runes are drawn as Java draws them: the jar's {_rune_model('waystone')} model as part of the "
+            "block (the band cut where it crosses into the upper half), turned with the block's facing as the "
+            "Java renderer turns them, without face shading or ambient occlusion, in the waystone style's rune "
+            "colour (the jar's texture as it is"
+            + (f"; tinted at convert time for {', '.join(coloured)}" if coloured else "")
+            + "). Java shows them only to a player who has activated that waystone; a Bedrock block looks the "
+            f"same to everyone, so the runtime turns them on ({RUNE_STATE}) once any player activates it "
+            "(placing activates it for the placer), and from then on every player sees them. Not carried over: "
+            "the runes' full-brightness glow and the disableTextGlow client option"
+            + ("" if len(rune_blocks) == len(kept_ways) else
+               f"; {', '.join(i for i in kept_ways if i not in rune_blocks)} are drawn without runes")
+            + ". ")
+    else:
+        _, why_ways = _runes(mod, "waystone")
+        ways_runes = ("Not carried over: the runes a Java client draws on an activated waystone (code-rendered"
+                      f"{'; ' + why_ways if why_ways else ''}). ")
     if kept_ways:
         result.notes.append(
             f"{NS}: {len(kept_ways)} waystone block(s) work through a Script API runtime ({SCRIPT_MODULE} "
@@ -1028,14 +1154,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "and only air or liquid count as room beside a target, where Java also accepts replaceable or "
             "non-suffocating blocks like grass), the other half going when one is removed by anything but a "
             "player (an explosion), and config changes "
-            "(the cited defaults are used). The item shows the lower half only. Village and wild waystone "
+            "(the cited defaults are used). The item shows the lower half only. " + ways_runes
+            + "Village and wild waystone "
             "generation, warp plates and portals, fleeting memorials and the warp "
             "stone, scrolls, shards and feather are not converted."
             + (" Silk touch drops a plain waystone." if silk else "")
         )
-    runes_on = [i for i in kept_share if "runes" in ((files.get(f"blocks/{i.split(':', 1)[1]}.json") or {})
-                                             .get("minecraft:block", {}).get("components", {})
-                                             .get("minecraft:material_instances") or {})]
+    runes_on = [i for i in kept_share if _has_runes(i)]
     if kept_share and runes_on:
         looks = (
             f"Its coloured runes are drawn as Java draws them: the jar's {RUNE_MODEL} model as part of the "
@@ -1048,7 +1173,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             + ". Not carried over: the runes' full-brightness glow (Bedrock materials have no emissive "
             "setting), the floating, spinning warp stone a Java client draws above it, ")
     else:
-        _, why_runes = _runes(mod)
+        _, why_runes = _runes(mod, "sharestone")
         looks = ("Not carried over: the coloured runes and the floating warp stone a Java client draws on it "
                  f"(code-rendered{'; ' + why_runes if why_runes else ''}, so every colour looks the same here; "
                  "the colour is in the item's name), ")
@@ -1065,6 +1190,23 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "and leashed mobs, waterlogging, particles, comparator and observers, the free-space tests, an "
             "unloaded target's room check, explosions taking one half, config changes)."
         )
+    port_runes = [i for i in kept_port if _has_runes(i)]
+    if port_runes:
+        port_looks = (
+            f"Its coloured runes are drawn as Java draws them: the jar's {_rune_model('portstone')} model as part "
+            "of the block, in the texture tinted at convert time with the colour's DyeColor texture diffuse "
+            "colour (block) and text colour (item, through minecraft:item_visual), turned with the block's "
+            "facing as the Java renderer turns them, without face shading or ambient occlusion; the item shows "
+            "the lower half with its runes"
+            + ("" if len(port_runes) == len(kept_port) else
+               f" ({', '.join(i for i in kept_port if i not in port_runes)} without runes)")
+            + ". Not carried over: the runes' full-brightness glow, the warp stone a Java client draws tilted "
+            "on top, ")
+    else:
+        _, why_port = _runes(mod, "portstone")
+        port_looks = ("Not carried over: the coloured runes and the floating warp stone a Java client draws on it "
+                      f"(code-rendered{'; ' + why_port if why_port else ''}; every colour looks the same here, "
+                      "the colour is in the item's name), ")
     if kept_port:
         result.notes.append(
             f"{NS}: {len(kept_port)} portstone block(s) work through the same runtime ({data_path}): "
@@ -1075,9 +1217,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "activated; choosing one teleports the player beside it from wherever they stand (Java checks no "
             "distance to a portstone), for the warpRequirements experience cost (the defaults have no "
             "portstone rule: distance x 0.01 points, 27 between dimensions, at most 27). Breaking either half "
-            "removes both. Not carried over: the coloured runes and the floating warp stone a Java client "
-            "draws on it (code-rendered; every colour looks the same here, the colour is in the item's name), "
-            "the item tooltip, global and team waystones in the white portstone's list (visibility is not "
+            "removes both. " + port_looks
+            + "the item tooltip, global and team waystones in the white portstone's list (visibility is not "
             "carried), the menu's sorting, search and deleting, and the rest listed for waystones (pets and "
             "leashed mobs, waterlogging, the free-space tests, an unloaded target's room check, explosions "
             "taking one half, config changes)."
