@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-13: waystone and portstone runes reuse the sharestone overlay; a waystone's show once any player activates it
 
-- **Status:** proposed (PR #204, Part of #178); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #204, Part of #178).
 - **Decision:** the `stations.Overlay` / `DerivedTexture` pieces from the
   sharestone runes (entry below) now carry the other two rune renderers in
   Waystones 21.1.46:
