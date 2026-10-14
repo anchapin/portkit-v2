@@ -1,8 +1,8 @@
-// portkit station runtime: Waystones waystone, sharestone and portstone logic (#178).
+// portkit station runtime: Waystones waystone, sharestone, portstone and warp plate logic (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). No imports, so it runs under
-// node (tests/js/waystone.test.mjs). The Bedrock binding is waystone.js.
+// node (tests/js/waystone.test.mjs, tests/js/warp_plate.test.mjs). The Bedrock binding is waystone.js.
 //
 // Cited to Waystones v21.1.46 (TwelveIterations/Waystones @9d280c1a,
 // common/src/main/java/net/blay09/mods/waystones/); the data table's header
@@ -218,4 +218,113 @@ export function activatedKey(namespace) {
 /** `setblock` that removes the block at `location` and drops its loot (Java's destroyBlock with drops). */
 export function destroyCommand(location) {
   return `setblock ${location.x} ${location.y} ${location.z} air destroy`;
+}
+
+// -- warp plates ---------------------------------------------------------------
+// WarpPlateBlockEntity (block/entity/WarpPlateBlockEntity.java). A plate holds
+// one shard ({id, attunement}: Java's container slot 0; the modifier slots 1-4
+// have no counterpart, so no modifier ever applies).
+
+/**
+ * getIdleState L145-157: no shard EMPTY, the locking shard LOCKED, the
+ * dormant shard ATTUNING, anything else IDLE. (REDSTONE_DISABLED needs a
+ * redstone torch in a modifier slot, which never holds anything here.)
+ */
+export function idleStatus(shard, shards) {
+  if (!shard) return "empty";
+  if (shards.locked && shard.id === shards.locked) return "locked";
+  if (shard.id === shards.dormant) return "attuning";
+  return "idle";
+}
+
+/** hasPotentialWarpTarget L105-108: any shard but the locking one. */
+export function hasPotentialTarget(shard, shards) {
+  return !!shard && !(shards.locked && shard.id === shards.locked);
+}
+
+/**
+ * getTargetAttunementStack L293-320 with one slot: the waystone the shard is
+ * attuned to, unless it is this plate's own (or the item is no warp shard);
+ * null for none (Java's EMPTY stack, so getBoundWaystone is empty).
+ */
+export function targetUid(shard, shards, selfUid) {
+  if (!shard || !shards.accepted.includes(shard.id)) return null;
+  const uid = shard.attunement;
+  return uid && uid !== selfUid ? uid : null;
+}
+
+/**
+ * attuneShard L345-376, one tick: a dormant shard counts up and at
+ * `maxTicks` (getMaxAttunementTicks L377-379) becomes an attuned shard bound
+ * to this plate; an attuned shard bound to this plate is popped out
+ * (`eject`); anything else resets the count. Returns {shard, ticks, changed, eject}.
+ */
+export function attune(shard, ticks, shards, selfUid, maxTicks) {
+  if (shard && shard.id === shards.dormant) {
+    const next = ticks + 1;
+    if (next >= maxTicks) return { shard: { id: shards.attuned, attunement: selfUid }, ticks: 0, changed: true, eject: false };
+    return { shard, ticks: next, changed: false, eject: false };
+  }
+  if (shard && shard.id === shards.attuned && shard.attunement === selfUid) {
+    return { shard: null, ticks, changed: true, eject: true };
+  }
+  return { shard, ticks: 0, changed: false, eject: false };
+}
+
+/**
+ * An entity's warp plate state (Java keeps it on the entity, EntityMixin
+ * L17-28, unsaved): the plate it was last tracked on (`plate`, a record key),
+ * ticks spent on it (`onPlate`) and the cooldown ticks left (`since`).
+ */
+export function newTracking() {
+  return { plate: null, onPlate: 0, since: 0 };
+}
+
+/** isOnWarpPlateCooldown L420-423. */
+export function onCooldown(t, plate) {
+  return t.plate === plate && t.since > 0;
+}
+
+/** startTrackingEntity L407-412. */
+export function startTracking(t, plate) {
+  if (t.plate !== plate) {
+    t.plate = plate;
+    t.onPlate = 0;
+  }
+}
+
+/** resetTicksPassedOnWarpPlate L414-418. */
+export function resetOnPlate(t, plate) {
+  if (t.plate === plate) t.onPlate = 0;
+}
+
+/** markEntityForCooldown L326-331: an entity that arrived on `plate`. */
+export function markCooldown(t, plate, cooldown) {
+  t.plate = plate;
+  t.onPlate = 0;
+  t.since = cooldown;
+}
+
+/**
+ * tickEntityWarpPlateState L385-405, one entity tick: off its plate (or with
+ * none) the count resets and the cooldown runs down; on it, a running
+ * cooldown starts over.
+ */
+export function entityTick(t, onItsPlate, cooldown) {
+  if (t.plate && onItsPlate) {
+    if (t.since > 0) t.since = cooldown;
+    return;
+  }
+  t.onPlate = 0;
+  if (t.since > 0) t.since -= 1;
+}
+
+/** Whether a tracking entry says nothing a fresh one wouldn't (it can be dropped). */
+export function idleTracking(t, onItsPlate) {
+  return !onItsPlate && t.onPlate === 0 && t.since <= 0;
+}
+
+/** Whether an entity position lies in the block at `pos` (getEntitiesOnTop L159-167: the block's own cube). */
+export function inBlock(location, pos) {
+  return Math.floor(location.x) === pos.x && Math.floor(location.y) === pos.y && Math.floor(location.z) === pos.z;
 }

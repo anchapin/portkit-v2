@@ -27,6 +27,103 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: warp plates attune a dormant shard and warp what stands on them through the waystone runtime; the shard keeps its plate as item data
+
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #205, Part of #178).
+- **Decision:** Waystones' warp plate (`WarpPlateBlock`, registered by name,
+  `ModBlocks` L86) runs through the waystone runtime of #198-#204 with a
+  component of its own (`waystones:portkit_warp_plate`: `onTick` every tick
+  through `minecraft:tick` [1, 1], `onPlayerInteract`, `onPlayerBreak`) and a
+  `warp_plates` section in the same data table. A plate is a record of type
+  `waystones:warp_plate` (`WaystoneTypes` L11), owned by its placer, never in
+  any menu, holding one shard (`{id, attunement}`: Java's container slot 0).
+  - **Block:** no facing; a custom `waystones:status` state with Java's seven
+    `WarpPlateStatus` values in enum order, `empty` first (L61-68, default
+    L87-89); one bone per Java model (`warp_plate_empty`, `warp_plate`,
+    `warp_plate_locked`) shown for the statuses the jar's blockstate maps to
+    it; collision and selection box = the bounding box of `SHAPE` (L78-81),
+    16 x 2 x 16 px. New generic `FacingBlock.facing=False` (a station block
+    whose blockstate is one state alone) and `drop_tinted` in `blocks.py`.
+  - **Attuning:** placing a plate (or the first tick of one placed by command,
+    origin UNKNOWN, no owner) gives it a dormant shard
+    (`WarpPlateBlockEntity#initializeWaystone` L67-80); a dormant shard
+    attunes after 30 ticks (`getMaxAttunementTicks` L377-379) into an attuned
+    shard bound to that plate, which pops out at the plate's centre the next
+    tick with `CHICKEN_EGG` 1/1 (L345-376; Bedrock `mob.chicken.plop`, the same
+    audio: mcmeta 1.21.1 `entity.chicken.egg` = `mob/chicken/plop`,
+    bedrock-samples `mob.chicken.plop`). The status follows `getIdleState`
+    (L145-157).
+  - **Shards:** using a plate with a shard of the jar's `waystones:warp_shards`
+    item tag in the main hand puts one in when it holds none, creative keeping
+    the item (`WarpPlateBlock#useItemOn` L163-176); sneak-using with empty
+    hands pops it out (`useWithoutItem` L184-194); sneaking with anything in
+    either hand does nothing (vanilla's rule for using a block). The attuned
+    shard keeps its plate's uid as an item dynamic property, which Bedrock
+    allows only on non-stackable items; the attuned shard's stack size becomes
+    1 and the crumbling one's 4, from their classes (`AttunedShardItem` L6,
+    `CrumblingAttunedShardItem` L17; the item converter had written 64).
+  - **Warping:** each tick, the entities whose position is in the plate's
+    block: an IDLE plate whose shard can name a target turns WARPING (or
+    WARPING_INVALID when that plate is gone or a player can't pay)
+    (`onEntityCollision` L115-142); while warping, each entity counts ticks
+    and after more than `warpPlateUseTime` (15, `WaystonesConfigData` L75;
+    `getWarpPlateUseTime` L236-249 with no modifiers) is teleported to the
+    target plate's centre facing north (no side offset for a warp plate,
+    `WaystoneTeleportManager` L245-247, L275-284); players are told on the
+    action bar, in DARK_RED, when the shard has no attunement or its plate is
+    gone (L208-220) or when they can't pay (L284-290). Mobs and items go too;
+    riders and `teleports.entityDenyList` (`minecraft:wither`, L114) do not.
+    An arrival is marked on the target plate and may not use it again until
+    it has been off it for `warpPlateCooldownTime` (20, L79), kept per entity
+    in memory as Java keeps it unsaved on the entity (`EntityMixin` L17-28,
+    `tickEntityWarpPlateState` L385-405).
+  - **Cost:** the `warpRequirements` default decided for a plate-to-plate
+    teleport (`fixed_conditions(WARP_PLATE_TYPE)`: `source_is_warp_plate` and
+    `target_is_warp_plate` true, the waystone ones false, `target_is_global`
+    false as a plate's visibility is SHARD_ONLY): `multiply_xp_cost(0)`
+    applies to every plate teleport, so it is free at the defaults; the rest
+    is still evaluated per teleport, creative players always go.
+  - **Breaking:** the jar's loot table (one pool, `survives_explosion`; its
+    silk-touch `copy_components` and `copy_name` are not carried) and,
+    outside creative, the held shard (`WaystoneBlockBase#playerWillDestroy`
+    L128-133); the plate is forgotten.
+  - **Gating:** a plate ships only when the jar's texts for it exist, its
+    `warp_shards` tag is readable and the dormant and attuned shard items
+    converted; otherwise it stays residue with the reason.
+- **Why:** the warp plate is built on `WaystoneBlockBase` and the same
+  teleport manager, so it shares the runtime's storage and cost parser; the
+  per-tick behaviour is read line by line from `WarpPlateBlockEntity`, and an
+  item dynamic property is the one place Bedrock lets a single stack carry
+  which plate it was attuned to.
+- **Rejected:** a three-value state (empty/plate/locked) with the status kept
+  elsewhere (loses Java's one-to-one blockstate); drawing the tinted rune mark
+  untinted (white, wrong) or baking its twelve `ChatFormatting` colours now
+  (a follow-up, as runes were for #201/#202: it needs a UUID-shaped uid and
+  Java's `String#hashCode` of the galactic name); keeping the attunement in
+  lore or a name tag (visible and editable) or in a world table (two attuned
+  shards could not be told apart); `onStepOn` (fires once; Java counts ticks
+  while standing); players only (Java warps any entity); a cooldown in entity
+  dynamic properties (it would survive a reload, Java's doesn't); a rename
+  form on plain use (nothing shows a plate's name here, and Java names plates
+  from a word-list generator that isn't carried).
+- **Not carried over (conversion note):** the rune mark tinted by the plate's
+  galactic name and the item's tinted runes (`0xC456BD`; the item shows the
+  empty plate, the block's default state, where Java's item model is the
+  whole plate), the settings
+  screen (name, visibility, the four modifier slots and every warp modifier:
+  status effects, amethyst/slime use time, quartz round-robin, spider eye,
+  redstone torch, so REDSTONE_DISABLED never shows), the generated name,
+  each status's particles and the eject effect, shard tooltips and glint,
+  pets and leashed mobs travelling along, a crumbling shard's attunement (a
+  stackable item can't hold script data, so it warps nowhere), several
+  shards picked at random, a silk-touched plate keeping its identity, an
+  entity counting as on the plate by its position (Java: its bounding box),
+  config changes (cited defaults).
+- **Coverage:** Waystones 29.9 -> 30.2 (316 -> 319 files, residue 741 ->
+  736); no other corpus mod changed.
+- **Links:** #178, PR #198 (waystones), PR #201 (sharestones), PR #202
+  (portstones), PR #203/#204 (runes), #87 (no fabrication), PR #205.
+
 ## 2026-10-13: waystone and portstone runes reuse the sharestone overlay; a waystone's show once any player activates it
 
 - **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #204, Part of #178).

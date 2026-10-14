@@ -438,6 +438,125 @@ def _facing_state_variants(blockstate: dict, java_state: str,
     return {v: by_value[v] for v in values}, uvlocks.pop()
 
 
+def _state_only_variants(blockstate: dict, java_state: str, values: tuple) -> dict | None:
+    """{value: model} when the blockstate is exactly ``<java_state>=<value>``
+    per value, one model each, no x or y turn (Waystones' warp plate:
+    ``status`` alone, no facing). Only station blocks whose state the mod's
+    code sets take this path."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or set(variants) != {f"{java_state}={v}" for v in values}:
+        return None
+    by_value = {}
+    for value in values:
+        entry = variants[f"{java_state}={value}"]
+        if not isinstance(entry, dict) or not isinstance(entry.get("model"), str) or entry.get("x") \
+                or entry.get("y") or entry.get("uvlock"):
+            return None
+        by_value[value] = entry["model"]
+    return by_value
+
+
+def _tinted(element: dict) -> bool:
+    """Whether any face of ``element`` is tinted (has a ``tintindex``)."""
+    return any(isinstance(spec, dict) and "tintindex" in spec for spec in (element.get("faces") or {}).values())
+
+
+def _convert_state_only(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                        by_value: dict, station) -> None:
+    """A station block with no facing and one state the mod's code sets
+    (Waystones' warp plate, #178): one bone per distinct model, shown by the
+    custom ``station.state`` (Java's values, its default first) for the values
+    that draw that model. With ``station.drop_tinted`` the elements with a
+    tinted face are left out (their colour comes from the mod's colour
+    handler), and a note names them."""
+    textures: dict = {}
+    parts: list[tuple[str, list]] = []
+    shown: dict[str, list[str]] = {}
+    bone_of: dict[str, str] = {}
+    dropped: dict[str, list[str]] = {}
+    for value, model_ref in by_value.items():
+        if model_ref in bone_of:
+            shown[bone_of[model_ref]].append(value)
+            continue
+        flat, why = _flat_model(mod, result, model_ref)
+        if flat is None:
+            result.unhandled.append(Unhandled(rel, "block", f"{station.java_state}={value} model: {why}"))
+            return
+        kept = []
+        for element in flat.get("elements") or []:
+            if getattr(station, "drop_tinted", False) and _tinted(element):
+                dropped.setdefault(model_ref, []).append(str(element.get("name") or "unnamed"))
+                continue
+            if models.zero_rotation(element.get("rotation")):
+                element = {k: v for k, v in element.items() if k != "rotation"}
+            kept.append(element)
+        if not kept:
+            result.unhandled.append(Unhandled(rel, "block", f"{station.java_state}={value} model has no elements"))
+            return
+        used = _face_keys(kept)
+        for key, ref in (flat.get("textures") or {}).items():
+            if key not in used or textures.setdefault(key, ref) == ref:
+                continue
+            # Another model draws a different texture under the same key: this
+            # model's faces get a key of their own.
+            prefix = f"{key}_{station.java_state}_"
+            own = next((k for k, r in textures.items() if r == ref and k.startswith(prefix)), f"{prefix}{value}")
+            if textures.setdefault(own, ref) != ref:
+                result.unhandled.append(Unhandled(
+                    rel, "block", f"{station.java_state} models disagree about their {key!r} texture"))
+                return
+            kept = [_rekey(element, key, own) for element in kept]
+        bone = model_ref.rsplit("/", 1)[-1]
+        bone_of[model_ref] = bone
+        shown[bone] = [value]
+        parts.append((bone, kept))
+
+    combined = {"textures": textures, "elements": [e for _, els in parts for e in els]}
+    by_face, why = models.element_materials(combined)
+    tag_faces = by_face is None and "disagree" in why
+    if tag_faces:
+        by_face, why = models.tagged_materials(combined)
+    if by_face is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+    instances, why = _instances(mod, by_face, textures, tag_faces)
+    if instances is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+    identifier = f"geometry.{mod.namespace}.{name}"
+    geo, why = models.geometry_bones(parts, identifier, tag_faces=tag_faces)
+    if geo is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return
+    components = {
+        "minecraft:geometry": {
+            "identifier": identifier,
+            "bone_visibility": {
+                bone: " || ".join(_state_test(station, v) for v in values) for bone, values in shown.items()
+            },
+        },
+        "minecraft:material_instances": instances,
+        "minecraft:collision_box": dict(station.box),
+        "minecraft:selection_box": dict(station.box),
+    }
+    result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = {
+        "format_version": _BLOCK_FORMAT,
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{mod.namespace}:{name}",
+                "menu_category": {"category": _MENU_CATEGORY},
+                "states": {station.state: _state_values(station, by_value)},
+            },
+            "components": components,
+        },
+    }
+    for model_ref, names in dropped.items():
+        result.notes.append(
+            f"{name}: {model_ref} is drawn without {', '.join(names)}, whose faces the mod tints in code "
+            "(a colour handler); the block can't carry that colour, so they are left out.")
+
+
 def _state_values(station, by_value) -> list:
     """The custom state's Bedrock values: ints for an integer Java property
     (the feasts' ``servings``, like vanilla Bedrock's cake ``bite_counter``),
@@ -1057,7 +1176,12 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             continue
 
         station = (stations or {}).get(name)
-        if station is not None and getattr(station, "state", None):
+        if station is not None and not getattr(station, "facing", True):
+            by_value = _state_only_variants(blockstate, station.java_state, station.values)
+            if by_value is not None:
+                _convert_state_only(mod, result, rel, name, by_value, station)
+                continue
+        elif station is not None and getattr(station, "state", None):
             by_value, station_uvlock = _facing_state_variants(blockstate, station.java_state, station.values)
             if by_value is not None:
                 _convert_station_states(mod, result, rel, name, by_value, station_uvlock, station)

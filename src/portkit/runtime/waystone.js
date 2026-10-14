@@ -1,11 +1,12 @@
-// portkit station runtime: Waystones waystones, sharestones and portstones, Bedrock binding (#178).
+// portkit station runtime: Waystones waystones, sharestones, portstones and warp plates, Bedrock binding (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). The generated entry
 // scripts/portkit/main.js calls registerWaystones(table) with the mod's data
 // table. Script API: @minecraft/server 2.0.0 (custom components v2:
-// beforeOnPlayerPlace, onPlayerInteract, onPlayerBreak; world and entity
-// dynamic properties; Entity.teleport; world.afterEvents.playerPlaceBlock) and
+// beforeOnPlayerPlace, onPlayerInteract, onPlayerBreak, onTick; world, entity
+// and item stack dynamic properties; Entity.teleport; Dimension.getEntities;
+// system.runInterval; world.afterEvents.playerPlaceBlock) and
 // @minecraft/server-ui 2.0.0 (ActionFormData, ModalFormData).
 //
 // Storage: a waystone is one world dynamic property keyed by its dimension
@@ -22,11 +23,18 @@
 // targets with no waystone in use, so nothing is left out and no distance is
 // checked. A waystone's runes (table.rune_blocks) are a block state the
 // runtime turns on when a player activates it.
+//
+// Warp plates (table.warp_plates) have their own custom component: a plate is
+// a record of type warp_plate (never in a menu) holding one shard ({id,
+// attunement}); it ticks every tick (minecraft:tick) to attune a dormant
+// shard and to warp what stands on it; an attuned shard item carries its
+// plate's uid as an item dynamic property. Each entity's warp plate state is
+// kept in memory, as Java keeps it unsaved on the entity.
 
-import { GameMode, system, world } from "@minecraft/server";
+import { EquipmentSlot, GameMode, system, world } from "@minecraft/server";
 import { ActionFormData, FormCancelationReason, ModalFormData } from "@minecraft/server-ui";
 import * as core from "./waystone_core.js";
-import { centre, loadStored, play, saveStored } from "./station_storage.js";
+import { centre, describe, loadStored, play, rebuild, saveStored } from "./station_storage.js";
 
 // A form shown while the player is still busy (the use that opened it) is
 // cancelled with UserBusy; it is shown again on the next tick, this often.
@@ -178,6 +186,10 @@ function beforePlace(event) {
  */
 function placed(table, event) {
   const { block, player } = event;
+  if (table.warp_plates && table.warp_plates.blocks.includes(block.typeId)) {
+    platePlaced(table, event);
+    return;
+  }
   if (!table.blocks.includes(block.typeId)) return;
   const permutation = block.permutation;
   if (permutation.getState(table.half_state) !== "lower") return;
@@ -375,6 +387,336 @@ function broken(table, event) {
   saveStored(core.recordKey(table.namespace, dimension.id, pos), undefined);
 }
 
+// -- warp plates ---------------------------------------------------------------
+
+// Entity id -> {entity, plate, onPlate, since} (waystone_core.newTracking).
+const tracked = new Map();
+// Plate record key -> its dormant shard's attunement ticks (Java's
+// attunementTicks, unsaved too).
+const attuning = new Map();
+
+function plateKey(table, dimensionId, pos) {
+  return core.recordKey(table.namespace, dimensionId, pos);
+}
+
+function isPlayer(entity) {
+  return entity.typeId === "minecraft:player";
+}
+
+function creative(entity) {
+  return isPlayer(entity) && entity.getGameMode() === GameMode.Creative;
+}
+
+function trackingOf(entity) {
+  let t = tracked.get(entity.id);
+  if (!t) {
+    t = { entity, ...core.newTracking() };
+    tracked.set(entity.id, t);
+  }
+  t.entity = entity;
+  return t;
+}
+
+/**
+ * The plate record at a position, made when there is none: a plate placed by
+ * a player is owned by them, one placed otherwise has no owner and origin
+ * UNKNOWN (WaystoneBlockEntityBase#initializeWaystone); either way it starts
+ * with a dormant shard (WarpPlateBlockEntity#initializeWaystone L67-80,
+ * initializeInventory L82-84).
+ */
+function plateRecord(table, dimension, pos, placer) {
+  const plates = table.warp_plates;
+  const key = plateKey(table, dimension.id, pos);
+  let record = loadStored(key);
+  if (!record || record.type !== plates.type) {
+    record = {
+      uid: newUid(),
+      type: plates.type,
+      order: nextOrder(table),
+      dimension: dimension.id,
+      pos,
+      owner: placer ? placer.id : null,
+      owner_name: placer ? placer.name : null,
+      origin: placer ? "PLAYER" : "UNKNOWN",
+      shard: { id: plates.shards.dormant, attunement: null },
+    };
+    saveStored(key, record);
+  }
+  return record;
+}
+
+/** setShardItem L333-339: store the shard and show the idle state it gives. */
+function setShard(table, block, record, shard) {
+  record.shard = shard;
+  saveStored(plateKey(table, record.dimension, record.pos), record);
+  setStatus(table, block, core.idleStatus(shard, table.warp_plates.shards));
+}
+
+function setStatus(table, block, status) {
+  const state = table.warp_plates.status_state;
+  const permutation = block.permutation;
+  if (permutation.getState(state) !== status) block.setPermutation(permutation.withState(state, status));
+}
+
+function statusOf(table, block) {
+  return block.permutation.getState(table.warp_plates.status_state);
+}
+
+/** A held shard as stored: describe() plus its attunement (an item dynamic property). */
+function shardOf(table, stack) {
+  const raw = stack.getDynamicProperty ? stack.getDynamicProperty(table.warp_plates.attunement_property) : undefined;
+  return { ...describe(stack, 1), attunement: typeof raw === "string" ? raw : null };
+}
+
+/** A stored shard as an ItemStack; an attunement only fits a non-stackable item. */
+function shardStack(table, shard) {
+  const stack = rebuild(shard, 1);
+  if (shard.attunement && stack.maxAmount === 1) {
+    stack.setDynamicProperty(table.warp_plates.attunement_property, shard.attunement);
+  }
+  return stack;
+}
+
+function dropShard(table, dimension, shard, at) {
+  dimension.spawnItem(shardStack(table, shard), at);
+}
+
+/** Every warp plate record with `uid`, or undefined (WaystoneProxy by uid). */
+function plateByUid(table, uid) {
+  if (!uid) return undefined;
+  return records(table).find((r) => r.uid === uid && r.type === table.warp_plates.type);
+}
+
+/**
+ * The plate a shard warps to: {uid, record}. uid null: no attunement (Java's
+ * "no target"); record undefined: its plate is gone ("invalid target"). A
+ * record whose loaded block is no plate any more is forgotten (Java's
+ * onRemove drops it).
+ */
+function warpTarget(table, record) {
+  const uid = core.targetUid(record.shard, table.warp_plates.shards, record.uid);
+  let target = plateByUid(table, uid);
+  if (target) {
+    const block = blockAt(world.getDimension(target.dimension), target.pos);
+    if (block && !table.warp_plates.blocks.includes(block.typeId)) {
+      saveStored(plateKey(table, target.dimension, target.pos), undefined);
+      target = undefined;
+    }
+  }
+  return { uid, record: target };
+}
+
+function plateCost(table, entity, target) {
+  return core.cost(table.warp_plates.requirements, context(entity, target));
+}
+
+function plateMessage(table, role) {
+  return { rawtext: [{ text: table.warp_plates.error_style }, { translate: table.messages[role] }] };
+}
+
+function entitiesOn(dimension, pos) {
+  let found = [];
+  try {
+    found = dimension.getEntities({ location: pos, volume: { x: 1, y: 1, z: 1 } });
+  } catch {
+    return [];
+  }
+  return found.filter((e) => (e.isValid === undefined || e.isValid) && core.inBlock(e.location, pos));
+}
+
+function riding(entity) {
+  return !!entity.getComponent("minecraft:riding");
+}
+
+function denied(table, entity) {
+  return table.warp_plates.deny.includes(entity.typeId);
+}
+
+/** WarpPlateBlock#setPlacedBy (WaystoneBlockBase L286-339): a new plate owned by the placer. */
+function platePlaced(table, event) {
+  const { block, player } = event;
+  const pos = { ...block.location };
+  const key = plateKey(table, block.dimension.id, pos);
+  saveStored(key, undefined);
+  attuning.delete(key);
+  const record = plateRecord(table, block.dimension, pos, player);
+  setStatus(table, block, core.idleStatus(record.shard, table.warp_plates.shards));
+}
+
+/**
+ * WarpPlateBlock#useItemOn L163-176 and useWithoutItem L178-201. A player
+ * sneaking with anything in either hand never uses a block (vanilla
+ * ServerPlayerGameMode#useItemOn); a warp shard in the main hand goes in when
+ * the plate holds none (creative keeps the item); sneaking with empty hands
+ * pops the shard out. The settings screen Java opens otherwise is not
+ * carried.
+ */
+function plateInteract(table, event) {
+  const { block, dimension, player } = event;
+  if (!player) return;
+  const plates = table.warp_plates;
+  const equippable = player.getComponent("minecraft:equippable");
+  const main = equippable ? equippable.getEquipment(EquipmentSlot.Mainhand) : undefined;
+  const off = equippable ? equippable.getEquipment(EquipmentSlot.Offhand) : undefined;
+  if (player.isSneaking && (main || off)) return;
+  const pos = { ...block.location };
+  const record = plateRecord(table, dimension, pos, null);
+  if (main && plates.shards.accepted.includes(main.typeId)) {
+    if (record.shard) return;
+    const shard = shardOf(table, main);
+    if (!creative(player)) {
+      if (main.amount > 1) {
+        main.amount -= 1;
+        equippable.setEquipment(EquipmentSlot.Mainhand, main);
+      } else {
+        equippable.setEquipment(EquipmentSlot.Mainhand, undefined);
+      }
+    }
+    setShard(table, block, record, shard);
+    return;
+  }
+  if (player.isSneaking && record.shard) {
+    dropShard(table, dimension, record.shard, centre(block));
+    setShard(table, block, record, null);
+  }
+}
+
+/**
+ * Breaking a plate (WaystoneBlockBase#playerWillDestroy L128-133, onRemove
+ * L217-237): outside creative its shard drops; the plate is forgotten.
+ */
+function plateBroken(table, event) {
+  const { block, dimension, player } = event;
+  const pos = { ...block.location };
+  const key = plateKey(table, dimension.id, pos);
+  const record = loadStored(key);
+  if (record && record.type === table.warp_plates.type && record.shard && !(player && creative(player))) {
+    dropShard(table, dimension, record.shard, centre(block));
+  }
+  saveStored(key, undefined);
+  attuning.delete(key);
+}
+
+/** WarpPlateBlockEntity#onEntityCollision L115-142 (WarpPlateBlock#entityInside L108-113). */
+function collide(table, block, record, entity, key) {
+  const plates = table.warp_plates;
+  if (riding(entity) || denied(table, entity)) return;
+  const t = trackingOf(entity);
+  if (core.onCooldown(t, key)) return;
+  if (statusOf(table, block) !== "idle" || !core.hasPotentialTarget(record.shard, plates.shards)) return;
+  core.startTracking(t, key);
+  const target = warpTarget(table, record);
+  const affords = !target.record || !isPlayer(entity) || creative(entity)
+    || core.canAfford(entity.getTotalXp(), plateCost(table, entity, target.record), false);
+  setStatus(table, block, target.record && affords ? "warping" : "warping_invalid");
+}
+
+/**
+ * teleportToTarget L265-282 -> WaystoneTeleportManager#tryTeleportAsync:
+ * a player who can't pay is told so (not in creative); the target must still
+ * be there; the player pays (consumeRequirements); the entity lands on the
+ * target plate's centre, turned north (a plate has no facing:
+ * resolveDefaultDestination L275-284, no side offset for a warp plate
+ * L245-247), marked for the cooldown there (performTeleport L155-158); a
+ * single-use shard is used up (not by a creative player).
+ */
+function warp(table, block, record, entity, target) {
+  const plates = table.warp_plates;
+  const player = isPlayer(entity);
+  const points = plateCost(table, entity, target);
+  if (player && !core.canAfford(entity.getTotalXp(), points, creative(entity))) {
+    entity.onScreenDisplay.setActionBar(plateMessage(table, "not_enough_xp"));
+    return;
+  }
+  const dimension = world.getDimension(target.dimension);
+  if (player && points > 0) entity.addExperience(-points);
+  const destination = core.destination(target.pos, null, "north");
+  const departure = { ...entity.location };
+  const sourceDimension = entity.dimension;
+  const rotation = entity.getRotation ? entity.getRotation() : { x: 0, y: 0 };
+  entity.teleport(destination.location, { dimension, rotation: { x: rotation.x, y: destination.yaw } });
+  core.markCooldown(trackingOf(entity), plateKey(table, target.dimension, target.pos), plates.cooldown);
+  play(sourceDimension, departure, table.sounds.depart);
+  play(dimension, destination.location, table.sounds.arrive);
+  if (record.shard && plates.shards.single_use.includes(record.shard.id) && !creative(entity)) {
+    // ItemStack#shrink on the slot's stack (no setShardItem, so no new state).
+    record.shard = null;
+    saveStored(plateKey(table, record.dimension, record.pos), record);
+  }
+}
+
+/** WarpPlateBlockEntity#serverTick L169-234, after the collisions of this tick. */
+function plateTick(table, event) {
+  const plates = table.warp_plates;
+  const { block, dimension } = event;
+  if (!plates.blocks.includes(block.typeId)) return;
+  const pos = { ...block.location };
+  const key = plateKey(table, dimension.id, pos);
+  const record = plateRecord(table, dimension, pos, null);
+  const on = entitiesOn(dimension, pos);
+  for (const entity of on) collide(table, block, record, entity, key);
+
+  const step = core.attune(record.shard, attuning.get(key) ?? 0, plates.shards, record.uid, plates.attunement_ticks);
+  attuning.set(key, step.ticks);
+  if (step.changed) {
+    if (step.eject) {
+      dropShard(table, dimension, record.shard, centre(block));
+      play(dimension, centre(block), table.sounds.eject);
+    }
+    setShard(table, block, record, step.shard);
+  }
+
+  const status = statusOf(table, block);
+  if (status !== "warping" && status !== "warping_invalid") return;
+  if (on.length === 0) {
+    setStatus(table, block, core.idleStatus(record.shard, plates.shards));
+    return;
+  }
+  if (!core.hasPotentialTarget(record.shard, plates.shards)) return;
+  let active = false;
+  for (const entity of on) {
+    const t = trackingOf(entity);
+    if (riding(entity) || denied(table, entity)) {
+      core.resetOnPlate(t, key);
+      continue;
+    }
+    if (core.onCooldown(t, key)) continue;
+    active = true;
+    core.startTracking(t, key);
+    if (t.onPlate > plates.use_time) {
+      const target = warpTarget(table, record);
+      if (target.record) warp(table, block, record, entity, target.record);
+      if (isPlayer(entity)) {
+        if (!target.uid) entity.onScreenDisplay.setActionBar(plateMessage(table, "no_target"));
+        else if (!target.record) entity.onScreenDisplay.setActionBar(plateMessage(table, "invalid_target"));
+      }
+      core.resetOnPlate(t, key);
+    } else {
+      t.onPlate += 1;
+    }
+  }
+  if (!active) setStatus(table, block, core.idleStatus(record.shard, plates.shards));
+}
+
+/** WarpPlateBlockEntity#tickEntityWarpPlateState L385-405 for every tracked entity, each tick. */
+function entityTicks(table) {
+  const plates = table.warp_plates;
+  for (const [id, t] of tracked) {
+    const entity = t.entity;
+    if (!entity || (entity.isValid !== undefined && !entity.isValid)) {
+      tracked.delete(id);
+      continue;
+    }
+    let onItsPlate = false;
+    if (t.plate) {
+      const record = loadStored(t.plate);
+      onItsPlate = !!record && record.dimension === entity.dimension.id && core.inBlock(entity.location, record.pos);
+    }
+    core.entityTick(t, onItsPlate, plates.cooldown);
+    if (core.idleTracking(t, onItsPlate)) tracked.delete(id);
+  }
+}
+
 /** Register the waystones' custom component for one mod's data table. */
 export function registerWaystones(table) {
   system.beforeEvents.startup.subscribe((init) => {
@@ -383,6 +725,14 @@ export function registerWaystones(table) {
       onPlayerInteract: (event) => interact(table, event),
       onPlayerBreak: (event) => broken(table, event),
     });
+    if (table.warp_plates) {
+      init.blockComponentRegistry.registerCustomComponent(table.warp_plates.component, {
+        onTick: (event) => plateTick(table, event),
+        onPlayerInteract: (event) => plateInteract(table, event),
+        onPlayerBreak: (event) => plateBroken(table, event),
+      });
+    }
   });
   world.afterEvents.playerPlaceBlock.subscribe((event) => placed(table, event));
+  if (table.warp_plates) system.runInterval(() => entityTicks(table), 1);
 }
