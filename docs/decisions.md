@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-13: sharestones share one network per colour through the waystone runtime; the cost is the same cited default, decided per waystone type
 
-- **Status:** proposed (PR for #178, design decisions awaiting Alex).
+- **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR #201).
 - **Decision:** Waystones' fifteen coloured sharestones (the
   `waystones:sharestones` block tag intersected with the colours `ModBlocks`
   registers a `SharestoneBlock` for, L35-51 / L96-100: every dye colour but
