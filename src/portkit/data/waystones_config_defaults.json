@@ -45,6 +45,10 @@
           "value": 20,
           "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L79"
         },
+        "general.scrollUseTime": {
+          "value": 32,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L83"
+        },
         "teleports.entityDenyList": {
           "value": ["minecraft:wither"],
           "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L114"

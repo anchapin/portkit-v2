@@ -189,6 +189,9 @@ export function _permutation(typeId, states = {}) {
   };
 }
 
+/** BlockPermutation.resolve, as the warp portal sets its halves. */
+export const BlockPermutation = { resolve: (typeId, states = {}) => _permutation(typeId, states) };
+
 /**
  * A placed block whose neighbours below are `below` ([{ id, states }] from the
  * block under it downward). setPermutation records the change.

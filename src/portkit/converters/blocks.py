@@ -373,8 +373,10 @@ def _facing_definition(namespace: str, name: str, geometry: str, instances: dict
     if station is not None:
         if station.placement_offset:
             trait["y_rotation_offset"] = station.placement_offset
-        components["minecraft:collision_box"] = dict(station.box)
-        components["minecraft:selection_box"] = dict(station.box)
+        # A box of None: Java's shape is empty (Waystones' warp portal), so
+        # nothing collides with the block and nothing can select it.
+        components["minecraft:collision_box"] = dict(station.box) if station.box is not None else False
+        components["minecraft:selection_box"] = dict(station.box) if station.box is not None else False
     return {
         "format_version": _BLOCK_FORMAT,
         "minecraft:block": {
@@ -591,6 +593,31 @@ def _rekey(element: dict, key: str, own: str) -> dict:
     return {**element, "faces": faces}
 
 
+# The texture key a sliced face draws (FacingBlock.slices): one per value, and
+# _convert_station_states gives a value whose key disagrees its own key.
+_SLICE_KEY = "portkit_slice"
+
+
+def _slice(elements: list, textures: dict, sliced: tuple) -> tuple[list | None, str]:
+    """``elements`` with every face that draws ``sliced``'s Java texture over
+    its uv drawing the derived texture over the new uv instead
+    (:attr:`portkit.converters.stations.FacingBlock.slices`); None and why when
+    a face draws that texture over any other part (it can't be redrawn)."""
+    java_ref, _, uv_from, uv_to = sliced
+    out = []
+    for element in elements:
+        faces = {}
+        for face, spec in (element.get("faces") or {}).items():
+            if isinstance(spec, dict) and isinstance(spec.get("texture"), str) \
+                    and textures.get(spec["texture"].lstrip("#")) == java_ref:
+                if [float(v) for v in spec.get("uv") or ()] != [float(v) for v in uv_from]:
+                    return None, f"a {face} face draws {java_ref} over uv {spec.get('uv')}, not {list(uv_from)}"
+                spec = {**spec, "texture": f"#{_SLICE_KEY}", "uv": list(uv_to)}
+            faces[face] = spec
+        out.append({**element, "faces": faces})
+    return out, ""
+
+
 def _below_block(element: dict) -> bool:
     """Whether an element lies wholly in the block below (top at or under y 0)."""
     start, end = element.get("from"), element.get("to")
@@ -631,6 +658,14 @@ def _convert_station_states(
                 dropped.setdefault(value, []).append(str(element.get("name") or "unnamed"))
             else:
                 kept.append(element)
+        sliced = (getattr(station, "slices", None) or {}).get(value)
+        if sliced is not None:
+            flat = dict(flat)
+            kept, why = _slice(kept, flat.get("textures") or {}, sliced)
+            if kept is None:
+                result.unhandled.append(Unhandled(rel, "block", f"{station.java_state}={value} model: {why}"))
+                return
+            flat["textures"] = {**(flat.get("textures") or {}), _SLICE_KEY: sliced[1]}
         used = _face_keys(kept)
         for key, ref in (flat.get("textures") or {}).items():
             if textures.setdefault(key, ref) == ref or key not in used:
@@ -696,6 +731,8 @@ def _convert_station_states(
     if instances is None:
         result.unhandled.append(Unhandled(rel, "block", why))
         return
+    if getattr(station, "material", None):
+        instances = {face: {**spec, **station.material} for face, spec in instances.items()}
     identifier = f"geometry.{mod.namespace}.{name}"
     geo, why = models.geometry_bones([(bone, els) for bone, _, _, els in parts], identifier,
                                      tag_faces=tag_faces)

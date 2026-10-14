@@ -1100,3 +1100,237 @@ def test_a_line_only_the_warp_plate_keeps_is_listed_once():
     plate_lines = [d for d in plan.dropped if d.startswith("[source_is_warp_plate]")]
     assert plate_lines == ["[source_is_warp_plate] multiply_xp_cost(0) (never applies here) "
                            "(from all but waystones:warp_plate)"]
+
+
+# -- warp portals ---------------------------------------------------------------
+
+PORTAL_LANG = {
+    "block.waystones.warp_portal": "Warp Portal",
+    "item.waystones.portal_scroll": "Portal Scroll",
+    "chat.waystones.warp_portal_no_space": "There is no space to open a Warp Portal here.",
+    "chat.waystones.warp_portal_attunement_lost": "This portal has closed because its target was destroyed.",
+    "gui.waystones.waystone_selection.return_to_portal": "Return to Portal",
+}
+PORTAL_FRAMES = 2
+
+
+def _portal_strip(frames=PORTAL_FRAMES, width=16, frame_height=32) -> bytes:
+    """An animation strip whose every pixel says where it is: red = frame,
+    green = row in the frame, blue = column, alpha 200 (translucent)."""
+    from portkit.png import encode_png
+
+    pixels = bytearray()
+    for frame in range(frames):
+        for row in range(frame_height):
+            for col in range(width):
+                pixels += bytes((frame, row, col, 200))
+    return encode_png(width, frames * frame_height, bytes(pixels))
+
+
+def _portal_model(uv):
+    return {"render_type": "translucent", "texture_size": [16, 32],
+            "textures": {"0": f"{NS}:block/warp_portal", "particle": f"{NS}:block/warp_portal"},
+            "elements": [{"from": [0, 0, 7.5], "to": [16, 16, 7.5],
+                          "rotation": {"angle": 0, "axis": "y", "origin": [8, 8, 7.5]},
+                          "faces": {"north": {"uv": uv, "texture": "#0"}, "south": {"uv": uv, "texture": "#0"}}}]}
+
+
+def _with_warp_portal(root: Path, lang_drop=(), scroll=True, meta=None, strip=None) -> Path:
+    """Waystones' warp portal as the jar has it (WarpPortalBlock; models
+    warp_portal_bottom/_top drawing halves of one 16 x 32 animation frame), and
+    the portal scroll item."""
+    _write(root, f"assets/{NS}/models/block/warp_portal_bottom.json", _portal_model([0, 8, 16, 16]))
+    _write(root, f"assets/{NS}/models/block/warp_portal_top.json", _portal_model([0, 0, 16, 8]))
+    _write(root, f"assets/{NS}/blockstates/warp_portal.json", {"variants": {
+        f"facing={d},half={h}": {"model": f"{NS}:block/warp_portal_{'bottom' if h == 'lower' else 'top'}",
+                                 **({"y": y} if y else {})}
+        for d, y in TURNS for h in ("lower", "upper")}})
+    tex = root / f"assets/{NS}/textures/block/warp_portal.png"
+    tex.parent.mkdir(parents=True, exist_ok=True)
+    tex.write_bytes(strip if strip is not None else _portal_strip())
+    _write(root, f"assets/{NS}/textures/block/warp_portal.png.mcmeta",
+           meta if meta is not None else {"animation": {"frametime": 3, "width": 16, "height": 32}})
+    if scroll:
+        _write(root, f"assets/{NS}/models/item/portal_scroll.json",
+               {"parent": "minecraft:item/handheld", "textures": {"layer0": f"{NS}:item/portal_scroll"}})
+        (root / f"assets/{NS}/textures/item").mkdir(parents=True, exist_ok=True)
+        (root / f"assets/{NS}/textures/item/portal_scroll.png").write_bytes(PNG.read_bytes())
+    lang = json.loads((root / f"assets/{NS}/lang/en_us.json").read_text())
+    lang.update({k: v for k, v in PORTAL_LANG.items() if k not in lang_drop})
+    _write(root, f"assets/{NS}/lang/en_us.json", lang)
+    return root
+
+
+@pytest.fixture
+def portaled(tmp_path):
+    root = _with_warp_portal(_waystones_mod(tmp_path))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    return result, tmp_path / "out"
+
+
+def test_warp_portal_block_has_no_shape_glows_and_cannot_be_broken(portaled):
+    _, tree = portaled
+    block = _block(tree, "warp_portal")
+    assert block["description"]["states"] == {"waystones:half": ["lower", "upper"]}
+    assert block["description"]["traits"]["minecraft:placement_direction"]["y_rotation_offset"] == 180
+    assert block["description"]["menu_category"] == {"category": "none"}
+    components = block["components"]
+    assert components["minecraft:collision_box"] is False
+    assert components["minecraft:selection_box"] is False
+    assert components["minecraft:light_emission"] == 10
+    assert components["minecraft:destructible_by_mining"] is False
+    assert components["minecraft:destructible_by_explosion"] is False
+    assert components["minecraft:loot"] == "loot_tables/empty.json"
+    assert components["minecraft:tick"] == {"interval_range": [1, 1], "looping": True}
+    assert components[waystones.WARP_PORTAL_COMPONENT] == {}
+    assert waystones.COMPONENT not in components
+    # Translucent (ModRenderers L35) and each half its own flipbook.
+    instances = components["minecraft:material_instances"]
+    assert {spec["render_method"] for spec in instances.values()} == {"blend"}
+    assert {spec["texture"] for spec in instances.values()} == {"waystones:warp_portal_bottom",
+                                                                "waystones:warp_portal_top"}
+    assert not (tree / "behavior_pack/loot_tables/blocks/warp_portal.json").exists()
+
+
+def test_warp_portal_halves_draw_their_whole_flipbook_frame(portaled):
+    _, tree = portaled
+    geo = json.loads((tree / "resource_pack/models/blocks/warp_portal.geo.json").read_text())
+    bones = {b["name"]: b for b in geo["minecraft:geometry"][0]["bones"]}
+    instances = _block(tree, "warp_portal")["components"]["minecraft:material_instances"]
+    for bone, texture in (("lower", "waystones:warp_portal_bottom"), ("upper", "waystones:warp_portal_top")):
+        (cube,) = bones[bone]["cubes"]
+        assert cube["size"] == [16.0, 16.0, 0.0]
+        for face in ("north", "south"):
+            spec = cube["uv"][face]
+            assert spec["uv"] == [0.0, 0.0] and spec["uv_size"] == [16.0, 16.0]
+            assert instances[spec["material_instance"]]["texture"] == texture
+
+
+def test_warp_portal_texture_is_cut_into_two_flipbooks(portaled):
+    from portkit.png import decode_rgba
+
+    result, tree = portaled
+    flipbooks = json.loads((tree / "resource_pack/textures/flipbook_textures.json").read_text())
+    assert flipbooks == [
+        {"flipbook_texture": "textures/blocks/warp_portal_bottom", "atlas_tile": "waystones:warp_portal_bottom",
+         "ticks_per_frame": 3, "blend_frames": False},
+        {"flipbook_texture": "textures/blocks/warp_portal_top", "atlas_tile": "waystones:warp_portal_top",
+         "ticks_per_frame": 3, "blend_frames": False},
+    ]
+    terrain = json.loads((tree / "resource_pack/textures/terrain_texture.json").read_text())["texture_data"]
+    assert terrain["waystones:warp_portal_bottom"] == {"textures": "textures/blocks/warp_portal_bottom"}
+    assert "waystones:warp_portal" not in terrain
+    assert not (tree / "resource_pack/textures/blocks/warp_portal.png").exists()
+    for name, first_row in (("warp_portal_bottom", 16), ("warp_portal_top", 0)):
+        width, height, pixels = decode_rgba((tree / f"resource_pack/textures/blocks/{name}.png").read_bytes())
+        assert (width, height) == (16, 16 * PORTAL_FRAMES)
+        for frame in range(PORTAL_FRAMES):
+            for row in range(16):
+                at = ((frame * 16 + row) * 16 + 5) * 4
+                assert tuple(pixels[at:at + 4]) == (frame, first_row + row, 5, 200)
+    assert not any("warp_portal" in u.source and u.kind == "texture_animation" for u in result.unhandled)
+
+
+def test_warp_portal_table_holds_the_cited_rules(portaled):
+    result, tree = portaled
+    table = _table(tree)
+    portal = table["warp_portals"]
+    assert portal["blocks"] == ["waystones:warp_portal"]
+    assert "waystones:warp_portal" not in table["blocks"] and "waystones:warp_portal" not in table["block_types"]
+    assert portal["lifetime"] == 6000 and portal["cooldown"] == 20
+    assert portal["deny"] == ["minecraft:wither"]
+    assert portal["scroll"]["items"] == ["waystones:portal_scroll"]
+    assert portal["scroll"]["use_time"] == 32
+    assert portal["scroll"]["network"] == "waystones:waystone"
+    assert portal["scroll"]["title"] == "container.waystones.waystone_selection"
+    zero = {"args": [0.0], "fn": "multiply_xp_cost", "when": {}}
+    # The scroll's menu: source_is_scroll multiplies by 0; through the portal it does not apply.
+    assert zero in portal["scroll"]["requirements"]
+    assert zero not in portal["requirements"]
+    assert portal["requirements"] == table["networks"]["waystones:waystone"]["requirements"]
+    assert set(portal["return_requirements"]) == {"waystones:waystone", "waystones:orange_sharestone"}
+    assert portal["return_property"] == "waystones:portkit_return_portal"
+    for role, key in waystones.WARP_PORTAL_MESSAGES.items():
+        assert table["messages"][role] == key
+    assert table["sounds"]["portal_close"] == {"id": "random.fizz", "volume": 0.5, "pitch": 1.2}
+    assert table["sounds"]["portal_open"] == {"id": "portal.travel", "volume": 0.25, "pitch": 1.4}
+    assert table["sounds"]["scroll_start"] == {"id": "portal.trigger", "volume": 0.1, "pitch": 2.0}
+    text = (tree / DATA).read_text()
+    assert "WaystonesConfigData.java#L83" in text and "WaystonesConfigData.java#L114" in text
+    assert "block/entity/WarpPortalBlockEntity.java#L38" in text
+    assert result.stations["waystones:warp_portals"]["converted"] == 1
+    assert any("warp portal block(s) work" in n for n in result.notes)
+
+
+def test_portal_scroll_has_the_glint(portaled):
+    _, tree = portaled
+    body = json.loads((tree / "behavior_pack/items/portal_scroll.json").read_text())
+    assert body["minecraft:item"]["components"]["minecraft:glint"] is True
+
+
+def test_warp_portal_texts_ship_under_their_java_keys(portaled):
+    _, tree = portaled
+    lang = (tree / "resource_pack/texts/en_US.lang").read_text()
+    for key, text in PORTAL_LANG.items():
+        if key.startswith(("chat.", "gui.")):
+            assert f"{key}={text}" in lang
+
+
+def test_without_a_warp_portal_the_table_has_no_portal_rules(converted):
+    _, tree = converted
+    assert "warp_portals" not in _table(tree)
+    text = (tree / DATA).read_text()
+    assert "WaystonesConfigData.java#L83" not in text and "WaystonesConfigData.java#L114" not in text
+
+
+def test_a_portal_without_the_portal_scroll_stays_residue(tmp_path):
+    root = _with_warp_portal(_waystones_mod(tmp_path), scroll=False)
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    assert "warp_portals" not in _table(tmp_path / "out")
+    assert any(u.kind == "waystone" and u.source.endswith("blockstates/warp_portal.json")
+               and "portal_scroll" in u.reason for u in result.unhandled)
+
+
+def test_a_missing_portal_text_leaves_only_the_portal_inert(tmp_path):
+    root = _with_warp_portal(_waystones_mod(tmp_path), lang_drop=("chat.waystones.warp_portal_no_space",))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    table = _table(tmp_path / "out")
+    assert "warp_portals" not in table and table["blocks"]
+    assert any(u.source.endswith("blockstates/warp_portal.json") and "warp_portal_no_space" in u.reason
+               for u in result.unhandled)
+
+
+def test_a_portal_strip_of_another_shape_is_not_converted(tmp_path):
+    root = _with_warp_portal(_waystones_mod(tmp_path), meta={"animation": {"frametime": 3}},
+                             strip=_portal_strip(frames=4, frame_height=16))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    assert "warp_portals" not in _table(tmp_path / "out")
+    assert not (tmp_path / "out/behavior_pack/blocks/warp_portal.json").exists()
+    assert any(u.source.endswith("blockstates/warp_portal.json") for u in result.unhandled)
+
+
+def test_portal_conditions_are_decided_per_teleport():
+    through = waystones.fixed_conditions(waystones.WARP_PORTAL_TYPE)
+    assert through["source_is_waystone"] is False and through["source_is_scroll"] is False
+    assert through["target_is_waystone"] is True and through["target_is_warp_portal"] is False
+    scroll = waystones.fixed_conditions(waystones.WAYSTONE_TYPE, scroll=True)
+    assert scroll["source_is_scroll"] is True and scroll["source_is_waystone"] is False
+    back = waystones.fixed_conditions("waystones:orange_sharestone", to_portal=True)
+    assert back["target_is_warp_portal"] is True and back["target_is_sharestone"] is False
+    assert back["target_is_orange_sharestone"] is False and back["source_is_orange_sharestone"] is True
+    assert back["target_is_global"] is False
+    kept, _ = requirements(DEFAULTS, True, True, waystones.WAYSTONE_TYPE, scroll=True)
+    assert {"args": [0.0], "fn": "multiply_xp_cost", "when": {}} in kept
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_warp_portal_runtime_under_node(portaled):
+    _, tree = portaled
+    js = ROOT / "tests" / "js"
+    for test in ("warp_portal.test.mjs", "waystone.test.mjs"):
+        for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
+            proc = subprocess.run(
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
+            )
+            assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr

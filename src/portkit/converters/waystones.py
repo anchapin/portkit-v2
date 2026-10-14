@@ -15,8 +15,12 @@ portstones (``PortstoneBlock``), which are no waystone themselves: using one
 lists its colour's sharestones (white: the player's activated waystones) and
 teleports from wherever the player stands; and the warp plate
 (``WarpPlateBlock``), which attunes a dormant shard to itself and teleports
-whatever stands on it to the plate its attuned shard names. Warp portals,
-fleeting memorials and the warp stone, scrolls and feather keep their residue.
+whatever stands on it to the plate its attuned shard names; and the warp
+portal (``WarpPortalBlock``) with the portal scroll that opens one: held for
+its use time, the scroll opens the menu of the player's activated waystones,
+and the portal it opens sends what enters it to the chosen waystone until it
+closes. Fleeting memorials and the warp stone, the other scrolls and the
+feather keep their residue.
 
 Where each value comes from (no fabrication, #87):
 
@@ -27,7 +31,10 @@ Where each value comes from (no fabrication, #87):
   ``waystones:portstones`` tag, each a ``PortstoneBlock``
   (:data:`PORTSTONE_BLOCKS`, cited); the blockstate is ``facing`` x ``half``.
   The warp plate is the block ``ModBlocks`` registers as ``WarpPlateBlock``
-  (:data:`WARP_PLATE_BLOCKS`); its blockstate is ``status`` alone.
+  (:data:`WARP_PLATE_BLOCKS`); its blockstate is ``status`` alone. The warp
+  portal is the one it registers as ``WarpPortalBlock``
+  (:data:`WARP_PORTAL_BLOCKS`), facing x half, drawn from two flipbooks cut
+  from its animation strip (:func:`warp_portal_textures`).
 * **Which network**: a waystone's type is ``waystones:waystone`` (reached by
   activating it); a sharestone's is its colour's
   (``WaystoneTypes.getSharestone``), and its menu lists every sharestone of
@@ -164,6 +171,8 @@ def waystone_type(name: str) -> str:
     SHARESTONE_BLOCKS or WARP_PLATE_BLOCKS entry)."""
     if name in WARP_PLATE_BLOCKS:
         return WARP_PLATE_TYPE
+    if name in WARP_PORTAL_BLOCKS:
+        return WARP_PORTAL_TYPE
     return f"{NS}:{name}" if name in SHARESTONE_BLOCKS else WAYSTONE_TYPE
 
 
@@ -241,6 +250,93 @@ WARP_PLATE_RUNTIME_SOURCES = (
 )
 # The config values only the warp plate reads.
 WARP_PLATE_CONFIG = ("general.warpPlateUseTime", "general.warpPlateCooldownTime", "teleports.entityDenyList")
+
+# The block ModBlocks registers as a WarpPortalBlock (ModBlocks.java L87,
+# registerBlock with no item, defaultProperties().noLootTable().lightLevel(10)
+# .strength(-1, 3600000)); its waystone is of type WaystoneTypes.WARP_PORTAL
+# (L12, WarpPortalBlockEntity#initialize L72-89). Only a portal scroll opens one
+# (WarpPortalManager#spawnPortal L39-62, called from PortalScrollItem L43-48).
+WARP_PORTAL_BLOCKS = ("warp_portal",)
+WARP_PORTAL_TYPE = f"{NS}:warp_portal"
+WARP_PORTAL_COMPONENT = f"{NS}:portkit_warp_portal"
+WARP_PORTAL_SOURCES = (
+    _src("block/ModBlocks.java", "87"),
+    # FACING x HALF, lower/north default; getShape and getCollisionShape empty.
+    _src("block/WarpPortalBlock.java", "28-L64"),
+    # renderers.setBlockRenderType(warpPortal, RenderType.translucent()).
+    _src("client/ModRenderers.java", "35"),
+)
+# ModBlocks L87: lightLevel(state -> 10); strength(-1f, 3600000f): a destroy
+# time of -1 can't be mined, and the blast resistance outlasts any explosion.
+WARP_PORTAL_LIGHT = 10
+# ModRenderers L35: the translucent render layer (Bedrock's "blend").
+WARP_PORTAL_MATERIAL = {"render_method": "blend"}
+# The portal's texture is one animation strip of 16 x 32 frames
+# (warp_portal.png.mcmeta: width 16, height 32, frametime 3); the lower half's
+# model (warp_portal_bottom) draws each frame's lower 16 rows (uv 0,8 - 16,16),
+# the upper half's (warp_portal_top) its upper 16 rows (uv 0,0 - 16,8). A Bedrock
+# flipbook has no frame size of its own (its frames come from the strip, so the
+# textures converter leaves a Java animation with a custom width/height as
+# residue), so each half gets its own strip of 16 x 16 frames cut from the
+# jar's, drawn whole.
+WARP_PORTAL_TEXTURE = f"assets/{NS}/textures/block/warp_portal.png"
+WARP_PORTAL_SLICES = {
+    # value -> (Java uv drawn, the derived texture's subpath)
+    "lower": ((0, 8, 16, 16), "warp_portal_bottom"),
+    "upper": ((0, 0, 16, 8), "warp_portal_top"),
+}
+# WarpPortalBlockEntity.LIFETIME_TICKS L38: 20 * 60 * 5, counted by the lower
+# half's server ticker (serverTick L121-125; WarpPortalBlock#getTicker L96-104).
+WARP_PORTAL_LIFETIME = 20 * 60 * 5
+# WarpPortalManager#canUsePortal L101-109: an entity uses a portal at most once
+# every 20 of its ticks.
+WARP_PORTAL_COOLDOWN = 20
+# The portal scroll (ModItems L41, a PortalScrollItem): its use time is
+# general.scrollUseTime (PortalScrollItem#getUseDuration L22-25,
+# WaystonesConfigData L83, cited in the defaults file).
+PORTAL_SCROLL_ITEMS = ("portal_scroll",)
+# The player dynamic property holding the uid of the portal a player last
+# came through (WarpPortalManager#setReturnPortal
+# L127-135: Balm persistent data "ReturnPortal").
+RETURN_PORTAL_PROPERTY = f"{NS}:portkit_return_portal"
+WARP_PORTAL_MESSAGES = {
+    # PortalScrollItem L36, L47 (chat, DARK_RED).
+    "no_space": "chat.waystones.warp_portal_no_space",
+    # WarpPortalBlockEntity#onEntityInside L113-115 (chat, no style).
+    "attunement_lost": "chat.waystones.warp_portal_attunement_lost",
+    # WarpPortalBlockEntity#initialize L83: the portal waystone's name, the
+    # "Return to Portal" entry in a waystone's or sharestone's menu.
+    "return_to_portal": "gui.waystones.waystone_selection.return_to_portal",
+}
+# ScrollItemBase#use L41: PORTAL_TRIGGER 0.1 / 2 at the player when a use
+# starts; WarpPortalManager#spawnPortal L59: PORTAL_TRAVEL 0.25 / 1.4 at the
+# portal; WarpPortalBlockEntity#removePortal L130: FIRE_EXTINGUISH 0.5 / 1.2.
+# block.portal.trigger = portal/trigger = Bedrock portal.trigger;
+# block.fire.extinguish = random/fizz = Bedrock random.fizz (misode/mcmeta
+# 1.21.1-assets sounds.json; Mojang/bedrock-samples 46ba6ea9
+# resource_pack/sounds/sound_definitions.json).
+WARP_PORTAL_SOUNDS = {
+    "scroll_start": {"id": "portal.trigger", "volume": 0.1, "pitch": 2.0},
+    "portal_open": {"id": "portal.travel", "volume": 0.25, "pitch": 1.4},
+    "portal_close": {"id": "random.fizz", "volume": 0.5, "pitch": 1.2},
+}
+WARP_PORTAL_RUNTIME_SOURCES = (
+    _src("block/WarpPortalBlock.java", "66-L104"),
+    _src("block/entity/WarpPortalBlockEntity.java", "38"),
+    _src("block/entity/WarpPortalBlockEntity.java", "72-L145"),
+    _src("core/WarpPortalManager.java", "32-L159"),
+    _src("item/PortalScrollItem.java", "16-L55"),
+    _src("item/ScrollItemBase.java", "37-L49"),
+    _src("handler/WarpDamageResetHandler.java", "10-L15"),
+    _src("network/message/SelectWaystoneMessage.java", "52-L58"),
+    _src("core/PlayerWaystoneManager.java", "292-L320"),
+    _src("api/WaystoneVisibility.java", "38-L62"),
+    _src("core/WaystoneImpl.java", "145-L148"),
+    _src("core/WaystonePermissionManager.java", "78-L81"),
+    _src("core/WaystoneTeleportManager.java", "245-L284"),
+)
+# The config values only the warp portal reads.
+WARP_PORTAL_CONFIG = ("general.scrollUseTime",)
 
 
 # -- runes -------------------------------------------------------------------------
@@ -495,6 +591,8 @@ def derived_textures(mod: SourceMod) -> list[DerivedTexture]:
         if rels[family] is None:
             continue
         out.extend(DerivedTexture(rels[family], subpath, rgb) for subpath, rgb in _derived(name))
+    if any(name in WARP_PORTAL_BLOCKS for name in waystone_blocks(mod)):
+        out.extend(warp_portal_textures(mod))
     return out
 
 
@@ -522,6 +620,19 @@ PORTSTONE_UPPER_BOX = {"origin": [-5, 0, -1], "size": [10, 7, 6]}
 
 
 def _block(name: str, overlay: Overlay | None = None) -> FacingBlock:
+    if name in WARP_PORTAL_BLOCKS:
+        # Facing x half like a waystone (the scroll sets both: spawnPortal
+        # L46-52, facing = the player's yaw turned round, as Bedrock's
+        # placement trait at 180); no shape at all; each half draws its half
+        # of the animation frame from its own flipbook (WARP_PORTAL_SLICES).
+        java = f"{NS}:block/warp_portal"
+        return FacingBlock(
+            name, 180, None, WARP_PORTAL_SOURCES,
+            java_state="half", values=("lower", "upper"), state=HALF_STATE,
+            slices={value: (java, f"{NS}:block/{sub}", uv, (0, 0, 16, 16))
+                    for value, (uv, sub) in WARP_PORTAL_SLICES.items()},
+            material=dict(WARP_PORTAL_MATERIAL),
+        )
     if name in WARP_PLATE_BLOCKS:
         # No facing; the model's tinted rune element (tintindex 1, coloured by
         # WarpPlateBlock#getColorForBlock from the plate's galactic name) is
@@ -654,7 +765,8 @@ FIXED_CONDITIONS = {
 }
 
 
-def fixed_conditions(kind: str, portstone: bool = False) -> dict[str, bool]:
+def fixed_conditions(kind: str, portstone: bool = False, scroll: bool = False,
+                     to_portal: bool = False) -> dict[str, bool]:
     """The conditions decided for teleports from a waystone of type ``kind``,
     or, with ``portstone``, from a portstone listing targets of type ``kind``.
 
@@ -670,6 +782,14 @@ def fixed_conditions(kind: str, portstone: bool = False) -> dict[str, bool]:
     """
     if kind == WAYSTONE_TYPE:
         fixed = dict(FIXED_CONDITIONS)
+    elif kind == WARP_PORTAL_TYPE:
+        # A teleport through a warp portal starts at the portal's own
+        # waystone (setFromWaystone, WarpPortalManager#teleportFromPortal
+        # L112) with no warp item, and ends at the waystone the portal scroll
+        # chose, which here is always one the player activated (the scroll's
+        # menu, getTargetsForPlayer L292-297); its visibility is ACTIVATION.
+        fixed = dict(FIXED_CONDITIONS)
+        fixed["source_is_waystone"] = False
     elif kind == WARP_PLATE_TYPE:
         # A warp plate's teleport starts at the plate (setFromWaystone,
         # WarpPlateBlockEntity L135, L267) and ends at the waystone its shard is
@@ -691,6 +811,18 @@ def fixed_conditions(kind: str, portstone: bool = False) -> dict[str, bool]:
     if portstone:
         fixed.update({"source_is_waystone": False, "source_is_sharestone": False, "source_is_portstone": True,
                       **{f"source_is_{n}": False for n in SHARESTONE_BLOCKS}})
+    if scroll:
+        # The portal scroll's menu (PortalScrollItem L39-50): no source
+        # waystone, the scroll as the warp item (source_is_scroll L311 reads
+        # the waystones:scrolls item tag, which lists portal_scroll).
+        fixed.update({"source_is_waystone": False, "source_is_sharestone": False, "source_is_scroll": True,
+                      **{f"source_is_{n}": False for n in SHARESTONE_BLOCKS}})
+    if to_portal:
+        # "Return to Portal" (getTargetsForWaystone L318): the target is a warp
+        # portal's waystone (target_is_warp_portal L326-328), whose visibility
+        # is the default ACTIVATION (WaystoneVisibility#fromWaystoneType L61).
+        fixed.update({"target_is_waystone": False, "target_is_sharestone": False, "target_is_warp_plate": False,
+                      "target_is_warp_portal": True, **{f"target_is_{n}": False for n in SHARESTONE_BLOCKS}})
     return fixed
 DYNAMIC_CONDITIONS = {"is_interdimensional"}  # L294: target dimension != the player's
 # Experience-point functions (RequirementRegistry L122-L147) and the parameter
@@ -797,10 +929,46 @@ def waystone_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
     names = [n for n in _tagged(mod) if n in WAYSTONE_BLOCKS]
     names += [n for n in _tagged(mod, SHARESTONE_TAG) if n in SHARESTONE_BLOCKS]
     names += [n for n in _tagged(mod, PORTSTONE_TAG) if n in PORTSTONE_BLOCKS]
-    # No tag names the warp plate; ModBlocks registers it by name (L86).
+    # No tag names the warp plate or the warp portal; ModBlocks registers
+    # them by name (L86, L87). The portal converts only with its texture's
+    # halves (warp_portal_textures).
     names += list(WARP_PLATE_BLOCKS)
+    if warp_portal_textures(mod):
+        names += list(WARP_PORTAL_BLOCKS)
     return {name: _block(name, _rune_overlay(mod, name))
             for name in names if (mod.assets / "blockstates" / f"{name}.json").is_file()}
+
+
+def warp_portal_textures(mod: SourceMod) -> list[DerivedTexture]:
+    """The warp portal's two flipbooks, cut from the jar's animation strip
+    (WARP_PORTAL_SLICES), or [] when the strip isn't the 16 x 32-frame one
+    the portal's models draw halves of, or a derived key is taken."""
+    from ..png import decode_rgba as _decode
+
+    path = mod.root / WARP_PORTAL_TEXTURE
+    try:
+        meta = json.loads(path.with_name(path.name + ".mcmeta").read_text()).get("animation") or {}
+        decoded = _decode(path.read_bytes())
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return []
+    if decoded is None or not isinstance(meta, dict):
+        return []
+    width, height, _ = decoded
+    frame_w, frame_h = meta.get("width", width), meta.get("height", width)
+    frametime = meta.get("frametime", 1)
+    if (frame_w, frame_h) != (16, 32) or width != 16 or height % 32 or meta.get("frames") \
+            or meta.get("interpolate") or not isinstance(frametime, int) or frametime < 1:
+        return []
+    taken = _jar_block_texture_keys(mod)
+    out = []
+    for (u0, v0, u1, v1), sub in WARP_PORTAL_SLICES.values():
+        if shortname(sub, mod.namespace) in taken:
+            return []
+        # A Java uv is in sixteenths of the frame: rows v * 32 / 16.
+        out.append(DerivedTexture(WARP_PORTAL_TEXTURE, sub, 0xFFFFFF,
+                                  frame=(frame_h, v0 * frame_h // 16, v1 * frame_h // 16),
+                                  ticks_per_frame=frametime))
+    return out
 
 
 def loot_names(mod: SourceMod) -> set[str]:
@@ -821,6 +989,8 @@ def lang_keys(mod: SourceMod) -> set[str]:
             keys |= portstone_keys(name)
     if any(name in WARP_PLATE_BLOCKS for name in blocks):
         keys |= set(WARP_PLATE_MESSAGES.values())
+    if any(name in WARP_PORTAL_BLOCKS for name in blocks):
+        keys |= set(WARP_PORTAL_MESSAGES.values())
     return keys
 
 
@@ -866,13 +1036,14 @@ def _argument(kind: str, raw: str):
 
 
 def requirements(lines: list[str], enable_costs: bool, enable_cooldowns: bool,
-                 kind: str = WAYSTONE_TYPE, portstone: bool = False) -> tuple[list[dict], list[str]]:
+                 kind: str = WAYSTONE_TYPE, portstone: bool = False, scroll: bool = False,
+                 to_portal: bool = False) -> tuple[list[dict], list[str]]:
     """The warp requirement modifiers that can apply in this runtime to a
     teleport from a waystone of type ``kind`` (with ``portstone``: from a
     portstone to a target of type ``kind``), in order, as {"when":
     {condition: wanted}, "fn": name, "args": [...]}, and the lines left out
     (with why). Raises _Refuse for anything without a runtime."""
-    fixed_table = fixed_conditions(kind, portstone)
+    fixed_table = fixed_conditions(kind, portstone, scroll, to_portal)
     kept: list[dict] = []
     dropped: list[str] = []
     for line in lines:
@@ -1017,6 +1188,12 @@ def warp_shards(mod: SourceMod, files: dict) -> tuple[dict | None, str]:
             "locked": roles.get("locked"), "single_use": single}, ""
 
 
+def portal_scrolls(files: dict) -> list[str]:
+    """The portal scroll items (PORTAL_SCROLL_ITEMS) the item converter wrote."""
+    items = _item_paths(files)
+    return [f"{NS}:{n}" for n in PORTAL_SCROLL_ITEMS if f"{NS}:{n}" in items]
+
+
 def _use_time(configured: int) -> int:
     """WarpPlateBlockEntity#getWarpPlateUseTime L236-249 with no modifier items
     (the multiplier stays 1): Mth.clamp((int) (configured * 1), 1, configured * 2)."""
@@ -1033,20 +1210,40 @@ class _Plan:
     defaults: dict
     # target type -> the requirement modifiers of a portstone teleport to it
     portstone_modifiers: dict
+    # With warp portals: the portal scroll's menu, and each menu's "Return to
+    # Portal" entry by the menu's waystone type (else empty).
+    scroll_modifiers: list = ()
+    return_modifiers: dict | None = None
 
 
-def _plan(mod: SourceMod, kinds: list[str], portstone_kinds: list[str] = ()) -> _Plan:
+def _plan(mod: SourceMod, kinds: list[str], portstone_kinds: list[str] = (),
+          return_kinds: list[str] = ()) -> _Plan:
+    """The requirement modifiers per teleport kind. With ``return_kinds``
+    (warp portals ship), also the portal scroll's menu and the "Return to
+    Portal" entry in the menus of those waystone types."""
     entry = _defaults((mod.mods or {}).get(NS))
     values = {k: v["value"] for k, v in entry["values"].items()}
     modifiers: dict[str, list] = {}
     portstone_modifiers: dict[str, list] = {}
+    return_modifiers: dict[str, list] = {}
+    scroll_modifiers: list = []
     left_out: dict[str, list[str]] = {}
-    variants = [(kind, False, kind) for kind in kinds]
-    variants += [(kind, True, f"a portstone to {kind}") for kind in portstone_kinds]
-    for kind, portstone, label in variants:
+    variants = [(kind, {}, kind) for kind in kinds]
+    variants += [(kind, {"portstone": True}, f"a portstone to {kind}") for kind in portstone_kinds]
+    if return_kinds:
+        variants.append((WAYSTONE_TYPE, {"scroll": True}, "the portal scroll's menu"))
+        variants += [(kind, {"to_portal": True}, f"{kind} to a warp portal") for kind in return_kinds]
+    for kind, flags, label in variants:
         kept, left = requirements(values["teleports.warpRequirements"], values["teleports.enableCosts"],
-                                  values["teleports.enableCooldowns"], kind, portstone)
-        (portstone_modifiers if portstone else modifiers)[kind] = kept
+                                  values["teleports.enableCooldowns"], kind, **flags)
+        if flags.get("portstone"):
+            portstone_modifiers[kind] = kept
+        elif flags.get("scroll"):
+            scroll_modifiers = kept
+        elif flags.get("to_portal"):
+            return_modifiers[kind] = kept
+        else:
+            modifiers[kind] = kept
         left_out[label] = left
     # A line left out for every type is listed once; one left out for some
     # types is listed once too, naming them (or, when it is kept for fewer,
@@ -1059,7 +1256,7 @@ def _plan(mod: SourceMod, kinds: list[str], portstone_kinds: list[str] = ()) -> 
         others = [label for label in labels if line not in left_out[label]]
         dropped.append(f"{line} (from {', '.join(where)})" if len(where) <= len(others)
                        else f"{line} (from all but {', '.join(others)})")
-    return _Plan(modifiers, dropped, entry, portstone_modifiers)
+    return _Plan(modifiers, dropped, entry, portstone_modifiers, scroll_modifiers, return_modifiers)
 
 
 def _network(kind: str, modifiers: list) -> dict:
@@ -1075,6 +1272,24 @@ def _network(kind: str, modifiers: list) -> dict:
         "requirements": modifiers,
         "shared": shared,
     }
+
+
+def _not_converted(plate: bool, portal: bool) -> str:
+    """The waystones note's closing list of what Waystones has and this
+    conversion doesn't, given whether warp plates and warp portals shipped."""
+    if plate and portal:
+        return ("Village and wild waystone generation, fleeting memorials and the warp stone, the warp, return "
+                "and bound scrolls and the feather are not converted (warp plates and warp portals with the "
+                "portal scroll have their own notes).")
+    if plate:
+        return ("Village and wild waystone generation, warp portals, fleeting memorials and the warp stone, "
+                "scrolls and feather are not converted (warp plates have their own note).")
+    if portal:
+        return ("Village and wild waystone generation, warp plates, fleeting memorials and the warp stone, the "
+                "warp, return and bound scrolls, shards and the feather are not converted (warp portals with the "
+                "portal scroll have their own note).")
+    return ("Village and wild waystone generation, warp plates and portals, fleeting memorials and the warp "
+            "stone, scrolls, shards and feather are not converted.")
 
 
 def _portstone(name: str, plan: _Plan) -> dict:
@@ -1111,10 +1326,14 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         why_share = f"the jar's en_us.json lacks {', '.join(missing_share)}, which a sharestone shows"
     kinds = sorted({waystone_type(name) for name in blocks if name not in PORTSTONE_BLOCKS})
     port_kinds = sorted({portstone_target(name) for name in blocks if name in PORTSTONE_BLOCKS})
+    # With a warp portal, every menu that can list "Return to Portal" (a
+    # waystone's and a sharestone's, getTargetsForWaystone L306-320).
+    return_kinds = (sorted(k for k in kinds if k not in (WARP_PLATE_TYPE, WARP_PORTAL_TYPE))
+                    if any(n in WARP_PORTAL_BLOCKS for n in blocks) else [])
     plan = None
     if why_all is None:
         try:
-            plan = _plan(mod, kinds or [WAYSTONE_TYPE], port_kinds)
+            plan = _plan(mod, kinds or [WAYSTONE_TYPE], port_kinds, return_kinds)
         except _Refuse as refusal:
             why_all = f"warpRequirements: {refusal}"
 
@@ -1122,12 +1341,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     kept: list[str] = []
     silk = False
     # Waystones and sharestones first: a portstone works only when the
-    # network it lists did.
-    for name in sorted(blocks, key=lambda n: (n in PORTSTONE_BLOCKS, n)):
+    # network it lists did, and a warp portal only when waystones do.
+    for name in sorted(blocks, key=lambda n: (n in PORTSTONE_BLOCKS or n in WARP_PORTAL_BLOCKS, n)):
         identifier = f"{NS}:{name}"
         share = name in SHARESTONE_BLOCKS
         port = name in PORTSTONE_BLOCKS
         plate = name in WARP_PLATE_BLOCKS
+        portal = name in WARP_PORTAL_BLOCKS
         block_path = f"blocks/{name}.json"
         body = files.get(block_path)
         loot = tables.get(name)
@@ -1146,11 +1366,22 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             else:
                 shards, why_shards = warp_shards(mod, files)
                 why = why_shards or None
+        if why is None and portal:
+            missing_portal = sorted(k for k in WARP_PORTAL_MESSAGES.values() if k not in lang)
+            if missing_portal:
+                why = f"the jar's en_us.json lacks {', '.join(missing_portal)}, which a warp portal shows"
+            elif not portal_scrolls(files):
+                why = "the portal_scroll item did not convert, and only a portal scroll opens a warp portal"
+            elif not any(waystone_type(i.split(":", 1)[1]) == WAYSTONE_TYPE for i in kept):
+                why = "no waystone block works here, so a portal scroll has nothing to open a portal to"
         if why is None and not (isinstance(body, dict) and body.get("minecraft:block", {})
                                 .get("description", {}).get("identifier") == identifier):
             why = f"the waystone block {identifier} did not convert"
         bedrock_loot = None
-        if why is None:
+        if why is None and portal:
+            # noLootTable (ModBlocks L87): the jar has none and none is needed.
+            bedrock_loot = EMPTY_LOOT
+        elif why is None:
             if loot is None:
                 why = f"no loot table for {identifier} in the jar, so what breaking it drops is unknown"
             else:
@@ -1167,16 +1398,39 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         if why is not None:
             if loot is not None:
                 result.unhandled.append(Unhandled(loot[0], RESIDUE_KIND, why))
+            elif portal:
+                # The portal has no loot table (noLootTable): its blockstate says why.
+                result.unhandled.append(Unhandled(f"assets/{NS}/blockstates/{name}.json", RESIDUE_KIND, why))
             if isinstance(body, dict):
                 notes.append(f"{identifier}: places but does nothing ({why})")
             continue
 
-        loot_path = f"loot_tables/blocks/{name}.json"
-        result.files[loot_path] = bedrock_loot
-        result.consumed.add(loot[0])
+        if portal:
+            loot_path = EMPTY_LOOT
+        else:
+            loot_path = f"loot_tables/blocks/{name}.json"
+            result.files[loot_path] = bedrock_loot
+            result.consumed.add(loot[0])
         new = json.loads(json.dumps(body))
         new["format_version"] = SCRIPT_FORMAT
         block = new["minecraft:block"]
+        if portal:
+            components = block.setdefault("components", {})
+            # The lower half's block entity ticks every server tick
+            # (getTicker L96-104); both halves take entities in (entityInside
+            # L66-74), so both tick and the runtime acts for the lower one.
+            components[WARP_PORTAL_COMPONENT] = {}
+            components["minecraft:tick"] = {"interval_range": [1, 1], "looping": True}
+            components["minecraft:light_emission"] = WARP_PORTAL_LIGHT
+            # strength(-1, 3600000): no player mines it, no explosion breaks it.
+            components["minecraft:destructible_by_mining"] = False
+            components["minecraft:destructible_by_explosion"] = False
+            components["minecraft:loot"] = EMPTY_LOOT
+            # registerBlock with no item (ModBlocks L87): not in any creative tab.
+            block["description"]["menu_category"] = {"category": "none"}
+            result.files[block_path] = new
+            kept.append(identifier)
+            continue
         if plate:
             # WarpPlateBlock#getTicker (L262-272): the block entity ticks every
             # server tick; Bedrock's minecraft:tick sends onTick every tick.
@@ -1204,9 +1458,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     kept_port = [i for i in kept if i.split(":", 1)[1] in PORTSTONE_BLOCKS]
     kept_share = [i for i in kept if i.split(":", 1)[1] in SHARESTONE_BLOCKS]
     kept_plate = [i for i in kept if i.split(":", 1)[1] in WARP_PLATE_BLOCKS]
-    kept_ways = [i for i in kept if i not in kept_port and i not in kept_share and i not in kept_plate]
-    # A warp plate is never in a menu: it has its own table section.
-    block_types = {i: waystone_type(i.split(":", 1)[1]) for i in kept if i not in kept_port and i not in kept_plate}
+    kept_portal = [i for i in kept if i.split(":", 1)[1] in WARP_PORTAL_BLOCKS]
+    kept_ways = [i for i in kept if i not in kept_port and i not in kept_share and i not in kept_plate
+                 and i not in kept_portal]
+    # A warp plate and a warp portal are never a menu's own network: each has
+    # its own table section.
+    block_types = {i: waystone_type(i.split(":", 1)[1]) for i in kept
+                   if i not in kept_port and i not in kept_plate and i not in kept_portal}
     def _states(ident: str) -> dict:
         return ((files.get(f"blocks/{ident.split(':', 1)[1]}.json") or {}).get("minecraft:block", {})
                 .get("description", {}).get("states") or {})
@@ -1224,9 +1482,12 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     if kept_plate:
         messages.update(WARP_PLATE_MESSAGES)
         sounds.update(WARP_PLATE_SOUNDS)
+    if kept_portal:
+        messages.update(WARP_PORTAL_MESSAGES)
+        sounds.update(WARP_PORTAL_SOUNDS)
     table = {
         "block_types": block_types,
-        "blocks": [i for i in kept if i not in kept_plate],
+        "blocks": [i for i in kept if i not in kept_plate and i not in kept_portal],
         "component": COMPONENT,
         # A record stored before records carried a type (#198) is a waystone's.
         "default_type": WAYSTONE_TYPE,
@@ -1271,12 +1532,51 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             body = json.loads(json.dumps(files[path]))
             body["minecraft:item"].setdefault("components", {})["minecraft:max_stack_size"] = size
             result.files[path] = body
+    if kept_portal:
+        scrolls = portal_scrolls(files)
+        table["warp_portals"] = {
+            "blocks": kept_portal,
+            "component": WARP_PORTAL_COMPONENT,
+            # canUsePortal L101-109: at most one use per entity per 20 of its ticks.
+            "cooldown": WARP_PORTAL_COOLDOWN,
+            # teleports.entityDenyList (WaystonePermissionManager#isEntityDeniedTeleports).
+            "deny": sorted(values["teleports.entityDenyList"]),
+            "error_style": ERROR_STYLE,
+            "lifetime": WARP_PORTAL_LIFETIME,
+            # A teleport through a portal (portal -> the waystone it opens to).
+            "requirements": plan.modifiers[WARP_PORTAL_TYPE],
+            "return_property": RETURN_PORTAL_PROPERTY,
+            # The "Return to Portal" entry's cost, by the menu's waystone type.
+            "return_requirements": {k: plan.return_modifiers[k] for k in sorted(set(block_types.values()))
+                                    if k in plan.return_modifiers},
+            "scroll": {
+                "items": scrolls,
+                # withTargetsForPlayer: the player's activated waystones.
+                "network": WAYSTONE_TYPE,
+                # The scroll's menu (no source waystone; the scroll is the warp item).
+                "requirements": plan.scroll_modifiers,
+                # PortalScrollItem L50: the menu's title.
+                "title": MESSAGES["title"],
+                # general.scrollUseTime: ticks the use button is held.
+                "use_time": values["general.scrollUseTime"],
+            },
+            "type": WARP_PORTAL_TYPE,
+        }
+        # PortalScrollItem#isFoil L27-30: always drawn with the enchantment glint.
+        items = _item_paths(files)
+        for ident in scrolls:
+            body = json.loads(json.dumps(files[items[ident]]))
+            body["minecraft:item"].setdefault("components", {})["minecraft:glint"] = True
+            result.files[items[ident]] = body
     data_path = f"{_RUNTIME_DIR}/data/{NS}_waystone.js"
     config_sources = [f"{plan.defaults['repo']}/blob/{plan.defaults['commit']}/{v['source']}"
-                      for k, v in plan.defaults["values"].items() if kept_plate or k not in WARP_PLATE_CONFIG]
+                      for k, v in plan.defaults["values"].items()
+                      if (kept_plate or k not in WARP_PLATE_CONFIG or (kept_portal and k == "teleports.entityDenyList"))
+                      and (kept_portal or k not in WARP_PORTAL_CONFIG)]
     header = (
         f"// Generated by portkit from {NS}'s waystone, sharestone and portstone blocks"
-        + (", warp plate, shard items" if kept_plate else "") + ", loot tables, config\n"
+        + (", warp plate, shard items" if kept_plate else "")
+        + (", warp portal, portal scroll" if kept_portal else "") + ", loot tables, config\n"
         f"// defaults and Java code; do not edit. Read by the fixed runtime {_RUNTIME_DIR}/waystone.js (portkit/runtime). Sources:\n"
         + "".join(f"//   {s}\n" for s in dict.fromkeys(
             (*(BLOCK_SOURCES if kept_ways else ()), *(SHARESTONE_SOURCES if kept_share else ()),
@@ -1285,7 +1585,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
              *config_sources, *REQUIREMENT_SOURCES, *RUNTIME_SOURCES,
              *(SHARESTONE_RUNTIME_SOURCES if kept_share else ()),
              *(PORTSTONE_RUNTIME_SOURCES if kept_port else ()),
-             *(WARP_PLATE_RUNTIME_SOURCES if kept_plate else ()))))
+             *(WARP_PLATE_RUNTIME_SOURCES if kept_plate else ()),
+             *(WARP_PORTAL_SOURCES + WARP_PORTAL_RUNTIME_SOURCES if kept_portal else ()))))
         + "".join(f"// warpRequirements left out: {d}\n" for d in plan.dropped)
     ).rstrip("\n")
     result.files[data_path] = _js_module(header, table)
@@ -1295,7 +1596,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     blocks_share = [n for n in blocks if n in SHARESTONE_BLOCKS]
     blocks_port = [n for n in blocks if n in PORTSTONE_BLOCKS]
     blocks_plate = [n for n in blocks if n in WARP_PLATE_BLOCKS]
-    blocks_ways = [n for n in blocks_ways if n not in WARP_PLATE_BLOCKS]
+    blocks_portal = [n for n in blocks if n in WARP_PORTAL_BLOCKS]
+    blocks_ways = [n for n in blocks_ways if n not in WARP_PLATE_BLOCKS and n not in WARP_PORTAL_BLOCKS]
     if blocks_ways:
         result.stations[f"{NS}:waystones"] = {
             "converted": len(kept_ways),
@@ -1316,6 +1618,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "residue": len(blocks_port) - len(kept_port),
             "data": data_path,
             "block": ", ".join(kept_port),
+        }
+    if blocks_portal:
+        result.stations[f"{NS}:warp_portals"] = {
+            "converted": len(kept_portal),
+            "residue": len(blocks_portal) - len(kept_portal),
+            "data": data_path,
+            "block": ", ".join(kept_portal),
         }
     if blocks_plate:
         result.stations[f"{NS}:warp_plates"] = {
@@ -1364,11 +1673,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "non-suffocating blocks like grass), the other half going when one is removed by anything but a "
             "player (an explosion), and config changes "
             "(the cited defaults are used). The item shows the lower half only. " + ways_runes
-            + ("Village and wild waystone generation, warp portals, fleeting memorials and the warp stone, "
-               "scrolls and feather are not converted (warp plates have their own note)." if kept_plate else
-               "Village and wild waystone "
-               "generation, warp plates and portals, fleeting memorials and the warp "
-               "stone, scrolls, shards and feather are not converted.")
+            + _not_converted(bool(kept_plate), bool(kept_portal))
             + (" Silk touch drops a plain waystone." if silk else "")
         )
     runes_on = [i for i in kept_share if _has_runes(i)]
@@ -1463,6 +1768,34 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "so a crumbling shard warps nowhere), a silk-touched plate keeping its identity, and config "
             "changes (the cited defaults are used). Entities count as on a plate when their position is in "
             "its block (Java tests their bounding box)."
+        )
+    if kept_portal:
+        portals = table["warp_portals"]
+        result.notes.append(
+            f"{NS}: {len(kept_portal)} warp portal block(s) work through the same runtime ({data_path}): "
+            f"{', '.join(kept_portal)}, opened by the portal scroll ({', '.join(portals['scroll']['items'])}). "
+            f"Using a portal scroll for {portals['scroll']['use_time']} ticks (scrollUseTime; the use starts with "
+            "the portal trigger sound) opens the menu of the waystones the player has activated, or says there "
+            "is no space for a portal; choosing one opens a two-block portal 3 or 4 blocks ahead of the player "
+            "(on solid ground, with room for it and one block above), facing the player, and uses up the scroll "
+            "(not in creative). Whatever enters either half (players, mobs, items; not riders, nor "
+            f"{', '.join(portals['deny'])}) is teleported beside that waystone at most once every "
+            f"{portals['cooldown']} ticks, for the warpRequirements cost decided for a portal teleport "
+            "(distance x 0.01 points in the same dimension, 27 between dimensions, at most 27; the scroll's "
+            "menu shows none, as Java's does); a player who can't pay is told on the action bar. A player who "
+            "came through finds 'Return to Portal' at the end of every waystone and sharestone menu while the "
+            "portal stands. The portal closes (fizz sound) after "
+            f"{portals['lifetime']} ticks of being loaded, or as soon as something enters it after its "
+            "waystone is gone (a player is told). It glows (light 10), can't be selected, mined or blown up, "
+            "and draws the jar's animated texture (each half its own flipbook, translucent); the scroll has the "
+            "enchantment glint. Not carried over: letting go of the use button (a script can't see it; "
+            "switching away from the scroll or taking damage does stop it), the bow-drawing pose, slowed "
+            "walking and the particles while it is used, using it from the off hand, the portal's particles, "
+            "pets, leashed mobs and mounts going along, Java's solid and replaceable block tests (only air and "
+            "liquid count as room, anything else as solid ground), an entity counting as inside by its position "
+            "(Java: its bounding box), the portal's age while its chunk is not loaded being kept to the "
+            "nearest second across a reload, 'Return to Portal' in the warp stone's and scrolls' menus "
+            "(not converted), and config changes (the cited defaults are used)."
         )
     entry = (
         'import { registerWaystones } from "./waystone.js";\n'

@@ -127,6 +127,14 @@ class DerivedTexture:
     source: str
     subpath: str
     rgb: int
+    # An animation strip cut down (Waystones' warp portal, #178): the jar's
+    # frames are ``frame[0]`` pixels tall and each is cut to its rows
+    # ``frame[1]``..``frame[2]`` (one Bedrock flipbook frame), stacked in order.
+    # None keeps the image as it is.
+    frame: tuple[int, int, int] | None = None
+    # A Bedrock flipbook for the result (textures/flipbook_textures.json):
+    # Java's frametime in ticks. None for a still texture.
+    ticks_per_frame: int | None = None
 
 
 @dataclass(frozen=True)
@@ -166,6 +174,15 @@ class FacingBlock:
     # Leave out model elements with a tinted face (``tintindex``): their colour
     # is the mod's colour handler's, which the block can't carry. A note names them.
     drop_tinted: bool = False
+    # Per Java value, faces drawing one part of a texture redrawn from a
+    # derived texture (:class:`DerivedTexture` with ``frame``): value ->
+    # (the Java texture, the derived texture's Java-style reference, the face
+    # uv drawn, the uv it becomes). The warp portal's halves each draw half of
+    # one 16 x 32 animation frame.
+    slices: dict | None = None
+    # Fields every material instance of the block takes (the warp portal's
+    # translucent render layer, set in the mod's client code). None for none.
+    material: dict | None = None
 
 
 # Farmer's Delight's cutting board, both corpus builds: FACING is
