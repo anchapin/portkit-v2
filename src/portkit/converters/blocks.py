@@ -37,6 +37,12 @@ _BLOCK_FORMAT = "1.20.20"
 # to match only when one is present (see pack.engine_floor).
 _CONNECTION_FORMAT = "1.26.0"
 
+# minecraft:item_visual (a block item drawn with its own geometry and material
+# instances) needs block format 1.21.60 (MicrosoftDocs/minecraft-creator
+# 4186dc4e, minecraftBlock_item_visual.md); only a block that carries one is
+# written at it, and the pack floor follows (pack.engine_floor).
+_ITEM_VISUAL_FORMAT = "1.21.60"
+
 _CARDINALS = ("north", "east", "south", "west")
 # The y turn Java uses to aim one side part at each neighbour.
 _CARDINAL_TURN = {"north": 0, "east": 90, "south": 180, "west": 270}
@@ -542,6 +548,20 @@ def _convert_station_states(
                 turned.append(moved)
             parts.append((f"{value}_facing_{direction}", value, direction, turned))
 
+    overlay = getattr(station, "overlay", None)
+    # (bone, value, the facings it shows at, its turn) per overlay bone.
+    overlay_bones: list[tuple[str, str, tuple, int]] = []
+    if overlay is not None:
+        extra, why = _overlay_parts(mod, result, overlay, tuple(by_value), uvlock, textures)
+        if extra is None:
+            result.notes.append(f"{name}: drawn without its {overlay.name} ({why}).")
+            overlay = None
+        else:
+            textures[overlay.name] = overlay.texture
+            for bone, value, directions, turn, els in extra:
+                parts.append((bone, value, None, els))
+                overlay_bones.append((bone, value, directions, turn))
+
     combined = {"textures": textures, "elements": [e for *_, els in parts for e in els]}
     by_face, why = models.element_materials(combined)
     tag_faces = by_face is None and "disagree" in why
@@ -550,7 +570,10 @@ def _convert_station_states(
     if by_face is None:
         result.unhandled.append(Unhandled(rel, "block", why))
         return
-    instances, why = _instances(mod, by_face, textures, tag_faces)
+    extra_instances = None
+    if overlay is not None:
+        extra_instances = {overlay.name: {"texture": overlay.block_texture, **overlay.block_material}}
+    instances, why = _instances(mod, by_face, textures, tag_faces, extra_instances)
     if instances is None:
         result.unhandled.append(Unhandled(rel, "block", why))
         return
@@ -570,6 +593,30 @@ def _convert_station_states(
                f"{_state_test(station, value)}")
         for bone, value, direction, _ in parts
     }
+    for bone, value, directions, _ in overlay_bones:
+        facings = " || ".join(f"q.block_state('minecraft:cardinal_direction') == '{d}'" for d in directions)
+        block["components"]["minecraft:geometry"]["bone_visibility"][bone] = (
+            f"{_state_test(station, value)} && ({facings})" if facings else "0.0")
+    if overlay is not None and overlay.item_texture is not None:
+        # The item: the overlay value's own bones and its overlay at the item's
+        # turn, the overlay wearing the item's texture (Java tints the item
+        # model with its own colour handler).
+        shown = {bone for bone, value, _, turn in overlay_bones
+                 if value == overlay.item_value and turn == overlay.item_turn}
+        overlay_names = {bone for bone, *_ in overlay_bones}
+        shown |= {bone for bone, value, _, _ in parts if bone not in overlay_names and value == overlay.item_value}
+        item_instances = json.loads(json.dumps(instances))
+        for key, spec in list(item_instances.items()):
+            if key == overlay.name or (isinstance(spec, dict) and spec.get("texture") == overlay.block_texture):
+                item_instances[key] = {"texture": overlay.item_texture, **overlay.item_material}
+        block["components"]["minecraft:item_visual"] = {
+            "geometry": {
+                "identifier": identifier,
+                "bone_visibility": {bone: "1.0" if bone in shown else "0.0" for bone, *_ in parts},
+            },
+            "material_instances": item_instances,
+        }
+        definition["format_version"] = _ITEM_VISUAL_FORMAT
     if getattr(station, "value_components", None):
         # Components the station gives one value (a feast's box per serving
         # count): one permutation per (facing, value), each with the facing's
@@ -592,6 +639,71 @@ def _convert_station_states(
             f"{name}: {station.java_state}={value} is drawn without {', '.join(names)}, which sit wholly "
             "in the block below; with them the model is taller than Bedrock's 30-pixel limit for "
             "custom block geometry.")
+
+
+def _shift_y(element: dict, dy: float) -> dict:
+    """``element`` moved ``dy`` pixels up (its rotation origin with it)."""
+    moved = json.loads(json.dumps(element))
+    for key in ("from", "to"):
+        moved[key][1] = round(float(moved[key][1]) + dy, 6)
+    rotation = moved.get("rotation")
+    if isinstance(rotation, dict) and isinstance(rotation.get("origin"), list) and len(rotation["origin"]) == 3:
+        rotation["origin"][1] = round(float(rotation["origin"][1]) + dy, 6)
+    return moved
+
+
+def _overlay_parts(mod: SourceMod, result: ConversionResult, overlay, values: tuple, uvlock: bool,
+                   textures: dict) -> tuple[list | None, str]:
+    """The bones of a station's overlay (:class:`portkit.converters.stations.Overlay`),
+    as (bone, value, facings, turn, elements), or None and why.
+
+    Each element goes to the value whose block it lies in (``overlay.offsets``,
+    moved down into that block), all its faces drawing the overlay's texture
+    under the key ``overlay.name``; then one bone per (value, turn), turned in
+    the block model's frame (the facing's own turn is the permutation's), shown
+    at the facings that take that turn.
+    """
+    if uvlock:
+        return None, "the block's model is uvlocked, which overlays are not mapped for"
+    if overlay.name in textures:
+        return None, f"the block's model already has a {overlay.name!r} texture"
+    flat, why = _flat_model(mod, result, overlay.model)
+    if flat is None:
+        return None, why
+    refs = flat.get("textures") or {}
+    by_value: dict[str, list] = {value: [] for value in values}
+    for element in flat.get("elements") or []:
+        keys = _face_keys([element])
+        if not keys or any(refs.get(key) != overlay.texture for key in keys):
+            return None, f"{overlay.model} draws a texture other than {overlay.texture}"
+        try:
+            low, high = float(element["from"][1]), float(element["to"][1])
+        except (KeyError, TypeError, ValueError, IndexError):
+            return None, f"{overlay.model} has an element without usable from/to"
+        value = next((v for v in values if v in overlay.offsets
+                      and overlay.offsets[v] <= min(low, high) and max(low, high) <= overlay.offsets[v] + 16), None)
+        if value is None:
+            return None, f"{overlay.model} element {element.get('name') or 'unnamed'} lies across two blocks"
+        faces = {face: ({**spec, "texture": f"#{overlay.name}"} if isinstance(spec, dict) else spec)
+                 for face, spec in (element.get("faces") or {}).items()}
+        by_value[value].append(_shift_y({**element, "faces": faces}, -overlay.offsets[value]))
+    if not any(by_value.values()):
+        return None, f"{overlay.model} has no elements"
+    turns = sorted(set(overlay.turns.values()) | ({overlay.item_turn} if overlay.item_texture else set()))
+    parts = []
+    for turn in turns:
+        directions = tuple(d for d in _CARDINALS if overlay.turns.get(d) == turn)
+        for value, elements in by_value.items():
+            if not elements:
+                continue
+            turned = []
+            for element in elements:
+                moved, why = models.turn_y(element, turn, False)
+                if moved is None:
+                    return None, why
+                turned.append(moved)
+            parts.append((f"{value}_{overlay.name}_{turn}", value, directions, turn, turned))
+    return parts, ""
 
 
 def _plain_cube(mod: SourceMod, model_ref: str) -> bool:
@@ -769,11 +881,19 @@ def _palisade_definition(namespace: str, name: str, geometry: str, instances: di
 
 
 def _instances(
-    mod: SourceMod, by_face: dict[str, str], textures: dict, tag_faces: bool
+    mod: SourceMod, by_face: dict[str, str], textures: dict, tag_faces: bool,
+    extra: dict[str, dict] | None = None,
 ) -> tuple[dict | None, str]:
-    """Material instances for a custom shape, from its face -> texture-key map."""
+    """Material instances for a custom shape, from its face -> texture-key map.
+
+    ``extra`` maps a texture key to the instance it gets as it is (a station
+    overlay's derived texture, which no Java reference names)."""
     instances: dict[str, dict] = {}
+    extra = extra or {}
     for face, texture_key in sorted(by_face.items()):
+        if texture_key in extra:
+            instances[face] = dict(extra[texture_key])
+            continue
         reference = textures.get(texture_key)
         if not isinstance(reference, str):
             return None, f"model has no {texture_key!r} texture"
@@ -793,8 +913,10 @@ def _instances(
         instances = {"*": json.loads(distinct.pop())}
     elif tag_faces:
         # Every face names its own instance, so "*" is only a fallback;
-        # point it at the first one rather than leave it undefined.
-        instances = {"*": dict(instances[min(instances)]), **instances}
+        # point it at the first one rather than leave it undefined (not an
+        # overlay's, which is not the block's own surface).
+        own = [face for face in instances if by_face[face] not in extra] or list(instances)
+        instances = {"*": dict(instances[min(own)]), **instances}
     return instances, ""
 
 

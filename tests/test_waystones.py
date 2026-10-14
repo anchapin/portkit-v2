@@ -424,6 +424,165 @@ def test_lines_left_out_for_every_type_are_listed_once():
     assert set(plan.modifiers) == {"waystones:orange_sharestone", "waystones:waystone"}
 
 
+# -- sharestone runes -----------------------------------------------------------
+
+RUNE_FACES = ("north", "east", "south", "west")
+
+
+def _rune_element(name, y0, y1, v):
+    return {"name": name, "from": [0.9, y0, 0.9], "to": [15.1, y1, 15.1],
+            "faces": {f: {"uv": [3.5 * i, v, 3.5 * (i + 1), v + 6.75], "texture": "#3", "tintindex": 0}
+                      for i, f in enumerate(RUNE_FACES)}}
+
+
+def _rune_png() -> bytes:
+    from portkit.png import encode_png
+
+    # 4x2: white, transparent, mid grey, white / transparent row.
+    pixels = bytes((255, 255, 255, 255, 0, 0, 0, 0, 128, 128, 128, 255, 255, 255, 255, 255) + (0, 0, 0, 0) * 4)
+    return encode_png(4, 2, pixels)
+
+
+def _with_runes(root: Path, top=(24.9, 29.1)) -> Path:
+    _write(root, f"assets/{NS}/models/block/sharestone_runes.json", {
+        "textures": {"3": f"{NS}:block/sharestone_runes", "particle": f"{NS}:block/sharestone_runes"},
+        "elements": [_rune_element("bottom_runes", 2.9, 7.1, 7), _rune_element("top_runes", *top, 0)]})
+    _write(root, f"assets/{NS}/textures/block/sharestone_runes.png", _rune_png())
+    return root
+
+
+@pytest.fixture
+def runed(tmp_path):
+    result = convert(_with_runes(_waystones_mod(tmp_path)), tmp_path / "out", emit_addon=False)
+    return result, tmp_path / "out"
+
+
+def _pixels(path: Path) -> list[tuple]:
+    from portkit.png import decode_rgba
+
+    _, _, data = decode_rgba(path.read_bytes())
+    return [tuple(data[i:i + 4]) for i in range(0, len(data), 4)]
+
+
+def test_dye_colours_are_cited_for_every_sharestone():
+    assert set(waystones.SHARESTONE_COLORS) <= set(waystones.DYE_COLORS)
+    # DyeColor.ORANGE: textureDiffuseColor 16351261, textColor 16738335 (1.21.1).
+    assert waystones.DYE_COLORS["orange"] == (16351261, 16738335)
+    assert waystones.DYE_COLORS["red"] == (0xB02E26, 0xFF0000)
+
+
+def test_tint_multiplies_each_channel_and_keeps_alpha():
+    from portkit.converters.textures import tint
+
+    pixels = _pixels_from(tint(_rune_png(), 0xF9801D))
+    assert pixels[0] == (0xF9, 0x80, 0x1D, 255)
+    assert pixels[1][3] == 0
+    assert pixels[2] == ((128 * 0xF9 + 127) // 255, (128 * 0x80 + 127) // 255, (128 * 0x1D + 127) // 255, 255)
+
+
+def _pixels_from(data: bytes) -> list[tuple]:
+    from portkit.png import decode_rgba
+
+    _, _, raw = decode_rgba(data)
+    return [tuple(raw[i:i + 4]) for i in range(0, len(raw), 4)]
+
+
+def test_sharestone_runes_are_baked_in_its_dye_colours(runed):
+    _, tree = runed
+    textures = tree / "resource_pack/textures/blocks"
+    assert _pixels(textures / "orange_sharestone_runes.png")[0] == (0xF9, 0x80, 0x1D, 255)
+    assert _pixels(textures / "orange_sharestone_runes_item.png")[0] == (0xFF, 0x68, 0x1F, 255)
+    terrain = json.loads((tree / "resource_pack/textures/terrain_texture.json").read_text())["texture_data"]
+    assert terrain["waystones:orange_sharestone_runes"] == {"textures": "textures/blocks/orange_sharestone_runes"}
+    assert "waystones:orange_sharestone_runes_item" in terrain
+    # Only registered sharestones get runes (white has no SharestoneBlock).
+    assert not (textures / "white_sharestone_runes.png").exists()
+
+
+def test_sharestone_wears_its_runes_as_part_of_the_block(runed):
+    result, tree = runed
+    block = _block(tree, "orange_sharestone")
+    instances = block["components"]["minecraft:material_instances"]
+    assert instances["runes"] == {"texture": "waystones:orange_sharestone_runes", "render_method": "alpha_test",
+                                  "face_dimming": False, "ambient_occlusion": False}
+    # "*" (particles and anything unnamed) stays the stone, not the runes.
+    assert instances["*"]["texture"] == "waystones:andesite_waystone"
+    geo = json.loads((tree / "resource_pack/models/blocks/orange_sharestone.geo.json").read_text())
+    bones = {b["name"]: b["cubes"] for b in geo["minecraft:geometry"][0]["bones"]}
+    assert {"lower_runes_0", "lower_runes_180", "upper_runes_0", "upper_runes_180"} <= set(bones)
+    # The top band (24.9-29.1 above the lower block) lies in the upper block.
+    assert bones["upper_runes_0"][0]["origin"][1] == pytest.approx(8.9)
+    assert bones["lower_runes_0"][0]["origin"][1] == pytest.approx(2.9)
+    assert all(f["material_instance"] == "runes" for f in bones["lower_runes_0"][0]["uv"].values())
+    # Turned half way round, the north band's texture is on the south face.
+    assert bones["lower_runes_180"][0]["uv"]["south"]["uv"] == bones["lower_runes_0"][0]["uv"]["north"]["uv"]
+    visibility = block["components"]["minecraft:geometry"]["bone_visibility"]
+    assert "'north'" in visibility["lower_runes_180"] and "'south'" in visibility["lower_runes_180"]
+    assert "'east'" in visibility["lower_runes_0"] and "'west'" in visibility["lower_runes_0"]
+    assert "== 'upper'" in visibility["upper_runes_0"]
+    assert any("coloured runes are drawn as Java draws them" in n for n in result.notes)
+    # Waystones keep their plain look.
+    assert "runes" not in _block(tree, "waystone")["components"]["minecraft:material_instances"]
+
+
+def test_runes_turn_as_the_java_renderer_turns_them(tmp_path):
+    from portkit.model import SourceMod
+
+    root = _waystones_mod(tmp_path)
+    mod = SourceMod(root=root, namespace=NS)
+    # SharestoneRenderer turns by FACING.toYRot() anticlockwise; the
+    # blockstate turns north 0, east 90, south 180, west 270 clockwise.
+    assert waystones._rune_turns(mod, "orange_sharestone") == {"north": 180, "east": 0, "south": 180, "west": 0}
+
+
+def test_sharestone_item_shows_its_runes_in_the_item_colour(runed):
+    _, tree = runed
+    raw = json.loads((tree / "behavior_pack/blocks/orange_sharestone.json").read_text())
+    assert tuple(int(v) for v in raw["format_version"].split(".")) >= (1, 21, 60)
+    visual = raw["minecraft:block"]["components"]["minecraft:item_visual"]
+    assert visual["geometry"]["identifier"] == "geometry.waystones.orange_sharestone"
+    shown = {b for b, v in visual["geometry"]["bone_visibility"].items() if v == "1.0"}
+    assert shown == {"lower", "lower_runes_0"}
+    assert visual["material_instances"]["runes"] == {"texture": "waystones:orange_sharestone_runes_item",
+                                                     "render_method": "alpha_test"}
+    assert visual["material_instances"]["*"]["texture"] == "waystones:andesite_waystone"
+
+
+def test_without_the_rune_model_sharestones_keep_the_plain_look(converted):
+    result, tree = converted
+    block = _block(tree, "orange_sharestone")
+    assert "runes" not in block["components"]["minecraft:material_instances"]
+    assert "minecraft:item_visual" not in block["components"]
+    assert not (tree / "resource_pack/textures/blocks/orange_sharestone_runes.png").exists()
+    assert any("no readable waystones:block/sharestone_runes model" in n for n in result.notes)
+
+
+def test_a_rune_band_across_two_blocks_is_not_guessed(tmp_path):
+    root = _with_runes(_waystones_mod(tmp_path), top=(14.0, 18.0))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    block = _block(tmp_path / "out", "orange_sharestone")
+    assert "runes" not in block["components"]["minecraft:material_instances"]
+    assert not (tmp_path / "out/resource_pack/textures/blocks/orange_sharestone_runes.png").exists()
+    assert any("every colour looks the same" in n and "top_runes lies across two blocks" in n
+               for n in result.notes)
+
+
+def test_block_converter_refuses_an_overlay_it_cannot_place(tmp_path):
+    from portkit.converters.blocks import _overlay_parts
+    from portkit.model import ConversionResult, SourceMod
+
+    root = _with_runes(_waystones_mod(tmp_path), top=(14.0, 18.0))
+    mod = SourceMod(root=root, namespace=NS)
+    overlay = waystones._rune_overlay(SourceMod(root=_with_runes(_waystones_mod(tmp_path / "ok")), namespace=NS),
+                                      "orange_sharestone")
+    parts, why = _overlay_parts(mod, ConversionResult(), overlay, ("lower", "upper"), False, {})
+    assert parts is None and "top_runes lies across two blocks" in why
+    parts, why = _overlay_parts(mod, ConversionResult(), overlay, ("lower", "upper"), True, {})
+    assert parts is None and "uvlocked" in why
+    parts, why = _overlay_parts(mod, ConversionResult(), overlay, ("lower", "upper"), False, {"runes": "x"})
+    assert parts is None and "already has a 'runes' texture" in why
+
+
 # -- portstones ---------------------------------------------------------------
 
 
