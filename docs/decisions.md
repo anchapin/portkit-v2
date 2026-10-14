@@ -27,6 +27,107 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: the portal scroll opens a warp portal through the waystone runtime; the portal sends what enters it to the chosen waystone and closes after its lifetime
+
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #206, Part of #178).
+- **Decision:** Waystones' warp portal (`WarpPortalBlock`, registered by name
+  with no item, `ModBlocks` L87) converts with the one thing that makes one,
+  the portal scroll (`PortalScrollItem`, `ModItems` L41), through the waystone
+  runtime of #198-#205: a component of its own
+  (`waystones:portkit_warp_portal`: `onTick` every tick through
+  `minecraft:tick` [1, 1]) and a `warp_portals` section in the same data
+  table. A portal is a record of type `waystones:warp_portal`
+  (`WaystoneTypes` L12) holding its target's uid and its age.
+  - **Scroll:** a use starts with `PORTAL_TRIGGER` 0.1 / 2 at the player
+    (`ScrollItemBase#use` L37-49; Bedrock `portal.trigger`, the same audio)
+    and finishes after `general.scrollUseTime` ticks (32,
+    `WaystonesConfigData` L83, now in the cited defaults): a script timer
+    started by `world.afterEvents.itemUse`, stopped when the player selects
+    another slot or the slot stops holding the scroll, or takes damage
+    (`WarpDamageResetHandler` L10-15, `world.afterEvents.entityHurt`). Then
+    (`PortalScrollItem#finishUsingItem` L33-53): no place for a portal says
+    `chat.waystones.warp_portal_no_space` in chat, DARK_RED; otherwise the
+    menu of the player's activated waystones (`withTargetsForPlayer`), titled
+    `container.waystones.waystone_selection`, its costs decided with
+    `source_is_scroll` true (so none shows at the defaults, as in Java).
+  - **Opening:** the choice (`SelectWaystoneMessage` L52-58, no teleport)
+    runs `WarpPortalManager#spawnPortal` L39-62: the place is found again
+    (`findPortalPos` L72-92: along the horizontal look, 3 then 4 blocks out,
+    from two blocks above the feet down five, the first block with solid
+    ground below and room for the two halves and one more block; scripts
+    read neither Java test, so anything but air or liquid is solid and only
+    air or liquid is room), both halves are set facing the player
+    (`Direction.fromYRot(yaw).getOpposite()`), `PORTAL_TRAVEL` 0.25 / 1.4
+    plays there, and one scroll is used up (`ItemStack#consume`: not in
+    creative).
+  - **Block:** facing x a custom `waystones:half` (lower, upper), Java's
+    models as one plane per half; no collision and no selection box (both
+    shapes empty, L57-64), `minecraft:light_emission` 10 (L87), not mined
+    and not blown up (`strength(-1, 3600000)`), no loot (`noLootTable`), no
+    creative item (`menu_category` none). Drawn translucent
+    (`ModRenderers` L35: `render_method` blend) from the jar's animation
+    strip (16 x 32 frames, frametime 3), which the models draw in halves:
+    each half gets its own 16 x 16-frame strip cut from it, as a flipbook at
+    3 ticks a frame. New generic `DerivedTexture.frame` / `ticks_per_frame`
+    (textures) and `FacingBlock.slices` / `material` (blocks): the strip
+    itself is no longer shipped nor residue.
+  - **Going through:** every tick, each entity whose position is in either
+    half (`entityInside` L66-74), at most once every 20 ticks per entity
+    (`canUsePortal` L101-109, in memory as Java's unsaved map), not the
+    deny list (`minecraft:wither`) and, here, not riders: a portal whose
+    waystone is gone tells a player `chat.waystones.warp_portal_attunement_lost`
+    and closes (`onEntityInside` L107-119); otherwise the entity lands beside
+    the waystone on its first free side for the `warpRequirements` default
+    decided for a portal teleport (`fixed_conditions(WARP_PORTAL_TYPE)`: no
+    source waystone of a known kind, no warp item, the target a waystone:
+    distance x 0.01, 27 across dimensions, at most 27), which only a player
+    pays (`consumeRequirements`), told on the action bar in DARK_RED when they
+    can't or when the waystone's block is gone.
+  - **Closing:** after `LIFETIME_TICKS` (6000, L38) ticks of the lower half
+    ticking (kept in memory, saved on the record every 20 ticks), or when
+    its target is gone: `FIRE_EXTINGUISH` 0.5 / 1.2 (`removePortal`
+    L127-137; Bedrock `random.fizz`, the same audio), both halves air, the
+    record forgotten. A portal placed by command has no target (Java's block
+    entity defaults), so the first entity in it closes it.
+  - **Return to Portal:** a player who went through keeps the portal's uid
+    (player dynamic property; `setReturnPortal` L128-135) and, while the
+    portal stands, finds "Return to Portal" (its name,
+    `gui.waystones.waystone_selection.return_to_portal`) at the end of every
+    waystone and sharestone menu (`getTargetsForWaystone` L318; not
+    portstones, which use `getTargetsForWaystoneType`), costing the default
+    decided for that menu's type with `target_is_warp_portal` true; it lands
+    beside the portal on its facing side first.
+  - **Item:** the portal scroll gets `minecraft:glint` (`isFoil` L27-30).
+  - **Gating:** the portal ships only when the jar's texts for it exist, the
+    portal scroll converted, a waystone block works, and the strip is the
+    16 x 32-frame one its models halve; otherwise its blockstate is residue
+    with the reason.
+- **Why:** the portal is a block with no way in but the scroll, so the
+  scroll is the slice; it is built on the same waystone records, teleport
+  rules and cost parser, and each step is read line by line from
+  `WarpPortalManager`, `WarpPortalBlockEntity` and `PortalScrollItem`.
+- **Rejected:** converting the block alone (nothing could ever open it);
+  `minecraft:use_modifiers` with `itemCompleteUse` for the hold (documented
+  only with food, shooter or throwable, as #198 found; if it doesn't fire on
+  a plain item the scroll does nothing) or an instant use (drops Java's
+  32-tick hold); one 16 x 32 flipbook (Bedrock would cut 16 x 16 frames and
+  show top and bottom halves in turn); the scroll's other targets (third-party
+  waystones, fleeting memorials: not converted); a cooldown in entity dynamic
+  properties (it would survive a reload, Java's doesn't).
+- **Not carried over (conversion note):** letting go of the use button (a
+  script can't see it), the bow pose, slowed walking and the particles while
+  it is used, using it from the off hand, the portal's idle and burst
+  particles, pets, leashed mobs and mounts travelling along, Java's solid and
+  replaceable tests, an entity counting as inside by its position (Java: its
+  bounding box), up to 19 ticks of a portal's age across a reload, "Return
+  to Portal" in the warp stone's and scrolls' menus (not converted), config
+  changes (cited defaults).
+- **Coverage:** Waystones 30.2 -> 30.7 (319 -> 324 files, residue 736 ->
+  732); no other corpus mod changed.
+- **Links:** #178, PR #198 (waystones), PR #201 (sharestones), PR #202
+  (portstones), PR #203/#204 (runes), PR #205 (warp plates), #87 (no
+  fabrication), PR #206.
+
 ## 2026-10-14: warp plates attune a dormant shard and warp what stands on them through the waystone runtime; the shard keeps its plate as item data
 
 - **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #205, Part of #178).

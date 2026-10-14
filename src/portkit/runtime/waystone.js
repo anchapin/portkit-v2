@@ -1,4 +1,4 @@
-// portkit station runtime: Waystones waystones, sharestones, portstones and warp plates, Bedrock binding (#178).
+// portkit station runtime: Waystones waystones, sharestones, portstones, warp plates and warp portals, Bedrock binding (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). The generated entry
@@ -30,8 +30,19 @@
 // shard and to warp what stands on it; an attuned shard item carries its
 // plate's uid as an item dynamic property. Each entity's warp plate state is
 // kept in memory, as Java keeps it unsaved on the entity.
+//
+// Warp portals (table.warp_portals): a portal scroll held for its use time
+// (a script timer: world.afterEvents.itemUse starts it, switching away from
+// the scroll or taking damage stops it) opens the menu of the player's
+// activated waystones; choosing one opens a two-block portal in front of the
+// player, a record of type warp_portal holding its target's uid and its age.
+// Its lower half ticks every tick (minecraft:tick): what stands in either
+// half is teleported to the target, and the portal closes after its
+// lifetime. A player who came through keeps the portal's uid (player dynamic
+// property) and sees "Return to Portal" in waystone and sharestone menus
+// while it stands.
 
-import { EquipmentSlot, GameMode, system, world } from "@minecraft/server";
+import { BlockPermutation, EquipmentSlot, GameMode, system, world } from "@minecraft/server";
 import { ActionFormData, FormCancelationReason, ModalFormData } from "@minecraft/server-ui";
 import * as core from "./waystone_core.js";
 import { centre, describe, loadStored, play, rebuild, saveStored } from "./station_storage.js";
@@ -300,6 +311,10 @@ function menu(table, player, source) {
   const net = table.networks[source.type];
   const list = core.menuTargets(net.shared, activated(table, player), records(table), source.type,
     from ? from.uid : null, table.default_type);
+  // getTargetsForWaystone L318: a waystone's or sharestone's menu ends with
+  // the portal the player last came through, while it stands.
+  const back = from && table.warp_portals ? returnPortal(table, player) : undefined;
+  if (back) list.push(back);
   const body = [];
   if (from) body.push(message(table, "current_location", [core.nameText(from.name, table.messages.unnamed)]));
   if (list.length === 0) {
@@ -308,7 +323,7 @@ function menu(table, player, source) {
   }
   const form = new ActionFormData().title(source.title).body(body.length ? { rawtext: body } : "");
   for (const target of list) {
-    const points = core.cost(source.requirements, context(player, target));
+    const points = core.cost(requirementsTo(table, source, target), context(player, target));
     const label = [core.nameText(target.name, table.messages.unnamed)];
     if (points > 0) label.push({ text: "\n" }, message(table, "xp_cost", [{ text: String(points) }]));
     form.button({ rawtext: label });
@@ -316,8 +331,19 @@ function menu(table, player, source) {
   show(form, player).then((response) => {
     if (response.canceled || response.selection === undefined) return;
     const target = list[response.selection];
-    if (target) teleport(table, player, source, target);
+    if (!target) return;
+    // The portal scroll's menu opens a portal instead (SelectWaystoneMessage L52-58).
+    if (source.select) source.select(target);
+    else teleport(table, player, source, target);
   });
+}
+
+/** The cost rules of a teleport from `source` to `target`: "Return to Portal" has its own per menu type. */
+function requirementsTo(table, source, target) {
+  if (table.warp_portals && target.type === table.warp_portals.type) {
+    return table.warp_portals.return_requirements[source.type] || [];
+  }
+  return source.requirements;
 }
 
 /** SelectWaystoneMessage -> WaystoneTeleportManager#tryTeleport. */
@@ -331,17 +357,32 @@ function teleport(table, player, source, target) {
   }
   const key = core.recordKey(table.namespace, target.dimension, target.pos);
   const current = loadStored(key);
-  if (!current || current.uid !== target.uid || typeOf(table, current) !== source.type) return fail("missing");
+  // "Return to Portal" names a warp portal's waystone, not one of the menu's type.
+  const toPortal = !!table.warp_portals && target.type === table.warp_portals.type;
+  const wanted = toPortal ? table.warp_portals.type : source.type;
+  if (!current || current.uid !== target.uid || typeOf(table, current) !== wanted) return fail("missing");
   const dimension = world.getDimension(current.dimension);
   const lower = blockAt(dimension, current.pos);
-  if (lower && table.block_types[lower.typeId] !== typeOf(table, current)) {
+  if (lower && (toPortal ? !isPortal(table, lower.typeId) : table.block_types[lower.typeId] !== typeOf(table, current))) {
     // The block went without a player breaking it; Java's onRemove drops it.
     saveStored(key, undefined);
     return fail("missing");
   }
-  const points = core.cost(source.requirements, context(player, current));
+  const points = core.cost(requirementsTo(table, source, current), context(player, current));
   const creative = player.getGameMode() === GameMode.Creative;
   if (!core.canAfford(player.getTotalXp(), points, creative)) return fail("not_enough_xp");
+  // consumeRequirements L490-494: giveExperiencePoints(-points), creative too.
+  if (points > 0) player.addExperience(-points);
+  land(table, player, current, lower, dimension);
+}
+
+/**
+ * WaystoneTeleportManager#resolveDefaultDestination L275-284 and
+ * performTeleport L161-162: `entity` lands beside the waystone `current` on
+ * its first free side (its own block when its chunk isn't loaded, `lower`
+ * undefined), turned to face that side, with the travel sounds.
+ */
+function land(table, entity, current, lower, dimension) {
   let side = current.facing;
   if (lower) {
     side = core.offsetDirection(current.facing, (direction) => {
@@ -351,15 +392,13 @@ function teleport(table, player, source, target) {
     });
   }
   const destination = core.destination(current.pos, side, current.facing);
-  // consumeRequirements L490-494: giveExperiencePoints(-points), creative too.
-  if (points > 0) player.addExperience(-points);
-  const departure = { ...player.location };
-  const sourceDimension = player.dimension;
-  player.teleport(destination.location, {
+  const departure = { ...entity.location };
+  const sourceDimension = entity.dimension;
+  const rotation = entity.getRotation ? entity.getRotation() : { x: 0, y: 0 };
+  entity.teleport(destination.location, {
     dimension,
-    rotation: { x: player.getRotation().x, y: destination.yaw },
+    rotation: { x: rotation.x, y: destination.yaw },
   });
-  // performTeleport L161-162.
   play(sourceDimension, departure, table.sounds.depart);
   play(dimension, destination.location, table.sounds.arrive);
 }
@@ -717,6 +756,315 @@ function entityTicks(table) {
   }
 }
 
+// -- warp portals ----------------------------------------------------------------
+
+// Portal record key -> its age in ticks (WarpPortalBlockEntity's Age); written
+// to the record every AGE_SAVE ticks, so a reload loses at most that many.
+const portalAges = new Map();
+const AGE_SAVE = 20;
+// Entity id -> the portal clock tick it last used a portal
+// (WarpPortalManager.portalCooldowns, unsaved, keyed by tickCount).
+const portalUses = new Map();
+// Player id -> {player, slot, typeId, ticks}: a portal scroll in use.
+const charging = new Map();
+// Ticks counted by the portal interval (Java counts each entity's tickCount).
+let portalClock = 0;
+
+function isPortal(table, typeId) {
+  return !!table.warp_portals && table.warp_portals.blocks.includes(typeId);
+}
+
+/** A DARK_RED text (PortalScrollItem L36, WarpPortalManager L116-124). */
+function portalError(table, role) {
+  return { rawtext: [{ text: table.warp_portals.error_style }, { translate: table.messages[role] }] };
+}
+
+/**
+ * ScrollItemBase#use L37-49: a use that is not already going on plays
+ * PORTAL_TRIGGER at the player and starts using the scroll for its use time
+ * (getUseDuration: general.scrollUseTime); no use time finishes at once.
+ */
+function scrollUsed(table, event) {
+  const { source: player, itemStack } = event;
+  const scroll = table.warp_portals.scroll;
+  if (!player || !itemStack || !scroll.items.includes(itemStack.typeId)) return;
+  if (charging.has(player.id)) return;
+  play(player.dimension, player.location, table.sounds.scroll_start);
+  if (scroll.use_time <= 0) {
+    scrollFinished(table, player);
+    return;
+  }
+  charging.set(player.id, { player, slot: player.selectedSlotIndex, typeId: itemStack.typeId, ticks: 0 });
+}
+
+function heldAt(player, slot) {
+  const inventory = player.getComponent("minecraft:inventory");
+  try {
+    return inventory && inventory.container ? inventory.container.getItem(slot) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Each tick of a scroll in use: Java stops using an item the player no
+ * longer holds in that hand (LivingEntity#updatingUsingItem); after the use
+ * time the use finishes (finishUsingItem). A script can't see the use button
+ * released, so letting go does not stop it here.
+ */
+function scrollTicks(table) {
+  const scroll = table.warp_portals.scroll;
+  for (const [id, c] of charging) {
+    const player = c.player;
+    if (!player || (player.isValid !== undefined && !player.isValid)) {
+      charging.delete(id);
+      continue;
+    }
+    const held = heldAt(player, c.slot);
+    if (player.selectedSlotIndex !== c.slot || !held || held.typeId !== c.typeId) {
+      charging.delete(id);
+      continue;
+    }
+    c.ticks += 1;
+    if (c.ticks >= scroll.use_time) {
+      charging.delete(id);
+      scrollFinished(table, player);
+    }
+  }
+}
+
+/** findPortalPos L72-92 against this world: solid below, air or liquid for the rest. */
+function portalPos(player) {
+  const dimension = player.dimension;
+  return core.portalPos(player.location, player.getViewDirection(), (pos) => {
+    // canPlacePortalAt L94-99 asks for a solid block below and replaceable
+    // ones in the portal's two blocks and the one above; scripts can read
+    // neither, so anything but air or liquid counts as solid and only air or
+    // liquid as replaceable.
+    const below = blockAt(dimension, { x: pos.x, y: pos.y - 1, z: pos.z });
+    if (!below || below.isAir || below.isLiquid) return false;
+    for (let dy = 0; dy <= 2; dy++) {
+      if (!free(blockAt(dimension, { x: pos.x, y: pos.y + dy, z: pos.z }))) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * PortalScrollItem#finishUsingItem L33-53: no room for a portal says so
+ * (chat, DARK_RED); otherwise the menu of the player's activated waystones
+ * (withTargetsForPlayer), whose choice opens a portal to it.
+ */
+function scrollFinished(table, player) {
+  const scroll = table.warp_portals.scroll;
+  if (!portalPos(player)) {
+    player.sendMessage(portalError(table, "no_space"));
+    return;
+  }
+  system.run(() => menu(table, player, {
+    type: scroll.network,
+    requirements: scroll.requirements,
+    title: { translate: scroll.title },
+    from: null,
+    select: (target) => openPortal(table, player, target),
+  }));
+}
+
+/**
+ * The scroll menu's choice (SelectWaystoneMessage L52-58, the post-teleport
+ * handler PortalScrollItem L43-49): WarpPortalManager#spawnPortal L39-62
+ * finds the place again, sets both halves facing the player, makes the
+ * portal's waystone (WarpPortalBlockEntity#initialize L72-89: a new uid, the
+ * target, "Return to Portal"), plays PORTAL_TRAVEL there and uses up one
+ * scroll (ItemStack#consume: not in creative); no place says so instead.
+ */
+function openPortal(table, player, target) {
+  const portals = table.warp_portals;
+  const pos = portalPos(player);
+  if (!pos) {
+    player.sendMessage(portalError(table, "no_space"));
+    return;
+  }
+  const dimension = player.dimension;
+  const facing = core.portalFacing(player.getRotation().y);
+  const typeId = portals.blocks[0];
+  for (const [dy, half] of [[0, "lower"], [1, "upper"]]) {
+    const block = blockAt(dimension, { x: pos.x, y: pos.y + dy, z: pos.z });
+    if (block) {
+      block.setPermutation(BlockPermutation.resolve(typeId, {
+        "minecraft:cardinal_direction": facing,
+        [table.half_state]: half,
+      }));
+    }
+  }
+  const key = core.recordKey(table.namespace, dimension.id, pos);
+  saveStored(key, {
+    uid: newUid(),
+    type: portals.type,
+    dimension: dimension.id,
+    pos,
+    facing,
+    target: target.uid,
+    age: 0,
+    name: { translate: table.messages.return_to_portal },
+  });
+  portalAges.set(key, 0);
+  play(dimension, { x: pos.x + 0.5, y: pos.y + 0.5, z: pos.z + 0.5 }, table.sounds.portal_open);
+  if (creative(player)) return;
+  const inventory = player.getComponent("minecraft:inventory");
+  const container = inventory && inventory.container;
+  const slot = player.selectedSlotIndex;
+  const held = container ? container.getItem(slot) : undefined;
+  if (!held || !portals.scroll.items.includes(held.typeId)) return;
+  if (held.amount > 1) {
+    held.amount -= 1;
+    container.setItem(slot, held);
+  } else {
+    container.setItem(slot, undefined);
+  }
+}
+
+/**
+ * WarpPortalBlockEntity#removePortal L127-137: the portal's waystone goes,
+ * FIRE_EXTINGUISH plays, both halves become air.
+ */
+function closePortal(table, dimension, pos) {
+  const key = core.recordKey(table.namespace, dimension.id, pos);
+  saveStored(key, undefined);
+  portalAges.delete(key);
+  play(dimension, { x: pos.x + 0.5, y: pos.y + 0.5, z: pos.z + 0.5 }, table.sounds.portal_close);
+  const lower = blockAt(dimension, pos);
+  if (lower && isPortal(table, lower.typeId)) lower.setType("minecraft:air");
+  const upper = blockAt(dimension, { x: pos.x, y: pos.y + 1, z: pos.z });
+  if (upper && isPortal(table, upper.typeId)) upper.setType("minecraft:air");
+}
+
+/** The waystone a portal opens to (WaystoneProxy by uid), or undefined when it is gone. */
+function portalTarget(table, record) {
+  if (!record.target) return undefined;
+  const type = table.warp_portals.scroll.network;
+  return records(table).find((r) => r.uid === record.target && typeOf(table, r) === type);
+}
+
+/**
+ * WarpPortalBlockEntity#onEntityInside L107-119 and
+ * WarpPortalManager#canUsePortal L101-109, teleportFromPortal L111-126: at
+ * most one use per entity per cooldown, none for the deny list; a portal
+ * whose target is gone tells a player so (chat) and closes; otherwise the
+ * teleport, which a player pays for (and is told on the action bar, DARK_RED,
+ * when they can't); a player who goes through keeps the portal as their
+ * return portal (setReturnPortal L128-135). Returns true when the portal closed.
+ */
+function enterPortal(table, dimension, record, entity) {
+  const portals = table.warp_portals;
+  // Java takes an entity's controlled mount along (EntityTeleportBatch);
+  // here riders don't use portals.
+  if (riding(entity)) return false;
+  if (!core.mayUsePortal(portalUses, entity.id, portalClock, portals.cooldown)) return false;
+  if (portals.deny.includes(entity.typeId)) return false;
+  const target = portalTarget(table, record);
+  if (!target) {
+    if (isPlayer(entity)) entity.sendMessage(message(table, "attunement_lost"));
+    closePortal(table, dimension, record.pos);
+    return true;
+  }
+  const player = isPlayer(entity);
+  const targetDimension = world.getDimension(target.dimension);
+  const lower = blockAt(targetDimension, target.pos);
+  if (lower && table.block_types[lower.typeId] !== typeOf(table, target)) {
+    // isValidInLevel fails (WaystoneImpl L145-148): the waystone is missing.
+    saveStored(core.recordKey(table.namespace, target.dimension, target.pos), undefined);
+    if (player) entity.onScreenDisplay.setActionBar(portalError(table, "missing"));
+    return false;
+  }
+  const points = core.cost(portals.requirements, context(entity, target));
+  if (player && !core.canAfford(entity.getTotalXp(), points, creative(entity))) {
+    entity.onScreenDisplay.setActionBar(portalError(table, "not_enough_xp"));
+    return false;
+  }
+  if (player && points > 0) entity.addExperience(-points);
+  land(table, entity, target, lower, targetDimension);
+  if (player && record.uid) entity.setDynamicProperty(portals.return_property, record.uid);
+  return false;
+}
+
+/**
+ * WarpPortalBlockEntity#serverTick L121-125 (the lower half's ticker) and
+ * WarpPortalBlock#entityInside L66-74 (either half, acting for the lower):
+ * what stands in the portal goes through it, and after its lifetime the
+ * portal closes. A portal no scroll opened (placed by command) has no target
+ * (Java's block entity defaults), so the first entity in it closes it.
+ */
+function portalTick(table, event) {
+  const portals = table.warp_portals;
+  const { block, dimension } = event;
+  if (!isPortal(table, block.typeId)) return;
+  const permutation = block.permutation;
+  if (permutation.getState(table.half_state) === "upper") return;
+  const pos = { ...block.location };
+  const key = core.recordKey(table.namespace, dimension.id, pos);
+  let record = loadStored(key);
+  if (!record || record.type !== portals.type) {
+    record = {
+      uid: null,
+      type: portals.type,
+      dimension: dimension.id,
+      pos,
+      facing: permutation.getState("minecraft:cardinal_direction") || "north",
+      target: null,
+      age: 0,
+    };
+    saveStored(key, record);
+  }
+  const seen = new Set();
+  for (const at of [pos, { x: pos.x, y: pos.y + 1, z: pos.z }]) {
+    for (const entity of entitiesOn(dimension, at)) {
+      if (seen.has(entity.id)) continue;
+      seen.add(entity.id);
+      if (enterPortal(table, dimension, record, entity)) return;
+    }
+  }
+  const age = (portalAges.get(key) ?? record.age ?? 0) + 1;
+  if (age >= portals.lifetime) {
+    closePortal(table, dimension, pos);
+    return;
+  }
+  portalAges.set(key, age);
+  if (age % AGE_SAVE === 0) {
+    record.age = age;
+    saveStored(key, record);
+  }
+}
+
+/**
+ * WarpPortalManager#getReturnPortal L137-159: the portal the player last came
+ * through while it stands (its record, and its block when loaded); a record
+ * whose loaded block is no portal any more is forgotten.
+ */
+function returnPortal(table, player) {
+  const portals = table.warp_portals;
+  const uid = player.getDynamicProperty ? player.getDynamicProperty(portals.return_property) : undefined;
+  if (typeof uid !== "string") return undefined;
+  const record = records(table).find((r) => r.uid === uid && r.type === portals.type);
+  if (!record) return undefined;
+  const dimension = world.getDimension(record.dimension);
+  const lower = dimension ? blockAt(dimension, record.pos) : undefined;
+  if (lower && !isPortal(table, lower.typeId)) {
+    saveStored(core.recordKey(table.namespace, record.dimension, record.pos), undefined);
+    return undefined;
+  }
+  return record;
+}
+
+/** Every tick: the portal clock, scrolls in use, and forgetting uses past their cooldown. */
+function portalInterval(table) {
+  portalClock += 1;
+  scrollTicks(table);
+  for (const [id, tick] of portalUses) {
+    if (portalClock - tick >= table.warp_portals.cooldown) portalUses.delete(id);
+  }
+}
+
 /** Register the waystones' custom component for one mod's data table. */
 export function registerWaystones(table) {
   system.beforeEvents.startup.subscribe((init) => {
@@ -732,7 +1080,20 @@ export function registerWaystones(table) {
         onPlayerBreak: (event) => plateBroken(table, event),
       });
     }
+    if (table.warp_portals) {
+      init.blockComponentRegistry.registerCustomComponent(table.warp_portals.component, {
+        onTick: (event) => portalTick(table, event),
+      });
+    }
   });
   world.afterEvents.playerPlaceBlock.subscribe((event) => placed(table, event));
   if (table.warp_plates) system.runInterval(() => entityTicks(table), 1);
+  if (table.warp_portals) {
+    world.afterEvents.itemUse.subscribe((event) => scrollUsed(table, event));
+    // WarpDamageResetHandler#onDamage L10-15: damage stops a scroll's use.
+    world.afterEvents.entityHurt.subscribe((event) => {
+      if (event.hurtEntity) charging.delete(event.hurtEntity.id);
+    });
+    system.runInterval(() => portalInterval(table), 1);
+  }
 }

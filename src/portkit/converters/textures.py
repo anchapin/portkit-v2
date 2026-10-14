@@ -91,12 +91,32 @@ def tint(data: bytes, rgb: int) -> bytes | None:
     return encode_png(width, height, bytes(out))
 
 
+def cut_frames(data: bytes, frame_height: int, top: int, bottom: int) -> bytes | None:
+    """``data`` (a PNG animation strip of ``frame_height``-pixel frames) with
+    each frame cut to its rows ``top``..``bottom`` and the cuts stacked in
+    frame order, or None when the PNG is unread or the rows don't fit."""
+    decoded = decode_rgba(data)
+    if decoded is None:
+        return None
+    width, height, pixels = decoded
+    if frame_height < 1 or height % frame_height or not 0 <= top < bottom <= frame_height:
+        return None
+    row = width * 4
+    out = bytearray()
+    for start in range(0, height, frame_height):
+        out += pixels[(start + top) * row:(start + bottom) * row]
+    return encode_png(width, (height // frame_height) * (bottom - top), bytes(out))
+
+
 def convert(mod: SourceMod, derived=()) -> ConversionResult:
     """The mod's block and item textures, plus ``derived``
     (:class:`portkit.converters.stations.DerivedTexture`): block textures a
     station's overlay wears, tinted here from the jar's own (#178)."""
     result = ConversionResult()
     flipbooks: list[dict] = []
+    # Animation strips a station ships cut into derived flipbooks (the warp
+    # portal's halves): the strip itself is not shipped, nor left as residue.
+    cut_sources = {texture.source for texture in derived if texture.frame is not None}
     for lane, (java_dirs, bedrock_dir, index_path, index_key) in _LANES.items():
         found = [
             (src, png)
@@ -132,6 +152,10 @@ def convert(mod: SourceMod, derived=()) -> ConversionResult:
             texture_path = f"{bedrock_dir}/{subpath}"
 
             sidecar = png.with_name(f"{png.name}.mcmeta")
+            if rel in cut_sources:
+                if sidecar.is_file():
+                    result.claim(mod, sidecar)
+                continue
             if sidecar.is_file():
                 sidecar_rel = result.claim(mod, sidecar)
                 try:
@@ -175,7 +199,11 @@ def convert(mod: SourceMod, derived=()) -> ConversionResult:
         key = shortname(texture.subpath, mod.namespace)
         index_path = _LANES["block"][2]
         index = (result.files.get(index_path) or {}).get("texture_data") or {}
-        baked = tint(source.read_bytes(), texture.rgb) if source.is_file() else None
+        baked = source.read_bytes() if source.is_file() else None
+        if baked is not None and texture.frame is not None:
+            baked = cut_frames(baked, *texture.frame)
+        if baked is not None and texture.rgb != 0xFFFFFF:
+            baked = tint(baked, texture.rgb)
         if baked is None or key in index:
             # The station checked both before asking (waystones.derived_textures);
             # say so rather than ship a block whose overlay has no texture.
@@ -190,6 +218,11 @@ def convert(mod: SourceMod, derived=()) -> ConversionResult:
             "texture_name": "atlas.terrain",
             "texture_data": {**index, key: {"textures": texture_path}},
         }
+        if texture.ticks_per_frame is not None:
+            # The station passes only animations without interpolate (the
+            # warp portal's), so frames never blend.
+            flipbooks.append({"flipbook_texture": texture_path, "atlas_tile": key,
+                              "ticks_per_frame": texture.ticks_per_frame, "blend_frames": False})
 
     if flipbooks:
         result.files["textures/flipbook_textures.json"] = sorted(

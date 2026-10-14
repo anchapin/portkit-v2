@@ -1,8 +1,9 @@
-// portkit station runtime: Waystones waystone, sharestone, portstone and warp plate logic (#178).
+// portkit station runtime: Waystones waystone, sharestone, portstone, warp plate and warp portal logic (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). No imports, so it runs under
-// node (tests/js/waystone.test.mjs, tests/js/warp_plate.test.mjs). The Bedrock binding is waystone.js.
+// node (tests/js/waystone.test.mjs, tests/js/warp_plate.test.mjs,
+// tests/js/warp_portal.test.mjs). The Bedrock binding is waystone.js.
 //
 // Cited to Waystones v21.1.46 (TwelveIterations/Waystones @9d280c1a,
 // common/src/main/java/net/blay09/mods/waystones/); the data table's header
@@ -327,4 +328,61 @@ export function idleTracking(t, onItsPlate) {
 /** Whether an entity position lies in the block at `pos` (getEntitiesOnTop L159-167: the block's own cube). */
 export function inBlock(location, pos) {
   return Math.floor(location.x) === pos.x && Math.floor(location.y) === pos.y && Math.floor(location.z) === pos.z;
+}
+
+// -- warp portals ----------------------------------------------------------------
+// WarpPortalManager (core/WarpPortalManager.java) and the portal scroll that
+// opens a portal (item/PortalScrollItem.java).
+
+// Direction.from2DDataValue order (BY_2D: south, west, north, east) and
+// Direction#getOpposite.
+const BY_2D = ["south", "west", "north", "east"];
+const OPPOSITE = { north: "south", south: "north", east: "west", west: "east" };
+
+/**
+ * spawnPortal L45: Direction.fromYRot(yaw).getOpposite(), the way the portal
+ * faces: fromYRot is BY_2D[floor(yaw / 90 + 0.5) & 3] (Bedrock's yaw uses the
+ * same axes), turned round to face the player.
+ */
+export function portalFacing(yaw) {
+  return OPPOSITE[BY_2D[Math.floor(yaw / 90 + 0.5) & 3]];
+}
+
+/**
+ * findPortalPos L72-92: along the player's horizontal look, 3 then 4 blocks
+ * out, from two blocks above the player's feet down 5 blocks, the first block
+ * where canPlace(pos) holds (canPlacePortalAt L94-99: solid below, room for
+ * the portal's two halves and one more block); null when there is none or
+ * the player looks straight up or down (no horizontal direction).
+ */
+export function portalPos(location, view, canPlace) {
+  const length = Math.sqrt(view.x * view.x + view.z * view.z);
+  if (length < 1e-4) return null;
+  const hx = view.x / length;
+  const hz = view.z / length;
+  for (let distance = 3; distance <= 4; distance++) {
+    const start = {
+      x: Math.floor(location.x + hx * distance),
+      y: Math.floor(location.y + 2),
+      z: Math.floor(location.z + hz * distance),
+    };
+    for (let dy = 0; dy <= 5; dy++) {
+      const base = { x: start.x, y: start.y - dy, z: start.z };
+      if (canPlace(base)) return base;
+    }
+  }
+  return null;
+}
+
+/**
+ * canUsePortal L101-109: an entity that used a portal fewer than `cooldown`
+ * ticks ago can't again; otherwise this use is recorded (`uses`: entity id ->
+ * the clock tick of its last use). Returns whether it may use the portal now
+ * (the deny list is checked after, as in Java).
+ */
+export function mayUsePortal(uses, id, clock, cooldown) {
+  const last = uses.get(id);
+  if (last !== undefined && clock - last < cooldown) return false;
+  uses.set(id, clock);
+  return true;
 }

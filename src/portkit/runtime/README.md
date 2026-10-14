@@ -39,7 +39,8 @@ entry `scripts/portkit/main.js` that wires the two.
   side and destination, names, the edit rule, the menu's entries: activated
   waystones, or every sharestone of one colour; storage keys; the warp plate's
   idle status, shard target, attunement step and each entity's on-plate count
-  and cooldown), no imports.
+  and cooldown; the warp portal's facing, the place a portal scroll opens it
+  and each entity's portal cooldown), no imports.
 - `waystone.js`: its Bedrock binding (placement of both halves through
   `beforeOnPlayerPlace` and `world.afterEvents.playerPlaceBlock`, activation
   and the menu through `onPlayerInteract`, breaking through `onPlayerBreak`;
@@ -53,7 +54,13 @@ entry `scripts/portkit/main.js` that wires the two.
   what stands on it, `onPlayerInteract` for shards in and out, `onPlayerBreak`
   to drop its shard; an attuned shard keeps its plate as an item dynamic
   property, and each entity's warp plate state lives in memory, unsaved, as in
-  Java).
+  Java; a warp portal has its own component, `onTick` every tick through
+  `minecraft:tick` to send what stands in it to its waystone and close it
+  after its lifetime, opened by a portal scroll held for its use time
+  (`world.afterEvents.itemUse` and a `system.runInterval` timer, stopped by
+  switching away or `world.afterEvents.entityHurt`); a player who went through
+  keeps the portal as a player dynamic property for the "Return to Portal"
+  entry of waystone and sharestone menus).
 - `station_storage.js`: helpers the bindings share (world dynamic property
   storage, stored stacks, giving and dropping items, sounds).
 
