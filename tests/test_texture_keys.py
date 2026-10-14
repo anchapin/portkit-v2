@@ -4,7 +4,7 @@ import json
 from portkit.converters import models, textures
 from portkit.model import SourceMod
 from portkit.pipeline import convert
-from portkit.validate.rules import _IDENTIFIER
+from portkit.validate.rules import _TEXTURE_KEY
 
 PNG = b"\x89PNG\r\n\x1a\n"
 
@@ -23,7 +23,7 @@ def test_a_hyphen_becomes_an_underscore_in_the_key():
 def test_every_legal_java_path_character_gives_a_valid_identifier():
     # Java resource-location paths are [a-z0-9/._-].
     key = textures.shortname("a-b/c.d_e9", "examplemod")
-    assert _IDENTIFIER.match(key), key
+    assert _TEXTURE_KEY.match(key), key
 
 
 def test_the_hyphenated_texture_keeps_its_file_path(tmp_path):

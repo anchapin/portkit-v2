@@ -24,7 +24,8 @@ from pathlib import Path
 
 from .report import ValidationReport
 
-_LANG_NAME = re.compile(r"^(tile|item)\.([a-z0-9_]+:[a-z0-9_/.]+)\.name$")
+# Same id shape as validate.rules._IDENTIFIER: a hyphenated id has a name too.
+_LANG_NAME = re.compile(r"^(tile|item)\.([a-z0-9_-]+:[a-z0-9_/.-]+)\.name$")
 _VANILLA = "minecraft"
 
 

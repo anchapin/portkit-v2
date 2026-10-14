@@ -7,9 +7,9 @@ is a rename and an index build. No judgement required, so no model.
 Subdirectories carry over as they are: block/palettes/andesite.png becomes
 textures/blocks/palettes/andesite, the way vanilla Bedrock keeps
 textures/blocks/huge_fungus/. Its index key flattens the subpath with
-underscores (examplemod:palettes_andesite), and so does a hyphen, which Java
-allows in a path but a Bedrock identifier does not (item/dura-chan ->
-examplemod:dura_chan). models.texture_shortname derives the same key from the
+underscores (examplemod:palettes_andesite), and so does a hyphen (item/dura-chan
+-> examplemod:dura_chan): texture keys stay [a-z0-9_] (validate.rules
+_TEXTURE_KEY, #168), even though block and item ids keep their hyphen. models.texture_shortname derives the same key from the
 model's reference. Two files that flatten to one key (a-b and a_b, a/b and a_b)
 are both residue, since picking either would be a guess.
 
@@ -67,8 +67,9 @@ def _flipbook(animation: dict, texture_path: str, atlas_tile: str) -> tuple[dict
 def shortname(subpath: str, namespace: str) -> str:
     """Index key for a texture at <lane>/<subpath> (no extension).
 
-    A Java path is [a-z0-9/._-]; a Bedrock identifier path takes [a-z0-9_/.].
-    "/" and "-" both become "_", so every legal Java path gives a valid key.
+    A Java path is [a-z0-9/._-]; a texture key takes [a-z0-9_/.]
+    (validate.rules._TEXTURE_KEY). "/" and "-" both become "_", so every legal
+    Java path gives a valid key.
     """
     return f"{namespace}:{subpath.replace('/', '_').replace('-', '_')}"
 
