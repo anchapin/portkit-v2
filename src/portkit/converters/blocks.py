@@ -2232,8 +2232,10 @@ def _coded_facing_notes(records: list[dict]) -> list[str]:
 # converted block carries (one value can't stand for every permutation),
 # Properties copied from a vanilla block (the repo holds no cited table of
 # vanilla light levels), a NeoForge getLightEmission override (which can read
-# the world), or code that can't be followed. No light is ever a default
-# value standing in for one that wasn't read (#87).
+# the world), a value outside 0-15, a Properties object another registration
+# changes (the outcome depends on registration order), or code that can't be
+# followed. No light is ever a default value standing in for one that wasn't
+# read (#87).
 #
 # A block another path already gave light to (a station runtime citing it,
 # e.g. Farmer's Delight's stove) keeps that light.

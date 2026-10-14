@@ -238,6 +238,13 @@ class Props:
 
     has_collision: object = True  # True, False or UNKNOWN
     light: object = DARK
+    # The evaluation (a class initialiser or one registration's supplier)
+    # that built it; a change made from another one marks it shared_changed,
+    # since which blocks see that change then depends on registration order.
+    epoch: int = 0
+    shared_changed: bool = False
+    # For the copy a block keeps: the Properties object it was taken from.
+    origin: object = None
 
 
 @dataclass(frozen=True)
@@ -279,6 +286,18 @@ def _arg_count(desc: str) -> tuple[int, bool]:
     return n, desc[i + 1] != "V"
 
 
+def _snapshot(props):
+    if not isinstance(props, Props):
+        return props
+    return Props(props.has_collision, props.light, props.epoch, origin=props.origin or props)
+
+
+def _shared_changed(props) -> bool:
+    """Whether the Properties a block was built from were changed by another
+    evaluation than the one that built them (see Props.epoch)."""
+    return isinstance(props, Props) and isinstance(props.origin, Props) and props.origin.shared_changed
+
+
 def _only_objects(desc: str) -> bool:
     """Whether every argument in a method descriptor is a plain object
     reference (so splitting on ';' indexes them)."""
@@ -309,6 +328,9 @@ class Machine:
         self.depth = 0
         # Whether the instruction being run sits after an undecided branch.
         self._forked = False
+        # Which evaluation is running (see Props.epoch).
+        self.epoch = 0
+        self._epochs = 0
         # BlockState property names read (getValue) while it is a set.
         self.state_reads: set | None = None
 
@@ -385,10 +407,18 @@ class Machine:
         m = cf.method("<clinit>", "()V")
         if m is None or m.code is None:
             return
+        saved = self.epoch
+        self.new_epoch()
         try:
             self.run(cf, m, [])
         except Unreadable:
             self._clinit_failed.add(name)
+        finally:
+            self.epoch = saved
+
+    def new_epoch(self) -> None:
+        self._epochs += 1
+        self.epoch = self._epochs
 
     def get_static(self, ref: Ref):
         owner = self._field_owner(ref.owner, ref.name)
@@ -811,11 +841,14 @@ class Machine:
         # vanilla block classes taking more (DoorBlock(BlockSetType,
         # Properties), ...) hand theirs on to it.
         props_at = [k for k, a in enumerate(ref.desc[1:ref.desc.index(")")].split(";")) if a.endswith(_PROPERTIES)]
+        # The block takes the settings as they are now (BlockBehaviour copies
+        # hasCollision, and each state its light, when it is built), so a
+        # later change to a shared Properties doesn't reach it.
         if ref.desc.startswith(f"(L{_PROPERTIES};") and len(args) > 1:
-            obj.fields.setdefault("__props", args[1])
+            obj.fields.setdefault("__props", _snapshot(args[1]))
         elif ref.owner.startswith(_VANILLA_BLOCK_PACKAGE) and len(props_at) == 1 \
                 and _only_objects(ref.desc) and props_at[0] + 1 < len(args):
-            obj.fields.setdefault("__props", args[props_at[0] + 1])
+            obj.fields.setdefault("__props", _snapshot(args[props_at[0] + 1]))
         elif obj.cls == "net/minecraft/resources/ResourceLocation" and len(args) == 3 \
                 and all(isinstance(a, str) for a in args[1:]):
             obj.fields["__rl"] = f"{args[1]}:{args[2]}"
@@ -991,7 +1024,7 @@ class Machine:
         change is a copy only that path sees."""
         if static:
             if name == "of":
-                return [Props(True, DARK)]
+                return [Props(True, DARK, self.epoch)]
             if name in ("ofFullCopy", "ofLegacyCopy") and rest:
                 src = rest[0]
                 if isinstance(src, Obj) and isinstance(src.fields.get("__props"), Props):
@@ -1001,25 +1034,27 @@ class Machine:
                 else:
                     light = CopiedLight("a block it can't read")
                 # Whether it collides is the copied block's (not read here).
-                return [Props(UNKNOWN, light)]
-            return [Props(UNKNOWN, UNKNOWN)]
+                return [Props(UNKNOWN, light, self.epoch)]
+            return [Props(UNKNOWN, UNKNOWN, self.epoch)]
         if not isinstance(recv, Props):
             return [UNKNOWN]
         if name == "noCollission":
-            changed = Props(False, recv.light)
+            collision, light = False, recv.light
         elif name == "lightLevel" and len(rest) == 1:
             fn = rest[0]
             ok = isinstance(fn, Lam) or (isinstance(fn, Obj) and self.is_mod(fn.cls))
-            changed = Props(recv.has_collision, fn if ok else UNKNOWN)
+            collision, light = recv.has_collision, fn if ok else UNKNOWN
         elif _OBFUSCATED.match(name):
             # A Forge SRG / Fabric intermediary name: which setting it is
             # can't be told, so neither collision nor light is known.
-            changed = Props(UNKNOWN, UNKNOWN)
+            collision, light = UNKNOWN, UNKNOWN
         else:
             return [recv]
         if self._forked:
-            return [changed]
-        recv.has_collision, recv.light = changed.has_collision, changed.light
+            return [Props(collision, light, self.epoch)]
+        if recv.epoch != self.epoch:
+            recv.shared_changed = True
+        recv.has_collision, recv.light = collision, light
         return [recv]
 
     def _direction(self, name: str, recv, rest: list, static: bool):
@@ -1152,6 +1187,8 @@ class Reading:
     behaviour: tuple = ()
 
 
+_SHARED_WHY = ("its Properties object is shared with other registrations that change it, so "
+               "what it holds when this block is built depends on registration order")
 _OBFUSCATED = re.compile(r"^(m_\d+_|f_\d+_|method_\d+|field_\d+|func_\d+_[a-z]+)$")
 
 
@@ -1207,11 +1244,15 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     machine.registrations = None
 
     out: dict[str, tuple[list, str]] = {}
-    for name in names:
+    # Every registration found is built, wanted or not: one that changes a
+    # shared Properties object must mark it (Props.shared_changed) before
+    # any block built from that object is read.
+    for name in [*names, *sorted(set(regs) - set(names))]:
         objs, others = [], []
         why = ""
         for value in regs.get(name, []):
             machine.steps = 0
+            machine.new_epoch()
             try:
                 built = machine.call_lambda(value, []) if isinstance(value, Lam) else [value]
             except Unreadable as exc:
@@ -1235,7 +1276,7 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
                    "methods can't be told apart from vanilla's by name")
             objs = []
         out[name] = (objs, why)
-    return machine, out
+    return machine, {n: out[n] for n in names}
 
 
 def read_blocks(classes: ClassIndex | None, names: list[str]) -> dict[str, Reading]:
@@ -1368,6 +1409,9 @@ def _read_shape(machine: Machine, obj: Obj, r: Reading) -> None:
                            "collision shape")
         return
     props = obj.fields.get("__props", UNKNOWN)
+    if _shared_changed(props):
+        r.collision_why = _SHARED_WHY
+        return
     if not isinstance(props, Props) or props.has_collision is UNKNOWN:
         r.collision_why = ("its Properties copy a vanilla block's or aren't read, so whether "
                            "it collides isn't known")
@@ -1378,7 +1422,9 @@ def _read_shape(machine: Machine, obj: Obj, r: Reading) -> None:
 # --- Light ------------------------------------------------------------------
 #
 # Java gives every block state a light level when the state is built:
-# ``BlockStateBase.lightEmission = properties.lightEmission.applyAsInt(this)``,
+# ``BlockStateBase.lightEmission = properties.lightEmission.applyAsInt(this)``
+# (BlockBehaviour$BlockStateBase#<init> L808-834, MC 1.21.1 client jar +
+# Mojang mappings; the states are built in the Block constructor),
 # the function being whatever ``Properties.lightLevel`` was last given
 # (``state -> 0`` when nothing was; ``ofFullCopy``/``ofLegacyCopy`` copy the
 # copied block's). NeoForge also lets a block override
@@ -1475,6 +1521,9 @@ def _read_light(machine: Machine, obj: Obj, r: LightReading, drawn: set) -> None
     if not isinstance(props, Props):
         r.why = "the Properties its constructor passes on aren't read"
         return
+    if _shared_changed(props):
+        r.why = _SHARED_WHY
+        return
     light = props.light
     if light is DARK:
         r.value, r.kind = 0, "dark"
@@ -1535,4 +1584,4 @@ def _read_light(machine: Machine, obj: Obj, r: LightReading, drawn: set) -> None
         r.states = tuple(sorted(reads))
     if not 0 <= r.value <= 15:
         r.why = f"{src}: Java gives {r.value}, outside Bedrock's 0-15"
-        r.value, r.kind = None, ""
+        r.value, r.kind, r.source, r.states = None, "", "", ()

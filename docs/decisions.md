@@ -54,15 +54,21 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
     cited table of vanilla light levels), a NeoForge `getLightEmission`
     override in the block's own classes (it can read the world), a value
     outside Bedrock's 0-15 ("in a range of 0-15", MicrosoftDocs
-    minecraftBlock_light_emission.md), or code that can't be followed
-    (Forge SRG / Fabric intermediary names included).
+    minecraftBlock_light_emission.md), a Properties object shared between
+    registrations and changed by one of them (what each block gets then
+    depends on registration order), or code that can't be followed (Forge
+    SRG / Fabric intermediary names included).
   A block another path already lit (a station runtime citing its light, e.g.
   Farmer's Delight's stove) keeps that light. No light value is ever a
   default standing in for one that wasn't read (#87). Shared interpreter
-  changes: Properties change in place (a dropped return value counts); a
-  renamed Properties call makes both collision and light unknown instead of
-  being ignored; a vanilla block class whose Properties aren't its first
-  argument (`DoorBlock(BlockSetType, Properties)`) keeps them.
+  changes: Properties change in place (a dropped return value counts) and a
+  block keeps a copy of them as they were when it was built (Java computes
+  each state's light in `BlockStateBase#<init>`, L808-834); every
+  registration found is built, so a shared-Properties change is seen
+  whichever blocks are asked about; a renamed Properties call makes both
+  collision and light unknown instead of being ignored; a vanilla block
+  class whose Properties aren't its first argument
+  (`DoorBlock(BlockSetType, Properties)`) keeps them.
 - **Why:** light is the decoration genre's visible gap (no converted block
   had any). Reading the code is deterministic and citable, as #212 settled for
   placement and boxes; when it can't be read, a dark block is an honest

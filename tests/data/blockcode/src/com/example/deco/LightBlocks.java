@@ -11,6 +11,8 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 /** Every way a block's light is set (or not) that read_light distinguishes. */
 public class LightBlocks {
     public static final DeferredRegister BLOCKS = DeferredRegister.createBlocks("examplemod");
+    // One Properties object several registrations share.
+    static final Properties SHARED = Properties.of();
     // state -> 12: one value for every state.
     public static final Object GLOW = BLOCKS.register("glow", () -> new Block(Properties.of().lightLevel(s -> 12)));
     // Code-only lit/brightness, read at the placed state.
@@ -35,6 +37,13 @@ public class LightBlocks {
     // A vanilla block class whose Properties aren't its first argument.
     public static final Object DOOR = BLOCKS.register("door",
             () -> new DoorBlock(BlockSetType.OAK, Properties.of().lightLevel(s -> 5)));
+
+    // Java's builder changes itself: SHARED_LIT lights SHARED for every block
+    // built from it afterwards, so SHARED_PLAIN's light depends on which of
+    // the two registers first. Neither is read.
+    public static final Object SHARED_LIT = BLOCKS.register("shared_lit",
+            () -> new Block(SHARED.lightLevel(s -> 15)));
+    public static final Object SHARED_PLAIN = BLOCKS.register("shared_plain", () -> new Block(SHARED));
 
     private static Block discarded() {
         Properties p = Properties.of();

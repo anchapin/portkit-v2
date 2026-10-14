@@ -21,7 +21,7 @@ from portkit.model import SourceMod
 CLASSES = Path(__file__).parent / "data" / "blockcode" / "classes"
 CARDINALS = ("north", "east", "south", "west")
 NAMES = ["glow", "night_lamp", "toggle", "copy", "copy_set", "world_lit", "too_bright", "plain",
-         "renamed", "discarded", "door", "lamp", "ghost"]
+         "renamed", "discarded", "door", "lamp", "ghost", "shared_lit", "shared_plain"]
 
 
 @pytest.fixture(scope="module")
@@ -90,6 +90,20 @@ def test_renamed_setting_is_unread_not_dark(light):
 def test_properties_change_in_place(light):
     # p.lightLevel(...) with its return value dropped still sets p's light.
     assert (light["discarded"].value, light["discarded"].kind) == (7, "constant")
+
+
+def test_shared_properties_changed_by_another_registration_are_unread(light):
+    # shared_lit calls SHARED.lightLevel(...) inside its supplier: in Java that
+    # lights every block built from SHARED after it, so shared_plain's light
+    # depends on registration order. Neither is read.
+    for name in ("shared_lit", "shared_plain"):
+        assert light[name].value is None and "depends on registration order" in light[name].why
+
+
+def test_shared_change_is_seen_without_asking_for_the_changer():
+    # Every registration is built, so shared_plain alone is still unread.
+    r = blockcode.read_light(ClassIndex.from_source(CLASSES), ["shared_plain"])["shared_plain"]
+    assert r.value is None and "depends on registration order" in r.why
 
 
 def test_vanilla_block_class_with_properties_second(light):
