@@ -587,6 +587,11 @@ def _convert_station_states(
     definition = _facing_definition(mod.namespace, name, identifier, instances, station)
     block = definition["minecraft:block"]
     block["description"]["states"] = {station.state: _state_values(station, by_value)}
+    shown_by = getattr(overlay, "shown_by", None) if overlay is not None else None
+    if shown_by:
+        # The runtime turns the overlay on (Overlay.shown_by); false first,
+        # so a placed block and its item start without it.
+        block["description"]["states"][shown_by] = [False, True]
     block["components"]["minecraft:geometry"]["bone_visibility"] = {
         bone: (_state_test(station, value) if direction is None else
                f"q.block_state('minecraft:cardinal_direction') == '{direction}' && "
@@ -595,8 +600,9 @@ def _convert_station_states(
     }
     for bone, value, directions, _ in overlay_bones:
         facings = " || ".join(f"q.block_state('minecraft:cardinal_direction') == '{d}'" for d in directions)
+        shown = f" && q.block_state('{shown_by}')" if shown_by else ""
         block["components"]["minecraft:geometry"]["bone_visibility"][bone] = (
-            f"{_state_test(station, value)} && ({facings})" if facings else "0.0")
+            f"{_state_test(station, value)} && ({facings}){shown}" if facings else "0.0")
     if overlay is not None and overlay.item_texture is not None:
         # The item: the overlay value's own bones and its overlay at the item's
         # turn, the overlay wearing the item's texture (Java tints the item
@@ -652,6 +658,28 @@ def _shift_y(element: dict, dy: float) -> dict:
     return moved
 
 
+def _overlay_pieces(element: dict, values: tuple, offsets: dict) -> tuple[list | None, str]:
+    """``element`` as (value, piece) per block it lies in (``offsets``: each
+    value's block height in the model, pixels), cut where it crosses from one
+    block into the next (:func:`portkit.converters.models.split_y`, the
+    waystone's rune band), or None and why."""
+    try:
+        low, high = sorted((float(element["from"][1]), float(element["to"][1])))
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None, "has no usable from/to"
+    blocks = sorted((offsets[v], v) for v in values if v in offsets)
+    inside = next((v for base, v in blocks if base <= low and high <= base + 16), None)
+    if inside is not None:
+        return [(inside, element)], ""
+    for (base, value), (next_base, next_value) in zip(blocks, blocks[1:]):
+        if next_base == base + 16 and base <= low < next_base < high <= next_base + 16:
+            halves, why = models.split_y(element, next_base)
+            if halves is None:
+                return None, f"lies across two blocks and cannot be cut ({why})"
+            return [(value, halves[0]), (next_value, halves[1])], ""
+    return None, "lies outside the blocks"
+
+
 def _overlay_parts(mod: SourceMod, result: ConversionResult, overlay, values: tuple, uvlock: bool,
                    textures: dict) -> tuple[list | None, str]:
     """The bones of a station's overlay (:class:`portkit.converters.stations.Overlay`),
@@ -676,17 +704,17 @@ def _overlay_parts(mod: SourceMod, result: ConversionResult, overlay, values: tu
         keys = _face_keys([element])
         if not keys or any(refs.get(key) != overlay.texture for key in keys):
             return None, f"{overlay.model} draws a texture other than {overlay.texture}"
-        try:
-            low, high = float(element["from"][1]), float(element["to"][1])
-        except (KeyError, TypeError, ValueError, IndexError):
-            return None, f"{overlay.model} has an element without usable from/to"
-        value = next((v for v in values if v in overlay.offsets
-                      and overlay.offsets[v] <= min(low, high) and max(low, high) <= overlay.offsets[v] + 16), None)
-        if value is None:
-            return None, f"{overlay.model} element {element.get('name') or 'unnamed'} lies across two blocks"
         faces = {face: ({**spec, "texture": f"#{overlay.name}"} if isinstance(spec, dict) else spec)
                  for face, spec in (element.get("faces") or {}).items()}
-        by_value[value].append(_shift_y({**element, "faces": faces}, -overlay.offsets[value]))
+        element = {**element, "faces": faces}
+        if models.zero_rotation(element.get("rotation")):
+            # A 0-degree rotation leaves the element as it is in Java.
+            element = {k: v for k, v in element.items() if k != "rotation"}
+        pieces, why = _overlay_pieces(element, values, overlay.offsets)
+        if pieces is None:
+            return None, f"{overlay.model} element {element.get('name') or 'unnamed'} {why}"
+        for value, piece in pieces:
+            by_value[value].append(_shift_y(piece, -overlay.offsets[value]))
     if not any(by_value.values()):
         return None, f"{overlay.model} has no elements"
     turns = sorted(set(overlay.turns.values()) | ({overlay.item_turn} if overlay.item_texture else set()))

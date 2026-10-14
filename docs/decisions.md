@@ -27,6 +27,78 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: waystone and portstone runes reuse the sharestone overlay; a waystone's show once any player activates it
+
+- **Status:** proposed (PR #TBD, Part of #178); Alex decides the picks.
+- **Decision:** the `stations.Overlay` / `DerivedTexture` pieces from the
+  sharestone runes (entry below) now carry the other two rune renderers in
+  Waystones 21.1.46:
+  - **Portstones (16):** `PortstoneRenderer` (L26-47) draws
+    `block/portstone_runes` from the lower half, turned by `toYRot()`, in the
+    colour's `DyeColor#getTextureDiffuseColor()` (L43); the item model
+    `item/portstone` has the same runes with `tintindex 0`, tinted by the item
+    colour handler with `getTextColor()` (`ModRenderers` L31-32). Exactly the
+    sharestone treatment: bones in the lower half (the band lies wholly in
+    it), a baked block texture and a baked item texture per colour (white
+    included: `F9FFFE` / `FFFFFF`), `minecraft:item_visual` for the item. The
+    jar's `portstone_runes.png` is grey+alpha; it is decoded to RGBA before
+    the multiply.
+  - **Waystones (10):** `WaystoneRenderer` (L26-51) draws
+    `block/waystone_runes` in the block's `WaystoneStyle` rune colour
+    (`WaystoneStyles` L19 blackstone `0xFF993333`, L21 end stone
+    `0xFF7200FF`; every other style keeps `WaystoneStyle`'s default
+    `0xFFFFFFFF`, L11), only while the client's own player has activated that
+    waystone (L33-37, `PlayerWaystoneManager#isWaystoneActivated`, a
+    per-player list). The item model `item/waystone` has no runes.
+    - **Colour:** white multiplies the texture by 1, so the eight white styles
+      use the jar's own `waystone_runes.png` (already shipped under
+      `waystones:waystone_runes`); blackstone and end stone get a baked
+      texture. No item texture.
+    - **Activation:** a boolean block state `waystones:runes` (default false)
+      that the overlay bones also require in `bone_visibility`. The waystone
+      runtime turns it on for both halves when a player activates the
+      waystone (placing it activates it for the placer, as in Java; first use
+      activates it for the user), and turns it back on when a player who has
+      it activated uses it and finds it off. It never turns off: the runtime
+      has no "forget waystone" action. Table keys `rune_state` /
+      `rune_blocks` (only waystones whose block really has the state).
+    - **Geometry:** the band runs from 12 to 21.5 px, across into the upper
+      block. It is cut at 16 (`models.split_y`): the side faces' v range is
+      split linearly where y = 16 falls (north `3.5-13` becomes upper
+      `3.5-9`, lower `9-13`), the up face goes with the top part and the down
+      face with the bottom one. Only an unrotated element (or one with a
+      0-degree rotation, which Java leaves as it is; the jar's element has
+      one) with unrotated side faces is cut; anything else still means no
+      runes with the reason in the note (this replaces the sharestone
+      entry's "an element across two blocks means no runes" for such boxes).
+      Same facing rule as the sharestones
+      (180 degrees at north/south in the stone's frame), computed from each
+      blockstate.
+- **Why:** the runes are the only thing that tells a portstone's colour
+  apart and the visible sign that a waystone is activated. A Bedrock block
+  looks the same to every player, so a per-player overlay cannot exist. A
+  world-level state driven by the runtime that already tracks activation is
+  exact in single player (the common case) and on a server shows runes
+  once anyone has activated the waystone.
+- **Rejected:**
+  - Waystone runes never shown (matches only players who never activated
+    it; loses the activation cue entirely); always shown (wrong for every
+    waystone nobody has activated, including freshly generated ones).
+  - A per-player view through a client-side entity or particles (no
+    per-player block rendering in Bedrock; an entity per waystone for this
+    is heavy and drifts from the block).
+  - Baking white copies of the waystone texture (identical to the jar's own).
+  - Refusing the waystone band because it crosses blocks (the cut is exact
+    for an unrotated box).
+  - A separate overlay block on top (Bedrock has no mechanism that draws
+    over a custom block).
+- **Not carried over (conversion note):** per-player rune visibility (once
+  any player activates a waystone, everyone sees its runes); the runes'
+  full-brightness glow and the `disableTextGlow` client option; the
+  portstone's tilted warp stone on top; the portstone item's upper half.
+- **Links:** #178, PR #TBD; builds on PR #203 (sharestone runes) and PR
+  #202 (portstones).
+
 ## 2026-10-13: a sharestone's runes are part of its block, in textures tinted at convert time with the colour's DyeColor values
 
 - **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR #203).

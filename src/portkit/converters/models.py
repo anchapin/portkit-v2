@@ -528,6 +528,71 @@ def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]
 
 
 
+_SIDES = ("north", "east", "south", "west")
+
+
+def zero_rotation(rotation) -> bool:
+    """Whether an element's ``rotation`` is one Java leaves as it is: an
+    object whose angle is 0 (rescale then scales by 1/cos 0 = 1)."""
+    if not isinstance(rotation, dict):
+        return False
+    try:
+        return float(rotation.get("angle") or 0) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def split_y(element: dict, at: float) -> tuple[tuple[dict, dict] | None, str]:
+    """``element`` cut at height ``at`` into the part below and the part above,
+    looking exactly as the whole did, or why not.
+
+    Each side face keeps its texture: its uv's v edge is cut where ``at``
+    falls between the top (Java's v1 edge) and the bottom (v2), linearly, as
+    Java maps the face's quad. The up face goes with the top part, the down
+    face with the bottom one. Only an unrotated element (or one rotated by 0
+    degrees, which Java leaves as it is) with unrotated side faces is cut.
+    """
+    rotation = element.get("rotation")
+    if rotation and not zero_rotation(rotation):
+        return None, "element is rotated"
+    try:
+        start = [float(v) for v in element["from"]]
+        end = [float(v) for v in element["to"]]
+    except (KeyError, TypeError, ValueError):
+        return None, "element is missing usable from/to coordinates"
+    low, high = sorted((start[1], end[1]))
+    if not low < at < high:
+        return None, f"element does not cross y={at}"
+    below = {k: v for k, v in element.items() if k not in ("rotation", "faces")}
+    above = dict(below)
+    below["from"], below["to"] = [start[0], low, start[2]], [end[0], at, end[2]]
+    above["from"], above["to"] = [start[0], at, start[2]], [end[0], high, end[2]]
+    faces_below: dict = {}
+    faces_above: dict = {}
+    for face, spec in (element.get("faces") or {}).items():
+        if not isinstance(spec, dict):
+            return None, f"element's {face} face is not an object"
+        if face == "up":
+            faces_above[face] = dict(spec)
+            continue
+        if face == "down":
+            faces_below[face] = dict(spec)
+            continue
+        if face not in _SIDES:
+            return None, f"element has an unknown {face!r} face"
+        if spec.get("rotation"):
+            return None, f"element's {face} face is rotated"
+        try:
+            u1, v1, u2, v2 = (float(v) for v in (spec.get("uv") or auto_uv(face, start, end)))
+        except (TypeError, ValueError):
+            return None, f"element's {face} face has no usable uv"
+        cut = round(v1 + (high - at) / (high - low) * (v2 - v1), 6)
+        faces_above[face] = {**spec, "uv": [u1, v1, u2, cut]}
+        faces_below[face] = {**spec, "uv": [u1, cut, u2, v2]}
+    below["faces"], above["faces"] = faces_below, faces_above
+    return (below, above), ""
+
+
 def _turn_with_textures(element: dict, quarters: int, start: list, end: list) -> tuple[dict | None, str]:
     """A y turn without uvlock: the textures ride along with the box.
 

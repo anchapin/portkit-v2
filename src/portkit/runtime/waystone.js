@@ -20,7 +20,8 @@
 // its type and has nothing to activate. A portstone (table.portstones) is no
 // waystone: it stores nothing, and using it opens the menu of the network it
 // targets with no waystone in use, so nothing is left out and no distance is
-// checked.
+// checked. A waystone's runes (table.rune_blocks) are a block state the
+// runtime turns on when a player activates it.
 
 import { GameMode, system, world } from "@minecraft/server";
 import { ActionFormData, FormCancelationReason, ModalFormData } from "@minecraft/server-ui";
@@ -94,6 +95,25 @@ function activated(table, player) {
 function activate(table, player, uid) {
   const next = core.withActivated(activated(table, player), uid);
   player.setDynamicProperty(core.activatedKey(table.namespace), JSON.stringify(next));
+}
+
+/**
+ * WaystoneRenderer L33-37: a waystone's runes are drawn once the client's
+ * player has activated it. A Bedrock block looks the same to every player,
+ * so its runes state (table.rune_state, on both halves) is turned on once
+ * any player activates it, and stays on.
+ */
+function showRunes(table, dimension, pos) {
+  if (!table.rune_state) return;
+  const lower = blockAt(dimension, pos);
+  if (!lower || !(table.rune_blocks || []).includes(lower.typeId)) return;
+  const upper = blockAt(dimension, { x: pos.x, y: pos.y + 1, z: pos.z });
+  for (const block of [lower, upper]) {
+    if (!block || block.typeId !== lower.typeId) continue;
+    const permutation = block.permutation;
+    if (permutation.getState(table.rune_state) === true) continue;
+    block.setPermutation(permutation.withState(table.rune_state, true));
+  }
 }
 
 /** The next placement number (a world counter), so sharestones list in the order they were placed. */
@@ -171,7 +191,10 @@ function placed(table, event) {
   saveStored(core.recordKey(table.namespace, block.dimension.id, pos), undefined);
   const record = recordAt(table, block.dimension, pos, permutation, player, block.typeId);
   // activateWaystone L60: only a waystone joins the player's activated list.
-  if (!network(table, record).shared) activate(table, player, record.uid);
+  if (!network(table, record).shared) {
+    activate(table, player, record.uid);
+    showRunes(table, block.dimension, pos);
+  }
   system.run(() => rename(table, player, record));
 }
 
@@ -230,6 +253,9 @@ function interact(table, event) {
   // SharestoneBlock#handleActivation L74-82: the menu, nothing to activate.
   // WaystoneBlock#handleActivation L81-123.
   if (network(table, record).shared || activated(table, player).includes(record.uid)) {
+    // Runes missing on a waystone this player has activated (its upper half
+    // was replaced, or it predates them) come back on its next use.
+    if (!network(table, record).shared) showRunes(table, dimension, pos);
     system.run(() => menu(table, player, {
       type: typeOf(table, record),
       requirements: network(table, record).requirements,
@@ -239,6 +265,7 @@ function interact(table, event) {
     return;
   }
   activate(table, player, record.uid);
+  showRunes(table, dimension, pos);
   player.sendMessage(message(table, "activated", [core.nameText(record.name)]));
   play(dimension, centre(block), table.sounds.activate);
 }

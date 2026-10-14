@@ -443,11 +443,55 @@ def _rune_png() -> bytes:
     return encode_png(4, 2, pixels)
 
 
-def _with_runes(root: Path, top=(24.9, 29.1)) -> Path:
+def _la_png() -> bytes:
+    """A 2x1 grey+alpha PNG (colour type 4, as the jar's portstone_runes.png):
+    white opaque, then grey 128 half transparent."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    raw = bytes((0, 255, 255, 128, 128))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 1, 8, 4, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+# Waystones 21.1.46's block/waystone_runes element (one band from 12 to 21.5
+# pixels, across into the upper block; a 0-degree rotation) and
+# block/portstone_runes element (lower block only).
+WAYSTONE_RUNE_ELEMENT = {
+    "name": "runes", "from": [2.75, 12, 2.75], "to": [13.25, 21.5, 13.25],
+    "rotation": {"angle": 0, "axis": "y", "origin": [0, -0.5, 0]},
+    "faces": {"north": {"uv": [2.5, 3.5, 5, 13], "texture": "#runes", "tintindex": 0},
+              "east": {"uv": [5, 3.5, 7.5, 13], "texture": "#runes", "tintindex": 0},
+              "south": {"uv": [7.5, 3.5, 10, 13], "texture": "#runes", "tintindex": 0},
+              "west": {"uv": [0, 3.5, 2.5, 13], "texture": "#runes", "tintindex": 0}}}
+PORTSTONE_RUNE_ELEMENT = {
+    "name": "runes", "from": [0.9, 2.9, 0.9], "to": [15.1, 7.1, 15.1],
+    "faces": {"north": {"uv": [0, 0.25, 16, 4.25], "texture": "#3", "tintindex": 0},
+              "east": {"uv": [0, 4.25, 16, 8.25], "texture": "#3", "tintindex": 0},
+              "south": {"uv": [0, 8.25, 16, 12.25], "texture": "#3", "tintindex": 0},
+              "west": {"uv": [0, 11.75, 16, 15.75], "texture": "#3", "tintindex": 0}}}
+
+
+def _with_runes(root: Path, top=(24.9, 29.1), stones=False) -> Path:
+    """The sharestone rune model and texture; with ``stones`` also the
+    waystone's and portstone's."""
     _write(root, f"assets/{NS}/models/block/sharestone_runes.json", {
         "textures": {"3": f"{NS}:block/sharestone_runes", "particle": f"{NS}:block/sharestone_runes"},
         "elements": [_rune_element("bottom_runes", 2.9, 7.1, 7), _rune_element("top_runes", *top, 0)]})
     _write(root, f"assets/{NS}/textures/block/sharestone_runes.png", _rune_png())
+    if stones:
+        _write(root, f"assets/{NS}/models/block/waystone_runes.json", {
+            "ambientocclusion": False, "texture_size": [128, 32],
+            "textures": {"particle": f"{NS}:block/waystone_runes", "runes": f"{NS}:block/waystone_runes"},
+            "elements": [WAYSTONE_RUNE_ELEMENT]})
+        _write(root, f"assets/{NS}/textures/block/waystone_runes.png", _rune_png())
+        _write(root, f"assets/{NS}/models/block/portstone_runes.json", {
+            "textures": {"3": f"{NS}:block/portstone_runes", "particle": f"{NS}:block/portstone_runes"},
+            "elements": [PORTSTONE_RUNE_ELEMENT]})
+        _write(root, f"assets/{NS}/textures/block/portstone_runes.png", _la_png())
     return root
 
 
@@ -521,7 +565,7 @@ def test_sharestone_wears_its_runes_as_part_of_the_block(runed):
     assert "'east'" in visibility["lower_runes_0"] and "'west'" in visibility["lower_runes_0"]
     assert "== 'upper'" in visibility["upper_runes_0"]
     assert any("coloured runes are drawn as Java draws them" in n for n in result.notes)
-    # Waystones keep their plain look.
+    # Without their own rune models, waystones keep their plain look.
     assert "runes" not in _block(tree, "waystone")["components"]["minecraft:material_instances"]
 
 
@@ -557,13 +601,35 @@ def test_without_the_rune_model_sharestones_keep_the_plain_look(converted):
     assert any("no readable waystones:block/sharestone_runes model" in n for n in result.notes)
 
 
-def test_a_rune_band_across_two_blocks_is_not_guessed(tmp_path):
+def _rotated_top(root: Path) -> Path:
+    """The sharestone rune model with its top band across both blocks and turned."""
+    path = root / f"assets/{NS}/models/block/sharestone_runes.json"
+    model = json.loads(path.read_text())
+    model["elements"][1]["rotation"] = {"angle": 22.5, "axis": "y", "origin": [8, 16, 8]}
+    path.write_text(json.dumps(model))
+    return root
+
+
+def test_a_rune_band_across_two_blocks_is_cut_between_them(tmp_path):
     root = _with_runes(_waystones_mod(tmp_path), top=(14.0, 18.0))
+    convert(root, tmp_path / "out", emit_addon=False)
+    block = _block(tmp_path / "out", "orange_sharestone")
+    assert "runes" in block["components"]["minecraft:material_instances"]
+    geo = json.loads((tmp_path / "out/resource_pack/models/blocks/orange_sharestone.geo.json").read_text())
+    bones = {b["name"]: b["cubes"] for b in geo["minecraft:geometry"][0]["bones"]}
+    # 14-16 in the lower block (beside the bottom band), 16-18 -> 0-2 in the upper.
+    assert sorted(c["origin"][1] for c in bones["lower_runes_0"]) == pytest.approx([2.9, 14.0])
+    assert [c["origin"][1] for c in bones["upper_runes_0"]] == pytest.approx([0.0])
+    assert [c["size"][1] for c in bones["upper_runes_0"]] == pytest.approx([2.0])
+
+
+def test_a_turned_rune_band_across_two_blocks_is_not_guessed(tmp_path):
+    root = _rotated_top(_with_runes(_waystones_mod(tmp_path), top=(14.0, 18.0)))
     result = convert(root, tmp_path / "out", emit_addon=False)
     block = _block(tmp_path / "out", "orange_sharestone")
     assert "runes" not in block["components"]["minecraft:material_instances"]
     assert not (tmp_path / "out/resource_pack/textures/blocks/orange_sharestone_runes.png").exists()
-    assert any("every colour looks the same" in n and "top_runes lies across two blocks" in n
+    assert any("every colour looks the same" in n and "top_runes lies across two blocks and cannot be cut" in n
                for n in result.notes)
 
 
@@ -571,16 +637,142 @@ def test_block_converter_refuses_an_overlay_it_cannot_place(tmp_path):
     from portkit.converters.blocks import _overlay_parts
     from portkit.model import ConversionResult, SourceMod
 
-    root = _with_runes(_waystones_mod(tmp_path), top=(14.0, 18.0))
+    root = _rotated_top(_with_runes(_waystones_mod(tmp_path), top=(14.0, 18.0)))
     mod = SourceMod(root=root, namespace=NS)
     overlay = waystones._rune_overlay(SourceMod(root=_with_runes(_waystones_mod(tmp_path / "ok")), namespace=NS),
                                       "orange_sharestone")
     parts, why = _overlay_parts(mod, ConversionResult(), overlay, ("lower", "upper"), False, {})
-    assert parts is None and "top_runes lies across two blocks" in why
+    assert parts is None and "top_runes lies across two blocks and cannot be cut (element is rotated)" in why
     parts, why = _overlay_parts(mod, ConversionResult(), overlay, ("lower", "upper"), True, {})
     assert parts is None and "uvlocked" in why
     parts, why = _overlay_parts(mod, ConversionResult(), overlay, ("lower", "upper"), False, {"runes": "x"})
     assert parts is None and "already has a 'runes' texture" in why
+
+
+# -- waystone and portstone runes ---------------------------------------------
+
+
+@pytest.fixture
+def stoned(tmp_path):
+    result = convert(_with_runes(_waystones_mod(tmp_path), stones=True), tmp_path / "out", emit_addon=False)
+    return result, tmp_path / "out"
+
+
+def _bones(tree: Path, name: str) -> dict:
+    geo = json.loads((tree / f"resource_pack/models/blocks/{name}.geo.json").read_text())
+    return {b["name"]: b["cubes"] for b in geo["minecraft:geometry"][0]["bones"]}
+
+
+def test_waystone_rune_colours_are_its_styles():
+    # WaystoneStyles L19/L21; every other style keeps WaystoneStyle's 0xFFFFFFFF.
+    assert waystones.rune_colors("blackstone_waystone") == (0x993333, None)
+    assert waystones.rune_colors("end_stone_waystone") == (0x7200FF, None)
+    for name in waystones.WAYSTONE_BLOCKS:
+        if name not in ("blackstone_waystone", "end_stone_waystone"):
+            assert waystones.rune_colors(name) == (0xFFFFFF, None)
+    # Portstones: DyeColor's diffuse colour on the block, text colour on the item.
+    assert waystones.rune_colors("white_portstone") == (0xF9FFFE, 0xFFFFFF)
+    assert waystones.rune_colors("orange_portstone") == waystones.DYE_COLORS["orange"]
+    assert set(waystones.PORTSTONE_COLORS) <= set(waystones.DYE_COLORS)
+
+
+def test_split_y_cuts_a_band_and_its_side_uvs():
+    from portkit.converters.models import split_y
+
+    halves, why = split_y(WAYSTONE_RUNE_ELEMENT, 16)
+    assert why == ""
+    below, above = halves
+    assert below["from"][1] == 12 and below["to"][1] == 16
+    assert above["from"][1] == 16 and above["to"][1] == 21.5
+    assert "rotation" not in below and "rotation" not in above
+    # v runs 3.5 (top, y 21.5) to 13 (bottom, y 12): y 16 is v 9.
+    assert above["faces"]["north"]["uv"] == [2.5, 3.5, 5, 9]
+    assert below["faces"]["north"]["uv"] == [2.5, 9, 5, 13]
+    turned = {**WAYSTONE_RUNE_ELEMENT, "rotation": {"angle": 22.5, "axis": "y", "origin": [8, 8, 8]}}
+    assert split_y(turned, 16) == (None, "element is rotated")
+    assert split_y(WAYSTONE_RUNE_ELEMENT, 30)[0] is None
+
+
+def test_waystone_runes_cross_into_the_upper_half_shown_by_a_state(stoned):
+    result, tree = stoned
+    block = _block(tree, "waystone")
+    assert block["description"]["states"]["waystones:runes"] == [False, True]
+    instances = block["components"]["minecraft:material_instances"]
+    # White: the jar's own texture, no baked copy.
+    assert instances["runes"] == {"texture": "waystones:waystone_runes", "render_method": "alpha_test",
+                                  "face_dimming": False, "ambient_occlusion": False}
+    assert not (tree / "resource_pack/textures/blocks/waystone_runes_item.png").exists()
+    terrain = json.loads((tree / "resource_pack/textures/terrain_texture.json").read_text())["texture_data"]
+    assert "waystones:waystone_runes" in terrain
+    bones = _bones(tree, "waystone")
+    assert [(c["origin"][1], c["size"][1]) for c in bones["lower_runes_0"]] == [(12.0, 4.0)]
+    assert [(c["origin"][1], c["size"][1]) for c in bones["upper_runes_0"]] == [(0.0, 5.5)]
+    visibility = block["components"]["minecraft:geometry"]["bone_visibility"]
+    for bone in ("lower_runes_0", "lower_runes_180", "upper_runes_0", "upper_runes_180"):
+        assert visibility[bone].endswith("&& q.block_state('waystones:runes')")
+    assert "'north'" in visibility["upper_runes_180"]
+    # Java's waystone item has no runes: the item is the block's default look.
+    assert "minecraft:item_visual" not in block["components"]
+    table = _table(tree)
+    assert table["rune_state"] == "waystones:runes"
+    assert table["rune_blocks"] == ["waystones:mossy_waystone", "waystones:waystone"]
+    assert any("Java shows them only to a player who has activated that waystone" in n for n in result.notes)
+
+
+def test_without_waystone_runes_the_table_lists_none(converted):
+    result, tree = converted
+    assert _table(tree)["rune_blocks"] == []
+    assert "waystones:runes" not in _block(tree, "waystone")["description"]["states"]
+    assert any("no readable waystones:block/waystone_runes model" in n for n in result.notes)
+
+
+def test_a_coloured_waystone_style_bakes_its_runes(tmp_path):
+    root = _with_runes(_waystones_mod(tmp_path), stones=True)
+    _write(root, f"assets/{NS}/blockstates/blackstone_waystone.json", json.loads(
+        (root / f"assets/{NS}/blockstates/waystone.json").read_text()))
+    _write(root, f"data/{NS}/loot_table/blocks/blackstone_waystone.json", _loot("blackstone_waystone"))
+    _write(root, f"data/{NS}/tags/block/waystones.json", {"values": [
+        f"{NS}:waystone", f"{NS}:mossy_waystone", f"{NS}:blackstone_waystone"]})
+    convert(root, tmp_path / "out", emit_addon=False)
+    tree = tmp_path / "out"
+    instances = _block(tree, "blackstone_waystone")["components"]["minecraft:material_instances"]
+    assert instances["runes"]["texture"] == "waystones:blackstone_waystone_runes"
+    assert _pixels(tree / "resource_pack/textures/blocks/blackstone_waystone_runes.png")[0] == (0x99, 0x33, 0x33, 255)
+    assert "waystones:blackstone_waystone" in _table(tree)["rune_blocks"]
+
+
+def test_portstone_runes_are_baked_in_its_dye_colours_with_the_item(stoned):
+    result, tree = stoned
+    textures = tree / "resource_pack/textures/blocks"
+    # The jar's grey+alpha texture: white opaque, then grey 128 at alpha 128.
+    pixels = _pixels(textures / "orange_portstone_runes.png")
+    assert pixels[0] == (0xF9, 0x80, 0x1D, 255)
+    assert pixels[1] == ((128 * 0xF9 + 127) // 255, (128 * 0x80 + 127) // 255, (128 * 0x1D + 127) // 255, 128)
+    assert _pixels(textures / "orange_portstone_runes_item.png")[0] == (0xFF, 0x68, 0x1F, 255)
+    assert _pixels(textures / "white_portstone_runes.png")[0] == (0xF9, 0xFF, 0xFE, 255)
+    block = _block(tree, "orange_portstone")
+    assert "waystones:runes" not in block["description"]["states"]
+    assert block["components"]["minecraft:material_instances"]["runes"]["texture"] == "waystones:orange_portstone_runes"
+    bones = _bones(tree, "orange_portstone")
+    assert {"lower_runes_0", "lower_runes_180"} <= set(bones)
+    assert not any(b.startswith("upper_runes") for b in bones)
+    visual = block["components"]["minecraft:item_visual"]
+    assert visual["material_instances"]["runes"]["texture"] == "waystones:orange_portstone_runes_item"
+    assert {b for b, v in visual["geometry"]["bone_visibility"].items() if v == "1.0"} == {"lower", "lower_runes_0"}
+    assert any("portstone" in n and "coloured runes are drawn as Java draws them" in n for n in result.notes)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_runtime_under_node_with_waystone_runes(stoned):
+    _, tree = stoned
+    js = ROOT / "tests" / "js"
+    proc = subprocess.run(
+        ["node", "--import", str(js / "register.mjs"), "--test", str(js / "waystone.test.mjs")],
+        capture_output=True, text=True, timeout=120,
+        env={"PATH": os.environ["PATH"], "PORTKIT_WAYSTONE_TABLE": str(tree / DATA)},
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "# skipped 0" in proc.stdout
 
 
 # -- portstones ---------------------------------------------------------------
