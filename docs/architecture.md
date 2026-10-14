@@ -122,7 +122,11 @@ model's geometry turned per `minecraft:cardinal_direction` by
 way `facing` points when placed and the block's box are its code's, so they are
 read from the jar's class files: `bytecode.py` parses class files (JVMS ch. 4)
 and `blockcode.py` runs the registration (`DeferredRegister.register`,
-`Registry.register`, helpers), `getStateForPlacement` (the placement context's
+`Registry.register`, helpers; a call that passes the block and its item as
+several lambdas, like MrCrayfish Framework's `blockWithItem(id, Supplier,
+Function)`, registers the one lambda whose dynamicMethodType takes nothing
+and returns a block class, and none when that isn't exactly one),
+`getStateForPlacement` (the placement context's
 `getHorizontalDirection()` is a symbol) and `getShape` once per facing on a
 small abstract interpreter, with vanilla `Block.box` / `Shapes.*` /
 `Stream.reduce` / enum switch maps / `Map.get` modelled and everything else an

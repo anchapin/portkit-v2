@@ -16,7 +16,9 @@ involved on a tiny abstract interpreter (:class:`Machine`):
   to the boxes Java collides with;
 * the block's registration (``DeferredRegister.register("name", ...)``,
   ``Registry.register(.., id, new Block(..))`` and helpers around them) ties
-  each blockstate name to the object constructed for it.
+  each blockstate name to the object constructed for it; a call that passes
+  the block and its item as separate lambdas registers the one lambda that
+  takes nothing and returns a block class, by its dynamicMethodType.
 
 Anything the interpreter does not know is an unknown value. A branch on an
 unknown value runs both ways, and the answer counts only when every way agrees.
@@ -176,6 +178,15 @@ class ClassLit:
 class Lam:
     handle: Handle
     captured: tuple = ()
+    # The lambda's dynamicMethodType (instantiatedMethodType in older javadoc):
+    # the third static argument of LambdaMetafactory.metafactory and
+    # altMetafactory, "the signature and return type that should be enforced
+    # dynamically at invocation time" (java.lang.invoke.LambdaMetafactory,
+    # Java SE 21 javadoc). It says what this lambda takes and
+    # returns at its call site, e.g. ``()Lcom/x/LampBlock;`` for a block
+    # Supplier and ``(Lcom/x/LampBlock;)Lcom/x/LampItem;`` for an item
+    # Function. None when the call site doesn't carry one.
+    itype: str | None = None
 
 
 @dataclass(eq=False)
@@ -312,7 +323,8 @@ def _is_wide(desc_char: str) -> bool:
 @dataclass
 class Registration:
     name: str
-    value: object  # Lam or Obj
+    value: object  # Lam or Obj; None when the call can't be read (see why)
+    why: str = ""
 
 
 class Machine:
@@ -470,8 +482,36 @@ class Machine:
                  else a for a in args
                  if isinstance(a, (str, RL)) or (isinstance(a, Obj) and "__rl" in a.fields)]
         values = [a for a in args if isinstance(a, Lam) or (isinstance(a, Obj) and "__rl" not in a.fields)]
-        if len(names) == 1 and len(values) == 1:
-            self.registrations.append(Registration(names[0].rsplit(":", 1)[-1], values[0]))
+        if len(names) != 1 or not values:
+            return
+        name = names[0].rsplit(":", 1)[-1]
+        if len(values) == 1:
+            self.registrations.append(Registration(name, values[0]))
+            return
+        # Several lambdas in one call: a block registration that also makes
+        # the block's item, e.g. MrCrayfish Framework's
+        # RegistryEntry.blockWithItem(id, Supplier<T> supplier, Function<T, E>
+        # function) (T extends Block, E extends BlockItem). The block is the
+        # lambda that takes nothing and returns a block class; the item
+        # function takes the block. Only lambdas, and exactly one such
+        # supplier, count; anything else is left unread with the reason.
+        if not all(isinstance(v, Lam) for v in values):
+            return
+        suppliers = [v for v in values if self.supplies_block(v)]
+        if len(suppliers) == 1:
+            self.registrations.append(Registration(name, suppliers[0]))
+        else:
+            self.registrations.append(Registration(name, None, (
+                f"its registration passes {len(values)} lambdas and {len(suppliers)} of them take no arguments "
+                "and return a block class (by the lambda's dynamicMethodType; exactly one must), so which "
+                "one builds the block can't be told")))
+
+    def supplies_block(self, lam: Lam) -> bool:
+        """Whether ``lam``, by its dynamicMethodType, takes no arguments
+        and returns a class that reaches a vanilla block class."""
+        if not lam.itype or not lam.itype.startswith("()L") or not lam.itype.endswith(";"):
+            return False
+        return self.is_block_class(lam.itype[3:-1])
 
     def run(self, cf: ClassFile, m: Method, args: list) -> list:
         """Every value ``m`` may return (None for void), over all paths."""
@@ -775,7 +815,9 @@ class Machine:
         bsm = indy.bootstrap.ref if indy.bootstrap else None
         if bsm and bsm.owner == "java/lang/invoke/LambdaMetafactory" and len(indy.args) >= 2 \
                 and isinstance(indy.args[1], Handle):
-            f.stack.append(Lam(indy.args[1], tuple(args)))
+            itype = indy.args[2] if len(indy.args) >= 3 else None
+            itype = itype[1] if isinstance(itype, tuple) and itype[:1] == ("methodtype",) else None
+            f.stack.append(Lam(indy.args[1], tuple(args), itype))
         elif bsm and bsm.owner == "java/lang/invoke/StringConcatFactory" and indy.args \
                 and isinstance(indy.args[0], str):
             recipe, consts = indy.args[0], list(indy.args[1:])
@@ -1239,7 +1281,12 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
         machine.steps = 0
         machine.init_class(cname)
     regs: dict[str, list] = {}
+    unread: dict[str, str] = {}
     for reg in machine.registrations:
+        if reg.value is None:
+            unread.setdefault(reg.name, reg.why)
+            regs.setdefault(reg.name, [])
+            continue
         regs.setdefault(reg.name, []).append(reg.value)
     machine.registrations = None
 
@@ -1267,7 +1314,7 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
             why = why or (f"registered as {others[0].replace('/', '.')}, whose superclasses leave the jar at "
                           f"{outside.replace('/', '.')} rather than reach a vanilla block class")
         if not objs:
-            why = why or "no registration of this block was found in the mod's classes"
+            why = why or unread.get(name) or "no registration of this block was found in the mod's classes"
         elif len({o.cls for o in objs}) != 1:
             why = "registered more than once with different classes: " + ", ".join(sorted({o.cls for o in objs}))
             objs = []

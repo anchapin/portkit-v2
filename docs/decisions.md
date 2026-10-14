@@ -27,6 +27,38 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: a registration that passes several lambdas registers the one that supplies the block, picked by its lambda signature
+
+- **Status:** reader fix under the approved #212/#213 rules (read from bytecode first, labelled DEFAULT otherwise); no new policy
+- **Decision:** when one registration call passes the block and its item as
+  separate lambdas (MrCrayfish Framework's `RegistryEntry.blockWithItem(id,
+  Supplier<T> supplier, Function<T, E> function)`, `T extends Block, E extends
+  BlockItem`; Framework multiloader/1.21.1, RegistryEntry.java L156),
+  `blockcode` registers the lambda whose `dynamicMethodType` (named
+  instantiatedMethodType in older javadoc; the third static argument of
+  `LambdaMetafactory.metafactory`, "the signature and return type that should
+  be enforced dynamically at invocation time", Java SE 21 javadoc) takes no
+  arguments and returns a class that reaches a vanilla block class. Every value in the call must be a lambda and exactly one must qualify;
+  otherwise (two block suppliers, a `Supplier<?>` erased to `Object`, a
+  non-lambda value) nothing is registered and the block is unread with that
+  reason, so its facing, box, collision and light take the labelled DEFAULT or
+  stay unconverted as before (#87). Argument order doesn't matter. Calls with
+  one lambda are unchanged.
+- **Why:** the item function takes the block (`(LampBlock)LampItem`), so it can't
+  be what builds it; the signature is in the class file at the call site, so the
+  pick is deterministic and citable. Before this, such calls registered nothing
+  and 60 Refurbished blocks (lamps, ceiling fans and lights, range hoods, stoves,
+  toasters, microwaves, mail boxes, light switches, doorbell, TV) read as "no
+  registration found"; 3 more (computer, recycle_bin, workbench) were named only
+  by their menu registration. All 63 now read; none of them converts yet (their
+  blockstates carry more than `facing`), so converted output is unchanged.
+- **Rejected:** picking by position (first or last lambda): registries differ,
+  and nothing in the class file says which slot is the block. Running every
+  lambda and keeping whichever builds a block: an item function given an
+  unknown block may still build something, and two block suppliers would need a
+  tie-break we can't cite.
+- **Links:** #212, #213 (side finding), #87.
+
 ## 2026-10-14: block light emission is read from the jar's bytecode (Properties.lightLevel); a light that can't be read is not emitted
 
 - **Status:** approved (Alex, 2026-10-14)
