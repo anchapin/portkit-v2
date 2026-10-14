@@ -20,7 +20,19 @@ from .report import ValidationReport
 from .xrefs import check_cross_pack
 
 _ICON_SIZES = {2, 4, 8, 16, 32, 64, 128, 256}
-_IDENTIFIER = re.compile(r"^[a-z0-9_]+:[a-z0-9_/.]+$")
+# A namespaced id of a block, item, recipe or loot entry. Bedrock's schemas take
+# a hyphen here (checked against the schemas, not in game): Mojang's block
+# description schema only asks for no whitespace (bedrock-schemas
+# bp/blocks/block_description.schema.json, "^\\S+$"), the item, recipe and
+# loot-entry schemas put no pattern on the id, and the biome schema spells the
+# set out as "^[a-z0-9._%+-]+:[a-z0-9._%+-]+$". Java ids are [a-z0-9_.-] with
+# "/" in the path, so a converted id keeps its hyphen and its Java spelling
+# (Wallpapercraft's wallpapercraft:woolblue-0). See docs/decisions.md.
+_IDENTIFIER = re.compile(r"^[a-z0-9_-]+:[a-z0-9_/.-]+$")
+# A terrain/item texture key. No published schema constrains these, and the
+# texture converter maps a Java path's "-" to "_" (#168), so the key check
+# stays as strict as it was.
+_TEXTURE_KEY = re.compile(r"^[a-z0-9_]+:[a-z0-9_/.]+$")
 _RECIPE_KEYS = {
     "minecraft:recipe_shaped",
     "minecraft:recipe_shapeless",
@@ -272,7 +284,7 @@ def _check_texture_index(report: ValidationReport, path: Path, rel: str, pack_ro
     if not entries:
         report.add(rel, "texture_index.empty", "texture index has no entries")
     for name, entry in entries.items():
-        if not _IDENTIFIER.match(name):
+        if not _TEXTURE_KEY.match(name):
             report.add(rel, "texture_index.identifier", f"bad texture key {name!r}")
         target = entry.get("textures")
         if not isinstance(target, str):

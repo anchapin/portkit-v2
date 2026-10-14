@@ -27,6 +27,70 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: a Java id with a hyphen stays that id on Bedrock; the validator takes "-" in block, item, recipe and loot ids
+
+- **Decision:** the validator's identifier rule (`validate/rules.py`
+  `_IDENTIFIER`, used for block ids, recipe ids and loot-entry item names) is
+  now `^[a-z0-9_-]+:[a-z0-9_/.-]+$`: Java's identifier characters, with the
+  hyphen added on both sides of the colon. The converter keeps mapping a Java
+  id to the same Bedrock id (`converters.items.bedrock_identifier` is the
+  identity), so `wallpapercraft:woolblue-0` ships as `wallpapercraft:woolblue-0`
+  with no rename, no mapping table and no collision handling. The `.lang` name
+  check in `validate/xrefs.py` reads the same id shape, so a hyphenated block
+  with a `tile.<id>.name` line is no longer reported as unnamed. Texture keys
+  (terrain/item atlas) keep the old `[a-z0-9_]` rule as `_TEXTURE_KEY`, since
+  the texture converter already maps `-` to `_` there (#168).
+- **Why:** every Mojang source that constrains these ids admits a hyphen, and
+  none excludes it:
+  - Mojang/bedrock-schemas @fc31f9af `schemas/bp/blocks/block_description.schema.json`:
+    block `identifier` pattern is `^\S+$` (any non-whitespace); the same file is
+    vendored in `src/portkit/validate/schemas/1.26.60/`.
+  - Same repo, `schemas/bp/items/item_description.schema.json`, the one
+    recipe schema it publishes (`schemas/bp/recipes/brewing_mix_recipe_definition.schema.json`,
+    description `identifier`) and `schemas/bp/loot_tables/loot_loot_entry.schema.json`
+    (`name`: "The item identifier"): plain strings, no pattern.
+  - Same repo, `schemas/bp/biomes/biome_biome_description.schema.json`: the one
+    id with its character set spelled out, `^[a-z0-9._%+-]+:[a-z0-9._%+-]+$`.
+  - Mojang/bedrock-samples @46ba6ea9 `metadata/json_schemas/server/block/1.26.20/Description.json`
+    (block identifier `^\S+$`, flags `ECMAScript,icase`) and
+    `server/item/1.26.30/description.json` (no pattern).
+  - Microsoft Learn: block description "must include a namespace and must not
+    use the Minecraft namespace" with no character rule
+    (https://learn.microsoft.com/en-us/minecraft/creator/reference/content/blockreference/examples/blockdescription);
+    item `minecraft:item` the same; biome description gives the
+    `^[a-z0-9._%+-]+:[a-z0-9._%+-]+$` pattern (MicrosoftDocs/minecraft-creator
+    `creator/Reference/Content/BiomesReference/Examples/Components/biome_description.md`,
+    https://learn.microsoft.com/en-us/minecraft/creator/reference/content/biomesreference/examples/components/biome_description);
+    1.26.20 changelog: "Namespace constraints have been tweaked but everything
+    permitted before should still be valid. This affects identifiers used for
+    blocks, states, and menu category groups."
+  - minecraft.wiki Identifier, Bedrock Edition: "The namespace and the path of
+    a namespaced ID can contain all symbols with the exception of slashes and
+    colons" (https://minecraft.wiki/w/Identifier). The Bedrock Wiki
+    (wiki.bedrock.dev style guide, namespaces) gives naming advice
+    (lowercase, snake_case) but no character rule.
+  - Microsoft's own validator, Minecraft Creator Tools (`mct validate`
+    0.20.0), reports 0 errors on Wallpapercraft's 2300 hyphenated blocks.
+  - No vanilla id in bedrock-samples has a hyphen, so there is no in-game
+    vanilla precedent either way; that is absence, not a rule.
+  Wallpapercraft – Repainted 1.2.0 (NeoForge 1.21.1): validator errors
+  2420 -> 0 (2300 `block.identifier` + 120 `recipe.identifier`), valid NO ->
+  yes; output tree byte-identical (4911 files, residue 2577, 65.6%, 2302
+  block files), mct 0 errors / 2595 warnings unchanged. The 13 corpus mods:
+  rows, validity and mct counts unchanged.
+- **Rejected:** rename `-` to `_` in the converter with a mapping table and
+  collision detection. Nothing documented requires it, it would make Bedrock
+  ids differ from the Java ids that `/give`, recipes, loot and the residue
+  agent's guards key on, and it adds a collision class (`a-b` vs `a_b`) for
+  no evidenced gain. Relaxing the rule to Mojang's literal `^\S+$`: it would
+  stop the validator catching ids a Java mod cannot produce (uppercase, a
+  missing namespace), which are agent mistakes here, not valid conversions.
+  Relaxing texture keys too: no source documents them and #168 already maps
+  them.
+- **Not verified in-game:** placing, breaking, `/give` and `/setblock` with a
+  hyphenated custom block id, and crafting a hyphenated recipe result.
+- **Links:** PR #211; deco-mods spike gap 4; #168 (texture keys).
+
 ## 2026-10-14: "Return to Portal" is pinned to the top of waystone menus, as in Java, below the player's fleeting memorials
 
 - **Status:** Return to Portal pinned to top as in Java; approved (Alex, 2026-10-14) (PR #210, Part of #178).
