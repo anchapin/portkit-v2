@@ -27,6 +27,85 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: the warp stone opens the warp scroll's menu through the waystone runtime after its own hold, and each teleport from it costs one of its 128 durability
+
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #208, Part of #178).
+- **Decision:** Waystones' warp stone (`WarpStoneItem`, `ModItems` L42) works
+  through the waystone runtime of #198-#207: a `warp_stones` section in the
+  same data table, no new block or component.
+  - **Item:** `properties.durability(128)` (`WarpStoneItem` L33-35), which in
+    Minecraft 1.21.1 also makes it one per stack (`Item$Properties#durability`
+    L144-147: max damage, max stack size 1, damage 0; Mojang's mappings for
+    the 1.21.1 client jar): `minecraft:durability` 128 and
+    `minecraft:max_stack_size` 1 (the item converter wrote 64 and no
+    durability). Always drawn with the enchantment glint (`isFoil` L152-155:
+    `minecraft:glint`). It stays in the items tab (registered with the mod's
+    tab, L42).
+  - **Use:** held for `general.warpStoneUseTime` ticks (32,
+    `WaystonesConfigData` L71; `getUseDuration` L37-40) on #206's script
+    timer: `world.afterEvents.itemUse` starts it with `PORTAL_TRIGGER` 0.1 / 2
+    (`use` L137-150, the scroll's sound), switching away from the stone or
+    taking damage stops it (an `IResetUseOnDamage`, L29;
+    `WarpDamageResetHandler` L10-15).
+  - **Menu** (`finishUsingItem` L120-135): `withTargetsForItem` ->
+    `getTargetsForItem` (`PlayerWaystoneManager` L299-304): the player's
+    activated waystones and, while it stands, "Return to Portal"; no source
+    waystone (no "Current Location", nothing left out, no range check),
+    titled `container.waystones.waystone_selection`. The builder gets no
+    `withHand`, so `SelectWaystoneMessage` L60-67 (and
+    `WaystoneTeleportManager#isWarpItemStillPresent` L547-558) never check
+    that the stone is still held: a choice teleports either way, unlike the
+    warp scroll.
+  - **Cost:** the `warpRequirements` default decided per target type (and the
+    return portal with `target_is_warp_portal`), no source waystone, with the
+    warp item's conditions read from the jar's item tags: new fixed condition
+    `source_is_warp_stone` (`RequirementRegistry` L316, tag
+    `waystones:warp_stones`), false elsewhere; the stone is in no
+    `waystones:*scrolls` tag. The defaults have no warp stone rule, so it
+    pays the distance cost (`scaled_add_xp_cost(distance, 0.01)` in the same
+    dimension, 27 between dimensions, at most 27), as in Java. Errors (can't
+    pay, block gone) on the action bar in DARK_RED (L80-81); a waystone that
+    no longer exists does nothing (`InvalidWaystone`'s empty message).
+  - **Wear** (post-teleport handler L126-130, with
+    `teleports.enableDurability`, true, `WaystonesConfigData` L97):
+    `ItemStack#hurtAndBreak(1)` (L442-470): no damage for a player with
+    infinite materials (creative); a stack whose new damage reaches 128
+    breaks (128 teleports), with the item break sound
+    (`LivingEntity#onEquippedItemBroken` L3571-3572 -> `breakItem`
+    L1368-1374: `ITEM_BREAK` 0.8, pitch 0.8 + random x 0.4; Java
+    `random/break` = Bedrock `random.break`). Java wears the very stack
+    used, wherever it went; here the warp stone in the slot it was used
+    from, if one is still there.
+  - **Gating:** the stone ships when a waystone block works (no new text: the
+    menu's are the waystone's); otherwise a note says why and it stays a
+    plain icon.
+- **Why:** the warp stone is the warp scroll's menu with durability instead
+  of a stack to use up (`WarpStoneItem` vs `WarpScrollItem`), so it reuses
+  #206/#207's timer, #207's menu (`requirementsFor`, `back`) and the scroll
+  teleport (now a shared `itemTeleport`), with every number read from the
+  item class, the config defaults and Minecraft's own `hurtAndBreak`.
+- **Rejected:** checking the stone is still in hand at the choice (Java's
+  warp stone menu has no warp hand; that check is the warp scroll's); keeping
+  the stack size 64 (Java's durability items don't stack); breaking one use later
+  as Bedrock's own tools do (Java breaks at damage 128); `minecraft:enchantable`
+  for Unbreaking and Mending (no Bedrock enchantable slot is
+  "durability only"; the stone would take other enchantments too).
+- **Not carried over (conversion note):** letting go of the use button, the
+  bow pose, slowed walking and the particles while it is used, using it from
+  the off hand, enchanting it (Java's `enchantable/durability` tag lets an
+  anvil put Unbreaking and Mending on it), repairing it by combining two,
+  wearing a stone that left its slot while the menu was open, pets and
+  leashed mobs travelling along, third-party waystones, fleeting memorials
+  and twinbound feather players in its menu (not converted), the menu's
+  sorting and search, the warp stone Java's sharestone and portstone
+  renderers draw, config changes (cited defaults).
+- **Coverage:** Waystones 30.7 -> 30.7 (324 files, residue 732): the warp
+  stone already shipped as a plain icon; this adds its behaviour, durability,
+  stack size and glint. No other corpus mod changed.
+- **Links:** #178, PR #198 (waystones), PR #201 (sharestones), PR #202
+  (portstones), PR #203/#204 (runes), PR #205 (warp plates), PR #206 (warp
+  portal and portal scroll), PR #207 (scrolls), #87 (no fabrication), PR #208.
+
 ## 2026-10-14: the warp, return and bound scrolls teleport through the waystone runtime after the portal scroll's hold; a blank scroll binds a bound scroll, which keeps its waystone as item data
 
 - **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #207, Part of #178).

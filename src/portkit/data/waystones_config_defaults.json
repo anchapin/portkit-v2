@@ -52,6 +52,14 @@
         "teleports.entityDenyList": {
           "value": ["minecraft:wither"],
           "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L114"
+        },
+        "general.warpStoneUseTime": {
+          "value": 32,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L71"
+        },
+        "teleports.enableDurability": {
+          "value": true,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L97"
         }
       }
     }

@@ -22,6 +22,7 @@ import pytest
 
 from portkit.converters import waystones
 from portkit.converters.waystones import requirements
+from portkit.model import SourceMod
 from portkit.pipeline import convert
 
 from test_stations import PNG, ROOT, _write
@@ -1491,6 +1492,132 @@ def test_scroll_runtime_under_node(scrolled):
     _, tree = scrolled
     js = ROOT / "tests" / "js"
     for test in ("scrolls.test.mjs", "warp_portal.test.mjs", "waystone.test.mjs"):
+        for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
+            proc = subprocess.run(
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
+            )
+            assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr
+
+
+# -- the warp stone (#178) ----------------------------------------------------------
+
+DURABILITY_COST = {"args": [0.0], "fn": "multiply_xp_cost", "when": {}}
+
+
+def _with_warp_stone(root: Path, tag=True) -> Path:
+    """Waystones' warp stone item as the jar has it (a flat handheld icon), its
+    text and its waystones:warp_stones item tag."""
+    _write(root, f"assets/{NS}/models/item/warp_stone.json",
+           {"parent": "minecraft:item/handheld", "textures": {"layer0": f"{NS}:item/warp_stone"}})
+    (root / f"assets/{NS}/textures/item").mkdir(parents=True, exist_ok=True)
+    (root / f"assets/{NS}/textures/item/warp_stone.png").write_bytes(PNG.read_bytes())
+    lang = json.loads((root / f"assets/{NS}/lang/en_us.json").read_text())
+    lang["item.waystones.warp_stone"] = "Warp Stone"
+    _write(root, f"assets/{NS}/lang/en_us.json", lang)
+    if tag:
+        _write(root, f"data/{NS}/tags/item/warp_stones.json", {"values": [f"{NS}:warp_stone"]})
+    return root
+
+
+@pytest.fixture
+def warp_stoned(tmp_path):
+    root = _with_warp_stone(_with_scrolls(_with_warp_portal(_waystones_mod(tmp_path))))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    return result, tmp_path / "out"
+
+
+def test_warp_stone_table_holds_the_cited_rules(warp_stoned):
+    result, tree = warp_stoned
+    table = _table(tree)
+    stones = table["warp_stones"]
+    assert list(stones["items"]) == ["waystones:warp_stone"]
+    assert stones["use_time"] == 32
+    assert stones["durability"] is True
+    assert stones["network"] == "waystones:waystone"
+    assert stones["title"] == "container.waystones.waystone_selection"
+    assert stones["error_style"] == "\u00a74"
+    rules = stones["items"]["waystones:warp_stone"]["requirements"]
+    # Every target type the menu can list, and the return portal.
+    assert set(rules) == {"waystones:waystone", "waystones:orange_sharestone", "waystones:warp_portal"}
+    # The defaults have no warp stone rule (and no source_is_scroll for it): the distance cost.
+    for kind in rules:
+        assert rules[kind] == table["networks"]["waystones:waystone"]["requirements"]
+    assert table["sounds"]["item_break"] == {"id": "random.break", "volume": 0.8, "pitch": 0.8, "spread": 0.4}
+    assert table["sounds"]["scroll_start"] == {"id": "portal.trigger", "volume": 0.1, "pitch": 2.0}
+    text = (tree / DATA).read_text()
+    assert "item/WarpStoneItem.java#L29-L155" in text and "RequirementRegistry.java#L316" in text
+    assert "WaystonesConfigData.java#L71" in text and "WaystonesConfigData.java#L97" in text
+    assert "ItemStack#hurtAndBreak L442-476" in text
+    assert "warp stone, loot tables" in text.splitlines()[0]
+    notes = result.notes
+    assert any("warp stone item(s) work" in n and "128 durability" in n for n in notes)
+    # Return to Portal now shows in every item menu that ships.
+    assert not any("Return to Portal' in" in n for n in notes)
+    ways = next(n for n in notes if "waystone block(s) work" in n)
+    assert "warp plates, fleeting memorials, shards and the feather are not converted" in ways
+    assert "scrolls and the warp stone have their own notes" in ways
+
+
+def test_warp_stone_item_holds_one_wears_and_glints(warp_stoned):
+    _, tree = warp_stoned
+    stone = _item(tree, "warp_stone")
+    assert stone["components"]["minecraft:max_stack_size"] == 1
+    assert stone["components"]["minecraft:durability"] == {"max_durability": 128}
+    assert stone["components"]["minecraft:glint"] is True
+    assert stone["components"]["minecraft:hand_equipped"] is True
+    assert stone["description"]["menu_category"] == {"category": "items"}
+
+
+def test_without_portals_the_warp_stone_has_no_return_portal_rules(tmp_path):
+    root = _with_warp_stone(_waystones_mod(tmp_path))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    table = _table(tmp_path / "out")
+    assert "warp_portals" not in table and "scrolls" not in table
+    assert set(table["warp_stones"]["items"]["waystones:warp_stone"]["requirements"]) == {
+        "waystones:waystone", "waystones:orange_sharestone"}
+    text = (tmp_path / "out" / DATA).read_text()
+    # Only the warp stone's own config values are cited.
+    assert "WaystonesConfigData.java#L71" in text and "WaystonesConfigData.java#L83" not in text
+    note = next(n for n in result.notes if "warp stone item(s) work" in n)
+    assert "Return to Portal" not in note
+    ways = next(n for n in result.notes if "waystone block(s) work" in n)
+    assert ("warp plates, warp portals, fleeting memorials, scrolls, shards and the feather are not converted "
+            "(the warp stone has its own note).") in ways
+
+
+def test_a_warp_stone_rule_follows_the_jars_tag():
+    lines = ["[source_is_warp_stone] add_xp_cost(80)"]
+    on = {"source_is_scroll": False, "source_is_warp_stone": True}
+    kept, _ = requirements(lines, True, True, waystones.WAYSTONE_TYPE, scroll=on)
+    assert kept == [{"args": [80], "fn": "add_xp_cost", "when": {}}]
+    # From a waystone or a scroll the warp item is no warp stone.
+    assert requirements(lines, True, True, waystones.WAYSTONE_TYPE)[0] == []
+    kept, dropped = requirements(lines, True, True, waystones.WAYSTONE_TYPE, scroll={"source_is_scroll": True})
+    assert kept == [] and dropped == ["[source_is_warp_stone] add_xp_cost(80) (never applies here)"]
+
+
+def test_warp_stone_conditions_come_from_the_jars_tags(tmp_path):
+    root = _with_warp_stone(_waystones_mod(tmp_path))
+    flags = waystones.scroll_conditions(SourceMod(root=root, namespace=NS), "warp_stone")
+    assert flags["source_is_warp_stone"] is True and flags["source_is_scroll"] is False
+    bare = _with_warp_stone(_waystones_mod(tmp_path / "bare"), tag=False)
+    assert waystones.scroll_conditions(SourceMod(root=bare, namespace=NS), "warp_stone")["source_is_warp_stone"] is False
+
+
+def test_without_the_warp_stone_the_table_has_no_warp_stone_rules(converted):
+    result, tree = converted
+    assert "warp_stones" not in _table(tree)
+    text = (tree / DATA).read_text()
+    assert "WarpStoneItem" not in text and "WaystonesConfigData.java#L71" not in text
+    assert "item_break" not in _table(tree)["sounds"]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_warp_stone_runtime_under_node(warp_stoned):
+    _, tree = warp_stoned
+    js = ROOT / "tests" / "js"
+    for test in ("warp_stone.test.mjs", "scrolls.test.mjs", "warp_portal.test.mjs", "waystone.test.mjs"):
         for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
             proc = subprocess.run(
                 ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
