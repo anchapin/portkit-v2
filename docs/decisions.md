@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: block light emission is read from the jar's bytecode (Properties.lightLevel); a light that can't be read is not emitted
 
-- **Status:** proposed (PR #213); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14)
 - **Decision:** every block `converters/blocks.py` writes gets its light from
   its compiled code, through `blockcode.read_light` (the #212 interpreter).
   Java gives each state `properties.lightEmission.applyAsInt(state)`, the
