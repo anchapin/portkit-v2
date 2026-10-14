@@ -21,9 +21,12 @@ class SourceMod:
     # metadata. Load conditions are decided against them (#183).
     mods: dict[str, str] | None = None
     requires: frozenset[str] | None = None
+    # The jar's compiled classes (portkit.bytecode.ClassIndex), or None when
+    # the source has none to offer: what a block's code says is then unknown.
+    classes: Any = field(default=None, compare=False, repr=False)
 
     @classmethod
-    def from_metadata(cls, root: Path, namespace: str, meta) -> "SourceMod":
+    def from_metadata(cls, root: Path, namespace: str, meta, classes=None) -> "SourceMod":
         """The mod one namespace of a staged jar stands for, under its metadata.
 
         One construction for the converters (``pipeline.convert``) and the
@@ -33,7 +36,7 @@ class SourceMod:
         requires = getattr(meta, "requires", None)
         return cls(root=root, namespace=namespace, loader=getattr(meta, "loader", None),
                    minecraft=getattr(meta, "minecraft", None), mods=getattr(meta, "mods", None),
-                   requires=frozenset(requires) if requires is not None else None)
+                   requires=frozenset(requires) if requires is not None else None, classes=classes)
 
     @property
     def assets(self) -> Path:

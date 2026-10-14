@@ -341,7 +341,8 @@ def convert(
             overrides, records = resolve_config(list(config), known)
             meta.notes.append(config_note(records))
         per_namespace = {
-            ns: convert_all(SourceMod.from_metadata(staged.root, ns, meta), overrides=overrides or None)
+            ns: convert_all(SourceMod.from_metadata(staged.root, ns, meta, classes=staged.classes),
+                            overrides=overrides or None)
             for ns in selected
         }
         result = merge_namespaces(per_namespace)

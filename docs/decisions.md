@@ -27,6 +27,69 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: facing-only blocks convert outside the station runtimes, placement and box read from the jar's bytecode, else a documented default
+
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #212).
+- **Decision:** a block whose blockstate is exactly `facing=north|east|south|west`
+  (one model, a quarter turn about y per facing, no x) and that is no station
+  converts. Its geometry is the model as written, turned per
+  `minecraft:cardinal_direction` by `minecraft:transformation` (Java turns the
+  whole model, rotated elements and textures included, as transformation does;
+  the box turns with it, Bedrock-OSS wiki blocks/block-orientation); a
+  uvlocked model instead gets one bone per facing through `models.turn_y`,
+  which needs unrotated elements. The block's placement rule and box come from
+  its compiled code, read by `portkit/bytecode.py` (a class-file reader, JVMS
+  ch. 4) and `portkit/blockcode.py` (an abstract interpreter that runs the
+  registration, `getStateForPlacement` with the player's horizontal direction
+  as a symbol, and `getShape` once per facing; vanilla `Block.box`,
+  `Shapes.box/or/join(OR)/block/empty`, `Stream.reduce`, enum switch maps,
+  `ImmutableMap`/`Maps.newEnumMap`/`Map.get` and `Properties.noCollission`
+  are modelled; anything else is unknown, a branch on an unknown runs both
+  ways and counts only when both agree). Vanilla behaviour it relies on is
+  read from the 1.21.1 client jar with Mojang's mappings:
+  `Block#getStateForPlacement` returns `defaultBlockState()`,
+  `BlockBehaviour#getShape` is `Shapes.block()`, `#getCollisionShape` is
+  `hasCollision ? getShape : empty`, and `HorizontalDirectionalBlock`,
+  `TransparentBlock`, `HalfTransparentBlock`, `BaseEntityBlock` override none
+  of the three. Read values map as: facing = `getHorizontalDirection()` ->
+  `y_rotation_offset` 0, `.getOpposite()` -> 180; the Bedrock box is the
+  bounding box of Java's shape at each facing (one box per block; cut to the
+  block's edges), per permutation when it differs in the model's frame;
+  `noCollission` -> `minecraft:collision_box: false`. Where a value can't be
+  read deterministically (no registration found, unknown calls, Forge SRG or
+  Fabric intermediary member names, `Properties.ofFullCopy`), the documented
+  DEFAULT stands in: placement faces the player (offset 180), box = the
+  model's element bounds (from/to, element rotations ignored), collision = the
+  selection box. Code that was read but asks for something the placement trait
+  can't give (a quarter turn from the player, or a facing the player never
+  sets) stays residue. The conversion notes name every block's placement, box
+  and collision as read (`class#method`) or DEFAULT with the reason, never one
+  as the other (#87), plus code-declared states the blockstate doesn't draw
+  (`waterlogged`, `lit`) and behaviour methods the block overrides, which a
+  decoration-only block doesn't carry. Class files are kept in memory at
+  ingest (`Ingested.classes`), never staged, and are still residue.
+- **Coverage (deco manifest, not banked):** MOA DECOR: TOYS 39.9 -> 72.3%
+  (0 -> 177 blocks), Plushie Buddies 38.4 -> 71.1% (0 -> 76), Night Lights
+  83.8 -> 95.7% (0 -> 82), Cluttered 46.7 -> 47.5% (353 -> 387), Refurbished
+  19.2 -> 20.0% (17 -> 28); Beautify and Seafoam unchanged; mct 0 errors on
+  all. Of the 380 blocks, placement is read for 379 (1 default), the box for
+  368 (12 default), collision for 297 (83 default). Standard corpus (banked):
+  +60 blocks in 7 mods, 59 of them on the defaults (SRG/intermediary jars,
+  registries the interpreter doesn't follow), Farmer's Delight NeoForge's
+  half tatami mat read.
+- **Why:** Alex's decision (2026-10-14): read each block's facing rule and
+  hitbox from bytecode first, fall back to a clearly labelled default, keep
+  the no-fabrication rule. Decoration mods are mostly facing-only blocks (8 of
+  12 measured converted none), and their code follows a handful of compiler
+  patterns that read deterministically.
+- **Rejected:** a per-mod citation table (doesn't scale to MCreator's one class
+  per block); defaulting without reading (Refurbished faces *with* the player,
+  offset 0, which a default would get wrong); extending `turn_y` to rotated
+  elements (a whole-model transformation is exact for any element rotation);
+  a JVM or decompiler dependency (the reader and interpreter are ~1.7k lines of stdlib Python).
+- **Links:** PR #212; #87 (no fabrication), #177 (station facing blocks),
+  #56 (facing-only blocks counted in the behaviour sweep).
+
 ## 2026-10-14: a Java id with a hyphen stays that id on Bedrock; the validator takes "-" in block, item, recipe and loot ids
 
 - **Decision:** the validator's identifier rule (`validate/rules.py`

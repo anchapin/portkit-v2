@@ -9,7 +9,10 @@ block that is a plain cube converts to a Bedrock block definition with its
 geometry and material instances. A block with real states converts only when a
 Bedrock placement or connection trait sets the same states Java's block code
 does: pillars (axis), fences and walls (connections), seats (facing), stairs
-(facing, half, corner) and slabs (half). Anything else goes to the residue with
+(facing, half, corner) and slabs (half). A block whose only state is facing
+converts too, its placement rule and box read from its compiled code
+(portkit.blockcode) or, where that can't be read, a default the notes name as
+one (see "Facing-only blocks" below). Anything else goes to the residue with
 its state names, because approximating one produces a block that loads and
 behaves wrong, which is worse than one that never shipped.
 
@@ -22,6 +25,7 @@ from __future__ import annotations
 import json
 from portkit import png as png_reader
 
+from .. import blockcode
 from ..model import ConversionResult, SourceMod, Unhandled
 from . import models
 
@@ -1210,6 +1214,8 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
     if not src.is_dir():
         return result
 
+    readings = _read_facing_code(mod, src, stations or {})
+    coded: list[dict] = []
     for path in sorted(src.glob("*.json")):
         rel = result.claim(mod, path)
         name = path.stem
@@ -1217,6 +1223,13 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             blockstate = json.loads(path.read_text())
         except json.JSONDecodeError as exc:
             result.unhandled.append(Unhandled(rel, "block", f"invalid JSON: {exc}"))
+            continue
+
+        if name in readings:
+            model_ref, turns, uvlock = _coded_facing_variants(blockstate)
+            record = _convert_coded_facing(mod, result, rel, name, model_ref, turns, uvlock, readings[name])
+            if record is not None:
+                coded.append(record)
             continue
 
         station = (stations or {}).get(name)
@@ -1290,6 +1303,7 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
         result.files[f"blocks/{name}.json"] = _block_definition(
             mod.namespace, name, identifier, instances or {}
         )
+    result.notes.extend(_coded_facing_notes(coded))
     return result
 
 
@@ -1852,3 +1866,342 @@ def _wall_definition(namespace: str, name: str, geometry: str, instances: dict) 
             },
         },
     }
+
+
+# --------------------------------------------------------------------------
+# Facing-only blocks outside the station runtimes.
+#
+# A blockstate that is exactly ``facing=north|east|south|west``, one model
+# turned by a quarter-turn ``y`` per facing and no ``x``, converts when the
+# block is no station: the model's geometry turned per
+# ``minecraft:cardinal_direction`` by ``minecraft:transformation`` (Java turns
+# the whole model, element rotations and textures included, as transformation
+# does; the Bedrock-OSS wiki, docs/blocks/block-orientation.md, for the turn
+# and for transformation turning collision and selection boxes with it). A
+# uvlocked model can't turn its textures with it, so it gets one bone per
+# facing instead (models.turn_y), which needs unrotated elements.
+#
+# Which way Java's facing points and the block's box are its code's. They are
+# read from the jar's bytecode (portkit.blockcode) and cited per block; when
+# they can't be read, a documented DEFAULT stands in and the conversion notes
+# say so for that block (#87):
+#
+# * placement DEFAULT: the block faces the player, i.e. ``facing`` is the
+#   player's horizontal direction turned round (y_rotation_offset 180), the
+#   rule every facing block in the decoration corpus reads as;
+# * box DEFAULT: the model's element bounds (from/to over every element,
+#   element rotations ignored), turned with the geometry;
+# * collision DEFAULT: the same box as the selection box.
+DEFAULT_PLACEMENT = 180
+_COLLISION_DEFAULT = "the same box as the selection box"
+_BOX_DEFAULT = "the model's element bounds (from/to of every element, element rotations ignored)"
+_PLACEMENT_DEFAULT = ("faces the player: facing = the player's horizontal direction turned round "
+                      "(y_rotation_offset 180)")
+
+
+def _coded_facing_variants(blockstate: dict) -> tuple[str | None, dict | None, bool]:
+    """(model, {facing: Java y}, uvlock) when the blockstate is the four
+    ``facing=<dir>`` variants of one model, each a quarter turn about y and no
+    x; (None, None, False) otherwise."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or set(variants) != {f"facing={d}" for d in _CARDINALS}:
+        return None, None, False
+    seen, uvlocks, turns = set(), set(), {}
+    for d in _CARDINALS:
+        entry = variants[f"facing={d}"]
+        if not isinstance(entry, dict) or not isinstance(entry.get("model"), str) or entry.get("x"):
+            return None, None, False
+        y = entry.get("y") or 0
+        if not isinstance(y, int) or isinstance(y, bool) or y % 90:
+            return None, None, False
+        turns[d] = y % 360
+        seen.add(entry["model"])
+        uvlocks.add(bool(entry.get("uvlock")))
+    if len(seen) != 1 or len(uvlocks) != 1:
+        return None, None, False
+    return seen.pop(), turns, uvlocks.pop()
+
+
+def _read_facing_code(mod: SourceMod, src, stations: dict) -> dict:
+    """blockcode readings for every facing-only blockstate that is no station."""
+    names = []
+    for path in sorted(src.glob("*.json")):
+        if path.stem in stations:
+            continue
+        try:
+            blockstate = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            continue
+        if _coded_facing_variants(blockstate)[0] is not None:
+            names.append(path.stem)
+    if not names:
+        return {}
+    return blockcode.read_blocks(getattr(mod, "classes", None), names)
+
+
+def _java_turn(box: tuple, degrees: int) -> tuple:
+    """A Java pixel box turned clockwise (seen from above) by ``degrees``, as a
+    blockstate ``y`` turns a model: north goes east at 90."""
+    x1, y1, z1, x2, y2, z2 = box
+    for _ in range((degrees // 90) % 4):
+        x1, z1, x2, z2 = 16 - z2, x1, 16 - z1, x2
+    return (x1, y1, z1, x2, y2, z2)
+
+
+def _clamped(box: tuple) -> tuple[tuple, bool]:
+    """``box`` cut to the block (Bedrock's boxes can't leave it), and whether it was."""
+    lo = tuple(min(max(v, 0.0), 16.0) for v in box[:3])
+    hi = tuple(min(max(v, 0.0), 16.0) for v in box[3:])
+    out = lo + hi
+    return out, out != tuple(float(v) for v in box)
+
+
+def _bedrock_box(box: tuple) -> dict:
+    """A Java pixel box as a Bedrock collision/selection box, in the space the
+    geometry is written in (models.X_AXIS_IS_FLIPPED, as models.bounding_boxes)."""
+    x1, y1, z1, x2, y2, z2 = (float(v) for v in box)
+    origin_x = 8 - x2 if models.X_AXIS_IS_FLIPPED else x1 - 8
+    return {"origin": [_num(origin_x), _num(y1), _num(z1 - 8)],
+            "size": [_num(x2 - x1), _num(y2 - y1), _num(z2 - z1)]}
+
+
+def _num(v: float):
+    return int(v) if float(v).is_integer() else round(v, 4)
+
+
+def _bbox(boxes) -> tuple | None:
+    boxes = list(boxes)
+    if not boxes:
+        return None
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes), min(b[2] for b in boxes),
+            max(b[3] for b in boxes), max(b[4] for b in boxes), max(b[5] for b in boxes))
+
+
+def _element_bounds(elements: list) -> tuple | None:
+    boxes = []
+    for element in elements:
+        try:
+            a = [float(v) for v in element["from"]]
+            b = [float(v) for v in element["to"]]
+        except (KeyError, TypeError, ValueError):
+            return None
+        boxes.append(tuple(min(p, q) for p, q in zip(a, b)) + tuple(max(p, q) for p, q in zip(a, b)))
+    return _bbox(boxes)
+
+
+def _bedrock_turn(java_y: int) -> int:
+    """minecraft:transformation y rotation for a Java blockstate y turn
+    (_BEDROCK_Y_TURN: Java's 90 to the east is Bedrock's -90)."""
+    return {0: 0, 90: -90, 180: 180, 270: 90}[java_y % 360]
+
+
+def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                          model_ref: str, turns: dict, uvlock: bool, reading) -> dict | None:
+    if reading.placement_conflict:
+        result.unhandled.append(Unhandled(rel, "block", f"facing: {reading.placement_conflict}"))
+        return None
+    if not uvlock:
+        identifier, instances, geo, why = _model_block(mod, result, model_ref, name)
+        if identifier is None:
+            result.unhandled.append(Unhandled(rel, "block", f"facing model: {why}"))
+            return None
+        if geo is None:
+            # A plain cube (Bedrock's full_block): its box is the whole block.
+            elements = [{"from": [0, 0, 0], "to": [16, 16, 16]}]
+        else:
+            flat, why = _flat_model(mod, result, model_ref)
+            elements = (flat or {}).get("elements") or []
+    else:
+        flat, why = _flat_model(mod, result, model_ref)
+        if flat is None:
+            result.unhandled.append(Unhandled(rel, "block", f"facing model: {why}"))
+            return None
+        elements = flat.get("elements") or []
+    if not elements:
+        result.unhandled.append(Unhandled(rel, "block", "facing model has no elements"))
+        return None
+
+    # Java's box per facing, in the world, or None for the default.
+    world = None
+    if reading.shapes is not None:
+        world = {d: _bbox(reading.shapes[d]) for d in _CARDINALS}
+    clamped = False
+
+    outside = False
+
+    def frame(box, turn):
+        nonlocal clamped, outside
+        if box is None:
+            return None
+        out, cut = _clamped(_java_turn(box, turn))
+        clamped = clamped or cut
+        outside = outside or any(out[i + 3] <= out[i] for i in range(3))
+        return out
+
+    if not uvlock:
+        geometry: object = identifier
+        # Boxes in the model's own frame: transformation turns them with it.
+        if world is not None:
+            boxes = {d: frame(world[d], 360 - turns[d]) for d in _CARDINALS}
+        else:
+            bounds = _element_bounds(elements)
+            boxes = {d: frame(bounds, 0) for d in _CARDINALS}
+    else:
+        textures = flat.get("textures") or {}
+        parts = []
+        for d in _CARDINALS:
+            turned = []
+            for element in elements:
+                moved, why = models.turn_y(element, turns[d], True)
+                if moved is None:
+                    result.unhandled.append(Unhandled(rel, "block", f"facing={d}: {why}"))
+                    return None
+                turned.append(moved)
+            parts.append((f"facing_{d}", turned))
+        combined = {"textures": textures, "elements": [e for _, els in parts for e in els]}
+        by_face, why = models.element_materials(combined)
+        tag_faces = by_face is None and "disagree" in why
+        if tag_faces:
+            by_face, why = models.tagged_materials(combined)
+        if by_face is None:
+            result.unhandled.append(Unhandled(rel, "block", why))
+            return None
+        instances, why = _instances(mod, by_face, textures, tag_faces)
+        if instances is None:
+            result.unhandled.append(Unhandled(rel, "block", why))
+            return None
+        identifier = f"geometry.{mod.namespace}.{name}"
+        geo, why = models.geometry_bones(parts, identifier, tag_faces=tag_faces)
+        if geo is None:
+            result.unhandled.append(Unhandled(rel, "block", why))
+            return None
+        geometry = {
+            "identifier": identifier,
+            "bone_visibility": {
+                f"facing_{d}": f"q.block_state('minecraft:cardinal_direction') == '{d}'" for d in _CARDINALS
+            },
+        }
+        # No transformation: the boxes are the world's.
+        if world is not None:
+            boxes = {d: frame(world[d], 0) for d in _CARDINALS}
+        else:
+            bounds = _element_bounds(elements)
+            boxes = {d: frame(bounds, turns[d]) for d in _CARDINALS}
+
+    if outside:
+        result.unhandled.append(Unhandled(rel, "block", "facing: Java's shape lies outside the block at "
+                                          "some facing, and a Bedrock box can't"))
+        return None
+    placement = reading.placement if reading.placement is not None else DEFAULT_PLACEMENT
+    collides = reading.collision if reading.collision is not None else True
+
+    def box_components(box) -> dict:
+        selection = _bedrock_box(box) if box is not None else False
+        collision = selection if collides else False
+        return {"minecraft:collision_box": collision, "minecraft:selection_box": selection}
+
+    trait = {"enabled_states": ["minecraft:cardinal_direction"]}
+    if placement:
+        trait["y_rotation_offset"] = placement
+    components = {"minecraft:geometry": geometry, "minecraft:material_instances": instances}
+    same_box = len({json.dumps(boxes[d]) for d in _CARDINALS}) == 1
+    if same_box:
+        components.update(box_components(boxes["north"]))
+    permutations = []
+    for d in _CARDINALS:
+        extra = {}
+        if not uvlock and _bedrock_turn(turns[d]):
+            extra["minecraft:transformation"] = {"rotation": [0, _bedrock_turn(turns[d]), 0]}
+        if not same_box:
+            extra.update(box_components(boxes[d]))
+        if extra:
+            permutations.append({"condition": f"q.block_state('minecraft:cardinal_direction') == '{d}'",
+                                 "components": extra})
+    block = {
+        "description": {
+            "identifier": f"{mod.namespace}:{name}",
+            "menu_category": {"category": _MENU_CATEGORY},
+            "traits": {"minecraft:placement_direction": trait},
+        },
+        "components": components,
+    }
+    if permutations:
+        block["permutations"] = permutations
+    if geo is not None:
+        result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = {"format_version": _BLOCK_FORMAT, "minecraft:block": block}
+    extra_states = sorted(set(reading.states or ()) - {"facing"})
+    return {
+        "name": name,
+        "placement": (reading.placement_from, placement) if reading.placement is not None
+        else (None, reading.placement_why),
+        "box": reading.shape_from if reading.shapes is not None else None,
+        "box_why": reading.shape_why,
+        "collision": reading.collision,
+        "collision_why": reading.collision_why,
+        "states": extra_states,
+        "behaviour": list(reading.behaviour),
+        "clamped": clamped,
+        "uvlock": uvlock,
+    }
+
+
+def _grouped(pairs: list[tuple[str, str]]) -> str:
+    """'key: a, b; key2: c' for (key, name) pairs, keys in first-seen order."""
+    groups: dict[str, list[str]] = {}
+    for key, name in pairs:
+        groups.setdefault(key, []).append(name)
+    return "; ".join(f"{key}: {', '.join(names)}" for key, names in groups.items())
+
+
+def _coded_facing_notes(records: list[dict]) -> list[str]:
+    """The conversion notes for facing blocks converted outside stations: per
+    block, which values were read from bytecode (class#method) and which are
+    the documented DEFAULT, never one mistaken for the other."""
+    if not records:
+        return []
+    notes = [
+        f"{len(records)} facing block(s) convert outside a station runtime: geometry turned per "
+        "minecraft:cardinal_direction; placement rule and box read from the jar's bytecode where "
+        "it can be read deterministically, otherwise a documented DEFAULT, named per block below "
+        "(a DEFAULT is not a citation)."
+    ]
+    read_p = [(f"{src} (y_rotation_offset {off})", r["name"]) for r in records
+              for src, off in [r["placement"]] if src]
+    if read_p:
+        notes.append("Facing placement read from bytecode (getStateForPlacement sets facing from the "
+                     "player's horizontal direction; offset 180 = turned round, 0 = as is) - "
+                     + _grouped(read_p) + ".")
+    default_p = [(why, r["name"]) for r in records for src, why in [r["placement"]] if not src]
+    if default_p:
+        notes.append(f"Facing placement DEFAULT, not read from code ({_PLACEMENT_DEFAULT}) - "
+                     + _grouped(default_p) + ".")
+    read_b = [(r["box"], r["name"]) for r in records if r["box"]]
+    if read_b:
+        notes.append("Facing box read from bytecode (the bounding box of getShape at each facing; "
+                     "Bedrock has one box per block) - " + _grouped(read_b) + ".")
+    default_b = [(r["box_why"], r["name"]) for r in records if not r["box"]]
+    if default_b:
+        notes.append(f"Facing box DEFAULT, not read from code ({_BOX_DEFAULT}) - "
+                     + _grouped(default_b) + ".")
+    no_coll = [r["name"] for r in records if r["collision"] is False]
+    if no_coll:
+        notes.append("No collision, read from bytecode (the block's Properties call noCollission, so "
+                     "BlockBehaviour#getCollisionShape is empty): " + ", ".join(no_coll) + ".")
+    default_c = [(r["collision_why"], r["name"]) for r in records if r["collision"] is None]
+    if default_c:
+        notes.append(f"Facing collision DEFAULT, not read from code ({_COLLISION_DEFAULT}) - "
+                     + _grouped(default_c) + ".")
+    clamped = [r["name"] for r in records if r["clamped"]]
+    if clamped:
+        notes.append("Java's shape reaches outside the block, and Bedrock's boxes stop at its edges: "
+                     + ", ".join(clamped) + ".")
+    states = [(", ".join(r["states"]), r["name"]) for r in records if r["states"]]
+    if states:
+        notes.append("The block's code declares states its blockstate doesn't draw; Bedrock doesn't "
+                     "carry them (the block behaves as placed) - " + _grouped(states) + ".")
+    acts = [(", ".join(r["behaviour"]), r["name"]) for r in records if r["behaviour"]]
+    if acts:
+        notes.append("The block's own classes override behaviour methods that a converted facing "
+                     "block doesn't carry (it is decoration only on Bedrock) - " + _grouped(acts) + ".")
+    return notes
