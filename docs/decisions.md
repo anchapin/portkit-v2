@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: blocks with facing and boolean states convert outside stations, each boolean's start, toggle and light read from bytecode
 
-- **Status:** proposed (PR #215); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14)
 - **Decision:** a blockstate that draws `facing` (north/east/south/west) and
   one to four boolean states (`lit`, `open`, `powered`, `on`...), with one
   model per state (a `variants` map naming every combination, or a multipart
