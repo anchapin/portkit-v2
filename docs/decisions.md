@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-13: waystone and portstone runes reuse the sharestone overlay; a waystone's show once any player activates it
 
-- **Status:** proposed (PR #TBD, Part of #178); Alex decides the picks.
+- **Status:** proposed (PR #204, Part of #178); Alex decides the picks.
 - **Decision:** the `stations.Overlay` / `DerivedTexture` pieces from the
   sharestone runes (entry below) now carry the other two rune renderers in
   Waystones 21.1.46:
@@ -96,7 +96,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   any player activates a waystone, everyone sees its runes); the runes'
   full-brightness glow and the `disableTextGlow` client option; the
   portstone's tilted warp stone on top; the portstone item's upper half.
-- **Links:** #178, PR #TBD; builds on PR #203 (sharestone runes) and PR
+- **Links:** #178, PR #204; builds on PR #203 (sharestone runes) and PR
   #202 (portstones).
 
 ## 2026-10-13: a sharestone's runes are part of its block, in textures tinted at convert time with the colour's DyeColor values
