@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: warp plates attune a dormant shard and warp what stands on them through the waystone runtime; the shard keeps its plate as item data
 
-- **Status:** proposed (PR #205, Part of #178); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #205, Part of #178).
 - **Decision:** Waystones' warp plate (`WarpPlateBlock`, registered by name,
   `ModBlocks` L86) runs through the waystone runtime of #198-#204 with a
   component of its own (`waystones:portkit_warp_plate`: `onTick` every tick
