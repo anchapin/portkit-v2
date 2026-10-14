@@ -56,8 +56,12 @@ function events(side) {
   });
 }
 const players = [];
+const dimensions = new Map();
 export const world = {
   getDynamicProperty: (key) => properties.get(key),
+  getDynamicPropertyIds: () => [...properties.keys()],
+  getDimension: (id) => dimensions.get(id),
+  _dimensions: dimensions,
   setDynamicProperty: (key, value) => (value === undefined ? properties.delete(key) : properties.set(key, value)),
   _properties: properties,
   beforeEvents: events("before"),

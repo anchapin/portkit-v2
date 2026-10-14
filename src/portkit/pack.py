@@ -29,6 +29,13 @@ SCRIPT_DEPENDENCY = {"module_name": "@minecraft/server", "version": "2.0.0"}
 # @minecraft/server 2.0.0 shipped with Bedrock 1.21.90 (minecraft.net,
 # "Minecraft 1.21.90 Bedrock Changelog").
 SCRIPT_ENGINE = (1, 21, 90)
+# A runtime that shows forms (the waystone menu, #178) imports
+# @minecraft/server-ui; the pack then declares it too. 2.0.0 is the stable
+# release published with @minecraft/server 2.0.0 for Bedrock 1.21.90 (npm
+# @minecraft/server-ui 2.0.0, 2025-06-17, depends on @minecraft/server ^2.0.0),
+# so the engine floor stays where the station scripts put it.
+SCRIPT_UI_DEPENDENCY = {"module_name": "@minecraft/server-ui", "version": "2.0.0"}
+SCRIPT_UI_IMPORT = 'from "@minecraft/server-ui"'
 
 
 def _uuid(*parts: str) -> str:
@@ -42,6 +49,7 @@ def manifest(
     depends_on: tuple[str, ...] = (),
     min_engine: tuple[int, int, int] = (1, 20, 20),
     script_entry: str | None = None,
+    script_ui: bool = False,
 ) -> dict:
     """One Bedrock pack manifest.
 
@@ -95,7 +103,15 @@ def manifest(
         ]
     if script_entry:
         data.setdefault("dependencies", []).append(dict(SCRIPT_DEPENDENCY))
+        if script_ui:
+            data["dependencies"].append(dict(SCRIPT_UI_DEPENDENCY))
     return data
+
+
+def uses_script_ui(files: dict) -> bool:
+    """Whether a shipped script imports @minecraft/server-ui."""
+    return any(path.startswith("scripts/") and isinstance(body, str) and SCRIPT_UI_IMPORT in body
+               for path, body in files.items())
 
 
 ENGINE_FLOOR = (1, 20, 20)
@@ -164,7 +180,8 @@ def write_tree(
         depends_on = ("resource",) if kind == "behavior" and has_resource else ()
         entry = SCRIPT_ENTRY if kind == "behavior" and SCRIPT_ENTRY in files else None
         (base / "manifest.json").write_text(
-            json.dumps(manifest(namespace, kind, meta, depends_on, floor, entry), indent=2) + "\n"
+            json.dumps(manifest(namespace, kind, meta, depends_on, floor, entry,
+                                script_ui=bool(entry) and uses_script_ui(files)), indent=2) + "\n"
         )
         (base / ICON_NAME).write_bytes(icon)
         for relpath, content in files.items():
