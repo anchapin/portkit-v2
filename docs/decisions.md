@@ -27,6 +27,79 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: blocks with facing and boolean states convert outside stations, each boolean's start, toggle and light read from bytecode
+
+- **Status:** approved (Alex, 2026-10-14)
+- **Decision:** a blockstate that draws `facing` (north/east/south/west) and
+  one to four boolean states (`lit`, `open`, `powered`, `on`...), with one
+  model per state (a `variants` map naming every combination, or a multipart
+  where exactly one part applies at each), converts outside station runtimes
+  the way a facing-only block does (#212: placement and box read from
+  bytecode, else the labelled DEFAULT), plus:
+  1. **States:** one Bedrock state per boolean, `<namespace>:<java name>`,
+     values `[start, other]` ("The first item in the values array is used as
+     the default", Bedrock-OSS bedrock-wiki docs/blocks/block-states.md).
+  2. **Start value** (`blockcode.read_state_blocks`): the value
+     `getStateForPlacement` puts in the state it returns on every path
+     (*placed*); where that reads the world (a redstone signal, the fluid), the
+     registered default state's (`registerDefaultState` in the constructor,
+     *registered*); a boolean the code never sets, `StateDefinition#any`'s,
+     whose booleans are true (*any*: StateDefinition#any L92 is the first
+     state, BooleanProperty's values are `ImmutableSet.of(true, false)`,
+     BooleanProperty#<init> L12-14, MC 1.21.1 client jar + Mojang mappings);
+     otherwise DEFAULT false, labelled per block. `BlockStateProperties`'
+     48 boolean fields are known by the name their `<clinit>` creates them
+     with (client jar class `dts`), so `BlockStateProperties.ENABLED` reads as
+     `enabled` instead of an unknown property.
+  3. **Models:** one geometry with a bone per model drawn (per model and turn
+     for a uvlocked variant, turned with `models.turn_y`), each shown by
+     `bone_visibility` at the states that draw it; a non-uvlocked model turns
+     whole per `minecraft:cardinal_direction` with `minecraft:transformation`,
+     as #212. Two models with one texture key and different textures get a
+     key each, as station states do.
+  4. **Box and light per permutation:** `getShape` run at every (facing,
+     booleans) gives each permutation's selection/collision box (else #212's
+     DEFAULT: the bounds of the model drawn there); `Properties.lightLevel`
+     run at every combination of the booleans (code-only states at their
+     placed value) gives `minecraft:light_emission` per permutation, with
+     #213's refusals (copied vanilla Properties, `getLightEmission`
+     override, shared Properties, outside 0-15). This replaces #213's pick 4
+     deferral for these blocks.
+  5. **Toggle:** read only when `useWithoutItem` (`use` before 1.20.5), run
+     on the server (`Level.isClientSide` false) at every state, calls
+     `Level#setBlock` once on every way through it, at the clicked position,
+     with exactly that one boolean flipped (`state.cycle(P)`, StateHolder#cycle
+     L54 / findNextInCollection L58-69, or `setValue(P, !getValue(P))`), and
+     the block's classes don't override `useItemOn`. Such a block carries
+     `<namespace>:portkit_toggle` (block format 1.21.90) and the fixed runtime
+     `portkit/runtime/toggle.js` flips the state in `onPlayerInteract`
+     (@minecraft/server 2.0.0, custom components v2), wired into
+     `scripts/portkit/main.js` beside the stations. Sounds and particles in the
+     Java method aren't carried.
+  6. **Everything else is static** at the start value, named per block in the
+     notes with the methods of the block's own classes that change it in
+     Java (`+redstone` when that method reads a signal: a Bedrock custom
+     block has no redstone input). A use that flips a boolean only sometimes
+     (sneaking, a seat, a menu) is not a toggle. No toggle is invented (#87).
+  7. **Refused:** a block class reaching a vanilla class with behaviour of its
+     own (FenceGateBlock, LanternBlock, JukeboxBlock...) stays residue, since
+     its states are vanilla code the jar doesn't hold; a blockstate drawing
+     `waterlogged` is left to the other converters (later); a multipart this
+     doesn't read is left to `_facing_parts` as before. A block that fails
+     claims none of the models it looked at, so residue counts don't move
+     when nothing converts.
+- **Why:** #214 made 63 more MrCrayfish Refurbished registrations readable and
+  most of them carry lit, powered or open; the deco spike counted 197 blocks
+  with facing plus a toggled boolean. Reading each boolean from the code that
+  sets it keeps the bytecode-first rule (labelled DEFAULT otherwise), and the
+  same reader that gives the start value gives the light per state.
+- **Rejected:** treating every boolean as a use toggle (invented behaviour);
+  picking `false` for every start (wrong for code that places a block lit or
+  never sets a boolean); one Bedrock block per combination (the item and
+  `/setblock` would need N blocks); converting vanilla-parent blocks at
+  DEFAULTs (a fence gate that never opens and has the wrong box).
+- **Links:** #212, #213 (pick 4), #214, #87.
+
 ## 2026-10-14: a registration that passes several lambdas registers the one that supplies the block, picked by its lambda signature
 
 - **Status:** reader fix under the approved #212/#213 rules (read from bytecode first, labelled DEFAULT otherwise); no new policy

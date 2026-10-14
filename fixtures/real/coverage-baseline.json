@@ -31,9 +31,9 @@
       "errors": 0
     },
     "mekanism": {
-      "coverage": 12.4,
-      "files": 1268,
-      "residue": 8966,
+      "coverage": 12.6,
+      "files": 1286,
+      "residue": 8937,
       "errors": 0
     },
     "mythicmetals": {
@@ -61,15 +61,15 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 26.4,
-      "files": 1463,
-      "residue": 4086,
+      "coverage": 27.9,
+      "files": 1521,
+      "residue": 3934,
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 42.8,
-      "files": 13605,
-      "residue": 18177,
+      "coverage": 42.9,
+      "files": 13617,
+      "residue": 18156,
       "errors": 0
     },
     "waystones": {

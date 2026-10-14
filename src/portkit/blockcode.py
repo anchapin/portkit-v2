@@ -78,11 +78,65 @@ _VANILLA_PROPS = {
     ("net/minecraft/world/level/block/HorizontalDirectionalBlock", "FACING"): "facing",
     (_STATE_PROPS, "HORIZONTAL_FACING"): "facing",
     (_STATE_PROPS, "FACING"): "facing6",
-    (_STATE_PROPS, "WATERLOGGED"): "waterlogged",
+    # Every BooleanProperty field of BlockStateProperties, by the name its
+    # <clinit> creates it with (BooleanProperty.create("...") into the field;
+    # MC 1.21.1 client jar class dts + Mojang mappings client.txt).
+    (_STATE_PROPS, "ATTACHED"): "attached",
+    (_STATE_PROPS, "BOTTOM"): "bottom",
+    (_STATE_PROPS, "CONDITIONAL"): "conditional",
+    (_STATE_PROPS, "DISARMED"): "disarmed",
+    (_STATE_PROPS, "DRAG"): "drag",
+    (_STATE_PROPS, "ENABLED"): "enabled",
+    (_STATE_PROPS, "EXTENDED"): "extended",
+    (_STATE_PROPS, "EYE"): "eye",
+    (_STATE_PROPS, "FALLING"): "falling",
+    (_STATE_PROPS, "HANGING"): "hanging",
+    (_STATE_PROPS, "HAS_BOTTLE_0"): "has_bottle_0",
+    (_STATE_PROPS, "HAS_BOTTLE_1"): "has_bottle_1",
+    (_STATE_PROPS, "HAS_BOTTLE_2"): "has_bottle_2",
+    (_STATE_PROPS, "HAS_RECORD"): "has_record",
+    (_STATE_PROPS, "HAS_BOOK"): "has_book",
+    (_STATE_PROPS, "INVERTED"): "inverted",
+    (_STATE_PROPS, "IN_WALL"): "in_wall",
     (_STATE_PROPS, "LIT"): "lit",
-    (_STATE_PROPS, "POWERED"): "powered",
+    (_STATE_PROPS, "LOCKED"): "locked",
+    (_STATE_PROPS, "OCCUPIED"): "occupied",
     (_STATE_PROPS, "OPEN"): "open",
+    (_STATE_PROPS, "PERSISTENT"): "persistent",
+    (_STATE_PROPS, "POWERED"): "powered",
+    (_STATE_PROPS, "SHORT"): "short",
+    (_STATE_PROPS, "SIGNAL_FIRE"): "signal_fire",
+    (_STATE_PROPS, "SNOWY"): "snowy",
+    (_STATE_PROPS, "TRIGGERED"): "triggered",
+    (_STATE_PROPS, "UNSTABLE"): "unstable",
+    (_STATE_PROPS, "WATERLOGGED"): "waterlogged",
+    (_STATE_PROPS, "BERRIES"): "berries",
+    (_STATE_PROPS, "BLOOM"): "bloom",
+    (_STATE_PROPS, "SHRIEKING"): "shrieking",
+    (_STATE_PROPS, "CAN_SUMMON"): "can_summon",
+    (_STATE_PROPS, "UP"): "up",
+    (_STATE_PROPS, "DOWN"): "down",
+    (_STATE_PROPS, "NORTH"): "north",
+    (_STATE_PROPS, "EAST"): "east",
+    (_STATE_PROPS, "SOUTH"): "south",
+    (_STATE_PROPS, "WEST"): "west",
+    (_STATE_PROPS, "CHISELED_BOOKSHELF_SLOT_0_OCCUPIED"): "slot_0_occupied",
+    (_STATE_PROPS, "CHISELED_BOOKSHELF_SLOT_1_OCCUPIED"): "slot_1_occupied",
+    (_STATE_PROPS, "CHISELED_BOOKSHELF_SLOT_2_OCCUPIED"): "slot_2_occupied",
+    (_STATE_PROPS, "CHISELED_BOOKSHELF_SLOT_3_OCCUPIED"): "slot_3_occupied",
+    (_STATE_PROPS, "CHISELED_BOOKSHELF_SLOT_4_OCCUPIED"): "slot_4_occupied",
+    (_STATE_PROPS, "CHISELED_BOOKSHELF_SLOT_5_OCCUPIED"): "slot_5_occupied",
+    (_STATE_PROPS, "CRACKED"): "cracked",
+    (_STATE_PROPS, "CRAFTING"): "crafting",
+    (_STATE_PROPS, "OMINOUS"): "ominous",
 }
+
+# Level methods that put a state in the world (MC 1.21.1 Level#setBlock
+# (pos, state, flags) and LevelWriter#setBlockAndUpdate (pos, state)).
+_SET_BLOCK = ("setBlock", "setBlockAndUpdate")
+_LEVEL = "net/minecraft/world/level/Level"
+# Marks a state built from StateDefinition#any (see Machine.vanilla).
+_ANY = "__any"
 
 _MAX_STEPS = 400_000
 _MAX_PATHS = 256
@@ -277,9 +331,12 @@ class Frame:
     locals: list
     stack: list
     forked: bool = False
+    # The blocks this path set in the world (Level#setBlock), as (pos,
+    # state) pairs, when the machine tracks them (Machine.effects).
+    effects: tuple = ()
 
     def copy(self) -> "Frame":
-        return Frame(self.pc, list(self.locals), list(self.stack), True)
+        return Frame(self.pc, list(self.locals), list(self.stack), True, self.effects)
 
 
 def _arg_count(desc: str) -> tuple[int, bool]:
@@ -345,6 +402,13 @@ class Machine:
         self._epochs = 0
         # BlockState property names read (getValue) while it is a set.
         self.state_reads: set | None = None
+        # While a list: (return value, effects) per path of the method run at
+        # depth ``effects_depth``, whose Level#setBlock calls are recorded on
+        # its frames instead of being unknown calls (see read_toggle).
+        self.effects: list | None = None
+        self.effects_depth = 0
+        # Set when a method that method calls sets a block itself.
+        self.deep_effect = False
 
     # -- classes ------------------------------------------------------------
 
@@ -547,6 +611,8 @@ class Machine:
                 kind, payload = outcome
                 if kind == "return":
                     results.append(payload)
+                    if self.effects is not None and self.depth == self.effects_depth:
+                        self.effects.append((payload, frame.effects))
                     break
                 if kind == "throw":
                     break
@@ -860,6 +926,13 @@ class Machine:
             self._vanilla_init(ref, args, f)
             return None
         self._forked = f.forked
+        if self.effects is not None and ref.name in _SET_BLOCK and not static and args \
+                and isinstance(args[0], Obj) and args[0].cls == _LEVEL:
+            if self.depth != self.effects_depth:
+                self.deep_effect = True
+            f.effects = f.effects + ((args[1], args[2]),)
+            f.stack.append(1)
+            return None
         results = self.call(ref.owner, ref.name, ref.desc, args, special=op == 0xB7, static=static)
         if not returns:
             return None
@@ -952,7 +1025,18 @@ class Machine:
             if name == "getHorizontalDirection":
                 return [PlayerDir(0)]
             return [UNKNOWN]
+        if isinstance(recv, Obj) and recv.cls == _LEVEL and name == "isClientSide":
+            return [0]
         if isinstance(recv, State):
+            if name == "cycle" and len(rest) == 1 and isinstance(rest[0], Prop) and self.effects is not None:
+                # StateHolder#cycle (L54) takes the next of the property's
+                # values (findNextInCollection, L58-69); a boolean's are
+                # (true, false) (BooleanProperty#<init>, L12-14), so it flips.
+                # Only while a toggle is read, which keeps only flips of the
+                # booleans the blockstate draws (an IntegerProperty at 0 or 1
+                # would cycle otherwise).
+                v = recv.get(rest[0].name)
+                return [recv.set(rest[0].name, 1 - v) if v in (0, 1) and not isinstance(v, bool) else UNKNOWN]
             if name == "setValue" and len(rest) == 2:
                 prop = rest[0]
                 key = prop.name if isinstance(prop, Prop) else f"?{id(prop)}"
@@ -982,7 +1066,11 @@ class Machine:
                 if name == "getShape" and desc == _GET_SHAPE_DESC:
                     return [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),))]
         if isinstance(recv, Obj) and recv.cls == "__statedef" and name == "any":
-            return [State()]
+            # StateDefinition#any is the first possible state (L92), each
+            # property at its first value; the marker lets a reader take a
+            # boolean's (true, BooleanProperty#<init> L12-14) where the code
+            # never sets it.
+            return [State(((_ANY, 1),))]
         if isinstance(recv, Obj) and recv.cls == "__statebuilder" and name == "add":
             props = rest[0].items if rest and isinstance(rest[0], Arr) else rest
             for p in props:
@@ -1632,3 +1720,404 @@ def _read_light(machine: Machine, obj: Obj, r: LightReading, drawn: set) -> None
     if not 0 <= r.value <= 15:
         r.why = f"{src}: Java gives {r.value}, outside Bedrock's 0-15"
         r.value, r.kind, r.source, r.states = None, "", "", ()
+
+
+# --- Facing plus boolean states ---------------------------------------------
+#
+# A block whose blockstate draws ``facing`` and one or more boolean states
+# (lit, open, powered...) carries those booleans on Bedrock as custom states.
+# Per boolean the code gives (each read, or the reason it wasn't):
+#
+# * the value a placed block starts with: the one getStateForPlacement puts
+#   in the state it returns (``placed``); when that depends on the world (a
+#   redstone signal, the fluid there), the registered default state's
+#   (``registered``, Block#registerDefaultState in the constructor); a boolean
+#   the code never sets takes StateDefinition#any's, the first state, whose
+#   booleans are true (``any``: StateDefinition#any L92, BooleanProperty
+#   values ImmutableSet.of(true, false) in BooleanProperty#<init> L12-14, MC
+#   1.21.1 client jar + Mojang mappings);
+# * whether using the block flips it: useWithoutItem (``use`` before 1.20.5)
+#   run on the server at every state, where every way through it puts the
+#   same state back with that one boolean flipped (Level#setBlock in the
+#   method itself, ``state.cycle(P)`` or ``state.setValue(P, !state.getValue(P))``);
+# * the methods of the block's own classes that set it otherwise (and
+#   whether they read redstone), for the notes;
+# * the shape at every (facing, booleans) and the light at every booleans.
+
+_USE_DESCS = (
+    ("useWithoutItem", "(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;"
+                       "Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/player/Player;"
+                       "Lnet/minecraft/world/phys/BlockHitResult;)Lnet/minecraft/world/InteractionResult;"),
+    ("use", "(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;"
+            "Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/player/Player;"
+            "Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/phys/BlockHitResult;)"
+            "Lnet/minecraft/world/InteractionResult;"),
+)
+_USE_ITEM_ON = "useItemOn"
+_REDSTONE_READS = ("hasNeighborSignal", "getBestNeighborSignal", "getDirectSignal", "getSignal",
+                   "hasSignal", "getDirectSignalTo")
+_STATE_CHANGES = ("setValue", "cycle")
+
+
+@dataclass
+class StateReading(Reading):
+    """A :class:`Reading` for a block with facing and boolean states.
+
+    ``bools`` names the booleans (sorted); a combination is a tuple of 0/1 in
+    that order. ``shapes_by`` maps (facing, combination) to Java's boxes, or is
+    None with ``shape_why``. ``defaults`` maps each boolean to (value, kind,
+    source): kind ``placed``, ``registered`` or ``any`` (read, ``source``
+    cites it) or ``DEFAULT`` (not read, ``source`` says why; the value is
+    false). ``toggle`` names the boolean using the block flips (read from
+    ``toggle_from``), or is None with ``toggle_why``. ``changed_by`` maps a
+    boolean to the methods of the block's classes that set it (``+redstone``
+    when the method reads a redstone signal). ``light_by`` maps each
+    combination to its light, or is None with ``light_why``; ``light_kind`` is
+    dark/constant/per_state and ``light_source`` cites it.
+    """
+
+    bools: tuple = ()
+    # Set (and nothing else read) when the block class reaches a vanilla
+    # block class other than the plain ones (_PLAIN_VANILLA).
+    vanilla_parent: str = ""
+    shapes_by: dict | None = None
+    defaults: dict = field(default_factory=dict)
+    toggle: str | None = None
+    toggle_from: str = ""
+    toggle_why: str = ""
+    changed_by: dict = field(default_factory=dict)
+    light_by: dict | None = None
+    light_kind: str = ""
+    light_source: str = ""
+    light_why: str = ""
+    light_copied: str = ""
+
+
+def combinations(bools: tuple) -> list[tuple]:
+    """Every (0/1, ...) combination of ``bools``, all-false first."""
+    out = [()]
+    for _ in bools:
+        out = [c + (v,) for c in out for v in (0, 1)]
+    return out
+
+
+def _with(state, bools: tuple, combo: tuple) -> "State":
+    base = state if isinstance(state, State) else State()
+    for prop, v in zip(bools, combo):
+        base = base.set(prop, v)
+    return base
+
+
+def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple]) -> dict[str, StateReading]:
+    """A :class:`StateReading` per blockstate name in ``bools`` (name ->
+    the boolean state names its blockstate draws)."""
+    names = list(bools)
+    readings = {n: StateReading(n, bools=tuple(sorted(bools[n]))) for n in names}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.placement_why = r.shape_why = r.collision_why = r.toggle_why = r.light_why = \
+                "the mod ships no class files"
+        return readings
+    machine, registered = _registered(classes, names)
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.placement_why = r.shape_why = r.collision_why = r.toggle_why = r.light_why = why
+            continue
+        obj = objs[0]
+        r.cls = obj.cls.replace("/", ".")
+        base = machine.vanilla_base(obj.cls)
+        if base not in _PLAIN_VANILLA:
+            # A vanilla block class with behaviour of its own (FenceGateBlock,
+            # LanternBlock...) places, shapes and changes its states in code
+            # the jar doesn't hold, which isn't read.
+            r.vanilla_parent = base.replace("/", ".")
+            continue
+        _read_states(machine, obj, r)
+        r.behaviour = _behaviour(machine, obj.cls)
+        _read_placement(machine, obj, r)
+        placed = _placed_states(machine, obj)
+        _read_defaults(machine, obj, r, placed)
+        _read_state_shapes(machine, obj, r)
+        _read_shape_collision(machine, obj, r)
+        _read_toggle(machine, obj, r)
+        r.changed_by = _changed_by(machine, obj.cls, r.bools)
+        _read_state_light(machine, obj, r, placed)
+        if len(objs) > 1:
+            other = StateReading(name, bools=r.bools)
+            _read_placement(machine, objs[1], other)
+            _read_defaults(machine, objs[1], other, _placed_states(machine, objs[1]))
+            _read_state_shapes(machine, objs[1], other)
+            _read_shape_collision(machine, objs[1], other)
+            if (other.placement, other.shapes_by, other.collision, other.defaults) != \
+                    (r.placement, r.shapes_by, r.collision, r.defaults):
+                r.placement, r.shapes_by, r.collision = None, None, None
+                r.placement_why = r.shape_why = r.collision_why = "registered twice with different settings"
+                r.defaults = {}
+    return readings
+
+
+def _placed_states(machine: Machine, obj: Obj) -> list | None:
+    """The states getStateForPlacement returns (paths returning null, where
+    Java doesn't place the block, left out), or None if unread."""
+    machine.steps = 0
+    try:
+        results = machine.call(obj.cls, "getStateForPlacement", _PLACEMENT_DESC, [obj, PLACE_CTX])
+    except Unreadable:
+        return None
+    placed = [s for s in results if s is not None]
+    if not placed or any(not isinstance(s, State) for s in placed):
+        return None
+    return placed
+
+
+def _bool_value(state: State, prop: str):
+    """0/1 for ``prop`` in ``state``, the StateDefinition#any value (1) for
+    one the code never set on a state built from it, else UNKNOWN."""
+    values = dict(state.values)
+    v = values.get(prop, UNKNOWN)
+    if prop not in values and _ANY in values and not any(str(k).startswith("?") for k in values):
+        # (A property set under a name that wasn't read could be this one.)
+        return 1
+    return v if v in (0, 1) and not isinstance(v, bool) else UNKNOWN
+
+
+def _read_defaults(machine: Machine, obj: Obj, r: StateReading, placed: list | None) -> None:
+    where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+    default = obj.fields.get("__default")
+    ctor = f"{r.cls}#<init> (registerDefaultState)"
+    for prop in r.bools:
+        why = ""
+        if placed is None:
+            why = f"{where} isn't read"
+        else:
+            values = {_bool_value(s, prop) for s in placed}
+            set_here = any(prop in dict(s.values) for s in placed)
+            if len(values) == 1 and UNKNOWN not in values:
+                value = values.pop()
+                kind = "placed" if set_here else "any"
+                src = where if set_here else (f"{where} leaves it at StateDefinition#any's value "
+                                              "(BooleanProperty's first value, true)")
+                r.defaults[prop] = (bool(value), kind, src)
+                continue
+            why = f"{where} sets it from the world" if UNKNOWN in values else f"{where} differs between paths"
+        if isinstance(default, State) and _bool_value(default, prop) is not UNKNOWN:
+            value = _bool_value(default, prop)
+            if prop in dict(default.values):
+                r.defaults[prop] = (bool(value), "registered", f"{ctor}; {why}")
+            else:
+                r.defaults[prop] = (bool(value), "any", f"{ctor} from StateDefinition#any (BooleanProperty's "
+                                                      f"first value, true); {why}")
+            continue
+        r.defaults[prop] = (False, "DEFAULT", why or "the default state isn't read")
+
+
+def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading) -> None:
+    machine.steps = 0
+    where = _declaring(machine, obj.cls, "getShape", _GET_SHAPE_DESC)
+    default = obj.fields.get("__default", State())
+    shapes = {}
+    try:
+        if "__partial" in obj.fields:
+            raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
+        for combo in combinations(r.bools):
+            for d in HORIZONTAL:
+                state = _with(default, r.bools, combo).set("facing", Dir(d))
+                results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
+                if not results or any(not isinstance(x, Shape) for x in results):
+                    raise Unreadable(f"the shape at facing={d} is not built from boxes it can read")
+                if len({x for x in results}) != 1:
+                    raise Unreadable(f"the shape at facing={d} depends on more than the drawn states")
+                shapes[(d, combo)] = results[0].boxes
+    except Unreadable as exc:
+        r.shape_why = f"{where}: {exc}"
+    else:
+        r.shapes_by = shapes
+        r.shape_from = where
+
+
+def _read_shape_collision(machine: Machine, obj: Obj, r: Reading) -> None:
+    """Collision as _read_shape reads it (Properties#noCollission, or a
+    getCollisionShape override), without reading the facing-only shapes."""
+    own = machine.find_method(obj.cls, "getCollisionShape", _GET_SHAPE_DESC)
+    if own is not None:
+        r.collision_why = f"{own[0].name.replace('/', '.')}#getCollisionShape overrides the collision shape"
+        return
+    props = obj.fields.get("__props", UNKNOWN)
+    if _shared_changed(props):
+        r.collision_why = _SHARED_WHY
+        return
+    if not isinstance(props, Props) or props.has_collision is UNKNOWN:
+        r.collision_why = ("its Properties copy a vanilla block's or aren't read, so whether "
+                           "it collides isn't known")
+        return
+    r.collision = bool(props.has_collision)
+
+
+def _read_toggle(machine: Machine, obj: Obj, r: StateReading) -> None:
+    found = None
+    for name, desc in _USE_DESCS:
+        found = machine.find_method(obj.cls, name, desc) if machine.is_mod(obj.cls) else None
+        if found is not None:
+            break
+    if found is None:
+        r.toggle_why = "the block's classes don't override useWithoutItem, so using it changes nothing"
+        return
+    cf, m = found
+    where = f"{cf.name.replace('/', '.')}#{m.name}"
+    own_item = None
+    for cname in machine.chain(obj.cls):
+        c = machine.classes.get(cname)
+        if c is None:
+            break
+        if any(x.name == _USE_ITEM_ON and x.code is not None for x in c.methods):
+            own_item = cname
+            break
+    default = obj.fields.get("__default", State())
+    level = Obj(_LEVEL, {"isClientSide": 0})
+    pos = Obj("__pos")
+    flipped = set()
+    try:
+        for combo in combinations(r.bools):
+            for d in HORIZONTAL:
+                state = _with(default, r.bools, combo).set("facing", Dir(d))
+                args = [obj, state, level, pos, UNKNOWN, UNKNOWN]
+                if m.name == "use":
+                    args.append(UNKNOWN)
+                machine.steps = 0
+                machine.effects, machine.deep_effect = [], False
+                machine.effects_depth = machine.depth + 1
+                try:
+                    machine.run(cf, m, args)
+                    paths = machine.effects
+                finally:
+                    machine.effects = None
+                if machine.deep_effect:
+                    raise Unreadable("a method it calls changes the block")
+                if not paths:
+                    raise Unreadable("no way through it returns")
+                for _ret, effects in paths:
+                    if not effects:
+                        raise Unreadable("some ways through it leave the block as it is")
+                    if len(effects) != 1:
+                        raise Unreadable("it sets the block more than once")
+                    at, new = effects[0]
+                    if at is not pos or not isinstance(new, State):
+                        raise Unreadable("it sets another block, or a state it can't read")
+                    changed = {k for k in (*r.bools, "facing") if new.get(k) != state.get(k)}
+                    if len(changed) != 1 or changed <= {"facing"}:
+                        raise Unreadable("it doesn't flip exactly one drawn boolean")
+                    prop = changed.pop()
+                    if new.get(prop) != 1 - state.get(prop):
+                        raise Unreadable(f"it doesn't flip {prop}")
+                    flipped.add(prop)
+    except Unreadable as exc:
+        r.toggle_why = f"{where}: {exc}"
+        return
+    if len(flipped) != 1:
+        r.toggle_why = f"{where}: it flips different booleans at different states"
+        return
+    if own_item is not None:
+        r.toggle_why = (f"{where} flips {next(iter(flipped))}, but {own_item.replace('/', '.')}#useItemOn "
+                        "decides what using it with an item does first, which isn't carried")
+        return
+    r.toggle = flipped.pop()
+    r.toggle_from = where
+
+
+def _changed_by(machine: Machine, cls: str, bools: tuple) -> dict:
+    """Per boolean: the methods of the block's own classes that load its
+    property and change a state (setValue/cycle), with ``+redstone`` when the
+    method also reads a redstone signal. A scan, not a run: it says where the
+    code changes the boolean, not when."""
+    out: dict[str, list] = {}
+    for cname in machine.chain(cls):
+        cf = machine.classes.get(cname)
+        if cf is None:
+            break
+        for m in cf.methods:
+            if m.code is None or m.name in ("<init>", "<clinit>", "getStateForPlacement"):
+                continue
+            try:
+                code = instructions(cf, m.code)
+            except Exception:  # noqa: BLE001 - a scan; unreadable code just isn't listed
+                continue
+            props, changes, redstone = set(), False, False
+            for insn in code:
+                if insn.op == 0xB2 and isinstance(insn.arg, Ref):
+                    try:
+                        v = machine.get_static(insn.arg)
+                    except Exception:  # noqa: BLE001 - a scan; a field that can't be had isn't listed
+                        continue
+                    if isinstance(v, Prop) and v.name in bools:
+                        props.add(v.name)
+                elif insn.op in (0xB6, 0xB7, 0xB8, 0xB9) and isinstance(insn.arg, Ref):
+                    if insn.arg.name in _STATE_CHANGES:
+                        changes = True
+                    elif insn.arg.name in _REDSTONE_READS:
+                        redstone = True
+            if changes:
+                for p in props:
+                    label = m.name + ("+redstone" if redstone else "")
+                    if label not in out.setdefault(p, []):
+                        out[p].append(label)
+    return out
+
+
+def _read_state_light(machine: Machine, obj: Obj, r: StateReading, placed: list | None) -> None:
+    """The light per boolean combination: Properties.lightLevel run on the
+    state with those booleans (other states at their placed value, which
+    Bedrock keeps since it doesn't carry them). The same refusals as
+    _read_light: a getLightEmission override, Properties copied from vanilla,
+    shared or unread, a value outside 0-15."""
+    for cname in machine.chain(obj.cls):
+        cf = machine.classes.get(cname)
+        if cf is None:
+            break
+        if any(m.name == "getLightEmission" and m.code is not None for m in cf.methods):
+            r.light_why = (f"{cname.replace('/', '.')}#getLightEmission overrides the light "
+                           "(it can depend on the world, not only the state)")
+            return
+    props = obj.fields.get("__props", UNKNOWN)
+    if not isinstance(props, Props):
+        r.light_why = "the Properties its constructor passes on aren't read"
+        return
+    if _shared_changed(props):
+        r.light_why = _SHARED_WHY
+        return
+    fn = props.light
+    if fn is DARK:
+        r.light_by = {c: 0 for c in combinations(r.bools)}
+        r.light_kind, r.light_source = "dark", "BlockBehaviour$Properties default (state -> 0)"
+        return
+    if isinstance(fn, CopiedLight):
+        r.light_copied = fn.source
+        r.light_why = (f"its Properties copy {fn.source}'s, and the repo has no cited table of "
+                       "vanilla light levels")
+        return
+    if fn is UNKNOWN:
+        r.light_why = "Properties.lightLevel is given a function it can't read (or a renamed setting)"
+        return
+    src = _lambda_name(fn)
+    base = placed[0] if placed and len(set(placed)) == 1 else obj.fields.get("__default", State())
+    out = {}
+    try:
+        for combo in combinations(r.bools):
+            machine.steps = 0
+            machine.state_reads = set()
+            try:
+                vals = _light_values(_apply_light(machine, fn, _with(base, r.bools, combo).set("facing", UNKNOWN)))
+            finally:
+                reads, machine.state_reads = machine.state_reads, None
+            if "?" in reads or vals is None or len(vals) != 1:
+                raise Unreadable("the light is not built from values it can read")
+            out[combo] = vals.pop()
+    except Unreadable as exc:
+        r.light_why = f"{src}: {exc}"
+        return
+    bad = [v for v in out.values() if not 0 <= v <= 15]
+    if bad:
+        r.light_why = f"{src}: Java gives {bad[0]}, outside Bedrock's 0-15"
+        return
+    r.light_by, r.light_source = out, src
+    r.light_kind = "constant" if len(set(out.values())) == 1 else "per_state"
