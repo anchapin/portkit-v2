@@ -27,6 +27,54 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: block light emission is read from the jar's bytecode (Properties.lightLevel); a light that can't be read is not emitted
+
+- **Status:** proposed (PR #213); Alex decides the picks.
+- **Decision:** every block `converters/blocks.py` writes gets its light from
+  its compiled code, through `blockcode.read_light` (the #212 interpreter).
+  Java gives each state `properties.lightEmission.applyAsInt(state)`, the
+  function being whatever `Properties.lightLevel` was last given, `state -> 0`
+  when nothing was (BlockBehaviour$Properties#<init>, MC 1.21.1 client jar +
+  Mojang mappings: the default lambda is `iconst_0; ireturn`), and
+  `ofFullCopy`/`ofLegacyCopy` copy the copied block's. The function is run on
+  abstract states:
+  - one value for every state (`state -> 15`, or branches that all agree) ->
+    `minecraft:light_emission: N` in the block's components, cited
+    class#lambda in the notes; 0 emits nothing;
+  - never set -> read as no light (the vanilla default), nothing emitted;
+  - the function reads only states the blockstate doesn't draw (code-only
+    states, which Bedrock doesn't carry, so the block keeps the state it is
+    placed in) -> the value at the state `getStateForPlacement` returns, noted
+    as read "at the placed state" (Night Lights: `lit ? brightness : 0`,
+    placed lit at 8 or 10);
+  - anything else is NOT converted and the block emits no light (Bedrock's
+    default), listed per block with the reason: a light that depends on a
+    state the converted block carries (one value can't stand for every
+    permutation), Properties copied from a vanilla block (the repo holds no
+    cited table of vanilla light levels), a NeoForge `getLightEmission`
+    override in the block's own classes (it can read the world), a value
+    outside Bedrock's 0-15 ("in a range of 0-15", MicrosoftDocs
+    minecraftBlock_light_emission.md), or code that can't be followed
+    (Forge SRG / Fabric intermediary names included).
+  A block another path already lit (a station runtime citing its light, e.g.
+  Farmer's Delight's stove) keeps that light. No light value is ever a
+  default standing in for one that wasn't read (#87). Shared interpreter
+  changes: Properties change in place (a dropped return value counts); a
+  renamed Properties call makes both collision and light unknown instead of
+  being ignored; a vanilla block class whose Properties aren't its first
+  argument (`DoorBlock(BlockSetType, Properties)`) keeps them.
+- **Why:** light is the decoration genre's visible gap (no converted block
+  had any). Reading the code is deterministic and citable, as #212 settled for
+  placement and boxes; when it can't be read, a dark block is an honest
+  shortfall where a guessed light level would be a fabrication.
+- **Rejected:** a constant maximum for state-dependent lights (Night Lights
+  would glow 13, a level the placed block never has); a default light for
+  unread blocks; resolving copied vanilla Properties from PrismarineJS
+  minecraft-data (`emitLight` is the default state's only: furnace 0,
+  redstone_lamp 0, sea_pickle 6); Decocraft's `lighting.json` now (its own
+  schema, and 0 Decocraft blocks convert yet).
+- **Links:** PR #213; deco-mods spike (2026-10-14); #212, #87.
+
 ## 2026-10-14: facing-only blocks convert outside the station runtimes, placement and box read from the jar's bytecode, else a documented default
 
 - **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #212).
