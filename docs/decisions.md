@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: warp plates attune a dormant shard and warp what stands on them through the waystone runtime; the shard keeps its plate as item data
 
-- **Status:** proposed (PR #N, Part of #178); Alex decides the picks.
+- **Status:** proposed (PR #205, Part of #178); Alex decides the picks.
 - **Decision:** Waystones' warp plate (`WarpPlateBlock`, registered by name,
   `ModBlocks` L86) runs through the waystone runtime of #198-#204 with a
   component of its own (`waystones:portkit_warp_plate`: `onTick` every tick
@@ -122,7 +122,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **Coverage:** Waystones 29.9 -> 30.2 (316 -> 319 files, residue 741 ->
   736); no other corpus mod changed.
 - **Links:** #178, PR #198 (waystones), PR #201 (sharestones), PR #202
-  (portstones), PR #203/#204 (runes), #87 (no fabrication), PR #N.
+  (portstones), PR #203/#204 (runes), #87 (no fabrication), PR #205.
 
 ## 2026-10-13: waystone and portstone runes reuse the sharestone overlay; a waystone's show once any player activates it
 
