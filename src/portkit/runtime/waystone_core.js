@@ -418,3 +418,12 @@ export function nearestWaystone(activated, records, type, dimensionId, location,
 export function mayBind(emptySlots, stackableSlot, creative, heldAmount) {
   return emptySlots > 0 || stackableSlot || (!creative && heldAmount === 1);
 }
+
+/**
+ * ItemStack#hurtAndBreak L442-470 (Minecraft 1.21.1) for one point of damage:
+ * whether the stack breaks (its new damage reaches its maximum) rather than
+ * taking the damage.
+ */
+export function wearBreaks(damage, maxDamage) {
+  return damage + 1 >= maxDamage;
+}

@@ -1,4 +1,4 @@
-// portkit station runtime: Waystones waystones, sharestones, portstones, warp plates, warp portals and scrolls, Bedrock binding (#178).
+// portkit station runtime: Waystones waystones, sharestones, portstones, warp plates, warp portals, scrolls and the warp stone, Bedrock binding (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). The generated entry
@@ -49,6 +49,11 @@
 // player's dimension, and the bound scroll to the waystone whose uid it holds
 // as an item dynamic property. A blank scroll used on a waystone or
 // sharestone gives a bound scroll bound to it.
+//
+// Warp stone (table.warp_stones): held for its own use time on the same
+// timer, it opens the warp scroll's menu; each teleport from it takes one
+// durability from the warp stone in the slot it was used from (not in
+// creative), breaking it at its maximum.
 
 import { BlockPermutation, EquipmentSlot, GameMode, ItemStack, system, world } from "@minecraft/server";
 import { ActionFormData, FormCancelationReason, ModalFormData } from "@minecraft/server-ui";
@@ -818,16 +823,22 @@ function scrollUsed(table, event) {
   charging.set(player.id, { player, slot: player.selectedSlotIndex, typeId: itemStack.typeId, ticks: 0, useTime });
 }
 
-/** A scroll's use time (getUseDuration: general.scrollUseTime), or undefined for any other item. */
+/**
+ * A held item's use time (getUseDuration: general.scrollUseTime for a
+ * scroll, general.warpStoneUseTime for the warp stone), or undefined for any
+ * other item.
+ */
 function scrollUseTime(table, typeId) {
   if (table.warp_portals && table.warp_portals.scroll.items.includes(typeId)) return table.warp_portals.scroll.use_time;
   if (table.scrolls && table.scrolls.items[typeId]) return table.scrolls.use_time;
+  if (table.warp_stones && table.warp_stones.items[typeId]) return table.warp_stones.use_time;
   return undefined;
 }
 
-/** finishUsingItem of the scroll used: the portal scroll's, or a warp, return or bound scroll's. */
+/** finishUsingItem of the item used: the portal scroll's, a warp, return or bound scroll's, or the warp stone's. */
 function scrollDone(table, player, typeId) {
   if (table.warp_portals && table.warp_portals.scroll.items.includes(typeId)) scrollFinished(table, player);
+  else if (table.warp_stones && table.warp_stones.items[typeId]) warpStoneFinished(table, player, typeId);
   else scrollItemFinished(table, player, typeId);
 }
 
@@ -1183,17 +1194,33 @@ function scrollRequirements(table, item, target) {
  * handler / ifLeft: consume). Errors go to the action bar in DARK_RED.
  */
 function scrollTeleport(table, player, typeId, target, fromMenu) {
-  const item = table.scrolls.items[typeId];
   const fail = (role) => player.onScreenDisplay.setActionBar(scrollError(table, role));
   if (fromMenu) {
     const held = heldItem(player);
     if (!held || held.typeId !== typeId) return fail("source_item_missing");
   }
+  if (itemTeleport(table, player, table.scrolls.items[typeId], target, table.scrolls.error_style)) {
+    useUp(player, typeId);
+  }
+}
+
+/**
+ * The teleport with a warp item (a scroll or the warp stone) to `target`:
+ * the target must still exist (else nothing: InvalidWaystone's empty
+ * message) with its block (else "missing"); a player who can't pay is told
+ * (validateRequirements); then the cost is taken and the player lands beside
+ * it. Errors go to the action bar in `style`. True when the player went.
+ */
+function itemTeleport(table, player, item, target, style) {
+  const fail = (role) => {
+    player.onScreenDisplay.setActionBar({ rawtext: [{ text: style }, { translate: table.messages[role] }] });
+    return false;
+  };
   const key = core.recordKey(table.namespace, target.dimension, target.pos);
   const current = loadStored(key);
-  if (!current || current.uid !== target.uid) return;
+  if (!current || current.uid !== target.uid) return false;
   const toPortal = !!table.warp_portals && current.type === table.warp_portals.type;
-  if (!toPortal && !table.networks[typeOf(table, current)]) return;
+  if (!toPortal && !table.networks[typeOf(table, current)]) return false;
   const dimension = world.getDimension(current.dimension);
   const lower = blockAt(dimension, current.pos);
   if (lower && (toPortal ? !isPortal(table, lower.typeId) : table.block_types[lower.typeId] !== typeOf(table, current))) {
@@ -1205,7 +1232,59 @@ function scrollTeleport(table, player, typeId, target, fromMenu) {
   if (!core.canAfford(player.getTotalXp(), points, creative(player))) return fail("not_enough_xp");
   if (points > 0) player.addExperience(-points);
   land(table, player, current, lower, dimension);
-  useUp(player, typeId);
+  return true;
+}
+
+// -- the warp stone ----------------------------------------------------------------
+
+/**
+ * WarpStoneItem#finishUsingItem L120-135: the menu of getTargetsForItem (the
+ * player's activated waystones and the return portal; no source waystone)
+ * titled container.waystones.waystone_selection. The menu has no warp hand
+ * (no withHand), so SelectWaystoneMessage L60-67 never checks that the stone
+ * is still held; the post-teleport handler wears down the stone used.
+ */
+function warpStoneFinished(table, player, typeId) {
+  const stones = table.warp_stones;
+  const item = stones.items[typeId];
+  const slot = player.selectedSlotIndex;
+  system.run(() => menu(table, player, {
+    type: stones.network,
+    requirementsFor: (target) => scrollRequirements(table, item, target),
+    title: { translate: stones.title },
+    from: null,
+    back: true,
+    select: (target) => {
+      if (itemTeleport(table, player, item, target, stones.error_style)) wearWarpStone(table, player, typeId, slot);
+    },
+  }));
+}
+
+/**
+ * The post-teleport handler (WarpStoneItem L126-130): with
+ * teleports.enableDurability, ItemStack#hurtAndBreak(1): nothing for a player
+ * with infinite materials (creative); one more damage, and a stack whose
+ * damage reaches its maximum breaks (ItemStack L442-470) with the item break
+ * sound (LivingEntity#breakItem: 0.8, pitch 0.8 + random * 0.4). Java wears
+ * the very stack used, wherever it went; here, the warp stone in the slot it
+ * was used from, if one is still there.
+ */
+function wearWarpStone(table, player, typeId, slot) {
+  if (!table.warp_stones.durability || creative(player)) return;
+  const inventory = player.getComponent("minecraft:inventory");
+  const container = inventory && inventory.container;
+  const held = container ? container.getItem(slot) : undefined;
+  if (!held || held.typeId !== typeId) return;
+  const durability = held.getComponent("minecraft:durability");
+  if (!durability) return;
+  if (core.wearBreaks(durability.damage, durability.maxDurability)) {
+    container.setItem(slot, undefined);
+    const sound = table.sounds.item_break;
+    play(player.dimension, player.location, sound, sound ? sound.pitch + Math.random() * sound.spread : undefined);
+    return;
+  }
+  durability.damage += 1;
+  container.setItem(slot, held);
 }
 
 /**
@@ -1256,10 +1335,10 @@ export function registerWaystones(table) {
   });
   world.afterEvents.playerPlaceBlock.subscribe((event) => placed(table, event));
   if (table.warp_plates) system.runInterval(() => entityTicks(table), 1);
-  if (table.warp_portals || table.scrolls) {
+  if (table.warp_portals || table.scrolls || table.warp_stones) {
     world.afterEvents.itemUse.subscribe((event) => scrollUsed(table, event));
     // WarpDamageResetHandler#onDamage L10-15: damage stops a scroll's use
-    // (every scroll is an IResetUseOnDamage).
+    // (every scroll and the warp stone is an IResetUseOnDamage).
     world.afterEvents.entityHurt.subscribe((event) => {
       if (event.hurtEntity) charging.delete(event.hurtEntity.id);
     });

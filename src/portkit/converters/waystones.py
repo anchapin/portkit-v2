@@ -24,8 +24,9 @@ binds a bound scroll to a waystone), each used for the same time as the
 portal scroll and teleporting through the same records and cost rules: the
 warp scroll through the menu of the player's activated waystones, the return
 scroll to their return portal or nearest activated waystone, the bound scroll
-to its waystone. Fleeting memorials, the warp stone and the feather keep
-their residue.
+to its waystone; and the warp stone, held for its own use time, opens the
+same menu as the warp scroll and wears down by one durability a teleport.
+Fleeting memorials and the feather keep their residue.
 
 Where each value comes from (no fabrication, #87):
 
@@ -402,6 +403,52 @@ SCROLL_SOURCES = (
     _src("requirement/RequirementRegistry.java", "311-L315"),
     # Balm 1.21.1 BalmItems#registerItem: a null creative tab adds the item to none.
     "https://github.com/TwelveIterations/Balm/blob/1.21.1/common/src/main/java/net/blay09/mods/balm/api/item/BalmItems.java",
+)
+
+# -- the warp stone -----------------------------------------------------------------
+# ModItems L42: the warp stone (WarpStoneItem). properties.durability(128)
+# (WarpStoneItem L33-35), which in Minecraft 1.21.1 also sets the stack size
+# to 1 (Item$Properties#durability L144-147: MAX_DAMAGE, MAX_STACK_SIZE 1,
+# DAMAGE 0; Mojang's mappings for the 1.21.1 client jar). Used for
+# general.warpStoneUseTime ticks (getUseDuration L37-40; use L137-150 plays
+# PORTAL_TRIGGER 0.1 / 2 as a scroll does), then (finishUsingItem L120-135)
+# the menu of getTargetsForItem (PlayerWaystoneManager L299-304: the
+# player's activated waystones and the return portal) with no source
+# waystone and no warp hand (so SelectWaystoneMessage L60-67 never checks
+# the stone is still held); after a teleport from it, when
+# teleports.enableDurability, hurtAndBreak(1) (L126-130): ItemStack L442-470
+# takes no damage from a player with infinite materials (creative), and a
+# stack whose damage reaches its maximum breaks, with the item break sound
+# (LivingEntity#onEquippedItemBroken L3571-3572 -> breakItem L1368-1374:
+# ITEM_BREAK at 0.8, pitch 0.8 + random * 0.4). Always drawn with the
+# enchantment glint (isFoil L152-155). An IResetUseOnDamage (L29), so damage
+# stops its use (WarpDamageResetHandler L10-15).
+WARP_STONE_ITEMS = ("warp_stone",)
+WARP_STONE_DURABILITY = 128
+WARP_STONE_STACK = 1
+# The item tag source_is_warp_stone reads (RequirementRegistry L316), from the jar.
+WARP_STONE_TAG = "data/waystones/tags/item/warp_stones.json"
+# entity.item.break = random/break (misode/mcmeta 1.21.1-assets sounds.json) =
+# Bedrock random.break (bedrock-samples 46ba6ea9 sound_definitions.json);
+# the pitch is pitch + random * spread.
+WARP_STONE_SOUNDS = {
+    "item_break": {"id": "random.break", "volume": 0.8, "pitch": 0.8, "spread": 0.4},
+}
+# The config values only the warp stone reads.
+WARP_STONE_CONFIG = ("general.warpStoneUseTime", "teleports.enableDurability")
+_MC = "Minecraft 1.21.1 client jar (Mojang mappings)"
+WARP_STONE_SOURCES = (
+    _src("item/ModItems.java", "42"),
+    _src("item/WarpStoneItem.java", "29-L155"),
+    _src("core/PlayerWaystoneManager.java", "299-L304"),
+    _src("menu/WaystoneSelectionListBuilder.java", "59-L62"),
+    _src("network/message/SelectWaystoneMessage.java", "60-L83"),
+    _src("core/WaystoneTeleportManager.java", "547-L558"),
+    _src("handler/WarpDamageResetHandler.java", "10-L15"),
+    _src("requirement/RequirementRegistry.java", "316"),
+    f"{_MC}: net.minecraft.world.item.Item$Properties#durability L144-147",
+    f"{_MC}: net.minecraft.world.item.ItemStack#hurtAndBreak L442-476",
+    f"{_MC}: net.minecraft.world.entity.LivingEntity#breakItem L1368-1374, #onEquippedItemBroken L3571-3572",
 )
 
 
@@ -817,6 +864,7 @@ FIXED_CONDITIONS = {
     "source_is_return_scroll": False,
     "source_is_warp_scroll": False,
     "source_is_portal_scroll": False,
+    "source_is_warp_stone": False,  # L316: the warp stone's item tag, false without it too
     "source_is_inventory_button": False,  # L308-L310: no inventory button
     "source_is_portstone": False,  # L297-L298
     "source_is_sharestone": False,  # L301-L302
@@ -885,10 +933,11 @@ def fixed_conditions(kind: str, portstone: bool = False, scroll: bool | dict = F
     if scroll:
         # A scroll's teleport (the portal scroll's menu, PortalScrollItem
         # L39-50; the warp scroll's menu, WarpScrollItem L29-33; the bound and
-        # return scrolls, BoundScrollItem L42-45): no source waystone, the
-        # scroll as the warp item. ``scroll`` is the source_is_*scroll values
-        # its item tags give (scroll_conditions); True means the waystones:scrolls
-        # tag alone (source_is_scroll L311).
+        # return scrolls, BoundScrollItem L42-45; the warp stone's menu,
+        # WarpStoneItem L124-131): no source waystone, the item as the warp
+        # item. ``scroll`` is the source_is_*scroll / source_is_warp_stone
+        # values its item tags give (scroll_conditions); True means the
+        # waystones:scrolls tag alone (source_is_scroll L311).
         flags = {"source_is_scroll": True} if scroll is True else dict(scroll)
         fixed.update({"source_is_waystone": False, "source_is_sharestone": False, "source_is_warp_plate": False,
                       "source_is_portstone": False, **{f"source_is_{n}": False for n in SHARESTONE_BLOCKS},
@@ -1273,10 +1322,12 @@ def portal_scrolls(files: dict) -> list[str]:
 
 
 def scroll_conditions(mod: SourceMod, name: str) -> dict[str, bool]:
-    """The source_is_*scroll conditions for a teleport with the scroll ``name``
-    as the warp item: whether the jar's item tags (SCROLL_TAGS) list it
-    (RequirementRegistry L311-315). A tag the jar lacks lists nothing."""
-    return {condition: name in _tagged(mod, tag) for condition, tag in SCROLL_TAGS.items()}
+    """The source_is_*scroll and source_is_warp_stone conditions for a
+    teleport with the item ``name`` (a scroll or the warp stone) as the warp
+    item: whether the jar's item tags (SCROLL_TAGS, WARP_STONE_TAG) list it
+    (RequirementRegistry L311-316). A tag the jar lacks lists nothing."""
+    tags = {**SCROLL_TAGS, "source_is_warp_stone": WARP_STONE_TAG}
+    return {condition: name in _tagged(mod, tag) for condition, tag in tags.items()}
 
 
 def scroll_items(files: dict) -> dict[str, str]:
@@ -1291,8 +1342,15 @@ def blank_scrolls(files: dict) -> list[str]:
     return [f"{NS}:{n}" for n in BLANK_SCROLL_ITEMS if f"{NS}:{n}" in items]
 
 
+def warp_stones(files: dict) -> list[str]:
+    """The warp stone items (WARP_STONE_ITEMS) the item converter wrote."""
+    items = _item_paths(files)
+    return [f"{NS}:{n}" for n in WARP_STONE_ITEMS if f"{NS}:{n}" in items]
+
+
 def scroll_requirements(mod: SourceMod, name: str, kinds: list[str], portal: bool) -> dict[str, list]:
-    """The requirement modifiers of a teleport with the scroll ``name`` to a
+    """The requirement modifiers of a teleport with the warp item ``name`` (a
+    scroll or the warp stone) to a
     target of each waystone type in ``kinds`` and, with ``portal``, to a warp
     portal (the return portal: target_is_warp_portal), keyed by target type.
     Raises _Refuse like :func:`requirements`."""
@@ -1388,34 +1446,52 @@ def _network(kind: str, modifiers: list) -> dict:
     }
 
 
-def _not_converted(plate: bool, portal: bool, scrolls: bool = False) -> str:
+def _not_converted(plate: bool, portal: bool, scrolls: bool = False, stone: bool = False) -> str:
     """The waystones note's closing list of what Waystones has and this
-    conversion doesn't, given whether warp plates, warp portals and the warp,
-    return and bound scrolls shipped."""
+    conversion doesn't, given whether warp plates, warp portals, the warp,
+    return and bound scrolls and the warp stone shipped."""
     missing = ["village and wild waystone generation"]
     if not plate:
         missing.append("warp plates")
     if not portal:
-        missing.append("warp portals" if plate or scrolls else "portals")
-    missing.extend(["fleeting memorials", "the warp stone"] if scrolls else ["fleeting memorials and the warp stone"])
+        missing.append("warp portals" if plate or scrolls or stone else "portals")
+    if scrolls or stone:
+        missing.append("fleeting memorials")
+        if not stone:
+            missing.append("the warp stone")
+    else:
+        missing.append("fleeting memorials and the warp stone")
     if not scrolls:
         missing.append("the warp, return and bound scrolls" if portal else "scrolls")
     if not plate:
         missing.append("shards")
     missing.append("the feather")
     own = [n for n, on in (("warp plates", plate), ("warp portals with the portal scroll", portal),
-                           ("the warp, return and bound scrolls", scrolls)) if on]
-    if not plate and not portal and not scrolls:
+                           ("the warp, return and bound scrolls", scrolls), ("the warp stone", stone)) if on]
+    if not plate and not portal and not scrolls and not stone:
         # The wording before any of them shipped (#198).
         return ("Village and wild waystone generation, warp plates and portals, fleeting memorials and the warp "
                 "stone, scrolls, shards and feather are not converted.")
-    if plate and not portal and not scrolls:
+    if plate and not portal and not scrolls and not stone:
         return ("Village and wild waystone generation, warp portals, fleeting memorials and the warp stone, "
                 "scrolls and feather are not converted (warp plates have their own note).")
     text = ", ".join(missing[:-1]) + " and " + missing[-1] + " are not converted"
     text = text[0].upper() + text[1:]
+    if own == ["the warp stone"]:
+        return text + " (the warp stone has its own note)."
     return text + (f" ({' and '.join(own) if len(own) < 3 else ', '.join(own[:-1]) + ' and ' + own[-1]} "
                    f"have their own note{'s' if len(own) > 1 else ''}).")
+
+
+def _return_left_out(warp_scroll: bool, stone: bool) -> str:
+    """The warp portal note's clause on the item menus that list "Return to
+    Portal" in Java (getTargetsForItem L299-304) but did not ship here."""
+    if stone and warp_scroll:
+        return ""
+    if stone:
+        return "'Return to Portal' in the scrolls' menus (not converted), "
+    menus = "menu" if warp_scroll else "and scrolls' menus"
+    return f"'Return to Portal' in the warp stone's {menus} (not converted), "
 
 
 def _portstone(name: str, plan: _Plan) -> dict:
@@ -1764,17 +1840,69 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
                 # ModItems L39 registers it with a null creative tab: in none.
                 body["minecraft:item"]["description"]["menu_category"] = {"category": "none"}
             result.files[items[ident]] = body
+    # The warp stone, once a waystone works: its menu teleports through the
+    # same records and cost rules, and each teleport wears it down.
+    stone_table = None
+    why_stone = None
+    stones = warp_stones(files)
+    if stones:
+        if not kept_ways:
+            why_stone = "no waystone block works here, so its menu would list nothing"
+        else:
+            kinds_all = sorted(set(block_types.values()))
+            try:
+                stone_table = {
+                    # teleports.enableDurability: each teleport from it costs one durability.
+                    "durability": values["teleports.enableDurability"],
+                    # SelectWaystoneMessage L80-81: a failed teleport, DARK_RED on the action bar.
+                    "error_style": ERROR_STYLE,
+                    "items": {
+                        ident: {
+                            # Each target type's cost, and the return portal's when portals ship.
+                            "requirements": scroll_requirements(mod, ident.split(":", 1)[1], kinds_all,
+                                                                bool(kept_portal)),
+                        }
+                        for ident in stones
+                    },
+                    # getTargetsForItem L299-304: the player's activated waystones.
+                    "network": WAYSTONE_TYPE,
+                    # WarpStoneItem L131: the menu's title.
+                    "title": MESSAGES["title"],
+                    # general.warpStoneUseTime: ticks the use button is held.
+                    "use_time": values["general.warpStoneUseTime"],
+                }
+            except _Refuse as refusal:
+                why_stone = f"warpRequirements: {refusal}"
+    if why_stone is not None:
+        notes.append(f"{NS}: the warp stone does nothing ({why_stone})")
+    if stone_table is not None:
+        table["warp_stones"] = stone_table
+        # WarpStoneItem#use L141: the same PORTAL_TRIGGER a scroll's use starts with.
+        table["sounds"]["scroll_start"] = WARP_PORTAL_SOUNDS["scroll_start"]
+        table["sounds"].update(WARP_STONE_SOUNDS)
+        items = _item_paths(files)
+        for ident in stones:
+            body = json.loads(json.dumps(result.files.get(items[ident]) or files[items[ident]]))
+            components = body["minecraft:item"].setdefault("components", {})
+            # properties.durability(128): 128 damage, one per stack.
+            components["minecraft:max_stack_size"] = WARP_STONE_STACK
+            components["minecraft:durability"] = {"max_durability": WARP_STONE_DURABILITY}
+            # isFoil L152-155: always drawn with the enchantment glint.
+            components["minecraft:glint"] = True
+            result.files[items[ident]] = body
     data_path = f"{_RUNTIME_DIR}/data/{NS}_waystone.js"
     config_sources = [f"{plan.defaults['repo']}/blob/{plan.defaults['commit']}/{v['source']}"
                       for k, v in plan.defaults["values"].items()
                       if (kept_plate or k not in WARP_PLATE_CONFIG or (kept_portal and k == "teleports.entityDenyList"))
-                      and (kept_portal or scroll_table is not None or k not in WARP_PORTAL_CONFIG)]
+                      and (kept_portal or scroll_table is not None or k not in WARP_PORTAL_CONFIG)
+                      and (stone_table is not None or k not in WARP_STONE_CONFIG)]
     header = (
         f"// Generated by portkit from {NS}'s waystone, sharestone and portstone blocks"
         + (", warp plate, shard items" if kept_plate else "")
         + (", warp portal, portal scroll" if kept_portal else "")
         + (", " + ", ".join(i.split(":", 1)[1].replace("_", " ") for i in sorted(scrolls_kept))
            + (", blank scroll" if scroll_table and scroll_table["blank"] else "") if scroll_table else "")
+        + (", warp stone" if stone_table else "")
         + ", loot tables, config\n"
         f"// defaults and Java code; do not edit. Read by the fixed runtime {_RUNTIME_DIR}/waystone.js (portkit/runtime). Sources:\n"
         + "".join(f"//   {s}\n" for s in dict.fromkeys(
@@ -1786,7 +1914,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
              *(PORTSTONE_RUNTIME_SOURCES if kept_port else ()),
              *(WARP_PLATE_RUNTIME_SOURCES if kept_plate else ()),
              *(WARP_PORTAL_SOURCES + WARP_PORTAL_RUNTIME_SOURCES if kept_portal else ()),
-             *(SCROLL_SOURCES if scroll_table else ()))))
+             *(SCROLL_SOURCES if scroll_table else ()),
+             *(WARP_STONE_SOURCES if stone_table else ()))))
         + "".join(f"// warpRequirements left out: {d}\n" for d in plan.dropped)
     ).rstrip("\n")
     result.files[data_path] = _js_module(header, table)
@@ -1873,7 +2002,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "non-suffocating blocks like grass), the other half going when one is removed by anything but a "
             "player (an explosion), and config changes "
             "(the cited defaults are used). The item shows the lower half only. " + ways_runes
-            + _not_converted(bool(kept_plate), bool(kept_portal), scroll_table is not None)
+            + _not_converted(bool(kept_plate), bool(kept_portal), scroll_table is not None, stone_table is not None)
             + (" Silk touch drops a plain waystone." if silk else "")
         )
     runes_on = [i for i in kept_share if _has_runes(i)]
@@ -1994,9 +2123,9 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "pets, leashed mobs and mounts going along, Java's solid and replaceable block tests (only air and "
             "liquid count as room, anything else as solid ground), an entity counting as inside by its position "
             "(Java: its bounding box), the portal's age while its chunk is not loaded being kept to the "
-            "nearest second across a reload, 'Return to Portal' in the warp stone's "
-            + ("menu" if scroll_table and any(v == "warp" for v in scrolls_kept.values()) else "and scrolls' menus")
-            + " (not converted), and config changes (the cited defaults are used)."
+            "nearest second across a reload, "
+            + _return_left_out(scroll_table is not None and "warp" in scrolls_kept.values(), stone_table is not None)
+            + "and config changes (the cited defaults are used)."
         )
     if scroll_table:
         kinds = scrolls_kept
@@ -2039,6 +2168,29 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "leashed mobs travelling along, third-party waystones, fleeting memorials and twinbound feather "
             "players in the warp scroll's menu (not converted), the menu's sorting and search, and config "
             "changes (the cited defaults are used)."
+        )
+    if stone_table:
+        wear = (f"each teleport costs the stone one of its {WARP_STONE_DURABILITY} durability (enableDurability; not "
+                "in creative; the last one breaks it with the item break sound)"
+                if stone_table["durability"] else "it never wears down (enableDurability is off)")
+        result.notes.append(
+            f"{NS}: {len(stones)} warp stone item(s) work through the same runtime ({data_path}): "
+            f"{', '.join(stones)}. Used for {stone_table['use_time']} ticks (warpStoneUseTime; the use starts with "
+            "the portal trigger sound; switching away from it or taking damage stops it), it opens a menu of the "
+            "waystones the player has activated"
+            + (" (and 'Return to Portal' while the portal they last came through stands)" if kept_portal else "")
+            + "; choosing one teleports the player beside it for the warpRequirements cost decided for a teleport "
+            "with the warp stone (the defaults have no warp stone rule: distance x 0.01 points in the same "
+            "dimension, 27 between dimensions, at most 27; a player who can't pay, or whose waystone's block is "
+            "gone, is told on the action bar), and " + wear + ". As in Java the stone need not still be held when "
+            "the destination is chosen; the durability comes off the warp stone in the slot it was used from, if "
+            f"one is still there. It holds {WARP_STONE_STACK} (Java's durability items don't stack) and has the "
+            "enchantment glint. Not carried over: letting go of the use button, the bow-drawing pose, the slowed "
+            "walking and the particles while it is used, using it from the off hand, enchanting it (Java's "
+            "enchantable/durability tag lets it take Unbreaking and Mending), repairing it by combining two, pets "
+            "and leashed mobs travelling along, third-party waystones, fleeting memorials and twinbound feather "
+            "players in its menu (not converted), the menu's sorting and search, and config changes (the cited "
+            "defaults are used)."
         )
     entry = (
         'import { registerWaystones } from "./waystone.js";\n'

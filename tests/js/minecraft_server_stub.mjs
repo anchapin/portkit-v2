@@ -14,8 +14,11 @@ const MAX = {
   "waystones:attuned_shard": 1, "waystones:crumbling_attuned_shard": 4,
   // The bound scroll, which carries its waystone as script data (#178 scrolls).
   "waystones:bound_scroll": 1,
+  // The warp stone (WarpStoneItem: properties.durability(128), one per stack).
+  "waystones:warp_stone": 1,
 };
-const DURABILITY = { "minecraft:iron_shovel": 250, "farmersdelight:iron_knife": 250, "minecraft:wooden_shovel": 59 };
+const DURABILITY = { "minecraft:iron_shovel": 250, "farmersdelight:iron_knife": 250, "minecraft:wooden_shovel": 59,
+  "waystones:warp_stone": 128 };
 
 export class ItemStack {
   constructor(typeId, amount = 1) {
