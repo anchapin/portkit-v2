@@ -394,7 +394,7 @@ test("switching away from the warp stone or taking damage stops its use", async 
   assert.equal(alex.teleports.length, 1);
 });
 
-test("the warp stone's menu ends with Return to Portal while it stands", async () => {
+test("the warp stone's menu lists Return to Portal at the top while it stands", async () => {
   if (!table.warp_portals) return;
   clearWorld();
   const overworld = makeDimension("minecraft:overworld");
@@ -408,11 +408,13 @@ test("the warp stone's menu ends with Return to Portal while it stands", async (
     type: table.warp_portals.type, dimension: overworld.id, pos: P, facing: "north", target: null, age: 0,
     name: { translate: table.messages.return_to_portal } }));
   alex.setDynamicProperty(table.warp_portals.return_property, "portal1");
-  _respond({ canceled: false, selection: 1 });
+  _respond({ canceled: false, selection: 0 });
   await hold(alex);
   const form = _shown.at(-1);
   assert.equal(form.buttons.length, 2);
-  assert.deepEqual(form.buttons[1].text.rawtext[0], { translate: table.messages.return_to_portal });
+  // Pinned first (WaystoneSelectionScreenBase#pinReturnPortalFirst L447-450).
+  assert.deepEqual(form.buttons[0].text.rawtext[0], { translate: table.messages.return_to_portal });
+  assert.equal(form.buttons[1].text.rawtext[0].text, "Home");
   assert.deepEqual(alex.location, { x: 0.5, y: 64.5, z: 2.5 });
   assert.equal(damageOf(alex.slots[0]), 1);
 });

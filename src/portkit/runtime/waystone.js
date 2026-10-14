@@ -40,8 +40,8 @@
 // Its lower half ticks every tick (minecraft:tick): what stands in either
 // half is teleported to the target, and the portal closes after its
 // lifetime. A player who came through keeps the portal's uid (player dynamic
-// property) and sees "Return to Portal" in waystone and sharestone menus
-// while it stands.
+// property) and sees "Return to Portal" at the top of waystone and
+// sharestone menus (below any fleeting memorials of theirs) while it stands.
 //
 // Scrolls (table.scrolls): the warp, return and bound scrolls use the same
 // timer as the portal scroll; then the warp scroll opens the menu of the
@@ -349,18 +349,26 @@ function menu(table, player, source) {
   const net = table.networks[source.type];
   const list = core.menuTargets(net.shared, activated(table, player), records(table), source.type,
     from ? from.uid : null, table.default_type);
-  // getTargetsForWaystone L318: a waystone's or sharestone's menu ends with
-  // the portal the player last came through, while it stands.
-  // The warp scroll's menu has it too (getTargetsForItem L299-304).
-  const back = (from || source.back) && table.warp_portals ? returnPortal(table, player) : undefined;
-  if (back) list.push(back);
-  // FleetingMemorialManager#getTargets L56-63 in getTargetsForPlayer /
-  // getTargetsForWaystone (L292-320): the player's memorials, pinned to the
-  // top of the list (WaystoneSelectionScreenBase#pinReturnPortalFirst
-  // L447-450, isReturnPortal L246-249).
+  // getTargetsForWaystone L318: a waystone's or sharestone's menu lists the
+  // portal the player last came through, while it stands ("Return to
+  // Portal"); the warp scroll's and warp stone's too (getTargetsForItem
+  // L299-304). FleetingMemorialManager#getTargets L56-63 in
+  // getTargetsForPlayer / getTargetsForWaystone (L292-320): the player's
+  // memorials. Both are pinned to the top of the list
+  // (WaystoneSelectionScreenBase#getSorting L422-440 -> pinReturnPortalFirst
+  // L447-450: isReturnPortal L246-249 is true for a WARP_PORTAL or a
+  // FLEETING_MEMORIAL). Between them the default MANUAL sort applies
+  // (PersistentPlayerWaystoneData#getWaystoneSortMode L257-262): the
+  // player's sorting index, which ensureSortingIndex (L270-290) extends in
+  // the order the menu's targets arrive, and Java adds the memorials
+  // (L295 / L313) before the return portal (L302 / L318).
+  const pinned = [];
   if (source.memorials && table.fleeting_memorials) {
-    list.unshift(...core.memorialTargets(records(table), table.fleeting_memorials.type, player.id));
+    pinned.push(...core.memorialTargets(records(table), table.fleeting_memorials.type, player.id));
   }
+  const back = (from || source.back) && table.warp_portals ? returnPortal(table, player) : undefined;
+  if (back) pinned.push(back);
+  list.unshift(...pinned);
   const body = [];
   if (from) body.push(message(table, "current_location", [core.nameText(from.name, table.messages.unnamed)]));
   if (list.length === 0) {
