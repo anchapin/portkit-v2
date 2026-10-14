@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 
 from ..model import ConversionResult, SourceMod, Unhandled
+from ..png import decode_rgba, encode_png
 
 # lane -> (java dirs, bedrock dir, index file, index key). Pre-1.13 mods named
 # the dirs blocks/ and items/, and some later ones (Storage Drawers 1.19.2)
@@ -72,7 +73,28 @@ def shortname(subpath: str, namespace: str) -> str:
     return f"{namespace}:{subpath.replace('/', '_').replace('-', '_')}"
 
 
-def convert(mod: SourceMod) -> ConversionResult:
+def tint(data: bytes, rgb: int) -> bytes | None:
+    """``data`` (a PNG) with every pixel's red, green and blue multiplied by
+    ``rgb`` (0xRRGGBB) and its alpha kept, or None if the PNG is unread.
+
+    Java multiplies a tinted quad's texture by its vertex colour in the shader
+    (each channel a 0-1 float), which is this per channel, rounded."""
+    decoded = decode_rgba(data)
+    if decoded is None:
+        return None
+    width, height, pixels = decoded
+    factors = ((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF)
+    out = bytearray(pixels)
+    for i in range(0, len(out), 4):
+        for c in range(3):
+            out[i + c] = (pixels[i + c] * factors[c] + 127) // 255
+    return encode_png(width, height, bytes(out))
+
+
+def convert(mod: SourceMod, derived=()) -> ConversionResult:
+    """The mod's block and item textures, plus ``derived``
+    (:class:`portkit.converters.stations.DerivedTexture`): block textures a
+    station's overlay wears, tinted here from the jar's own (#178)."""
     result = ConversionResult()
     flipbooks: list[dict] = []
     for lane, (java_dirs, bedrock_dir, index_path, index_key) in _LANES.items():
@@ -147,6 +169,27 @@ def convert(mod: SourceMod) -> ConversionResult:
                 "texture_name": "atlas.terrain" if lane == "block" else "atlas.items",
                 index_key: index,
             }
+
+    for texture in derived:
+        source = mod.root / texture.source
+        key = shortname(texture.subpath, mod.namespace)
+        index_path = _LANES["block"][2]
+        index = (result.files.get(index_path) or {}).get("texture_data") or {}
+        baked = tint(source.read_bytes(), texture.rgb) if source.is_file() else None
+        if baked is None or key in index:
+            # The station checked both before asking (waystones.derived_textures);
+            # say so rather than ship a block whose overlay has no texture.
+            result.unhandled.append(Unhandled(
+                texture.source, "texture",
+                f"derived texture {key!r}: " + ("source unreadable" if baked is None else "key already taken")))
+            continue
+        texture_path = f"{_LANES['block'][1]}/{texture.subpath}"
+        result.files[f"{texture_path}.png"] = baked
+        result.files[index_path] = {
+            "resource_pack_name": mod.namespace,
+            "texture_name": "atlas.terrain",
+            "texture_data": {**index, key: {"textures": texture_path}},
+        }
 
     if flipbooks:
         result.files["textures/flipbook_textures.json"] = sorted(

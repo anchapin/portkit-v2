@@ -77,6 +77,54 @@ def _src(repo: tuple[str, str], path: str, line: str) -> str:
 
 
 @dataclass(frozen=True)
+class Overlay:
+    """A model the mod's client code draws over a station block, tinted
+    (Waystones' sharestone runes, #178): Java renders it from a block entity
+    renderer, so no blockstate names it; Bedrock gets it as extra bones of the
+    block's own geometry wearing a texture baked at convert time
+    (:class:`DerivedTexture`) in the colour the code multiplies it by.
+
+    ``model`` is the Java model and ``texture`` the one texture reference all
+    its faces must draw. ``offsets`` maps each value of the station's state to
+    that block's height in the model (pixels: the upper half of a two-block
+    model is 16), so each element lands in the block it lies in. ``turns`` is
+    the extra Java y turn (degrees, clockwise from above) the overlay takes in
+    the block model's frame at each facing, where the renderer's rotation
+    differs from the blockstate's. ``block_texture`` is the Bedrock texture key
+    of the placed block's overlay, ``block_material`` its other material
+    fields; ``item_texture`` (with ``item_value`` and ``item_turn``) is the
+    item's, shown through ``minecraft:item_visual``, or None to leave the item
+    as the block draws it.
+    """
+
+    name: str
+    model: str
+    texture: str
+    offsets: dict
+    turns: dict
+    block_texture: str
+    block_material: dict
+    item_texture: str | None
+    item_material: dict
+    item_value: str
+    item_turn: int
+    sources: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DerivedTexture:
+    """A block texture made at convert time from one of the jar's own: every
+    pixel's red, green and blue multiplied by ``rgb`` (0xRRGGBB), as Java's
+    renderer multiplies a tinted quad's texture by its vertex colour; alpha
+    kept. ``source`` is the PNG's path below the mod root and ``subpath`` the
+    Bedrock path below textures/blocks/ (its index key follows from it)."""
+
+    source: str
+    subpath: str
+    rgb: int
+
+
+@dataclass(frozen=True)
 class FacingBlock:
     """A station block whose facing and shape the mod's block code sets.
 
@@ -105,6 +153,8 @@ class FacingBlock:
     # Whether the Java state is an IntegerProperty (a feast's ``servings``):
     # Bedrock then gets an integer state, as vanilla's cake ``bite_counter``.
     int_state: bool = False
+    # A tinted model the mod's renderer draws over the block (Overlay), or None.
+    overlay: Overlay | None = None
 
 
 # Farmer's Delight's cutting board, both corpus builds: FACING is
@@ -282,6 +332,14 @@ def station_loot(mod: SourceMod) -> set[str]:
     from . import feasts, waystones
 
     return feasts.loot_names(mod) | waystones.loot_names(mod)
+
+
+def station_textures(mod: SourceMod) -> list[DerivedTexture]:
+    """Block textures a station's overlay wears, made from the jar's own
+    (the sharestones' tinted runes, #178)."""
+    from . import waystones
+
+    return waystones.derived_textures(mod)
 
 
 def station_lang_keys(mod: SourceMod) -> set[str]:

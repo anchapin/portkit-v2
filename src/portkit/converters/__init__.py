@@ -49,7 +49,10 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool] | None = 
     deferred: list = []
     deferred_loot: list = []
     for fn in CONVERTERS:
-        if fn is blocks.convert:
+        if fn is textures.convert:
+            # A station overlay's tinted textures (#178 sharestone runes).
+            converted = fn(mod, derived=stations.station_textures(mod))
+        elif fn is blocks.convert:
             converted = fn(mod, stations=stations.station_blocks(mod))
         elif fn is items.convert:
             # Blocks ran first: an item named like a block that did not convert

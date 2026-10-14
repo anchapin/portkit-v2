@@ -27,6 +27,75 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: a sharestone's runes are part of its block, in textures tinted at convert time with the colour's DyeColor values
+
+- **Status:** proposed (Hark, PR (this)); the picks are Alex's call.
+- **Decision:** Waystones' `SharestoneRenderer` (L31-53) draws the
+  `block/sharestone_runes` model (`ModModels` L11-17) from the lower half's
+  block entity, turned by `FACING.toYRot()`, through `RuneRenderUtil`
+  (L12-20): cutout, the colour's `DyeColor#getTextureDiffuseColor()`
+  multiplied into the tinted faces, full brightness unless the client config
+  `disableTextGlow` is set (default false). The item model tints the same
+  runes with `DyeColor#getTextColor()` (`ModRenderers` L27-28; the block
+  colour handler next to it has no effect, since the block models have no
+  tinted face). Bedrock now gets:
+  - **Block:** the rune model's elements as extra bones of the sharestone's
+    own geometry, each in the block it lies in (the top band moves 16 down
+    into the upper half), with a material instance `runes` on a texture baked
+    at convert time: the jar's `sharestone_runes.png` with every pixel's RGB
+    multiplied by the colour's texture diffuse colour, alpha kept (Java's
+    shader multiplies texture by vertex colour). `alpha_test`,
+    `face_dimming: false`, `ambient_occlusion: false` (Java puts these quads
+    with brightness 1: no face shade, no AO).
+  - **Facing:** the renderer turns the runes anticlockwise by `toYRot()`
+    (south 0, west 90, north 180, east 270) and the blockstate turns the stone
+    clockwise by its `y` (north 0 ... west 270), so in the stone's frame the
+    runes are turned 180 degrees at north and south and not at east and west.
+    Two rune bones per half (turn 0 / 180), picked by `bone_visibility`;
+    the facing's own turn stays the permutation's.
+  - **Item:** `minecraft:item_visual` (block format 1.21.60) with the same
+    geometry showing the lower half and its unturned runes, the runes on a
+    second baked texture in the colour's text colour.
+  - **Colours:** `waystones.DYE_COLORS`, the constructor arguments of
+    `net.minecraft.world.item.DyeColor`'s static initializer in the
+    Minecraft 1.21.1 client jar (sha1 30c73b1c5da7..., read with Mojang's
+    mappings), the game Waystones 21.1.46 is built for; the diffuse colours
+    match the minecraft.wiki Dye table. Thirty numbers, stored inline with
+    the citation (not fetched): they are facts, not Mojang assets.
+  - **Mechanism:** a station `FacingBlock` may carry an `Overlay` (model,
+    texture, per-value offsets, per-facing turns, block and item textures);
+    the block converter adds its bones, and the textures converter bakes the
+    `DerivedTexture`s the station asks for (`stations.station_textures`), so
+    `terrain_texture.json` stays one converter's output. A rune model that is
+    missing, draws more than one texture, has an element across two blocks,
+    or a derived texture key the jar already uses means no runes (the old
+    look, with the reason in the note), never a guess.
+- **Why:** the colour is the sharestone's identity (it decides the network),
+  and Bedrock has no arbitrary per-block tint: `tint_method` takes only biome
+  tints (MicrosoftDocs minecraftBlock_material_instances.md), so a baked
+  texture per colour is the one faithful way; the inputs are the user's own
+  jar texture and the exact numbers Java multiplies by.
+- **Rejected:** a block entity (Bedrock has none for custom blocks; an entity
+  per sharestone to draw runes is heavy and drifts from the block);
+  `tint_method` (biome tints only); recolouring the stone texture (Java's
+  stone is untinted); a flat item icon texture (loses the 3D item Java
+  shows); the item in the block colour (Java's item uses the text colour);
+  both halves in the item (the two halves are separate bones in one block
+  space and would overlap; a separate item geometry would be over Bedrock's
+  30-pixel block geometry limit); fetching the DyeColor values with
+  `portkit reference fetch` (thirty cited numbers do not need a download);
+  emissive glow via `minecraft:light_emission` (lights the whole block and
+  its surroundings, which Java's runes do not).
+- **Not carried over (conversion note):** the runes' full-brightness glow
+  (no emissive block material), the floating, spinning warp stone above the
+  sharestone (an animated item render), the `disableTextGlow` client option,
+  and the upper half in the item icon (as for waystones).
+- **Coverage:** Waystones 20.8 -> 23.1 (204 -> 234 files: 30 baked
+  textures; residue 778 -> 777, the rune model now read); no other corpus mod
+  changed.
+- **Links:** #178, PR #201 (sharestones, decision pick 6), #87 (no
+  fabrication), PR (this).
+
 ## 2026-10-13: sharestones share one network per colour through the waystone runtime; the cost is the same cited default, decided per waystone type
 
 - **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR #201).
