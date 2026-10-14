@@ -464,7 +464,7 @@ test("a portal placed by command has no target and closes on the first entity", 
 
 // -- return to portal --------------------------------------------------------------
 
-test("a waystone's menu ends with Return to Portal while the portal stands, and it takes the player back", async () => {
+test("a waystone's menu lists Return to Portal at the top while the portal stands, and it takes the player back", async () => {
   clearWorld();
   const overworld = makeDimension("minecraft:overworld");
   const alex = makePlayer(overworld, undefined, { xp: 100 });
@@ -472,7 +472,8 @@ test("a waystone's menu ends with Return to Portal while the portal stands, and 
   await openWith(alex);
   alex.location = { x: 0.5, y: 64, z: 3.5 };
   tick(overworld, P);
-  // At the waystone: use it, choose the last entry.
+  // At the waystone: use it, choose the top entry (Return to Portal is pinned
+  // first, WaystoneSelectionScreenBase#pinReturnPortalFirst L447-450).
   const block = overworld.blockAt(W);
   _respond({ canceled: false, selection: 0 });
   waystoneComponent.onPlayerInteract({ block, dimension: overworld, player: alex });

@@ -27,6 +27,36 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: "Return to Portal" is pinned to the top of waystone menus, as in Java, below the player's fleeting memorials
+
+- **Status:** Return to Portal pinned to top as in Java; approved (Alex, 2026-10-14) (PR #210, Part of #178).
+- **Decision:** "Return to Portal" (#206) now lists first, not last, in every
+  menu that has it: waystone and sharestone menus, the warp scroll's and the
+  warp stone's (the portal scroll's never lists it, `getTargetsForPlayer`).
+  Java's screen sorts with `pinReturnPortalFirst`
+  (`WaystoneSelectionScreenBase` L447-450, from `getSorting` L422-440), whose
+  `isReturnPortal` (L246-249) is true for a `WARP_PORTAL` or a
+  `FLEETING_MEMORIAL`, so both pin to the top together. Between them the
+  player's sort mode decides; the default is MANUAL
+  (`PersistentPlayerWaystoneData#getWaystoneSortMode` L257-262), the
+  player's sorting index, which `ensureSortingIndex` (L270-290) extends in
+  the order the menu's targets arrive, and `PlayerWaystoneManager` adds the
+  memorials before the return portal (`getTargetsForWaystone` L313 then
+  L318; `getTargetsForItem` L300 via `getTargetsForPlayer` L295, then L302).
+  So the runtime lists the memorials (in the order they were made), then
+  "Return to Portal", then the other entries.
+- **Why:** Java pins it there; #206 appended it last, which #209 noted when
+  it pinned the memorials.
+- **Rejected:** keeping it last (not Java's order); putting it above the
+  memorials (Java's default order adds the memorials first).
+- **Not carried over:** the sorting index itself (a player's manual
+  reordering, and an index that saw the portal before a memorial keeping it
+  above), and the NAME and DISTANCE sort modes, as for the rest of the menu.
+- **Links:** #178, #206, #209, PR #210; Waystones
+  `WaystoneSelectionScreenBase`, `PlayerWaystoneManager`,
+  `PersistentPlayerWaystoneData` at
+  https://github.com/TwelveIterations/Waystones/tree/9d280c1ac8d036516a2927e3d2cad8054e491074.
+
 ## 2026-10-14: a player who dies with an epitaph leaves a fleeting memorial, listed at the top of their menus through the waystone runtime until a teleport reaches it
 
 - **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #209, Part of #178).
@@ -378,6 +408,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
     portstones, which use `getTargetsForWaystoneType`), costing the default
     decided for that menu's type with `target_is_warp_portal` true; it lands
     beside the portal on its facing side first.
+    Its place at the end is superseded by the 2026-10-14 entry "Return to
+    Portal is pinned to the top of waystone menus": it lists first, as in
+    Java.
   - **Item:** the portal scroll gets `minecraft:glint` (`isFoil` L27-30).
   - **Gating:** the portal ships only when the jar's texts for it exist, the
     portal scroll converted, a waystone block works, and the strip is the

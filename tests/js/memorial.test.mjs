@@ -600,6 +600,52 @@ test("the warp scroll's and warp stone's menus list the memorial first; going th
   }
 });
 
+/** A standing warp portal at `pos` (facing north) that `player` last came through. */
+function returnPortalFor(dimension, player, pos = { x: 0, y: 64, z: 3 }) {
+  const portal = table.warp_portals.blocks[0];
+  dimension.set(pos, portal, { [HALF]: "lower", "minecraft:cardinal_direction": "north" });
+  dimension.set({ ...pos, y: pos.y + 1 }, portal, { [HALF]: "upper", "minecraft:cardinal_direction": "north" });
+  world.setDynamicProperty(core.recordKey("waystones", dimension.id, pos), JSON.stringify({ uid: "portal1",
+    type: table.warp_portals.type, dimension: dimension.id, pos, facing: "north", target: null, age: 0,
+    name: { translate: table.messages.return_to_portal } }));
+  player.setDynamicProperty(table.warp_portals.return_property, "portal1");
+}
+
+const RETURN = () => ({ translate: table.messages.return_to_portal });
+
+test("Return to Portal is pinned to the top with the memorials, after them: waystone, warp scroll, warp stone", async () => {
+  if (!table.warp_portals) return;
+  // WaystoneSelectionScreenBase#pinReturnPortalFirst L447-450: a warp portal
+  // and a fleeting memorial both sort first; between them the default
+  // MANUAL order, memorials (L313 / L295) before the return portal (L318 / L302).
+  const scroll = table.scrolls && Object.keys(table.scrolls.items).find((id) => table.scrolls.items[id].kind === "warp");
+  const stone = table.warp_stones && Object.keys(table.warp_stones.items)[0];
+  for (const item of [null, scroll, stone].filter((i) => i !== undefined)) {
+    clearWorld();
+    const overworld = makeDimension("minecraft:overworld");
+    const alex = makePlayer(overworld, { held: item ? new ItemStack(item, 1) : undefined, xp: 100,
+      location: { x: 100.5, y: 64, z: 2.5 } });
+    place(overworld, W, WAYSTONE, "Home", alex);
+    place(overworld, { x: 140, y: 64, z: 0 }, WAYSTONE, "Farm", alex);
+    const pos = mine(overworld, alex);
+    returnPortalFor(overworld, alex);
+    _respond({ canceled: false, selection: 1 });
+    if (item) {
+      await hold(alex, item === stone ? table.warp_stones.use_time : table.scrolls.use_time);
+    } else {
+      interact(overworld, W, alex);
+      _flush();
+      await settle();
+    }
+    const labels = _shown.at(-1).buttons.map((b) => b.text.rawtext[0]);
+    const rest = item ? [{ text: "Home" }, { text: "Farm" }] : [{ text: "Farm" }];
+    assert.deepEqual(labels, [NAME, RETURN(), ...rest], item ?? "waystone");
+    // The second entry is Return to Portal: beside the portal on its facing side.
+    assert.deepEqual(alex.location, { x: 0.5, y: 64.5, z: 2.5 }, item ?? "waystone");
+    assert.ok(record(overworld, pos), item ?? "waystone"); // the memorial is still there
+  }
+});
+
 test("a blank scroll binds to a memorial, and the bound scroll's teleport removes it", async () => {
   if (!table.scrolls || !table.scrolls.bound) return;
   clearWorld();
