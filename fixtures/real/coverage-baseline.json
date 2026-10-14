@@ -7,15 +7,15 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 35.3,
-      "files": 3405,
-      "residue": 6232,
+      "coverage": 35.4,
+      "files": 3409,
+      "residue": 6229,
       "errors": 0
     },
     "create": {
       "coverage": 29.3,
-      "files": 3949,
-      "residue": 9544,
+      "files": 3955,
+      "residue": 9541,
       "errors": 0
     },
     "farmers_delight_fabric": {
@@ -32,8 +32,8 @@
     },
     "mekanism": {
       "coverage": 12.6,
-      "files": 1286,
-      "residue": 8937,
+      "files": 1288,
+      "residue": 8936,
       "errors": 0
     },
     "mythicmetals": {
@@ -62,14 +62,14 @@
     },
     "supplementaries": {
       "coverage": 27.9,
-      "files": 1521,
-      "residue": 3934,
+      "files": 1523,
+      "residue": 3929,
       "errors": 0
     },
     "tinkers_construct": {
       "coverage": 42.9,
-      "files": 13617,
-      "residue": 18156,
+      "files": 13639,
+      "residue": 18145,
       "errors": 0
     },
     "waystones": {

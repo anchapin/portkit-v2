@@ -131,12 +131,12 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
         textures = {**(current.get("textures") or {}), **textures}
         parent = current.get("parent")
         if not isinstance(parent, str):
-            return {**current, "textures": textures}, seen, ""
+            return _unfolded({**current, "textures": textures}, seen)
         parent = normalize(parent)
         if parent.startswith("minecraft:"):
             # Vanilla: either one of the shapes we have tabulated, or a refusal
             # for faces() to explain. Either way the chain stops here.
-            return {**current, "parent": parent, "textures": textures}, seen, ""
+            return _unfolded({**current, "parent": parent, "textures": textures}, seen)
 
         path = model_path(mod, parent)
         if path is None:
@@ -149,6 +149,18 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
         except json.JSONDecodeError as exc:
             return {}, seen, f"parent model {parent!r} is invalid JSON: {exc}"
     return {}, seen, "model parent chain is deeper than we follow"
+
+
+def _unfolded(flat: dict, seen: list[Path]) -> tuple[dict, list[Path], str]:
+    """A flattened model with any negative-size element unfolded (see
+    unfold_negative), so every reader downstream sees from <= to."""
+    elements = flat.get("elements")
+    if not isinstance(elements, list) or not elements:
+        return flat, seen, ""
+    unfolded, why = unfold_elements(elements)
+    if unfolded is None:
+        return {}, seen, why
+    return {**flat, "elements": unfolded}, seen, ""
 
 
 def faces(model: dict) -> tuple[dict[str, str] | None, str]:
@@ -402,6 +414,9 @@ def geometry_bones(
     switch parts on and off the way a Java multipart blockstate does."""
     bones = []
     for name, elements in parts:
+        elements, why = unfold_elements(elements)
+        if elements is None:
+            return None, f"{name}: {why}"
         cubes = []
         for element in elements:
             box, why = cube(element, tag_faces)
@@ -482,6 +497,162 @@ def auto_uv(face: str, start: list, end: list) -> list[float]:
     }[face]
 
 
+# --------------------------------------------------------------------------
+# Negative-size elements. Java does not sort an element's corners: the model
+# deserializer only checks each coordinate lies in [-16, 32]
+# (BlockElement$Deserializer#getFrom/getTo L147-163), and FaceBakery#setupShape
+# (L114-121) files `from` under MIN_X/MIN_Y/MIN_Z and `to` under MAX_X/MAX_Y/
+# MAX_Z as written. Each face's four vertices are then read from those six
+# numbers through FaceInfo (FaceInfo <clinit> L7-32), vertex i taking
+# BlockFaceUV#getU(i)/getV(i) (L25-38). So on an axis where from > to, a face
+# keyed to that axis's minimum lands on the larger coordinate, and a face whose
+# in-plane axis is swapped is wound the other way round. FaceBakery#bakeQuad
+# (L49) then names the quad by the way it really faces (calculateFacing
+# L198-223: (v2 - v1) x (v0 - v1), nearest Direction), which is the side it is
+# drawn on. Blockbench's "inverted" cubes rely on this: their faces point in.
+# All MC 1.21.1 client jar, Mojang mappings.
+#
+# unfold_negative rewrites such an element as ordinary elements Java bakes to
+# the very same quads (same corners, same uv at each corner): a face pointing
+# out of the sorted box stays on that box under the name it really faces; a
+# face pointing into it becomes a zero-thickness element on its plane.
+# FaceInfo vertex corners: per face, four (x, y, z) picks, 0 = MIN (from), 1 = MAX (to).
+_FACE_INFO = {
+    "down": ((0, 0, 1), (0, 0, 0), (1, 0, 0), (1, 0, 1)),
+    "up": ((0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0)),
+    "north": ((1, 1, 0), (1, 0, 0), (0, 0, 0), (0, 1, 0)),
+    "south": ((0, 1, 1), (0, 0, 1), (1, 0, 1), (1, 1, 1)),
+    "west": ((0, 1, 0), (0, 0, 0), (0, 0, 1), (0, 1, 1)),
+    "east": ((1, 1, 1), (1, 0, 1), (1, 0, 0), (1, 1, 0)),
+}
+NEGATIVE_MARK = "portkit_negative"
+# uvlock (FaceBakery#recomputeUVs L61-102) re-maps a face's uv by the face it
+# was declared as, not the way an unfolded face really points, so a turned,
+# uvlocked negative-size element is not mapped.
+_NEGATIVE_UVLOCK = (
+    "uvlock turns a negative-size element, and Java re-maps its uvs by the face "
+    "each was declared as (FaceBakery#recomputeUVs), which is not mapped"
+)
+
+
+def baked_quad(face: str, start: list, end: list, uv: list, rotation: int) -> list[tuple]:
+    """The four (corner, (u, v)) pairs Java bakes for one element face, from
+    the raw ``from``/``to`` (FaceBakery#setupShape, FaceInfo, BlockFaceUV)."""
+    shift = (int(rotation) % 360) // 90
+    corners = []
+    for i, pick in enumerate(_FACE_INFO[face]):
+        point = tuple(float(end[a] if hi else start[a]) for a, hi in enumerate(pick))
+        k = (i + shift) % 4
+        u = uv[0] if k in (0, 1) else uv[2]
+        v = uv[1] if k in (0, 3) else uv[3]
+        corners.append((point, (float(u), float(v))))
+    return corners
+
+
+def quad_facing(corners: list[tuple]) -> str | None:
+    """FaceBakery#calculateFacing: the face a quad's winding points out of."""
+    (p0, _), (p1, _), (p2, _) = corners[0], corners[1], corners[2]
+    a = [p2[i] - p1[i] for i in range(3)]
+    b = [p0[i] - p1[i] for i in range(3)]
+    n = (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    best, score = None, 0.0
+    for face, normal in _FACE_NORMAL.items():
+        d = sum(n[i] * normal[i] for i in range(3))
+        if d > score:
+            best, score = face, d
+    return best
+
+
+def _same_quad(a: list[tuple], b: list[tuple]) -> bool:
+    def key(corners):
+        return sorted((tuple(round(c, 6) for c in p), tuple(round(c, 6) for c in uv)) for p, uv in corners)
+    return key(a) == key(b)
+
+
+def unfold_negative(element: dict) -> tuple[list[dict] | None, str]:
+    """``element`` as elements with from <= to that Java renders identically,
+    or why not. An element that is not negative comes back alone, untouched."""
+    try:
+        start = [float(v) for v in element["from"]]
+        end = [float(v) for v in element["to"]]
+    except (KeyError, TypeError, ValueError):
+        return [element], ""
+    if len(start) != 3 or len(end) != 3 or all(s <= e for s, e in zip(start, end)):
+        return [element], ""
+    low = [min(s, e) for s, e in zip(start, end)]
+    high = [max(s, e) for s, e in zip(start, end)]
+    rest = {k: v for k, v in element.items() if k not in ("from", "to", "faces")}
+    rest[NEGATIVE_MARK] = True
+    outward: dict = {}
+    planes: list[dict] = []
+    for face, spec in (element.get("faces") or {}).items():
+        if face not in _FACE_INFO:
+            return None, f"negative-size element has an unknown {face!r} face"
+        if not isinstance(spec, dict):
+            return None, f"negative-size element's {face} face is not an object"
+        # BlockElement#fillUvs: a face without uv takes uvsByFace of the raw
+        # from/to, before anything is sorted.
+        corners = spec.get("uv")
+        try:
+            uv = [float(v) for v in corners] if corners is not None else auto_uv(face, start, end)
+            rotation = int(spec.get("rotation") or 0)
+        except (TypeError, ValueError):
+            return None, f"negative-size element has an unreadable uv or rotation on its {face} face"
+        if len(uv) != 4 or rotation % 90:
+            return None, f"negative-size element has an unreadable uv or rotation on its {face} face"
+        quad = baked_quad(face, start, end, uv, rotation)
+        facing = quad_facing(quad)
+        if facing is None:
+            return None, f"negative-size element's {face} face has no area"
+        axis = next(i for i, c in enumerate(_FACE_NORMAL[facing]) if c)
+        plane = quad[0][0][axis]
+        side = high[axis] if sum(_FACE_NORMAL[facing]) > 0 else low[axis]
+        box_lo, box_hi = list(low), list(high)
+        if plane != side:
+            box_lo[axis] = box_hi[axis] = plane
+        found = None
+        u0, v0, u1, v1 = uv
+        # The uv kept as written where a texture turn (uv_rotation, read in
+        # game: #68/#71) reproduces it; a mirrored uv only where one is needed.
+        for cand in ([u0, v0, u1, v1], [u1, v0, u0, v1], [u0, v1, u1, v0], [u1, v1, u0, v0]):
+            for turn in range(4):
+                r = (rotation + 90 * turn) % 360
+                if _same_quad(baked_quad(facing, box_lo, box_hi, cand, r), quad):
+                    found = (cand, r)
+                    break
+            if found:
+                break
+        if found is None:  # pragma: no cover - the square's 8 symmetries are all reached
+            return None, f"negative-size element's {face} face has no matching layout"
+        new = {k: v for k, v in spec.items() if k != "rotation"}
+        new["uv"] = found[0]
+        if found[1]:
+            new["rotation"] = found[1]
+        if plane == side:
+            outward[facing] = new
+        else:
+            planes.append({**rest, "from": box_lo, "to": box_hi, "faces": {facing: new}})
+    unfolded = []
+    if outward:
+        unfolded.append({**rest, "from": low, "to": high, "faces": outward})
+    unfolded.extend(planes)
+    return unfolded, ""
+
+
+def unfold_elements(elements: list) -> tuple[list | None, str]:
+    """unfold_negative over a model's element list."""
+    out: list = []
+    for element in elements:
+        if not isinstance(element, dict):
+            out.append(element)
+            continue
+        found, why = unfold_negative(element)
+        if found is None:
+            return None, why
+        out.extend(found)
+    return out, ""
+
+
 def _zero_rotation(rotation) -> bool:
     """Whether a Java element ``rotation`` turns by 0 degrees (an identity)."""
     if not isinstance(rotation, dict):
@@ -518,6 +689,8 @@ def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]
         return None, "element is missing usable from/to coordinates"
     if not uvlock:
         return _turn_with_textures(element, quarters, [x1, y1, z1], [x2, y2, z2])
+    if element.get(NEGATIVE_MARK):
+        return None, _NEGATIVE_UVLOCK
 
     faces = element.get("faces") or {}
     for face, spec in faces.items():
@@ -816,6 +989,8 @@ def turn_locked(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | N
         end = [float(c) for c in element["to"]]
     except (KeyError, TypeError, ValueError):
         return None, "element is missing usable from/to coordinates"
+    if element.get(NEGATIVE_MARK):
+        return None, _NEGATIVE_UVLOCK
     for face, spec in (element.get("faces") or {}).items():
         if not isinstance(spec, dict):
             continue

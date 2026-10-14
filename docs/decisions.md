@@ -27,6 +27,55 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: a negative-size model element (from > to on an axis) converts as the quads Java bakes from it, unfolded into ordinary elements
+
+- **Status:** reproduces Java's renderer; no new policy
+- **Decision:** `models.resolve` (and `geometry_bones`, for elements read any
+  other way) rewrites every element with `from` > `to` on some axis as
+  elements with `from` <= `to` that Java bakes to the same quads, corner for
+  corner and uv for uv. A face that points out of the sorted box stays on that
+  box, under the name of the way it really faces; a face that points into it
+  becomes a zero-thickness element on its plane. A face without a uv first
+  takes the uv Java derives from the raw `from`/`to`. The face's texture turn
+  is adjusted where the move turns the texture (always 0 or 180 degrees in
+  practice: a half turn when two axes are swapped, or on the swapped axis's own
+  faces). A uvlocked blockstate turn of such an element stays residue, with a
+  reason.
+- **Why:** Java never sorts an element's corners. The deserializer only checks
+  each coordinate is in [-16, 32] (`BlockElement$Deserializer#getFrom/getTo`
+  L147-163). `FaceBakery#setupShape` (L114-121) stores `from` as
+  MIN_X/MIN_Y/MIN_Z and `to` as MAX_X/MAX_Y/MAX_Z as written. Each face's
+  vertices are read from those six numbers through `FaceInfo` (`<clinit>`
+  L7-32), and vertex i takes `BlockFaceUV#getU(i)/getV(i)` (L25-38). Then
+  `FaceBakery#bakeQuad` (L49) names the quad by `calculateFacing` (L198-223:
+  the normal of (v2 - v1) x (v0 - v1), nearest Direction), which is the side
+  the winding draws it on. All of this is from the MC 1.21.1 client jar with
+  Mojang mappings. So with an axis swapped, a face keyed to that axis's
+  minimum lands on the larger coordinate. A face with one of its in-plane
+  axes swapped is wound the other way and faces the opposite direction.
+  Blockbench's "inverted" cubes are an example: a basin interior, or Tinkers'
+  tank insides. Every face on one of those points inward. Unfolding in Java
+  space means everything after it (turns, splits, bounds, materials, the X
+  mirror) handles these elements as it already handles any other. The tests
+  compare all 7 swap patterns x 4 face rotations, with and without uv,
+  against a Java baking written from those methods.
+- **Rejected:** sorting `from`/`to` and keeping each face's name. Every
+  inverted interior would then turn outward and render over the outside of
+  its own block. Leaving the elements residue, as before: 117 Refurbished
+  blocks failed on it. Mirroring with a negative uv_size instead of a 180
+  texture turn: the face turn was read in game (#68/#71), and a negative
+  uv_size on both axes has not been. Carrying uvlock over: uvlock
+  (`FaceBakery#recomputeUVs` L61-102) re-maps a face's uv by the face it was
+  declared as, not the way it really faces, and that mapping hasn't been
+  worked out.
+- **Not verified in game:** zero-thickness cubes in Bedrock block geometry.
+  Also, which side of a face Bedrock draws depends on its render method:
+  `alpha_test` "also disabled backface culling", and so does `double_sided`
+  (Microsoft Learn, minecraft:material_instances, Render Method choices). An
+  inward face with one of those can also be seen from outside. That was
+  already true of every converted face.
+- **Links:** #87; deco-mods spike gap 3.
+
 ## 2026-10-14: blocks with facing and boolean states convert outside stations, each boolean's start, toggle and light read from bytecode
 
 - **Status:** approved (Alex, 2026-10-14)
