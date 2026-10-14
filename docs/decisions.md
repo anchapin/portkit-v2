@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-13: portstones open their colour's sharestone network (white: the player's waystones) from anywhere; a portstone is no waystone
 
-- **Status:** proposed (PR for #178, Hark's picks awaiting Alex).
+- **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR #202).
 - **Decision:** Waystones' sixteen portstones (the `waystones:portstones`
   block tag intersected with the colours `ModBlocks` registers a
   `PortstoneBlock` for, L16-33 / L90-94: every dye colour, white included)
