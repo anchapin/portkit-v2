@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-13: a sharestone's runes are part of its block, in textures tinted at convert time with the colour's DyeColor values
 
-- **Status:** proposed (Hark, PR (this)); the picks are Alex's call.
+- **Status:** proposed (Hark, PR #203); the picks are Alex's call.
 - **Decision:** Waystones' `SharestoneRenderer` (L31-53) draws the
   `block/sharestone_runes` model (`ModModels` L11-17) from the lower half's
   block entity, turned by `FACING.toYRot()`, through `RuneRenderUtil`
@@ -94,7 +94,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   textures; residue 778 -> 777, the rune model now read); no other corpus mod
   changed.
 - **Links:** #178, PR #201 (sharestones, decision pick 6), #87 (no
-  fabrication), PR (this).
+  fabrication), PR #203.
 
 ## 2026-10-13: sharestones share one network per colour through the waystone runtime; the cost is the same cited default, decided per waystone type
 
