@@ -1158,7 +1158,16 @@ def _with_warp_portal(root: Path, lang_drop=(), scroll=True, meta=None, strip=No
     lang = json.loads((root / f"assets/{NS}/lang/en_us.json").read_text())
     lang.update({k: v for k, v in PORTAL_LANG.items() if k not in lang_drop})
     _write(root, f"assets/{NS}/lang/en_us.json", lang)
+    _scroll_tags(root)
     return root
+
+
+def _scroll_tags(root: Path) -> None:
+    """Waystones' scroll item tags as the jar has them (generated data)."""
+    _write(root, f"data/{NS}/tags/item/scrolls.json", {"values": [
+        f"{NS}:warp_scroll", f"{NS}:portal_scroll", f"{NS}:return_scroll", f"{NS}:bound_scroll", f"{NS}:blank_scroll"]})
+    for name in ("warp", "portal", "return", "bound"):
+        _write(root, f"data/{NS}/tags/item/{name}_scrolls.json", {"values": [f"{NS}:{name}_scroll"]})
 
 
 @pytest.fixture
@@ -1328,6 +1337,160 @@ def test_warp_portal_runtime_under_node(portaled):
     _, tree = portaled
     js = ROOT / "tests" / "js"
     for test in ("warp_portal.test.mjs", "waystone.test.mjs"):
+        for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
+            proc = subprocess.run(
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
+            )
+            assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr
+
+
+# -- warp, return and bound scrolls (#178) ---------------------------------------
+
+SCROLL_LANG = {
+    "item.waystones.warp_scroll": "Warp Scroll",
+    "item.waystones.return_scroll": "Return Scroll",
+    "item.waystones.bound_scroll": "Bound Scroll",
+    "item.waystones.blank_scroll": "Blank Scroll",
+    "chat.waystones.source_item_missing": "You stopped holding the item to teleport.",
+}
+SCROLL_NAMES = ("warp_scroll", "return_scroll", "bound_scroll", "blank_scroll")
+
+
+def _with_scrolls(root: Path, names=SCROLL_NAMES, lang_drop=(), tags=True) -> Path:
+    """Waystones' warp, return, bound and blank scroll items as the jar has
+    them (flat handheld icons), their texts and item tags."""
+    (root / f"assets/{NS}/textures/item").mkdir(parents=True, exist_ok=True)
+    for name in names:
+        _write(root, f"assets/{NS}/models/item/{name}.json",
+               {"parent": "minecraft:item/handheld", "textures": {"layer0": f"{NS}:item/{name}"}})
+        (root / f"assets/{NS}/textures/item/{name}.png").write_bytes(PNG.read_bytes())
+    lang = json.loads((root / f"assets/{NS}/lang/en_us.json").read_text())
+    lang.update({k: v for k, v in SCROLL_LANG.items() if k not in lang_drop})
+    _write(root, f"assets/{NS}/lang/en_us.json", lang)
+    if tags:
+        _scroll_tags(root)
+    return root
+
+
+@pytest.fixture
+def scrolled(tmp_path):
+    root = _with_scrolls(_with_warp_portal(_waystones_mod(tmp_path)))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    return result, tmp_path / "out"
+
+
+def _item(tree: Path, name: str) -> dict:
+    return json.loads((tree / f"behavior_pack/items/{name}.json").read_text())["minecraft:item"]
+
+
+def test_scroll_table_holds_the_cited_rules(scrolled):
+    result, tree = scrolled
+    table = _table(tree)
+    scrolls = table["scrolls"]
+    assert {i: s["kind"] for i, s in scrolls["items"].items()} == {
+        "waystones:bound_scroll": "bound", "waystones:return_scroll": "return", "waystones:warp_scroll": "warp"}
+    assert scrolls["use_time"] == 32
+    assert scrolls["blank"] == ["waystones:blank_scroll"]
+    assert scrolls["bound"] == "waystones:bound_scroll"
+    assert scrolls["binding_property"] == "waystones:portkit_bound_waystone"
+    assert scrolls["network"] == "waystones:waystone"
+    assert scrolls["title"] == "container.waystones.waystone_selection"
+    assert scrolls["name_style"] == "\u00a7b" and scrolls["error_style"] == "\u00a74"
+    zero = {"args": [0.0], "fn": "multiply_xp_cost", "when": {}}
+    for spec in scrolls["items"].values():
+        # Every target type a scroll can reach, and the return portal.
+        assert set(spec["requirements"]) == {"waystones:waystone", "waystones:orange_sharestone",
+                                             "waystones:warp_portal"}
+        for rules in spec["requirements"].values():
+            assert zero in rules
+    assert table["messages"]["source_item_missing"] == "chat.waystones.source_item_missing"
+    assert table["sounds"]["scroll_start"] == {"id": "portal.trigger", "volume": 0.1, "pitch": 2.0}
+    text = (tree / DATA).read_text()
+    assert "item/BlankScrollItem.java#L15-L43" in text and "item/ReturnScrollItem.java#L13-L23" in text
+    assert any("scroll item(s) work" in n for n in result.notes)
+    assert any("Return to Portal' in the warp stone's menu (not converted)" in n for n in result.notes)
+
+
+def test_scroll_items_glint_and_the_bound_scroll_holds_one_in_no_tab(scrolled):
+    _, tree = scrolled
+    for name in ("return_scroll", "bound_scroll"):
+        assert _item(tree, name)["components"]["minecraft:glint"] is True
+    assert "minecraft:glint" not in _item(tree, "warp_scroll")["components"]
+    bound = _item(tree, "bound_scroll")
+    assert bound["components"]["minecraft:max_stack_size"] == 1
+    assert bound["description"]["menu_category"] == {"category": "none"}
+    assert _item(tree, "return_scroll")["components"]["minecraft:max_stack_size"] == 64
+    assert _item(tree, "blank_scroll")["description"]["menu_category"] == {"category": "items"}
+
+
+def test_scroll_texts_ship_under_their_java_keys(scrolled):
+    _, tree = scrolled
+    lang = (tree / "resource_pack/texts/en_US.lang").read_text()
+    assert "chat.waystones.source_item_missing=You stopped holding the item to teleport." in lang
+
+
+def test_scrolls_without_portals_have_no_return_portal_rules(tmp_path):
+    root = _with_scrolls(_waystones_mod(tmp_path))
+    convert(root, tmp_path / "out", emit_addon=False)
+    table = _table(tmp_path / "out")
+    assert "warp_portals" not in table
+    assert set(table["scrolls"]["items"]["waystones:warp_scroll"]["requirements"]) == {
+        "waystones:waystone", "waystones:orange_sharestone"}
+    assert table["sounds"]["scroll_start"]["id"] == "portal.trigger"
+    assert "WaystonesConfigData.java#L83" in (tmp_path / "out" / DATA).read_text()
+
+
+def test_a_bound_scroll_without_the_blank_scroll_does_nothing(tmp_path):
+    root = _with_scrolls(_waystones_mod(tmp_path), names=("warp_scroll", "return_scroll", "bound_scroll"))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    scrolls = _table(tmp_path / "out")["scrolls"]
+    assert "waystones:bound_scroll" not in scrolls["items"] and scrolls["blank"] == [] and scrolls["bound"] is None
+    assert "minecraft:glint" not in _item(tmp_path / "out", "bound_scroll")["components"]
+    assert any("waystones:bound_scroll: does nothing" in n for n in result.notes)
+
+
+def test_a_missing_scroll_text_leaves_the_scrolls_inert(tmp_path):
+    root = _with_scrolls(_waystones_mod(tmp_path), lang_drop=("chat.waystones.source_item_missing",))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    assert "scrolls" not in _table(tmp_path / "out")
+    assert any("scrolls do nothing" in n and "source_item_missing" in n for n in result.notes)
+
+
+def test_scroll_costs_follow_the_jars_scroll_tags(tmp_path):
+    # Without the item tags no condition names a scroll, so the distance cost applies (as Java would).
+    root = _with_scrolls(_waystones_mod(tmp_path), tags=False)
+    convert(root, tmp_path / "out", emit_addon=False)
+    rules = _table(tmp_path / "out")["scrolls"]["items"]["waystones:return_scroll"]["requirements"]
+    assert {"args": [0.0], "fn": "multiply_xp_cost", "when": {}} not in rules["waystones:waystone"]
+
+
+def test_scroll_conditions_are_decided_per_scroll():
+    flags = {"source_is_scroll": True, "source_is_bound_scroll": True, "source_is_return_scroll": False,
+             "source_is_warp_scroll": False, "source_is_portal_scroll": False}
+    to_share = waystones.fixed_conditions("waystones:orange_sharestone", scroll=flags)
+    assert to_share["source_is_bound_scroll"] is True and to_share["source_is_warp_scroll"] is False
+    assert to_share["source_is_sharestone"] is False and to_share["source_is_orange_sharestone"] is False
+    assert to_share["target_is_orange_sharestone"] is True and to_share["source_is_waystone"] is False
+    plate = waystones.fixed_conditions(waystones.WARP_PLATE_TYPE, scroll=flags)
+    assert plate["source_is_warp_plate"] is False
+    lines = ["[source_is_bound_scroll] add_xp_cost(5)", "[source_is_warp_scroll] add_xp_cost(7)"]
+    kept, dropped = requirements(lines, True, True, waystones.WAYSTONE_TYPE, scroll=flags)
+    assert kept == [{"args": [5], "fn": "add_xp_cost", "when": {}}]
+    assert dropped == ["[source_is_warp_scroll] add_xp_cost(7) (never applies here)"]
+
+
+def test_without_scrolls_the_table_has_no_scroll_rules(converted):
+    _, tree = converted
+    assert "scrolls" not in _table(tree)
+    assert "BlankScrollItem" not in (tree / DATA).read_text()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_scroll_runtime_under_node(scrolled):
+    _, tree = scrolled
+    js = ROOT / "tests" / "js"
+    for test in ("scrolls.test.mjs", "warp_portal.test.mjs", "waystone.test.mjs"):
         for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
             proc = subprocess.run(
                 ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],

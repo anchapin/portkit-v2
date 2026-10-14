@@ -27,6 +27,103 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: the warp, return and bound scrolls teleport through the waystone runtime after the portal scroll's hold; a blank scroll binds a bound scroll, which keeps its waystone as item data
+
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #207, Part of #178).
+- **Decision:** Waystones' warp scroll (`WarpScrollItem`), return scroll
+  (`ReturnScrollItem`) and bound scroll (`BoundScrollItem`), with the blank
+  scroll (`BlankScrollItem`) that makes a bound scroll (`ModItems` L37-40),
+  work through the waystone runtime of #198-#206: a `scrolls` section in the
+  same data table, no new block or component.
+  - **Use:** each is used for `general.scrollUseTime` ticks (32,
+    `WaystonesConfigData` L83; `getUseDuration` in each class) on #206's
+    script timer: `world.afterEvents.itemUse` starts it with `PORTAL_TRIGGER`
+    0.1 / 2 (`ScrollItemBase#use` L37-49), switching away from the scroll or
+    taking damage stops it (all three are `IResetUseOnDamage`,
+    `WarpDamageResetHandler` L10-15). The timer is now shared by every scroll.
+  - **Warp scroll** (`finishUsingItem` L25-36): the menu of
+    `getTargetsForItem` (`PlayerWaystoneManager` L299-304): the player's
+    activated waystones and, while it stands, "Return to Portal"; no source
+    waystone (no "Current Location", nothing left out, no range check), titled
+    `container.waystones.waystone_selection`. A choice teleports when the
+    scroll is still in hand (`SelectWaystoneMessage` L60-66: else
+    `chat.waystones.source_item_missing`, DARK_RED, on the action bar) and
+    uses one scroll up after the teleport (`withPostTeleportHandler`
+    `consume`: not in creative).
+  - **Return scroll** (`ReturnScrollItem` L19-22): the return portal while it
+    stands, else the nearest of the player's activated waystones in their
+    dimension (`getNearestWaystone` L104-117: `distanceToSqr` to the block
+    centre; the first of equals in activation order); none does nothing. A
+    teleport with no menu, then one scroll used up.
+  - **Bound scroll** (`BoundScrollItem` L37-65): a teleport to the waystone
+    it is bound to (a waystone or sharestone, any dimension, activated or
+    not), then one scroll used up; a player who can't pay or whose waystone's
+    block is gone is told on the action bar in DARK_RED (L49-50); a waystone
+    that no longer exists fails with `InvalidWaystone`, whose message is empty,
+    so nothing shows; an unbound bound scroll does nothing.
+  - **Binding** (`BlankScrollItem#useOn` L20-43): a blank scroll in the main
+    hand used on a waystone or sharestone (either half, sneaking or not:
+    `WaystoneBlockBase#useItemOn` L257-262 skips the block's own use, so
+    nothing is activated and no menu opens) gives a bound scroll bound to its
+    waystone, when the inventory has a free slot or, outside creative, it is
+    the last blank scroll (L29-31); one blank scroll is used up (not in
+    creative) and the bound scroll goes into the inventory, or is dropped at
+    the player. On a portstone nothing happens (no `WaystoneBlockEntityBase`);
+    on a warp plate neither (`WarpPlateBlock#useItemOn` passes to
+    `useWithoutItem`, which takes the click).
+  - **The bound waystone** (Java: the `waystones:bound_scroll` component,
+    `BoundScrollComponent` {id, name}) is kept as an item dynamic property
+    (`waystones:portkit_bound_waystone`, its uid). Bedrock allows those only on
+    items that don't stack, so the bound scroll's stack size becomes 1 (Java
+    64). Its lore is the waystone's name at binding time in AQUA
+    (`appendHoverText` L79-96 without its translated "Bound to:" label: lore
+    is plain text); an unnamed waystone gives no lore.
+  - **Cost:** the `warpRequirements` default decided per scroll and per target
+    type (each waystone type, and the return portal with
+    `target_is_warp_portal`), with no source waystone and the
+    `source_is_*scroll` conditions read from the jar's `waystones:*scrolls`
+    item tags (`RequirementRegistry` L311-315; new fixed conditions
+    `source_is_bound_scroll`, `_return_`, `_warp_`, `_portal_scroll`, false
+    elsewhere): `[source_is_scroll] multiply_xp_cost(0)` makes every scroll
+    teleport free at the defaults, as in Java. The portal scroll's menu now
+    reads the same tags (unchanged for the real jar, which lists it).
+  - **Items:** the return and bound scrolls get `minecraft:glint`
+    (`BoundScrollItem#isFoil` L98-101, which `ReturnScrollItem` inherits); the
+    warp scroll does not (no `isFoil`). The bound scroll is in no creative tab
+    (`ModItems` L39 registers it with a null tab: Balm 1.21.1
+    `BalmItems#registerItem`).
+  - **Gating:** the scrolls ship only when a waystone block works and the
+    jar's `chat.waystones.source_item_missing` exists; the bound scroll only
+    when the blank scroll converted (nothing else makes one); otherwise a
+    note says why (the items stay plain icons, as before).
+- **Why:** the three scrolls are the same `ScrollItemBase` hold as the portal
+  scroll and end in the same teleport (`createUncheckedDefaultTeleportContext`
+  with the scroll as the warp item), so they reuse #206's timer and #198's
+  records, landing and cost parser; each step is read line by line from the
+  item classes, `PlayerWaystoneManager`, `SelectWaystoneMessage` and
+  `WaystoneTeleportManager`.
+- **Rejected:** a bound scroll that stacks with its binding in lore (a
+  visible uid, or names, which aren't unique) or in a world table (two bound
+  scrolls could not be told apart); an English "Bound to:" label in the lore
+  (every locale would read English); leaving out the blank scroll (the bound
+  scroll could never be made: no recipe, no creative tab); converting the
+  bound scroll's binding as an activation (Java needs none).
+- **Not carried over (conversion note):** letting go of the use button, the
+  bow pose, the bound scroll's field-of-view change, slowed walking and the
+  particles while a scroll is used, using a scroll (or binding) from the off
+  hand, item tooltips (the blank scroll's, the return scroll's nearest
+  waystone), pets and leashed mobs travelling along, third-party waystones,
+  fleeting memorials and twinbound feather players in the warp scroll's menu
+  (not converted), the menu's sorting and search, the bound scroll stacking,
+  dropping the bound scroll the way `Player#drop` throws it, config changes
+  (cited defaults).
+- **Coverage:** Waystones 30.7 -> 30.7 (324 files, residue 732): the scroll
+  items already shipped as plain icons; this adds their behaviour (and one
+  runtime text). No other corpus mod changed.
+- **Links:** #178, PR #198 (waystones), PR #201 (sharestones), PR #202
+  (portstones), PR #203/#204 (runes), PR #205 (warp plates), PR #206 (warp
+  portal and portal scroll), #87 (no fabrication), PR #207.
+
 ## 2026-10-14: the portal scroll opens a warp portal through the waystone runtime; the portal sends what enters it to the chosen waystone and closes after its lifetime
 
 - **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #206, Part of #178).
