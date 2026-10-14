@@ -8,8 +8,9 @@ fixed runtime (portkit/runtime/waystone*.js), with a @minecraft/server-ui
 dependency in the behavior pack manifest.
 
 Offline: a Waystones-shaped Fabric mod with two waystones, an orange
-sharestone and a white "sharestone" (Waystones registers none: white is the
-one dye colour without a SharestoneBlock).
+sharestone, a white "sharestone" (Waystones registers none: white is the
+one dye colour without a SharestoneBlock), and a white and an orange
+portstone.
 """
 import json
 import os
@@ -83,7 +84,22 @@ LANG = {
     "container.waystones.sharestone": "Sharestone",
     "gui.waystones.waystone_selection.no_sharestones_available": "There are no matching Sharestones to teleport to.",
     "block.waystones.orange_sharestone": "Orange Sharestone",
+    "block.waystones.white_portstone": "Portstone",
+    "block.waystones.orange_portstone": "Orange Portstone",
+    "container.waystones.white_portstone": "Portstone",
+    "container.waystones.orange_portstone": "Orange Portstone",
+    "tooltip.waystones.portstone": "Can not be teleported to.",
 }
+# PortstoneBlock's north shapes (L66-74 / L97-101), drawn by its models.
+PORTSTONE_BOTTOM = [([0, 0, 0], [16, 3, 16]), ([1, 3, 1], [15, 7, 15]), ([2, 7, 2], [14, 9, 14]),
+                    ([3, 9, 9], [13, 16, 13]), ([4, 9, 6], [12, 16, 9]), ([4, 9, 4], [12, 12, 6])]
+PORTSTONE_TOP = [([3, 0, 9], [13, 7, 13]), ([4, 0, 7], [12, 2, 9])]
+
+
+def _box_model(boxes):
+    return {"textures": {"particle": "block/andesite", "texture": f"{NS}:block/andesite_waystone"},
+            "elements": [{"from": a, "to": b, "faces": {f: {"uv": [0, 0, 4, 4], "texture": "#texture"}
+                                                         for f in FACES}} for a, b in boxes]}
 
 
 def _waystones_mod(tmp_path, version="21.1.46", loot=None, lang=None) -> Path:
@@ -92,7 +108,10 @@ def _waystones_mod(tmp_path, version="21.1.46", loot=None, lang=None) -> Path:
     _write(root, "fabric.mod.json", {"schemaVersion": 1, "id": NS, "version": version,
                                      "depends": {"minecraft": "1.21.1", "fabricloader": ">=0.15"}})
     blocks = {"waystone": "andesite_waystone", "mossy_waystone": "mossy_andesite_waystone",
-              "white_sharestone": "andesite_waystone", "orange_sharestone": "andesite_waystone"}
+              "white_sharestone": "andesite_waystone", "orange_sharestone": "andesite_waystone",
+              "white_portstone": "andesite_waystone", "orange_portstone": "andesite_waystone"}
+    _write(root, f"assets/{NS}/models/block/portstone_bottom.json", _box_model(PORTSTONE_BOTTOM))
+    _write(root, f"assets/{NS}/models/block/portstone_top.json", _box_model(PORTSTONE_TOP))
     _write(root, f"assets/{NS}/models/block/waystone_bottom.json", {
         "textures": {"particle": "block/polished_andesite", "texture": f"{NS}:block/andesite_waystone"},
         "elements": [_element("base", 0, 3, 0), _element("pillar", 3, 16, 3)]})
@@ -100,7 +119,8 @@ def _waystones_mod(tmp_path, version="21.1.46", loot=None, lang=None) -> Path:
         "textures": {"particle": "block/polished_andesite", "texture": f"{NS}:block/andesite_waystone"},
         "elements": [_element("pillar", 0, 12, 3), _element("cap", 12, 16, 4)]})
     for name, texture in blocks.items():
-        stem = "sharestone" if name.endswith("_sharestone") else name
+        stem = ("sharestone" if name.endswith("_sharestone") else
+                "portstone" if name.endswith("_portstone") else name)
         if name == "mossy_waystone":
             for half in ("bottom", "top"):
                 _write(root, f"assets/{NS}/models/block/mossy_waystone_{half}.json", {
@@ -122,6 +142,8 @@ def _waystones_mod(tmp_path, version="21.1.46", loot=None, lang=None) -> Path:
     _write(root, f"data/{NS}/tags/block/waystones.json", {"values": [f"{NS}:waystone", f"{NS}:mossy_waystone"]})
     _write(root, f"data/{NS}/tags/block/sharestones.json", {"values": [
         f"{NS}:white_sharestone", f"{NS}:orange_sharestone"]})
+    _write(root, f"data/{NS}/tags/block/portstones.json", {"values": [
+        f"{NS}:white_portstone", f"{NS}:orange_portstone"]})
     return root
 
 
@@ -142,7 +164,8 @@ def converted(tmp_path):
 def test_table_holds_the_requirements_decided_for_this_runtime(converted):
     result, tree = converted
     table = _table(tree)
-    assert table["blocks"] == ["waystones:mossy_waystone", "waystones:orange_sharestone", "waystones:waystone"]
+    assert table["blocks"] == ["waystones:mossy_waystone", "waystones:orange_portstone",
+                               "waystones:orange_sharestone", "waystones:waystone", "waystones:white_portstone"]
     assert table["block_types"] == {"waystones:mossy_waystone": "waystones:waystone",
                                     "waystones:orange_sharestone": "waystones:orange_sharestone",
                                     "waystones:waystone": "waystones:waystone"}
@@ -248,7 +271,8 @@ def test_unreadable_loot_leaves_that_waystone_inert(tmp_path):
     loot = {"mossy_waystone": _loot("mossy_waystone", {"function": "minecraft:set_count", "count": 2})}
     result = convert(_waystones_mod(tmp_path, loot=loot), tmp_path / "out", emit_addon=False)
     table = _table(tmp_path / "out")
-    assert table["blocks"] == ["waystones:orange_sharestone", "waystones:waystone"]
+    assert table["blocks"] == ["waystones:orange_portstone", "waystones:orange_sharestone", "waystones:waystone",
+                               "waystones:white_portstone"]
     residue = [u for u in result.unhandled if u.kind == waystones.RESIDUE_KIND]
     assert len(residue) == 1 and residue[0].source.endswith("mossy_waystone.json")
     assert "silk-touch copy" in residue[0].reason
@@ -260,7 +284,7 @@ def test_missing_lang_key_means_no_runtime(tmp_path):
     result = convert(_waystones_mod(tmp_path, lang=lang), tmp_path / "out", emit_addon=False)
     assert not (tmp_path / "out" / DATA).exists()
     reasons = [u.reason for u in result.unhandled if u.kind == waystones.RESIDUE_KIND]
-    assert len(reasons) == 3 and all("chat.waystones.not_enough_xp" in r for r in reasons)
+    assert len(reasons) == 5 and all("chat.waystones.not_enough_xp" in r for r in reasons)
 
 
 def test_requirements_parse_like_waystones():
@@ -350,12 +374,14 @@ def test_a_missing_sharestone_text_leaves_only_the_sharestones_inert(tmp_path):
     lang = {k: v for k, v in LANG.items() if k != "container.waystones.sharestone"}
     result = convert(_waystones_mod(tmp_path, lang=lang), tmp_path / "out", emit_addon=False)
     table = _table(tmp_path / "out")
-    assert table["blocks"] == ["waystones:mossy_waystone", "waystones:waystone"]
+    assert table["blocks"] == ["waystones:mossy_waystone", "waystones:waystone", "waystones:white_portstone"]
     assert set(table["networks"]) == {"waystones:waystone"}
     assert "none_shared" not in table["messages"]
-    residue = [u for u in result.unhandled if u.kind == waystones.RESIDUE_KIND]
-    assert len(residue) == 1 and residue[0].source.endswith("orange_sharestone.json")
-    assert "which a sharestone shows" in residue[0].reason
+    residue = {u.source.rsplit("/", 1)[-1]: u.reason for u in result.unhandled if u.kind == waystones.RESIDUE_KIND}
+    assert set(residue) == {"orange_sharestone.json", "orange_portstone.json"}
+    assert "which a sharestone shows" in residue["orange_sharestone.json"]
+    # The orange portstone lists orange sharestones: with none working, it has nothing to list.
+    assert "no waystones:orange_sharestone block works here" in residue["orange_portstone.json"]
     assert "waystones:sharestones" in result.stations and result.stations["waystones:sharestones"]["residue"] == 1
 
 
@@ -396,3 +422,106 @@ def test_lines_left_out_for_every_type_are_listed_once():
     assert plan.dropped.count("[source_is_scroll] multiply_xp_cost(0) (never applies here)") == 1
     assert not any("(from " in d for d in plan.dropped)
     assert set(plan.modifiers) == {"waystones:orange_sharestone", "waystones:waystone"}
+
+
+# -- portstones ---------------------------------------------------------------
+
+
+def test_portstones_list_their_colours_network_or_the_waystones(converted):
+    result, tree = converted
+    table = _table(tree)
+    # A portstone is no waystone: no type, never a target.
+    assert "waystones:white_portstone" not in table["block_types"]
+    assert table["portstones"] == {
+        "waystones:orange_portstone": {
+            "requirements": table["networks"]["waystones:orange_sharestone"]["requirements"],
+            "target": "waystones:orange_sharestone", "title": "container.waystones.orange_portstone"},
+        "waystones:white_portstone": {
+            "requirements": table["networks"]["waystones:waystone"]["requirements"],
+            "target": "waystones:waystone", "title": "container.waystones.white_portstone"},
+    }
+    assert result.stations["waystones:portstones"] == {
+        "converted": 2, "residue": 0, "data": "scripts/portkit/data/waystones_waystone.js",
+        "block": "waystones:orange_portstone, waystones:white_portstone"}
+    assert any("portstone block(s) work through the same runtime" in n for n in result.notes)
+    text = (tree / DATA).read_text()
+    assert "PortstoneBlock.java#L133-L147" in text and "PortstoneBlock.java#L47-L107" in text
+
+
+def test_portstone_boxes_follow_the_north_shapes_turned_with_the_block(converted):
+    result, tree = converted
+    block = _block(tree, "orange_portstone")
+    assert block["description"]["states"] == {"waystones:half": ["lower", "upper"]}
+    assert block["components"]["waystones:portkit_waystone"] == {}
+    turns = {"north": 0, "east": -90, "south": 180, "west": 90}
+    assert len(block["permutations"]) == 8
+    for perm in block["permutations"]:
+        lower = "== 'lower'" in perm["condition"]
+        c = perm["components"]
+        facing = perm["condition"].split("== '", 1)[1].split("'", 1)[0]
+        assert c["minecraft:transformation"] == {"rotation": [0, turns[facing], 0]}
+        box = waystones.PORTSTONE_LOWER_BOX if lower else waystones.PORTSTONE_UPPER_BOX
+        assert c["minecraft:collision_box"] == box and c["minecraft:selection_box"] == box
+        assert c["minecraft:loot"] == ("loot_tables/blocks/orange_portstone.json" if lower
+                                       else "loot_tables/empty.json")
+    # North UPPER_SHAPES: x 3-13, y 0-7, z 7-13, centred on x and z.
+    assert waystones.PORTSTONE_UPPER_BOX == {"origin": [-5, 0, -1], "size": [10, 7, 6]}
+    loot = json.loads((tree / "behavior_pack/loot_tables/blocks/white_portstone.json").read_text())
+    assert loot["pools"][0]["entries"][0]["name"] == "waystones:white_portstone"
+    assert not any("portstone" in u.source and not u.source.endswith("models/item/portstone.json")
+                   for u in result.unhandled)
+
+
+def test_portstone_texts_ship_but_not_the_tooltip(converted):
+    _, tree = converted
+    en = (tree / "resource_pack/texts/en_US.lang").read_text()
+    assert "\ncontainer.waystones.white_portstone=Portstone" in f"\n{en}"
+    assert "\ncontainer.waystones.orange_portstone=Orange Portstone" in f"\n{en}"
+    assert "tooltip.waystones.portstone" not in en
+
+
+def test_a_missing_portstone_title_leaves_only_that_portstone_inert(tmp_path):
+    lang = {k: v for k, v in LANG.items() if k != "container.waystones.white_portstone"}
+    result = convert(_waystones_mod(tmp_path, lang=lang), tmp_path / "out", emit_addon=False)
+    table = _table(tmp_path / "out")
+    assert list(table["portstones"]) == ["waystones:orange_portstone"]
+    residue = [u for u in result.unhandled if u.kind == waystones.RESIDUE_KIND]
+    assert len(residue) == 1 and residue[0].source.endswith("white_portstone.json")
+    assert "container.waystones.white_portstone" in residue[0].reason
+    assert result.stations["waystones:portstones"]["residue"] == 1
+
+
+def test_only_registered_portstones_and_their_targets():
+    assert len(waystones.PORTSTONE_BLOCKS) == 16 and waystones.PORTSTONE_BLOCKS[0] == "white_portstone"
+    assert waystones.portstone_target("white_portstone") == "waystones:waystone"
+    assert waystones.portstone_target("light_blue_portstone") == "waystones:light_blue_sharestone"
+    assert waystones.portstone_keys("white_portstone") == {
+        "container.waystones.white_portstone", "gui.waystones.waystone_selection.no_waystones_activated"}
+    assert waystones.portstone_keys("red_portstone") == {
+        "container.waystones.red_portstone", "gui.waystones.waystone_selection.no_sharestones_available"}
+
+
+def test_portstone_conditions_have_no_source_waystone():
+    fixed = waystones.fixed_conditions("waystones:waystone", portstone=True)
+    assert fixed["source_is_portstone"] and fixed["target_is_waystone"]
+    assert not fixed["source_is_waystone"] and not fixed["source_is_sharestone"]
+    shared = waystones.fixed_conditions("waystones:orange_sharestone", portstone=True)
+    assert shared["source_is_portstone"] and shared["target_is_orange_sharestone"]
+    assert not shared["source_is_orange_sharestone"] and not shared["source_is_sharestone"]
+    lines = ["[source_is_portstone] add_xp_cost(5)", "[source_is_waystone] add_xp_cost(7)"]
+    kept, dropped = requirements(lines, True, True, "waystones:waystone", portstone=True)
+    assert kept == [{"when": {}, "fn": "add_xp_cost", "args": [5]}]
+    assert dropped == ["[source_is_waystone] add_xp_cost(7) (never applies here)"]
+    # The defaults have no portstone line: a portstone pays what a waystone does.
+    assert requirements(DEFAULTS, True, True, portstone=True)[0] == requirements(DEFAULTS, True, True)[0]
+
+
+def test_a_portstone_only_line_is_listed_per_variant():
+    from types import SimpleNamespace
+
+    from portkit.converters.waystones import _plan
+
+    mod = SimpleNamespace(mods={NS: "21.1.46"})
+    plan = _plan(mod, ["waystones:waystone"], ["waystones:waystone"])
+    assert plan.portstone_modifiers["waystones:waystone"] == plan.modifiers["waystones:waystone"]
+    assert plan.dropped.count("[source_is_scroll] multiply_xp_cost(0) (never applies here)") == 1
