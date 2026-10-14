@@ -16,9 +16,12 @@ one (see "Facing-only blocks" below). Anything else goes to the residue with
 its state names, because approximating one produces a block that loads and
 behaves wrong, which is worse than one that never shipped.
 
-Destroy time and light emission are deliberately absent: they are not in the
-Java JSON at all, and inventing numbers for them is the failure mode this
-project exists to prevent.
+Destroy time is deliberately absent: it is not in the Java JSON at all, and
+inventing numbers for it is the failure mode this project exists to prevent.
+Light emission isn't in the JSON either; it is read from the block's compiled
+code (``Properties.lightLevel``) where that can be done deterministically, and
+a block whose light can't be read emits none, with a note saying so (see
+"Light emission" below).
 """
 from __future__ import annotations
 
@@ -1304,6 +1307,7 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             mod.namespace, name, identifier, instances or {}
         )
     result.notes.extend(_coded_facing_notes(coded))
+    _add_light(mod, result, src)
     return result
 
 
@@ -2204,4 +2208,119 @@ def _coded_facing_notes(records: list[dict]) -> list[str]:
     if acts:
         notes.append("The block's own classes override behaviour methods that a converted facing "
                      "block doesn't carry (it is decoration only on Bedrock) - " + _grouped(acts) + ".")
+    return notes
+
+
+# --------------------------------------------------------------------------
+# Light emission.
+#
+# Java's light level is code: each block state takes it from the
+# ToIntFunction<BlockState> its Properties were given (``lightLevel``), or 0
+# when none was. portkit.blockcode.read_light runs that function on the
+# jar's bytecode. A converted block gets minecraft:light_emission (an integer
+# 0-15, "the amount of light this block will emit in a range of 0-15",
+# MicrosoftDocs/minecraft-creator minecraftBlock_light_emission.md) when:
+#
+# * the function gives one value for every state (``state -> 15``); or
+# * it reads only states the blockstate doesn't draw (code-only states such
+#   as Night Lights' lit/brightness), which Bedrock doesn't carry: the block
+#   keeps the state it was placed in, so it emits the function's value at the
+#   state getStateForPlacement returns.
+#
+# Anything else is not read and the block emits no light (Bedrock's default),
+# named in the notes with the reason: a light that depends on a state the
+# converted block carries (one value can't stand for every permutation),
+# Properties copied from a vanilla block (the repo holds no cited table of
+# vanilla light levels), a NeoForge getLightEmission override (which can read
+# the world), a value outside 0-15, a Properties object another registration
+# changes (the outcome depends on registration order), or code that can't be
+# followed. No light is ever a default value standing in for one that wasn't
+# read (#87).
+#
+# A block another path already gave light to (a station runtime citing it,
+# e.g. Farmer's Delight's stove) keeps that light.
+
+
+def _drawn_states(blockstate: dict) -> set:
+    """The Java state names a blockstate draws (its variant keys and
+    multipart conditions)."""
+    names = set()
+    for key in (blockstate.get("variants") or {}) if isinstance(blockstate.get("variants"), dict) else ():
+        for pair in key.split(","):
+            if "=" in pair:
+                names.add(pair.split("=", 1)[0].strip())
+
+    def walk(cond):
+        if isinstance(cond, dict):
+            for k, v in cond.items():
+                if k in ("OR", "AND"):
+                    for c in v if isinstance(v, list) else ():
+                        walk(c)
+                else:
+                    names.add(k)
+
+    for part in blockstate.get("multipart") or () if isinstance(blockstate.get("multipart"), list) else ():
+        if isinstance(part, dict):
+            walk(part.get("when"))
+    return names
+
+
+def _has_light(definition: dict) -> bool:
+    block = definition.get("minecraft:block") or {}
+    if "minecraft:light_emission" in (block.get("components") or {}):
+        return True
+    return any("minecraft:light_emission" in (p.get("components") or {})
+               for p in block.get("permutations") or () if isinstance(p, dict))
+
+
+def _add_light(mod: SourceMod, result: ConversionResult, src) -> None:
+    names = sorted(k[len("blocks/"):-len(".json")] for k, v in result.files.items()
+                   if k.startswith("blocks/") and k.endswith(".json") and isinstance(v, dict)
+                   and not _has_light(v))
+    if not names:
+        return
+    drawn = {}
+    for name in names:
+        path = src / f"{name}.json"
+        try:
+            drawn[name] = _drawn_states(json.loads(path.read_text())) if path.is_file() else set()
+        except json.JSONDecodeError:
+            drawn[name] = set()
+    readings = blockcode.read_light(getattr(mod, "classes", None), names, drawn)
+    for name in names:
+        r = readings[name]
+        if r.value:
+            block = result.files[f"blocks/{name}.json"]["minecraft:block"]
+            block.setdefault("components", {})["minecraft:light_emission"] = r.value
+    result.notes.extend(_light_notes([readings[n] for n in names]))
+
+
+def _light_notes(readings: list) -> list[str]:
+    """Per block: the light read from bytecode (class#method of the function)
+    or why it wasn't, never one mistaken for the other."""
+    notes = []
+    constant = [(f"{r.source} = {r.value}", r.name) for r in readings if r.kind == "constant"]
+    if constant:
+        notes.append("Light emission read from bytecode (Properties.lightLevel gives one value for "
+                     "every state; 0 emits nothing) - " + _grouped(constant) + ".")
+    placed = [(f"{r.source} = {r.value} (reads {', '.join(r.states)})", r.name)
+              for r in readings if r.kind == "placed"]
+    if placed:
+        notes.append("Light emission read from bytecode at the placed state: the function reads "
+                     "states the blockstate doesn't draw, which Bedrock doesn't carry, so the block "
+                     "keeps the light of the state getStateForPlacement gives (a use or tick that "
+                     "changes it in Java doesn't happen) - " + _grouped(placed) + ".")
+    dark = [r.name for r in readings if r.kind == "dark"]
+    if dark:
+        notes.append(f"No light, read from bytecode: {len(dark)} block(s) whose Properties never set "
+                     "one (BlockBehaviour$Properties default, state -> 0).")
+    copied = [(r.copied, r.name) for r in readings if r.value is None and r.copied]
+    if copied:
+        notes.append("Light emission NOT converted, the block emits none: its Properties copy a "
+                     "vanilla block's, and the repo has no cited table of vanilla light levels - "
+                     + _grouped(copied) + ".")
+    unread = [(r.why, r.name) for r in readings if r.value is None and not r.copied]
+    if unread:
+        notes.append("Light emission NOT converted, the block emits none (Java may light it) - "
+                     + _grouped(unread) + ".")
     return notes

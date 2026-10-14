@@ -210,10 +210,41 @@ class Opt:
 
 
 @dataclass(frozen=True)
+class Dark:
+    """The light vanilla Properties start with: ``lightEmission = state -> 0``
+    (BlockBehaviour$Properties#<init>, MC 1.21.1; its lambda is ``iconst_0;
+    ireturn``)."""
+
+
+DARK = Dark()
+
+
+@dataclass(frozen=True)
+class CopiedLight:
+    """The light of a vanilla block whose Properties were copied
+    (``ofFullCopy``/``ofLegacyCopy`` copy ``lightEmission``, MC 1.21.1)."""
+
+    source: str
+
+
+@dataclass
 class Props:
-    """BlockBehaviour.Properties, as far as collision goes."""
+    """BlockBehaviour.Properties, as far as collision and light go.
+
+    ``light`` is the ToIntFunction<BlockState> Java's states take their light
+    from: :data:`DARK` (never set), a :class:`Lam` or mod object (set with
+    ``lightLevel``), a :class:`CopiedLight`, or UNKNOWN.
+    """
 
     has_collision: object = True  # True, False or UNKNOWN
+    light: object = DARK
+    # The evaluation (a class initialiser or one registration's supplier)
+    # that built it; a change made from another one marks it shared_changed,
+    # since which blocks see that change then depends on registration order.
+    epoch: int = 0
+    shared_changed: bool = False
+    # For the copy a block keeps: the Properties object it was taken from.
+    origin: object = None
 
 
 @dataclass(frozen=True)
@@ -255,6 +286,25 @@ def _arg_count(desc: str) -> tuple[int, bool]:
     return n, desc[i + 1] != "V"
 
 
+def _snapshot(props):
+    if not isinstance(props, Props):
+        return props
+    return Props(props.has_collision, props.light, props.epoch, origin=props.origin or props)
+
+
+def _shared_changed(props) -> bool:
+    """Whether the Properties a block was built from were changed by another
+    evaluation than the one that built them (see Props.epoch)."""
+    return isinstance(props, Props) and isinstance(props.origin, Props) and props.origin.shared_changed
+
+
+def _only_objects(desc: str) -> bool:
+    """Whether every argument in a method descriptor is a plain object
+    reference (so splitting on ';' indexes them)."""
+    inner = desc[1:desc.index(")")]
+    return all(part.startswith("L") for part in inner.split(";") if part)
+
+
 def _is_wide(desc_char: str) -> bool:
     return desc_char in "JD"
 
@@ -276,6 +326,13 @@ class Machine:
         self.steps = 0
         self.registrations: list[Registration] | None = None
         self.depth = 0
+        # Whether the instruction being run sits after an undecided branch.
+        self._forked = False
+        # Which evaluation is running (see Props.epoch).
+        self.epoch = 0
+        self._epochs = 0
+        # BlockState property names read (getValue) while it is a set.
+        self.state_reads: set | None = None
 
     # -- classes ------------------------------------------------------------
 
@@ -350,10 +407,18 @@ class Machine:
         m = cf.method("<clinit>", "()V")
         if m is None or m.code is None:
             return
+        saved = self.epoch
+        self.new_epoch()
         try:
             self.run(cf, m, [])
         except Unreadable:
             self._clinit_failed.add(name)
+        finally:
+            self.epoch = saved
+
+    def new_epoch(self) -> None:
+        self._epochs += 1
+        self.epoch = self._epochs
 
     def get_static(self, ref: Ref):
         owner = self._field_owner(ref.owner, ref.name)
@@ -752,6 +817,7 @@ class Machine:
                     return None
             self._vanilla_init(ref, args, f)
             return None
+        self._forked = f.forked
         results = self.call(ref.owner, ref.name, ref.desc, args, special=op == 0xB7, static=static)
         if not returns:
             return None
@@ -771,9 +837,18 @@ class Machine:
         obj = args[0]
         if not isinstance(obj, Obj):
             return
-        # The vanilla Block constructor keeps the Properties it was given.
+        # The vanilla Block constructor keeps the Properties it was given, and
+        # vanilla block classes taking more (DoorBlock(BlockSetType,
+        # Properties), ...) hand theirs on to it.
+        props_at = [k for k, a in enumerate(ref.desc[1:ref.desc.index(")")].split(";")) if a.endswith(_PROPERTIES)]
+        # The block takes the settings as they are now (BlockBehaviour copies
+        # hasCollision, and each state its light, when it is built), so a
+        # later change to a shared Properties doesn't reach it.
         if ref.desc.startswith(f"(L{_PROPERTIES};") and len(args) > 1:
-            obj.fields.setdefault("__props", args[1])
+            obj.fields.setdefault("__props", _snapshot(args[1]))
+        elif ref.owner.startswith(_VANILLA_BLOCK_PACKAGE) and len(props_at) == 1 \
+                and _only_objects(ref.desc) and props_at[0] + 1 < len(args):
+            obj.fields.setdefault("__props", _snapshot(args[props_at[0] + 1]))
         elif obj.cls == "net/minecraft/resources/ResourceLocation" and len(args) == 3 \
                 and all(isinstance(a, str) for a in args[1:]):
             obj.fields["__rl"] = f"{args[1]}:{args[2]}"
@@ -842,6 +917,8 @@ class Machine:
                 return [recv.set(key, rest[1])]
             if name == "getValue" and len(rest) == 1:
                 prop = rest[0]
+                if self.state_reads is not None:
+                    self.state_reads.add(prop.name if isinstance(prop, Prop) else "?")
                 return [recv.get(prop.name) if isinstance(prop, Prop) else UNKNOWN]
             if name == "hasProperty" and len(rest) == 1 and isinstance(rest[0], Prop):
                 return [int(rest[0].name in dict(recv.values))]
@@ -870,15 +947,7 @@ class Machine:
                 recv.fields.setdefault("names", []).append(p.name if isinstance(p, Prop) else "?")
             return [recv]
         if owner == _PROPERTIES or isinstance(recv, Props):
-            if static and name == "of":
-                return [Props(True)]
-            if static:
-                return [Props(UNKNOWN)]  # ofFullCopy / ofLegacyCopy: a vanilla block's settings
-            if isinstance(recv, Props):
-                if name == "noCollission":
-                    return [Props(False)]
-                return [recv]
-            return [UNKNOWN]
+            return self._properties(name, recv, rest, static)
         if owner.endswith("/properties/DirectionProperty") or owner.endswith("/properties/EnumProperty") \
                 or owner.endswith("/properties/BooleanProperty") or owner.endswith("/properties/IntegerProperty"):
             if static and name == "create" and rest and isinstance(rest[0], str):
@@ -947,6 +1016,46 @@ class Machine:
         if name == "hashCode" or name == "equals":
             return [UNKNOWN]
         return _NOT_HANDLED
+
+    def _properties(self, name: str, recv, rest: list, static: bool) -> list:
+        """BlockBehaviour.Properties. Java's builder changes itself and returns
+        itself, and so does this one (a dropped return value still counts),
+        unless the call sits after a branch that wasn't decided: then the
+        change is a copy only that path sees."""
+        if static:
+            if name == "of":
+                return [Props(True, DARK, self.epoch)]
+            if name in ("ofFullCopy", "ofLegacyCopy") and rest:
+                src = rest[0]
+                if isinstance(src, Obj) and isinstance(src.fields.get("__props"), Props):
+                    light = src.fields["__props"].light  # a mod block's own Properties
+                elif isinstance(src, Const):
+                    light = CopiedLight(f"{src.owner.rsplit('/', 1)[-1]}.{src.name}")
+                else:
+                    light = CopiedLight("a block it can't read")
+                # Whether it collides is the copied block's (not read here).
+                return [Props(UNKNOWN, light, self.epoch)]
+            return [Props(UNKNOWN, UNKNOWN, self.epoch)]
+        if not isinstance(recv, Props):
+            return [UNKNOWN]
+        if name == "noCollission":
+            collision, light = False, recv.light
+        elif name == "lightLevel" and len(rest) == 1:
+            fn = rest[0]
+            ok = isinstance(fn, Lam) or (isinstance(fn, Obj) and self.is_mod(fn.cls))
+            collision, light = recv.has_collision, fn if ok else UNKNOWN
+        elif _OBFUSCATED.match(name):
+            # A Forge SRG / Fabric intermediary name: which setting it is
+            # can't be told, so neither collision nor light is known.
+            collision, light = UNKNOWN, UNKNOWN
+        else:
+            return [recv]
+        if self._forked:
+            return [Props(collision, light, self.epoch)]
+        if recv.epoch != self.epoch:
+            recv.shared_changed = True
+        recv.has_collision, recv.light = collision, light
+        return [recv]
 
     def _direction(self, name: str, recv, rest: list, static: bool):
         if static and name == "values":
@@ -1078,6 +1187,8 @@ class Reading:
     behaviour: tuple = ()
 
 
+_SHARED_WHY = ("its Properties object is shared with other registrations that change it, so "
+               "what it holds when this block is built depends on registration order")
 _OBFUSCATED = re.compile(r"^(m_\d+_|f_\d+_|method_\d+|field_\d+|func_\d+_[a-z]+)$")
 
 
@@ -1118,13 +1229,10 @@ def _wanted_classes(classes: ClassIndex, names: set[str]) -> list[str]:
     return out
 
 
-def read_blocks(classes: ClassIndex | None, names: list[str]) -> dict[str, Reading]:
-    """A :class:`Reading` per blockstate name in ``names``."""
-    readings = {n: Reading(n) for n in names}
-    if classes is None or not len(classes):
-        for r in readings.values():
-            r.placement_why = r.shape_why = r.collision_why = "the mod ships no class files"
-        return readings
+def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[str, tuple[list, str]]]:
+    """Run the registration code that names each blockstate in ``names`` and
+    return, per name, the block objects built for it (``[]`` with the reason
+    when none was found or it can't be followed)."""
     machine = Machine(classes)
     machine.registrations = []
     for cname in _wanted_classes(classes, set(names)):
@@ -1135,11 +1243,16 @@ def read_blocks(classes: ClassIndex | None, names: list[str]) -> dict[str, Readi
         regs.setdefault(reg.name, []).append(reg.value)
     machine.registrations = None
 
-    for name, r in readings.items():
+    out: dict[str, tuple[list, str]] = {}
+    # Every registration found is built, wanted or not: one that changes a
+    # shared Properties object must mark it (Props.shared_changed) before
+    # any block built from that object is read.
+    for name in [*names, *sorted(set(regs) - set(names))]:
         objs, others = [], []
         why = ""
         for value in regs.get(name, []):
             machine.steps = 0
+            machine.new_epoch()
             try:
                 built = machine.call_lambda(value, []) if isinstance(value, Lam) else [value]
             except Unreadable as exc:
@@ -1155,19 +1268,32 @@ def read_blocks(classes: ClassIndex | None, names: list[str]) -> dict[str, Readi
                           f"{outside.replace('/', '.')} rather than reach a vanilla block class")
         if not objs:
             why = why or "no registration of this block was found in the mod's classes"
-            r.placement_why = r.shape_why = r.collision_why = why
-            continue
-        if len({o.cls for o in objs}) != 1:
+        elif len({o.cls for o in objs}) != 1:
             why = "registered more than once with different classes: " + ", ".join(sorted({o.cls for o in objs}))
+            objs = []
+        elif _renamed(machine, objs[0].cls):
+            why = (f"{objs[0].cls.replace('/', '.')} uses Forge SRG or Fabric intermediary member names, so its "
+                   "methods can't be told apart from vanilla's by name")
+            objs = []
+        out[name] = (objs, why)
+    return machine, {n: out[n] for n in names}
+
+
+def read_blocks(classes: ClassIndex | None, names: list[str]) -> dict[str, Reading]:
+    """A :class:`Reading` per blockstate name in ``names``."""
+    readings = {n: Reading(n) for n in names}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.placement_why = r.shape_why = r.collision_why = "the mod ships no class files"
+        return readings
+    machine, registered = _registered(classes, names)
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
             r.placement_why = r.shape_why = r.collision_why = why
             continue
         obj = objs[0]
         r.cls = obj.cls.replace("/", ".")
-        if _renamed(machine, obj.cls):
-            why = (f"{r.cls} uses Forge SRG or Fabric intermediary member names, so its "
-                   "methods can't be told apart from vanilla's by name")
-            r.placement_why = r.shape_why = r.collision_why = why
-            continue
         _read_states(machine, obj, r)
         r.behaviour = _behaviour(machine, obj.cls)
         _read_placement(machine, obj, r)
@@ -1283,8 +1409,179 @@ def _read_shape(machine: Machine, obj: Obj, r: Reading) -> None:
                            "collision shape")
         return
     props = obj.fields.get("__props", UNKNOWN)
+    if _shared_changed(props):
+        r.collision_why = _SHARED_WHY
+        return
     if not isinstance(props, Props) or props.has_collision is UNKNOWN:
         r.collision_why = ("its Properties copy a vanilla block's or aren't read, so whether "
                            "it collides isn't known")
         return
     r.collision = bool(props.has_collision)
+
+
+# --- Light ------------------------------------------------------------------
+#
+# Java gives every block state a light level when the state is built:
+# ``BlockStateBase.lightEmission = properties.lightEmission.applyAsInt(this)``
+# (BlockBehaviour$BlockStateBase#<init> L808-834, MC 1.21.1 client jar +
+# Mojang mappings; the states are built in the Block constructor),
+# the function being whatever ``Properties.lightLevel`` was last given
+# (``state -> 0`` when nothing was; ``ofFullCopy``/``ofLegacyCopy`` copy the
+# copied block's). NeoForge also lets a block override
+# ``IBlockExtension#getLightEmission(state, level, pos)``, which can depend on
+# the world, so such a block's light is not read.
+
+_PLACEMENT_LIGHT = "getStateForPlacement"
+
+
+@dataclass
+class LightReading:
+    """One block's light as its code gives it.
+
+    ``value`` is the light level (0-15) or None with ``why``. ``kind`` says how
+    it was read: ``dark`` (the Properties never set a light), ``constant`` (the
+    function gives one value for every state) or ``placed`` (the value at the
+    state the block is placed in, when the function reads only states the
+    converted block doesn't carry; ``states`` names them). ``source`` cites
+    where it was read (class#method of the function, or the vanilla default).
+    ``copied`` names the vanilla block whose Properties were copied when that
+    is why it is unread.
+    """
+
+    name: str
+    cls: str | None = None
+    value: int | None = None
+    kind: str = ""
+    source: str = ""
+    states: tuple = ()
+    why: str = ""
+    copied: str = ""
+
+
+def _lambda_name(fn) -> str:
+    if isinstance(fn, Lam):
+        return f"{fn.handle.ref.owner.replace('/', '.')}#{fn.handle.ref.name}"
+    return f"{fn.cls.replace('/', '.')}#applyAsInt"
+
+
+def _apply_light(machine: Machine, fn, state) -> list:
+    if isinstance(fn, Lam):
+        return machine.call_lambda(fn, [state])
+    return machine.call(fn.cls, "applyAsInt", "(Ljava/lang/Object;)I", [fn, state])
+
+
+def _light_values(results: list) -> set | None:
+    if not results or any(not isinstance(v, int) or isinstance(v, bool) for v in results):
+        return None
+    return set(results)
+
+
+def read_light(classes: ClassIndex | None, names: list[str],
+               drawn: dict[str, set] | None = None) -> dict[str, LightReading]:
+    """A :class:`LightReading` per blockstate name in ``names``. ``drawn`` maps
+    a name to the Java state names its converted Bedrock block carries (the
+    ones its blockstate draws); a light that depends on one of those isn't
+    read, since one value can't stand for every permutation."""
+    readings = {n: LightReading(n) for n in names}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.why = "the mod ships no class files"
+        return readings
+    machine, registered = _registered(classes, names)
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.why = why
+            continue
+        values = []
+        for obj in objs:
+            one = LightReading(name)
+            _read_light(machine, obj, one, (drawn or {}).get(name, set()))
+            values.append(one)
+        first = values[0]
+        if any((v.value, v.why) != (first.value, first.why) for v in values[1:]):
+            r.cls = first.cls
+            r.why = "registered twice with different light"
+            continue
+        readings[name] = first
+    return readings
+
+
+def _read_light(machine: Machine, obj: Obj, r: LightReading, drawn: set) -> None:
+    r.cls = obj.cls.replace("/", ".")
+    for cname in machine.chain(obj.cls):
+        cf = machine.classes.get(cname)
+        if cf is None:
+            break
+        if any(m.name == "getLightEmission" and m.code is not None for m in cf.methods):
+            r.why = (f"{cname.replace('/', '.')}#getLightEmission overrides the light "
+                     "(it can depend on the world, not only the state)")
+            return
+    props = obj.fields.get("__props", UNKNOWN)
+    if not isinstance(props, Props):
+        r.why = "the Properties its constructor passes on aren't read"
+        return
+    if _shared_changed(props):
+        r.why = _SHARED_WHY
+        return
+    light = props.light
+    if light is DARK:
+        r.value, r.kind = 0, "dark"
+        r.source = "BlockBehaviour$Properties default (state -> 0)"
+        return
+    if isinstance(light, CopiedLight):
+        r.copied = light.source
+        r.why = (f"its Properties copy {light.source}'s, and the repo has no cited table of "
+                 "vanilla light levels")
+        return
+    if light is UNKNOWN:
+        r.why = "Properties.lightLevel is given a function it can't read (or a renamed setting)"
+        return
+    src = _lambda_name(light)
+    machine.steps = 0
+    machine.state_reads = set()
+    try:
+        any_state = _light_values(_apply_light(machine, light, State()))
+    except Unreadable as exc:
+        r.why = f"{src}: {exc}"
+        return
+    finally:
+        reads, machine.state_reads = machine.state_reads, None
+    if any_state is not None and len(any_state) == 1:
+        r.value, r.kind, r.source = any_state.pop(), "constant", src
+    elif "?" in reads or not reads:
+        r.why = f"{src}: the light is not built from values it can read"
+        return
+    elif reads & drawn:
+        r.why = (f"{src}: the light depends on {', '.join(sorted(reads & drawn))}, a state the "
+                 "converted block carries, and one light per permutation isn't read")
+        return
+    else:
+        # Bedrock doesn't carry these states, so the block keeps the state
+        # it was placed in: its light is the function's value there.
+        machine.steps = 0
+        try:
+            # A path returning null is one where Java doesn't place the block.
+            placed = [s for s in machine.call(obj.cls, _PLACEMENT_LIGHT, _PLACEMENT_DESC, [obj, PLACE_CTX])
+                      if s is not None]
+            if not placed or any(not isinstance(s, State) for s in placed):
+                raise Unreadable("the placed state isn't read")
+            got = set()
+            for s in placed:
+                vals = _light_values(_apply_light(machine, light, s))
+                if vals is None:
+                    raise Unreadable("the light at the placed state isn't read")
+                got |= vals
+        except Unreadable as exc:
+            r.why = (f"{src}: the light depends on {', '.join(sorted(reads))} and "
+                     f"{_declaring(machine, obj.cls, _PLACEMENT_LIGHT, _PLACEMENT_DESC)}: {exc}")
+            return
+        if len(got) != 1:
+            r.why = (f"{src}: the light at the placed state differs between paths "
+                     f"({', '.join(str(v) for v in sorted(got))})")
+            return
+        r.value, r.kind, r.source = got.pop(), "placed", src
+        r.states = tuple(sorted(reads))
+    if not 0 <= r.value <= 15:
+        r.why = f"{src}: Java gives {r.value}, outside Bedrock's 0-15"
+        r.value, r.kind, r.source, r.states = None, "", "", ()
