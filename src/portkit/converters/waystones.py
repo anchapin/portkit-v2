@@ -10,20 +10,27 @@ one (both halves), activating it, naming it, the menu of the waystones a player
 has activated, and the teleport with its experience cost; and the fifteen
 coloured sharestones (``SharestoneBlock``), which take the same placement,
 naming, breaking and teleport but list every sharestone of their own colour
-(one shared network per colour, nothing to activate). Portstones, warp plates,
-warp portals, fleeting memorials and the warp items keep their residue.
+(one shared network per colour, nothing to activate); and the sixteen
+portstones (``PortstoneBlock``), which are no waystone themselves: using one
+lists its colour's sharestones (white: the player's activated waystones) and
+teleports from wherever the player stands. Warp plates, warp portals,
+fleeting memorials and the warp items keep their residue.
 
 Where each value comes from (no fabrication, #87):
 
 * **Which blocks**: Waystones' own ``waystones:waystones`` block tag (data),
   each a block ``ModBlocks`` registers as a ``WaystoneBlock``
-  (:data:`WAYSTONE_BLOCKS`, cited), and its ``waystones:sharestones`` tag,
-  each a ``SharestoneBlock`` (:data:`SHARESTONE_BLOCKS`, cited); the
-  blockstate is ``facing`` x ``half``.
+  (:data:`WAYSTONE_BLOCKS`, cited), its ``waystones:sharestones`` tag,
+  each a ``SharestoneBlock`` (:data:`SHARESTONE_BLOCKS`, cited), and its
+  ``waystones:portstones`` tag, each a ``PortstoneBlock``
+  (:data:`PORTSTONE_BLOCKS`, cited); the blockstate is ``facing`` x ``half``.
 * **Which network**: a waystone's type is ``waystones:waystone`` (reached by
   activating it); a sharestone's is its colour's
   (``WaystoneTypes.getSharestone``), and its menu lists every sharestone of
-  that type (``PlayerWaystoneManager#getTargetsForWaystoneType``).
+  that type (``PlayerWaystoneManager#getTargetsForWaystoneType``). A
+  portstone has no type of its own: it lists the targets of its colour's
+  sharestone type, or of the waystone type when its colour has no sharestone
+  (``PortstoneBlock#getTargetWaystoneType``).
 * **Shape, facing, the two halves**: ``WaystoneBlock`` / ``SharestoneBlock`` /
   ``WaystoneBlockBase`` (shapes, ``getStateForPlacement``, ``setPlacedBy``,
   ``playerWillDestroy``).
@@ -115,6 +122,20 @@ SHARESTONE_SOURCES = (
     _src("block/SharestoneBlock.java", "69-L72"),
     _src("block/WaystoneBlockBase.java", "160-L173"),
 )
+# The colours ModBlocks registers a PortstoneBlock for (portstoneColors
+# L16-33: every dye colour, white first), each as <colour>_portstone (L90-94).
+PORTSTONE_COLORS = ("white", *SHARESTONE_COLORS)
+PORTSTONE_BLOCKS = tuple(f"{color}_portstone" for color in PORTSTONE_COLORS)
+# ModBlockTags L13 (PORTSTONES); the jar's tag lists the sixteen portstones.
+PORTSTONE_TAG = "data/waystones/tags/block/portstones.json"
+PORTSTONE_SOURCES = (
+    _src("block/ModBlocks.java", "16-L33"),
+    _src("block/ModBlocks.java", "90-L94"),
+    # LOWER_SHAPES / UPPER_SHAPES by facing; getShape by HALF.
+    _src("block/PortstoneBlock.java", "47-L107"),
+    _src("block/PortstoneBlock.java", "121-L125"),
+    _src("block/WaystoneBlockBase.java", "160-L173"),
+)
 # A waystone's type (WaystoneTypes.WAYSTONE L10; WaystoneBlockEntity) and a
 # sharestone's (WaystoneTypes.getSharestone L34-40 via
 # SharestoneBlockEntity#getWaystoneType L30-34).
@@ -124,6 +145,14 @@ WAYSTONE_TYPE = f"{NS}:waystone"
 def waystone_type(name: str) -> str:
     """The Java waystone type of the block ``name`` (a WAYSTONE_BLOCKS or SHARESTONE_BLOCKS entry)."""
     return f"{NS}:{name}" if name in SHARESTONE_BLOCKS else WAYSTONE_TYPE
+
+
+def portstone_target(name: str) -> str:
+    """The waystone type a portstone ``name`` lists (PortstoneBlock#getTargetWaystoneType
+    L145-147: its colour's sharestone, WaystoneTypes.getSharestone L34-40, which
+    white has none of, so a white portstone lists waystones)."""
+    color = name[:-len("_portstone")]
+    return f"{NS}:{color}_sharestone" if f"{color}_sharestone" in SHARESTONE_BLOCKS else WAYSTONE_TYPE
 
 
 # Java's shapes as one Bedrock box per half (origin/size in pixels, centred on
@@ -136,14 +165,27 @@ def waystone_type(name: str) -> str:
 LOWER_BOX = {"origin": [-8, 0, -8], "size": [16, 16, 16]}
 UPPER_BOX = {"origin": [-7, 0, -7], "size": [14, 16, 14]}
 SHARESTONE_BOX = {"origin": [-8, 0, -8], "size": [16, 16, 16]}
+# A portstone's shapes depend on its facing (PortstoneBlock L47-107, indexed by
+# Direction#get2DDataValue). Each box here is the bounding box of the north
+# shape, the facing Java's model is drawn for (the blockstate's facing=north has
+# no y turn), and the block's minecraft:transformation turns it with the
+# geometry for the other facings (Bedrock-OSS wiki blocks/block-orientation:
+# the transformation component turns the collision and selection boxes). North
+# LOWER_SHAPES spans 0-16 on every axis (box(0, 0, 0, 16, 3, 16) ..
+# box(3, 9, 9, 13, 16, 13)); north UPPER_SHAPES is box(3, 0, 9, 13, 7, 13) +
+# box(4, 0, 7, 12, 2, 9): x 3-13, y 0-7, z 7-13.
+PORTSTONE_LOWER_BOX = {"origin": [-8, 0, -8], "size": [16, 16, 16]}
+PORTSTONE_UPPER_BOX = {"origin": [-5, 0, -1], "size": [10, 7, 6]}
 
 
 def _block(name: str) -> FacingBlock:
     share = name in SHARESTONE_BLOCKS
-    lower = SHARESTONE_BOX if share else LOWER_BOX
-    upper = SHARESTONE_BOX if share else UPPER_BOX
+    port = name in PORTSTONE_BLOCKS
+    lower = PORTSTONE_LOWER_BOX if port else SHARESTONE_BOX if share else LOWER_BOX
+    upper = PORTSTONE_UPPER_BOX if port else SHARESTONE_BOX if share else UPPER_BOX
+    sources = PORTSTONE_SOURCES if port else SHARESTONE_SOURCES if share else BLOCK_SOURCES
     return FacingBlock(
-        name, 180, lower, SHARESTONE_SOURCES if share else BLOCK_SOURCES,
+        name, 180, lower, sources,
         java_state="half", values=("lower", "upper"), state=HALF_STATE,
         value_components={
             "lower": {"minecraft:collision_box": dict(lower), "minecraft:selection_box": dict(lower)},
@@ -195,6 +237,20 @@ SHARESTONE_MESSAGES = {
     "none_shared": "gui.waystones.waystone_selection.no_sharestones_available",
 }
 
+
+def portstone_title(name: str) -> str:
+    """The menu title a portstone ``name`` shows (PortstoneBlock#useWithoutItem
+    L140: container.waystones.<colour>_portstone)."""
+    return f"container.{NS}.{name}"
+
+
+def portstone_keys(name: str) -> set[str]:
+    """The jar texts a portstone shows: its menu title and its target list's
+    empty text (WaystoneSelectionScreenBase#getNoWaystonesMessage L349-360: the
+    sharestone text for a sharestone target kind, else the waystone one)."""
+    none = SHARESTONE_MESSAGES["none_shared"] if portstone_target(name) != WAYSTONE_TYPE else MESSAGES["none"]
+    return {portstone_title(name), none}
+
 # Bedrock vanilla sound events playing the same audio as the Java events
 # (Java: misode/mcmeta 1.21.1-assets 451045f2 assets/minecraft/sounds.json;
 # Bedrock: Mojang/bedrock-samples 46ba6ea9 resource_pack/sounds/sound_definitions.json):
@@ -237,24 +293,33 @@ FIXED_CONDITIONS = {
 }
 
 
-def fixed_conditions(kind: str) -> dict[str, bool]:
-    """The conditions decided for teleports from a waystone of type ``kind``.
+def fixed_conditions(kind: str, portstone: bool = False) -> dict[str, bool]:
+    """The conditions decided for teleports from a waystone of type ``kind``,
+    or, with ``portstone``, from a portstone listing targets of type ``kind``.
 
     From a sharestone the source and the target are sharestones of its type
     (getTargetsForWaystoneType L325-326 lists only that type), never a
     waystone; the target's visibility is its colour's
     (WaystoneVisibility#fromWaystoneType L38-57), so target_is_global stays
-    false.
+    false. A portstone's teleport has no source waystone (its menu carries
+    none, WaystoneSelectionListBuilder L69-72, and SelectWaystoneMessage
+    L70 passes that null on): every source_is_* condition read from the
+    source waystone is false, and source_is_portstone, read from the menu's
+    PORTSTONE flag (PortstoneBlock L139, ModMenus L27), is true.
     """
     if kind == WAYSTONE_TYPE:
-        return dict(FIXED_CONDITIONS)
-    name = kind.split(":", 1)[1]
-    if name not in SHARESTONE_BLOCKS:
-        raise _Refuse(f"no fixed conditions for waystone type {kind!r}")
-    fixed = dict(FIXED_CONDITIONS)
-    fixed.update({"source_is_waystone": False, "target_is_waystone": False,
-                  "source_is_sharestone": True, "target_is_sharestone": True,
-                  f"source_is_{name}": True, f"target_is_{name}": True})
+        fixed = dict(FIXED_CONDITIONS)
+    else:
+        name = kind.split(":", 1)[1]
+        if name not in SHARESTONE_BLOCKS:
+            raise _Refuse(f"no fixed conditions for waystone type {kind!r}")
+        fixed = dict(FIXED_CONDITIONS)
+        fixed.update({"source_is_waystone": False, "target_is_waystone": False,
+                      "source_is_sharestone": True, "target_is_sharestone": True,
+                      f"source_is_{name}": True, f"target_is_{name}": True})
+    if portstone:
+        fixed.update({"source_is_waystone": False, "source_is_sharestone": False, "source_is_portstone": True,
+                      **{f"source_is_{n}": False for n in SHARESTONE_BLOCKS}})
     return fixed
 DYNAMIC_CONDITIONS = {"is_interdimensional"}  # L294: target dimension != the player's
 # Experience-point functions (RequirementRegistry L122-L147) and the parameter
@@ -301,6 +366,17 @@ SHARESTONE_RUNTIME_SOURCES = (
     _src("core/WaystoneManagerImpl.java", "96-L99"),
     _src("client/gui/screen/WaystoneSelectionScreenBase.java", "349-L357"),
 )
+PORTSTONE_RUNTIME_SOURCES = (
+    _src("block/PortstoneBlock.java", "133-L147"),
+    _src("block/entity/PortstoneBlockEntity.java", "9-L20"),
+    _src("menu/WaystoneSelectionListBuilder.java", "69-L72"),
+    _src("menu/WaystoneSelectionMenu.java", "79-L86"),
+    _src("menu/ModMenus.java", "27"),
+    _src("network/message/SelectWaystoneMessage.java", "69-L82"),
+    _src("core/WaystoneTeleportManager.java", "523-L528"),
+    _src("core/PlayerWaystoneManager.java", "323-L334"),
+    _src("client/gui/screen/WaystoneSelectionScreenBase.java", "333-L360"),
+)
 NAME_MAX_LENGTH = 128  # WaystoneEditScreen L54: nameField.setMaxLength(128)
 # WaystoneTeleportManager#canInteractWithWaystone L531: a non-player must be
 # within 8 blocks (distanceToSqr <= 64) of the source waystone's centre; a
@@ -344,11 +420,12 @@ def _tagged(mod: SourceMod, tag: str = TAG) -> list[str]:
 
 
 def waystone_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
-    """Waystone and sharestone blocks of ``mod`` the runtime makes work, by blockstate name."""
+    """Waystone, sharestone and portstone blocks of ``mod`` the runtime makes work, by blockstate name."""
     if _unsupported(mod) is not None:
         return {}
     names = [n for n in _tagged(mod) if n in WAYSTONE_BLOCKS]
     names += [n for n in _tagged(mod, SHARESTONE_TAG) if n in SHARESTONE_BLOCKS]
+    names += [n for n in _tagged(mod, PORTSTONE_TAG) if n in PORTSTONE_BLOCKS]
     return {name: _block(name) for name in names if (mod.assets / "blockstates" / f"{name}.json").is_file()}
 
 
@@ -365,6 +442,9 @@ def lang_keys(mod: SourceMod) -> set[str]:
     keys = set(MESSAGES.values())
     if any(name in SHARESTONE_BLOCKS for name in blocks):
         keys |= set(SHARESTONE_MESSAGES.values())
+    for name in blocks:
+        if name in PORTSTONE_BLOCKS:
+            keys |= portstone_keys(name)
     return keys
 
 
@@ -410,12 +490,13 @@ def _argument(kind: str, raw: str):
 
 
 def requirements(lines: list[str], enable_costs: bool, enable_cooldowns: bool,
-                 kind: str = WAYSTONE_TYPE) -> tuple[list[dict], list[str]]:
+                 kind: str = WAYSTONE_TYPE, portstone: bool = False) -> tuple[list[dict], list[str]]:
     """The warp requirement modifiers that can apply in this runtime to a
-    teleport from a waystone of type ``kind``, in order, as {"when":
+    teleport from a waystone of type ``kind`` (with ``portstone``: from a
+    portstone to a target of type ``kind``), in order, as {"when":
     {condition: wanted}, "fn": name, "args": [...]}, and the lines left out
     (with why). Raises _Refuse for anything without a runtime."""
-    fixed_table = fixed_conditions(kind)
+    fixed_table = fixed_conditions(kind, portstone)
     kept: list[dict] = []
     dropped: list[str] = []
     for line in lines:
@@ -535,24 +616,30 @@ class _Plan:
     modifiers: dict  # waystone type -> its requirement modifiers
     dropped: list
     defaults: dict
+    # target type -> the requirement modifiers of a portstone teleport to it
+    portstone_modifiers: dict
 
 
-def _plan(mod: SourceMod, kinds: list[str]) -> _Plan:
+def _plan(mod: SourceMod, kinds: list[str], portstone_kinds: list[str] = ()) -> _Plan:
     entry = _defaults((mod.mods or {}).get(NS))
     values = {k: v["value"] for k, v in entry["values"].items()}
     modifiers: dict[str, list] = {}
+    portstone_modifiers: dict[str, list] = {}
     left_out: dict[str, list[str]] = {}
-    for kind in kinds:
+    variants = [(kind, False, kind) for kind in kinds]
+    variants += [(kind, True, f"a portstone to {kind}") for kind in portstone_kinds]
+    for kind, portstone, label in variants:
         kept, left = requirements(values["teleports.warpRequirements"], values["teleports.enableCosts"],
-                                  values["teleports.enableCooldowns"], kind)
-        modifiers[kind] = kept
-        left_out[kind] = left
+                                  values["teleports.enableCooldowns"], kind, portstone)
+        (portstone_modifiers if portstone else modifiers)[kind] = kept
+        left_out[label] = left
     # A line left out for every type is listed once; one left out for some
     # types only names them.
-    dropped = [line for line in left_out[kinds[0]] if all(line in left for left in left_out.values())]
-    for kind in kinds:
-        dropped.extend(f"{line} (from {kind})" for line in left_out[kind] if line not in dropped)
-    return _Plan(modifiers, dropped, entry)
+    labels = list(left_out)
+    dropped = [line for line in left_out[labels[0]] if all(line in left for left in left_out.values())]
+    for label in labels:
+        dropped.extend(f"{line} (from {label})" for line in left_out[label] if line not in dropped)
+    return _Plan(modifiers, dropped, entry, portstone_modifiers)
 
 
 def _network(kind: str, modifiers: list) -> dict:
@@ -570,9 +657,17 @@ def _network(kind: str, modifiers: list) -> dict:
     }
 
 
+def _portstone(name: str, plan: _Plan) -> dict:
+    """How the runtime treats one portstone: the network it lists
+    (PortstoneBlock#getTargetWaystoneType L145-147), its menu title (L140)
+    and the requirements of a teleport from it to that network."""
+    target = portstone_target(name)
+    return {"requirements": plan.portstone_modifiers[target], "target": target, "title": portstone_title(name)}
+
+
 def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             context: LoadContext) -> tuple[ConversionResult, str]:
-    """The waystones' and sharestones' runtime entry, loot tables and block components.
+    """The waystones', sharestones' and portstones' runtime entry, loot tables and block components.
 
     ``deferred`` is (source path, table) for their block loot tables, which
     the loot converter left to this one (:func:`loot_names`).
@@ -594,24 +689,35 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     missing_share = sorted(k for k in SHARESTONE_MESSAGES.values() if k not in lang)
     if missing_share:
         why_share = f"the jar's en_us.json lacks {', '.join(missing_share)}, which a sharestone shows"
-    kinds = sorted({waystone_type(name) for name in blocks})
+    kinds = sorted({waystone_type(name) for name in blocks if name not in PORTSTONE_BLOCKS})
+    port_kinds = sorted({portstone_target(name) for name in blocks if name in PORTSTONE_BLOCKS})
     plan = None
     if why_all is None:
         try:
-            plan = _plan(mod, kinds)
+            plan = _plan(mod, kinds or [WAYSTONE_TYPE], port_kinds)
         except _Refuse as refusal:
             why_all = f"warpRequirements: {refusal}"
 
     notes: list[str] = []
     kept: list[str] = []
     silk = False
-    for name in sorted(blocks):
+    # Waystones and sharestones first: a portstone works only when the
+    # network it lists did.
+    for name in sorted(blocks, key=lambda n: (n in PORTSTONE_BLOCKS, n)):
         identifier = f"{NS}:{name}"
         share = name in SHARESTONE_BLOCKS
+        port = name in PORTSTONE_BLOCKS
         block_path = f"blocks/{name}.json"
         body = files.get(block_path)
         loot = tables.get(name)
         why = why_all if why_all is not None else (why_share if share else None)
+        if why is None and port:
+            missing_port = sorted(k for k in portstone_keys(name) if k not in lang)
+            target = portstone_target(name)
+            if missing_port:
+                why = f"the jar's en_us.json lacks {', '.join(missing_port)}, which this portstone shows"
+            elif not any(waystone_type(i.split(":", 1)[1]) == target for i in kept):
+                why = f"no {target} block works here, so the portstone has nothing to list"
         if why is None and not (isinstance(body, dict) and body.get("minecraft:block", {})
                                 .get("description", {}).get("identifier") == identifier):
             why = f"the waystone block {identifier} did not convert"
@@ -627,8 +733,9 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
                     why = f"loot table {loot[0]}: {refusal}"
                 # A sharestone can't be silk-touched in Java either
                 # (WaystoneBlockBase#canSilkTouch L91-93, not overridden):
-                # its copied item places a new sharestone.
-                silk = silk or ("silk_touch" in flags and not share)
+                # its copied item places a new sharestone. A portstone's
+                # block entity holds nothing to copy.
+                silk = silk or ("silk_touch" in flags and not share and not port)
         if why is not None:
             if loot is not None:
                 result.unhandled.append(Unhandled(loot[0], RESIDUE_KIND, why))
@@ -659,9 +766,11 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         return result, ""
 
     values = {k: v["value"] for k, v in plan.defaults["values"].items()}
-    kept_ways = [i for i in kept if i.split(":", 1)[1] not in SHARESTONE_BLOCKS]
+    kept.sort()
+    kept_port = [i for i in kept if i.split(":", 1)[1] in PORTSTONE_BLOCKS]
     kept_share = [i for i in kept if i.split(":", 1)[1] in SHARESTONE_BLOCKS]
-    block_types = {i: waystone_type(i.split(":", 1)[1]) for i in kept}
+    kept_ways = [i for i in kept if i not in kept_port and i not in kept_share]
+    block_types = {i: waystone_type(i.split(":", 1)[1]) for i in kept if i not in kept_port}
     messages = dict(MESSAGES)
     if kept_share:
         messages.update(SHARESTONE_MESSAGES)
@@ -676,6 +785,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         "name_max_length": NAME_MAX_LENGTH,
         "namespace": NS,
         "networks": {kind: _network(kind, plan.modifiers[kind]) for kind in sorted(set(block_types.values()))},
+        "portstones": {i: _portstone(i.split(":", 1)[1], plan) for i in kept_port},
         "range_sq": RANGE_SQ,
         "restricted_origins": sorted(values["general.restrictedWaystones"]),
         "sounds": SOUNDS,
@@ -684,19 +794,22 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     config_sources = [f"{plan.defaults['repo']}/blob/{plan.defaults['commit']}/{v['source']}"
                       for v in plan.defaults["values"].values()]
     header = (
-        f"// Generated by portkit from {NS}'s waystone and sharestone blocks, loot tables, config defaults and\n"
-        f"// Java code; do not edit. Read by the fixed runtime {_RUNTIME_DIR}/waystone.js (portkit/runtime). Sources:\n"
+        f"// Generated by portkit from {NS}'s waystone, sharestone and portstone blocks, loot tables, config\n"
+        f"// defaults and Java code; do not edit. Read by the fixed runtime {_RUNTIME_DIR}/waystone.js (portkit/runtime). Sources:\n"
         + "".join(f"//   {s}\n" for s in dict.fromkeys(
             (*(BLOCK_SOURCES if kept_ways else ()), *(SHARESTONE_SOURCES if kept_share else ()),
+             *(PORTSTONE_SOURCES if kept_port else ()),
              *config_sources, *REQUIREMENT_SOURCES, *RUNTIME_SOURCES,
-             *(SHARESTONE_RUNTIME_SOURCES if kept_share else ()))))
+             *(SHARESTONE_RUNTIME_SOURCES if kept_share else ()),
+             *(PORTSTONE_RUNTIME_SOURCES if kept_port else ()))))
         + "".join(f"// warpRequirements left out: {d}\n" for d in plan.dropped)
     ).rstrip("\n")
     result.files[data_path] = _js_module(header, table)
     for name in ("waystone.js", "waystone_core.js"):
         result.files[f"{_RUNTIME_DIR}/{name}"] = runtime_source(name)
-    blocks_ways = [n for n in blocks if n not in SHARESTONE_BLOCKS]
+    blocks_ways = [n for n in blocks if n not in SHARESTONE_BLOCKS and n not in PORTSTONE_BLOCKS]
     blocks_share = [n for n in blocks if n in SHARESTONE_BLOCKS]
+    blocks_port = [n for n in blocks if n in PORTSTONE_BLOCKS]
     if blocks_ways:
         result.stations[f"{NS}:waystones"] = {
             "converted": len(kept_ways),
@@ -710,6 +823,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "residue": len(blocks_share) - len(kept_share),
             "data": data_path,
             "block": ", ".join(kept_share),
+        }
+    if blocks_port:
+        result.stations[f"{NS}:portstones"] = {
+            "converted": len(kept_port),
+            "residue": len(blocks_port) - len(kept_port),
+            "data": data_path,
+            "block": ", ".join(kept_port),
         }
     result.notes.extend(dict.fromkeys(notes))
     if kept_ways:
@@ -732,7 +852,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "non-suffocating blocks like grass), the other half going when one is removed by anything but a "
             "player (an explosion), and config changes "
             "(the cited defaults are used). The item shows the lower half only. Village and wild waystone "
-            "generation, portstones, warp plates and portals, fleeting memorials and the warp "
+            "generation, warp plates and portals, fleeting memorials and the warp "
             "stone, scrolls, shards and feather are not converted."
             + (" Silk touch drops a plain waystone." if silk else "")
         )
@@ -750,6 +870,23 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "sharestone from the network in Java), and the rest listed for waystones (pets and leashed mobs, "
             "waterlogging, particles, comparator and observers, the free-space tests, an unloaded target's "
             "room check, explosions taking one half, config changes)."
+        )
+    if kept_port:
+        result.notes.append(
+            f"{NS}: {len(kept_port)} portstone block(s) work through the same runtime ({data_path}): "
+            f"{', '.join(kept_port)}. A portstone is no waystone: placing one sets its upper half and nothing "
+            "else (no owner, no name, nothing activated), and it never appears in a menu. Using one opens a "
+            "menu titled with its colour of every sharestone of that colour (any dimension, in placement "
+            "order), or, for the white portstone (white has no sharestone), of the waystones the player has "
+            "activated; choosing one teleports the player beside it from wherever they stand (Java checks no "
+            "distance to a portstone), for the warpRequirements experience cost (the defaults have no "
+            "portstone rule: distance x 0.01 points, 27 between dimensions, at most 27). Breaking either half "
+            "removes both. Not carried over: the coloured runes and the floating warp stone a Java client "
+            "draws on it (code-rendered; every colour looks the same here, the colour is in the item's name), "
+            "the item tooltip, global and team waystones in the white portstone's list (visibility is not "
+            "carried), the menu's sorting, search and deleting, and the rest listed for waystones (pets and "
+            "leashed mobs, waterlogging, the free-space tests, an unloaded target's room check, explosions "
+            "taking one half, config changes)."
         )
     entry = (
         'import { registerWaystones } from "./waystone.js";\n'

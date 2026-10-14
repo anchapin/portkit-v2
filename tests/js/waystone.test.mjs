@@ -24,7 +24,13 @@ const FALLBACK = {
     "waystones:orange_sharestone": "waystones:orange_sharestone",
     "waystones:waystone": "waystones:waystone",
   },
-  blocks: ["waystones:mossy_waystone", "waystones:orange_sharestone", "waystones:waystone"],
+  blocks: [
+    "waystones:mossy_waystone",
+    "waystones:orange_portstone",
+    "waystones:orange_sharestone",
+    "waystones:waystone",
+    "waystones:white_portstone",
+  ],
   component: "waystones:portkit_waystone",
   default_type: "waystones:waystone",
   half_state: "waystones:half",
@@ -52,6 +58,14 @@ const FALLBACK = {
     "waystones:orange_sharestone": { name: "sharestone_name", none: "none_shared", requirements: REQUIREMENTS, shared: true },
     "waystones:waystone": { name: "waystone_name", none: "none", requirements: REQUIREMENTS, shared: false },
   },
+  portstones: {
+    "waystones:orange_portstone": {
+      requirements: REQUIREMENTS, target: "waystones:orange_sharestone", title: "container.waystones.orange_portstone",
+    },
+    "waystones:white_portstone": {
+      requirements: REQUIREMENTS, target: "waystones:waystone", title: "container.waystones.white_portstone",
+    },
+  },
   range_sq: 64,
   restricted_origins: ["PLAYER"],
   sounds: {
@@ -73,6 +87,8 @@ const component = _startup()[table.component];
 const HALF = table.half_state;
 const TYPE = "waystones:waystone";
 const ORANGE = "waystones:orange_sharestone";
+const ORANGE_PORT = "waystones:orange_portstone";
+const WHITE_PORT = "waystones:white_portstone";
 
 // -- a tiny world --------------------------------------------------------------
 
@@ -573,4 +589,159 @@ test("a waystone record left where a sharestone now stands is replaced, not reus
   assert.equal(now.type, ORANGE);
   assert.equal(now.owner, null);
   assert.equal(alex.messages.length, 0);
+});
+
+// -- portstones ----------------------------------------------------------------
+
+test("menu targets: shared lists the type, else the activated of that type; a null source leaves none out", () => {
+  const records = [
+    { uid: "a", type: ORANGE, order: 1 },
+    { uid: "w1", order: 2 },
+    { uid: "w2", type: TYPE, order: 3 },
+    { uid: "b", type: ORANGE, order: 4 },
+  ];
+  assert.deepEqual(core.menuTargets(true, [], records, ORANGE, null, TYPE).map((r) => r.uid), ["a", "b"]);
+  assert.deepEqual(core.menuTargets(false, ["w2", "a", "w1"], records, TYPE, null, TYPE).map((r) => r.uid), ["w2", "w1"]);
+  assert.deepEqual(core.menuTargets(false, ["w2", "w1"], records, TYPE, "w2", TYPE).map((r) => r.uid), ["w1"]);
+});
+
+test("placing a portstone sets its upper half and nothing else", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  assert.equal(await place(overworld, alex, { x: 0, y: 64, z: 0 }, "west", ORANGE_PORT), true);
+  const upper = overworld.blockAt({ x: 0, y: 65, z: 0 }).permutation;
+  assert.equal(upper.getState(HALF), "upper");
+  assert.equal(upper.getState("minecraft:cardinal_direction"), "west");
+  // No waystone stored, no name asked, nothing activated.
+  assert.deepEqual(world.getDynamicPropertyIds().filter((k) => k.startsWith(core.recordPrefix("waystones"))), []);
+  assert.equal(_shown.filter((form) => form.player === alex).length, 0);
+  assert.equal(alex.getDynamicProperty(core.activatedKey("waystones")), undefined);
+});
+
+test("a portstone with no room above is not placed", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  overworld.set({ x: 0, y: 65, z: 0 }, "minecraft:stone");
+  assert.equal(await place(overworld, alex, { x: 0, y: 64, z: 0 }, "north", WHITE_PORT), false);
+});
+
+test("a coloured portstone lists every sharestone of its colour and teleports from any distance", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const nether = makeDimension("minecraft:nether");
+  const alex = makePlayer(overworld, { id: "1" });
+  const sam = makePlayer(overworld, { id: "2", name: "Sam", xp: 100 });
+  _respond({ canceled: false, formValues: ["A"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 }, "north", ORANGE);
+  _respond({ canceled: false, formValues: ["W"] });
+  await place(overworld, alex, { x: 20, y: 64, z: 0 });
+  alex.dimension = nether;
+  _respond({ canceled: false, formValues: ["N"] });
+  await place(nether, alex, { x: 0, y: 64, z: 0 }, "north", ORANGE);
+  alex.dimension = overworld;
+  await place(overworld, alex, { x: 900, y: 64, z: 0 }, "north", ORANGE_PORT);
+  // Sam uses the portstone's upper half, sneaking (Java opens the menu either way).
+  sam.location = { x: 900, y: 64, z: 2 };
+  sam.isSneaking = true;
+  _respond({ canceled: false, selection: 0 });
+  use(overworld, sam, { x: 900, y: 65, z: 0 });
+  _flush();
+  // Far away by the time the choice lands: a portstone has no range to leave.
+  sam.location = { x: 1000, y: 64, z: 0 };
+  await tick();
+  const menu = _shown.at(-1);
+  assert.equal(menu.kind, "action");
+  assert.deepEqual(menu.title, { translate: "container.waystones.orange_portstone" });
+  // No "Current Location" header: there is no waystone in use.
+  assert.equal(menu.body, "");
+  // Both orange sharestones, in placement order; never the waystone.
+  assert.deepEqual(menu.buttons.map((b) => b.text.rawtext[0]), [{ text: "A" }, { text: "N" }]);
+  // Costs from where the player stands (distance x 0.01: 8 from the portstone; 27 across dimensions).
+  assert.equal(menu.buttons[0].text.rawtext[2].rawtext[0].with.rawtext[0].text, "8");
+  assert.equal(menu.buttons[1].text.rawtext[2].rawtext[0].with.rawtext[0].text, "27");
+  assert.equal(sam.teleports.length, 1);
+  assert.deepEqual(sam.teleports.at(-1).location, { x: 0.5, y: 64.5, z: -0.5 });
+  // Charged from where the player is at the teleport (999.5 blocks away: 9).
+  assert.equal(sam.xp, 91);
+  assert.equal(sam.messages.length, 0);
+  assert.equal(sam.getDynamicProperty(core.activatedKey("waystones")), undefined);
+});
+
+test("a lone coloured portstone says there are no matching sharestones", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 }, "north", ORANGE_PORT);
+  use(overworld, alex, { x: 0, y: 64, z: 0 });
+  _flush();
+  await tick();
+  const menu = _shown.at(-1);
+  assert.equal(menu.buttons.length, 0);
+  assert.deepEqual(menu.body.rawtext, [{ rawtext: [{ translate: table.messages.none_shared }] }]);
+});
+
+test("the white portstone lists the player's activated waystones, never sharestones, and activates nothing", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1", xp: 100 });
+  const sam = makePlayer(overworld, { id: "2", name: "Sam" });
+  _respond({ canceled: false, formValues: ["Home"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 });
+  alex.location = { x: 10, y: 64, z: 2 };
+  _respond({ canceled: false, formValues: ["Farm"] });
+  await place(overworld, alex, { x: 10, y: 64, z: 0 });
+  _respond({ canceled: false, formValues: ["S"] });
+  await place(overworld, alex, { x: 20, y: 64, z: 0 }, "north", ORANGE);
+  await place(overworld, alex, { x: 30, y: 64, z: 0 }, "north", WHITE_PORT);
+  alex.location = { x: 30, y: 64, z: 2 };
+  _respond({ canceled: false, selection: 1 });
+  use(overworld, alex, { x: 30, y: 64, z: 0 });
+  _flush();
+  await tick();
+  const menu = _shown.at(-1);
+  assert.deepEqual(menu.title, { translate: "container.waystones.white_portstone" });
+  // Both waystones, in activation order, the first not left out (none is in use).
+  assert.deepEqual(menu.buttons.map((b) => b.text.rawtext[0]), [{ text: "Home" }, { text: "Farm" }]);
+  assert.deepEqual(alex.teleports.at(-1).location, { x: 10.5, y: 64.5, z: -0.5 });
+  // Sam activated nothing: the empty list says so, and using it activated nothing.
+  _respond({ canceled: true });
+  use(overworld, sam, { x: 30, y: 64, z: 0 });
+  _flush();
+  await tick();
+  const empty = _shown.at(-1);
+  assert.equal(empty.buttons.length, 0);
+  assert.deepEqual(empty.body.rawtext, [{ rawtext: [{ translate: table.messages.none }] }]);
+  assert.equal(sam.getDynamicProperty(core.activatedKey("waystones")), undefined);
+  assert.equal(sam.messages.length, 0);
+});
+
+test("a portstone target that is gone is reported missing", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  _respond({ canceled: false, formValues: ["A"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 }, "north", ORANGE);
+  await place(overworld, alex, { x: 5, y: 64, z: 0 }, "north", ORANGE_PORT);
+  overworld.set({ x: 0, y: 64, z: 0 }, "minecraft:stone");
+  _respond({ canceled: false, selection: 0 });
+  use(overworld, alex, { x: 5, y: 64, z: 0 });
+  _flush();
+  await tick();
+  assert.equal(alex.teleports.length, 0);
+  assert.equal(alex.actionbar.at(-1).rawtext[0].translate, table.messages.missing);
+});
+
+test("breaking a portstone's upper half destroys the lower one with its drops", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 }, "north", WHITE_PORT);
+  const upper = overworld.blockAt({ x: 0, y: 65, z: 0 });
+  const permutation = upper.permutation;
+  upper.setType("minecraft:air");
+  component.onPlayerBreak({ block: upper, brokenBlockPermutation: permutation, dimension: overworld, player: alex });
+  assert.deepEqual(overworld.commands, ["setblock 0 64 0 air destroy"]);
+  assert.equal(overworld.typeAt({ x: 0, y: 64, z: 0 }), "minecraft:air");
 });

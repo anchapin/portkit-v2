@@ -1,4 +1,4 @@
-// portkit station runtime: Waystones waystones and sharestones, Bedrock binding (#178).
+// portkit station runtime: Waystones waystones, sharestones and portstones, Bedrock binding (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). The generated entry
@@ -17,7 +17,10 @@
 // Networks: the table maps each block to its Java waystone type and each type
 // to a network. A waystone's (not shared) lists the waystones the player
 // activated; a sharestone's (shared, one per colour) lists every sharestone of
-// its type and has nothing to activate.
+// its type and has nothing to activate. A portstone (table.portstones) is no
+// waystone: it stores nothing, and using it opens the menu of the network it
+// targets with no waystone in use, so nothing is left out and no distance is
+// checked.
 
 import { GameMode, system, world } from "@minecraft/server";
 import { ActionFormData, FormCancelationReason, ModalFormData } from "@minecraft/server-ui";
@@ -57,6 +60,11 @@ function typeOf(table, record) {
 
 function network(table, record) {
   return table.networks[typeOf(table, record)];
+}
+
+/** The table's entry for a portstone block, or undefined for a waystone or sharestone. */
+function portstoneOf(table, typeId) {
+  return (table.portstones || {})[typeId];
 }
 
 function lowerPos(table, block, permutation) {
@@ -155,6 +163,9 @@ function placed(table, event) {
   if (permutation.getState(table.half_state) !== "lower") return;
   const above = block.above();
   if (above) above.setPermutation(permutation.withState(table.half_state, "upper"));
+  // setPlacedBy L299: a portstone's block entity is no waystone, so placing
+  // one makes nothing else (no owner, no name, nothing activated).
+  if (portstoneOf(table, block.typeId)) return;
   const pos = { ...block.location };
   // A fresh waystone replaces anything stale stored at this spot.
   saveStored(core.recordKey(table.namespace, block.dimension.id, pos), undefined);
@@ -193,6 +204,18 @@ function interact(table, event) {
     const below = block.below();
     if (!below || below.typeId !== block.typeId) return; // a lone upper half is no waystone
   }
+  // PortstoneBlock#useWithoutItem L133-143: the menu of its target network,
+  // sneaking or not, with no source waystone.
+  const port = portstoneOf(table, block.typeId);
+  if (port) {
+    system.run(() => menu(table, player, {
+      type: port.target,
+      requirements: port.requirements,
+      title: { translate: port.title },
+      from: null,
+    }));
+    return;
+  }
   const pos = lowerPos(table, block, permutation);
   const record = recordAt(table, dimension, pos, permutation, null, block.typeId);
   // handleEditActions L196-205: sneaking opens the settings.
@@ -207,7 +230,12 @@ function interact(table, event) {
   // SharestoneBlock#handleActivation L74-82: the menu, nothing to activate.
   // WaystoneBlock#handleActivation L81-123.
   if (network(table, record).shared || activated(table, player).includes(record.uid)) {
-    system.run(() => menu(table, player, record));
+    system.run(() => menu(table, player, {
+      type: typeOf(table, record),
+      requirements: network(table, record).requirements,
+      title: { translate: table.messages.title },
+      from: record,
+    }));
     return;
   }
   activate(table, player, record.uid);
@@ -222,17 +250,26 @@ function context(player, target) {
   };
 }
 
-/** The selection menu (WaystoneSelectionScreen), then the teleport. */
-function menu(table, player, from) {
-  const net = network(table, from);
-  const list = net.shared
-    ? core.sharedTargets(records(table), typeOf(table, from), from.uid, table.default_type)
-    : core.targets(activated(table, player), records(table), from.uid).filter((r) => typeOf(table, r) === typeOf(table, from));
-  const body = [message(table, "current_location", [core.nameText(from.name, table.messages.unnamed)])];
-  if (list.length === 0) body.push({ text: "\n" }, message(table, net.none));
-  const form = new ActionFormData().title({ translate: table.messages.title }).body({ rawtext: body });
+/**
+ * The selection menu (WaystoneSelectionScreen), then the teleport. `source`
+ * is {type, requirements, title, from}: the network listed, the cost rules,
+ * the form title, and the waystone in use (null from a portstone: Java's
+ * screen then has no "Current Location" header, L333-337).
+ */
+function menu(table, player, source) {
+  const { from } = source;
+  const net = table.networks[source.type];
+  const list = core.menuTargets(net.shared, activated(table, player), records(table), source.type,
+    from ? from.uid : null, table.default_type);
+  const body = [];
+  if (from) body.push(message(table, "current_location", [core.nameText(from.name, table.messages.unnamed)]));
+  if (list.length === 0) {
+    if (body.length) body.push({ text: "\n" });
+    body.push(message(table, net.none));
+  }
+  const form = new ActionFormData().title(source.title).body(body.length ? { rawtext: body } : "");
   for (const target of list) {
-    const points = core.cost(net.requirements, context(player, target));
+    const points = core.cost(source.requirements, context(player, target));
     const label = [core.nameText(target.name, table.messages.unnamed)];
     if (points > 0) label.push({ text: "\n" }, message(table, "xp_cost", [{ text: String(points) }]));
     form.button({ rawtext: label });
@@ -240,20 +277,22 @@ function menu(table, player, from) {
   show(form, player).then((response) => {
     if (response.canceled || response.selection === undefined) return;
     const target = list[response.selection];
-    if (target) teleport(table, player, from, target);
+    if (target) teleport(table, player, source, target);
   });
 }
 
 /** SelectWaystoneMessage -> WaystoneTeleportManager#tryTeleport. */
-function teleport(table, player, from, target) {
+function teleport(table, player, source, target) {
+  const { from } = source;
   const fail = (role) => player.onScreenDisplay.setActionBar(message(table, role));
-  // validateTeleportStart L449-452: still near the waystone used.
-  if (player.dimension.id !== from.dimension || !core.inRange(player.location, from.pos, table.range_sq)) {
+  // validateTeleportStart L449-452: still near the waystone used; with no
+  // waystone in use (a portstone) there is nothing to be near (L523-528).
+  if (from && (player.dimension.id !== from.dimension || !core.inRange(player.location, from.pos, table.range_sq))) {
     return fail("out_of_range");
   }
   const key = core.recordKey(table.namespace, target.dimension, target.pos);
   const current = loadStored(key);
-  if (!current || current.uid !== target.uid || typeOf(table, current) !== typeOf(table, from)) return fail("missing");
+  if (!current || current.uid !== target.uid || typeOf(table, current) !== source.type) return fail("missing");
   const dimension = world.getDimension(current.dimension);
   const lower = blockAt(dimension, current.pos);
   if (lower && table.block_types[lower.typeId] !== typeOf(table, current)) {
@@ -261,7 +300,7 @@ function teleport(table, player, from, target) {
     saveStored(key, undefined);
     return fail("missing");
   }
-  const points = core.cost(network(table, from).requirements, context(player, current));
+  const points = core.cost(source.requirements, context(player, current));
   const creative = player.getGameMode() === GameMode.Creative;
   if (!core.canAfford(player.getTotalXp(), points, creative)) return fail("not_enough_xp");
   let side = current.facing;
@@ -275,14 +314,14 @@ function teleport(table, player, from, target) {
   const destination = core.destination(current.pos, side, current.facing);
   // consumeRequirements L490-494: giveExperiencePoints(-points), creative too.
   if (points > 0) player.addExperience(-points);
-  const source = { ...player.location };
+  const departure = { ...player.location };
   const sourceDimension = player.dimension;
   player.teleport(destination.location, {
     dimension,
     rotation: { x: player.getRotation().x, y: destination.yaw },
   });
   // performTeleport L161-162.
-  play(sourceDimension, source, table.sounds.depart);
+  play(sourceDimension, departure, table.sounds.depart);
   play(dimension, destination.location, table.sounds.arrive);
 }
 
@@ -305,6 +344,7 @@ function broken(table, event) {
       other.setType("minecraft:air");
     }
   }
+  // A portstone stores nothing; whatever is stored at its spot is stale.
   saveStored(core.recordKey(table.namespace, dimension.id, pos), undefined);
 }
 

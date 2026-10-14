@@ -1,4 +1,4 @@
-// portkit station runtime: Waystones waystone and sharestone logic (#178).
+// portkit station runtime: Waystones waystone, sharestone and portstone logic (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). No imports, so it runs under
@@ -177,6 +177,18 @@ export function sharedTargets(records, type, fromUid, fallback) {
   return records
     .filter((r) => r.uid !== fromUid && recordType(r, fallback) === type)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
+}
+
+/**
+ * A menu's entries for a network of `type` (PlayerWaystoneManager
+ * #getTargetsForWaystoneType L323-333): a shared network (a sharestone colour)
+ * lists every stored waystone of that type, any other the player's activated
+ * waystones of that type; `fromUid` (the waystone in use, null from a
+ * portstone, which is no waystone) is left out.
+ */
+export function menuTargets(shared, activated, records, type, fromUid, fallback) {
+  if (shared) return sharedTargets(records, type, fromUid, fallback);
+  return targets(activated, records, fromUid).filter((r) => recordType(r, fallback) === type);
 }
 
 /** The player's activated list with `uid` added (PlayerWaystoneManager#activateWaystone). */

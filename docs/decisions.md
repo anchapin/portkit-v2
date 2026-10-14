@@ -27,6 +27,75 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: portstones open their colour's sharestone network (white: the player's waystones) from anywhere; a portstone is no waystone
+
+- **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR #202).
+- **Decision:** Waystones' sixteen portstones (the `waystones:portstones`
+  block tag intersected with the colours `ModBlocks` registers a
+  `PortstoneBlock` for, L16-33 / L90-94: every dye colour, white included)
+  run through the waystone runtime of #198/#201. A portstone is no waystone:
+  its block entity is a plain `PortstoneBlockEntity`, so `setPlacedBy`
+  (L299) makes nothing beyond the upper half (no record, owner, name or
+  activation) and nothing ever lists it (its tooltip: "Can not be teleported
+  to."). Using one, sneaking or not, opens a menu of the network
+  `PortstoneBlock#getTargetWaystoneType` (L145-147) names: its colour's
+  sharestones (every one in the world, any dimension, placement order), or,
+  for white (`WaystoneTypes.getSharestone` has no white sharestone), the
+  waystones the player activated (activation order;
+  `getTargetsForWaystoneType` L323-333). The menu has no waystone in use
+  (`WaystoneSelectionListBuilder` L69-72), so nothing is left out, there is
+  no "Current Location" header (`WaystoneSelectionScreenBase` L333-337), and
+  no distance is checked: `WaystoneSelectionMenu#stillValid` (L79-86) and
+  `isSourceWaystoneInRange` (L523-528) pass without a source waystone, so the
+  player can walk away before choosing. The title is the jar's
+  `container.waystones.<colour>_portstone` (L140); an empty list shows the
+  sharestone or the waystone text by target kind (L349-360). The table gains
+  `portstones` (block -> `target` type, `title`, `requirements`); portstones
+  are in `blocks` (placement and breaking) but not `block_types` (never a
+  target).
+- **Cost:** the `warpRequirements` default is parsed once per target type
+  with a portstone's conditions decided (`fixed_conditions(kind,
+  portstone=True)`): `source_is_portstone` true (the menu's PORTSTONE flag,
+  ModMenus L27); `source_is_waystone`, `source_is_sharestone` and every
+  `source_is_<colour>_sharestone` false (no source waystone); the target's
+  conditions as for its network. The defaults have no portstone line, so a
+  portstone teleport costs what a waystone's does, from where the player
+  stands (distance x 0.01 points, 27 across dimensions, at most 27).
+- **Block:** facing x `waystones:half`; the lower box is full (north
+  `LOWER_SHAPES` spans 0-16), the upper is the bounding box of north
+  `UPPER_SHAPES` (x 3-13, y 0-7, z 7-13), turned per facing by the same
+  `minecraft:transformation` as the geometry (which turns collision and
+  selection boxes, Bedrock-OSS wiki blocks/block-orientation). The jar's loot
+  table drops from the lower half; there is nothing for silk touch to copy.
+- **Gating:** a portstone ships only when the jar has its title and its
+  empty-list text and its target network converted (a coloured portstone
+  needs its colour's sharestone, the white one a waystone); otherwise it
+  stays residue with the reason.
+- **Why:** Java builds the portstone on `WaystoneBlockBase` and the same
+  selection menu and teleport manager, so one runtime keeps one copy; the
+  target rule, the missing range check and the conditions are read straight
+  from the code paths a portstone takes.
+- **Rejected:** storing a record for portstones (they would become targets,
+  which Java's are not); the 8-block range rule from the portstone (Java has
+  no source waystone to measure from); reusing each network's requirement
+  list (wrong as soon as a config line names `source_is_portstone` or
+  `source_is_sharestone`); a "select your destination" title (Java shows the
+  portstone's own name); one centred upper box for every facing (10x7x10,
+  larger than any facing's shape) or a collision box array; shipping a
+  portstone whose network did not convert (an always-empty menu); drawing the
+  runes (code-rendered by `PortstoneRenderer`, as for sharestones).
+- **Not carried over (conversion note):** the coloured runes and the
+  floating warp stone (`PortstoneRenderer`), the item tooltip and the 3D item
+  model, global and team waystones in the white portstone's list (visibility
+  is not carried), the menu's sorting, search and deleting, and what #198
+  lists for waystones (pets and leashed mobs, waterlogging, the free-space
+  tests, an unloaded target's room check, explosions taking one half, config
+  changes).
+- **Coverage:** Waystones 20.8 -> 25.3 (204 -> 252 files, residue 778 ->
+  744); no other corpus mod changed.
+- **Links:** #178, PR #198 (waystones), PR #201 (sharestones), #87 (no
+  fabrication), PR (this).
+
 ## 2026-10-13: sharestones share one network per colour through the waystone runtime; the cost is the same cited default, decided per waystone type
 
 - **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR #201).
