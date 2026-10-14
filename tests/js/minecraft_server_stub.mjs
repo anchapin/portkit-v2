@@ -12,6 +12,8 @@ const MAX = {
   "minecraft:iron_shovel": 1, "farmersdelight:iron_knife": 1, "minecraft:wooden_shovel": 1,
   // The warp plate's shards (AttunedShardItem stacksTo(1), CrumblingAttunedShardItem stacksTo(4)).
   "waystones:attuned_shard": 1, "waystones:crumbling_attuned_shard": 4,
+  // The bound scroll, which carries its waystone as script data (#178 scrolls).
+  "waystones:bound_scroll": 1,
 };
 const DURABILITY = { "minecraft:iron_shovel": 250, "farmersdelight:iron_knife": 250, "minecraft:wooden_shovel": 59 };
 

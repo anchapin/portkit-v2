@@ -1,4 +1,4 @@
-// portkit station runtime: Waystones waystones, sharestones, portstones, warp plates and warp portals, Bedrock binding (#178).
+// portkit station runtime: Waystones waystones, sharestones, portstones, warp plates, warp portals and scrolls, Bedrock binding (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). The generated entry
@@ -41,8 +41,16 @@
 // lifetime. A player who came through keeps the portal's uid (player dynamic
 // property) and sees "Return to Portal" in waystone and sharestone menus
 // while it stands.
+//
+// Scrolls (table.scrolls): the warp, return and bound scrolls use the same
+// timer as the portal scroll; then the warp scroll opens the menu of the
+// player's activated waystones (and "Return to Portal"), the return scroll
+// teleports to the return portal or the nearest activated waystone in the
+// player's dimension, and the bound scroll to the waystone whose uid it holds
+// as an item dynamic property. A blank scroll used on a waystone or
+// sharestone gives a bound scroll bound to it.
 
-import { BlockPermutation, EquipmentSlot, GameMode, system, world } from "@minecraft/server";
+import { BlockPermutation, EquipmentSlot, GameMode, ItemStack, system, world } from "@minecraft/server";
 import { ActionFormData, FormCancelationReason, ModalFormData } from "@minecraft/server-ui";
 import * as core from "./waystone_core.js";
 import { centre, describe, loadStored, play, rebuild, saveStored } from "./station_storage.js";
@@ -250,9 +258,19 @@ function interact(table, event) {
     const below = block.below();
     if (!below || below.typeId !== block.typeId) return; // a lone upper half is no waystone
   }
+  const port = portstoneOf(table, block.typeId);
+  // WaystoneBlockBase#useItemOn L257-262: a blank scroll in hand skips the
+  // block's own use (sneaking or not: the item's useOn runs either way), and
+  // BlankScrollItem#useOn L20-43 binds a scroll to a waystone's or
+  // sharestone's waystone; a portstone's block entity holds none, so nothing.
+  const held = heldItem(player);
+  if (held && table.scrolls && table.scrolls.blank.includes(held.typeId)) {
+    if (!port) bind(table, player, recordAt(table, dimension, lowerPos(table, block, permutation), permutation,
+      null, block.typeId), held);
+    return;
+  }
   // PortstoneBlock#useWithoutItem L133-143: the menu of its target network,
   // sneaking or not, with no source waystone.
-  const port = portstoneOf(table, block.typeId);
   if (port) {
     system.run(() => menu(table, player, {
       type: port.target,
@@ -313,7 +331,8 @@ function menu(table, player, source) {
     from ? from.uid : null, table.default_type);
   // getTargetsForWaystone L318: a waystone's or sharestone's menu ends with
   // the portal the player last came through, while it stands.
-  const back = from && table.warp_portals ? returnPortal(table, player) : undefined;
+  // The warp scroll's menu has it too (getTargetsForItem L299-304).
+  const back = (from || source.back) && table.warp_portals ? returnPortal(table, player) : undefined;
   if (back) list.push(back);
   const body = [];
   if (from) body.push(message(table, "current_location", [core.nameText(from.name, table.messages.unnamed)]));
@@ -340,6 +359,7 @@ function menu(table, player, source) {
 
 /** The cost rules of a teleport from `source` to `target`: "Return to Portal" has its own per menu type. */
 function requirementsTo(table, source, target) {
+  if (source.requirementsFor) return source.requirementsFor(target);
   if (table.warp_portals && target.type === table.warp_portals.type) {
     return table.warp_portals.return_requirements[source.type] || [];
   }
@@ -765,7 +785,7 @@ const AGE_SAVE = 20;
 // Entity id -> the portal clock tick it last used a portal
 // (WarpPortalManager.portalCooldowns, unsaved, keyed by tickCount).
 const portalUses = new Map();
-// Player id -> {player, slot, typeId, ticks}: a portal scroll in use.
+// Player id -> {player, slot, typeId, ticks, useTime}: a scroll in use.
 const charging = new Map();
 // Ticks counted by the portal interval (Java counts each entity's tickCount).
 let portalClock = 0;
@@ -786,15 +806,29 @@ function portalError(table, role) {
  */
 function scrollUsed(table, event) {
   const { source: player, itemStack } = event;
-  const scroll = table.warp_portals.scroll;
-  if (!player || !itemStack || !scroll.items.includes(itemStack.typeId)) return;
+  if (!player || !itemStack) return;
+  const useTime = scrollUseTime(table, itemStack.typeId);
+  if (useTime === undefined) return;
   if (charging.has(player.id)) return;
   play(player.dimension, player.location, table.sounds.scroll_start);
-  if (scroll.use_time <= 0) {
-    scrollFinished(table, player);
+  if (useTime <= 0) {
+    scrollDone(table, player, itemStack.typeId);
     return;
   }
-  charging.set(player.id, { player, slot: player.selectedSlotIndex, typeId: itemStack.typeId, ticks: 0 });
+  charging.set(player.id, { player, slot: player.selectedSlotIndex, typeId: itemStack.typeId, ticks: 0, useTime });
+}
+
+/** A scroll's use time (getUseDuration: general.scrollUseTime), or undefined for any other item. */
+function scrollUseTime(table, typeId) {
+  if (table.warp_portals && table.warp_portals.scroll.items.includes(typeId)) return table.warp_portals.scroll.use_time;
+  if (table.scrolls && table.scrolls.items[typeId]) return table.scrolls.use_time;
+  return undefined;
+}
+
+/** finishUsingItem of the scroll used: the portal scroll's, or a warp, return or bound scroll's. */
+function scrollDone(table, player, typeId) {
+  if (table.warp_portals && table.warp_portals.scroll.items.includes(typeId)) scrollFinished(table, player);
+  else scrollItemFinished(table, player, typeId);
 }
 
 function heldAt(player, slot) {
@@ -813,7 +847,6 @@ function heldAt(player, slot) {
  * released, so letting go does not stop it here.
  */
 function scrollTicks(table) {
-  const scroll = table.warp_portals.scroll;
   for (const [id, c] of charging) {
     const player = c.player;
     if (!player || (player.isValid !== undefined && !player.isValid)) {
@@ -826,9 +859,9 @@ function scrollTicks(table) {
       continue;
     }
     c.ticks += 1;
-    if (c.ticks >= scroll.use_time) {
+    if (c.ticks >= c.useTime) {
       charging.delete(id);
-      scrollFinished(table, player);
+      scrollDone(table, player, c.typeId);
     }
   }
 }
@@ -1065,6 +1098,141 @@ function portalInterval(table) {
   }
 }
 
+// -- warp, return and bound scrolls ----------------------------------------------
+
+/** The item in the player's selected slot (Java's used hand here: the main hand). */
+function heldItem(player) {
+  return typeof player.selectedSlotIndex === "number" ? heldAt(player, player.selectedSlotIndex) : undefined;
+}
+
+/** A DARK_RED action-bar text (BoundScrollItem L49-50, SelectWaystoneMessage L64, L86-89). */
+function scrollError(table, role) {
+  return { rawtext: [{ text: table.scrolls.error_style }, { translate: table.messages[role] }] };
+}
+
+/** ItemStack#consume(1, player): one of the scroll in hand goes, not in creative. */
+function useUp(player, typeId) {
+  if (creative(player)) return;
+  const inventory = player.getComponent("minecraft:inventory");
+  const container = inventory && inventory.container;
+  const slot = player.selectedSlotIndex;
+  const held = container ? container.getItem(slot) : undefined;
+  if (!held || held.typeId !== typeId) return;
+  if (held.amount > 1) {
+    held.amount -= 1;
+    container.setItem(slot, held);
+  } else {
+    container.setItem(slot, undefined);
+  }
+}
+
+/**
+ * finishUsingItem of a warp, return or bound scroll: the warp scroll's menu
+ * (WarpScrollItem L25-36: getTargetsForItem, the player's activated
+ * waystones and the return portal; no source waystone), or a teleport to the
+ * bound waystone (BoundScrollItem L37-55) or, for the return scroll, to the
+ * return portal or the nearest activated waystone (ReturnScrollItem L19-22).
+ * No target does nothing (Optional#ifPresent).
+ */
+function scrollItemFinished(table, player, typeId) {
+  const scrolls = table.scrolls;
+  const item = scrolls.items[typeId];
+  if (!item) return;
+  if (item.kind === "warp") {
+    system.run(() => menu(table, player, {
+      type: scrolls.network,
+      requirementsFor: (target) => scrollRequirements(table, item, target),
+      title: { translate: scrolls.title },
+      from: null,
+      back: true,
+      select: (target) => scrollTeleport(table, player, typeId, target, true),
+    }));
+    return;
+  }
+  let target;
+  if (item.kind === "bound") {
+    const held = heldItem(player);
+    const uid = held && held.typeId === typeId && held.getDynamicProperty
+      ? held.getDynamicProperty(scrolls.binding_property) : undefined;
+    // WaystoneProxy by uid: a waystone that no longer exists fails with
+    // InvalidWaystone, whose message is empty (WaystoneTeleportError L45-50).
+    if (typeof uid === "string") target = records(table).find((r) => r.uid === uid) ?? null;
+  } else {
+    target = (table.warp_portals ? returnPortal(table, player) : undefined)
+      ?? core.nearestWaystone(activated(table, player), records(table), scrolls.network, player.dimension.id,
+        player.location, table.default_type);
+  }
+  if (target) scrollTeleport(table, player, typeId, target, false);
+}
+
+/** The cost rules of a teleport with a scroll to `target`, by the target's type (a return portal its own). */
+function scrollRequirements(table, item, target) {
+  const type = table.warp_portals && target.type === table.warp_portals.type
+    ? table.warp_portals.type : typeOf(table, target);
+  return item.requirements[type] || [];
+}
+
+/**
+ * A scroll's teleport (WaystonesAPI#createUncheckedDefaultTeleportContext with
+ * the scroll as the warp item, then tryTeleportAsync): from the warp scroll's
+ * menu the scroll must still be in hand (isSameItemSameComponents; else
+ * SourceItemMissing, SelectWaystoneMessage L60-66); the target must still
+ * exist (else nothing: an empty message) with its block (else "missing"); a
+ * player who can't pay is told (validateRequirements); then the cost is taken,
+ * the player lands beside it and one scroll is used up (the post-teleport
+ * handler / ifLeft: consume). Errors go to the action bar in DARK_RED.
+ */
+function scrollTeleport(table, player, typeId, target, fromMenu) {
+  const item = table.scrolls.items[typeId];
+  const fail = (role) => player.onScreenDisplay.setActionBar(scrollError(table, role));
+  if (fromMenu) {
+    const held = heldItem(player);
+    if (!held || held.typeId !== typeId) return fail("source_item_missing");
+  }
+  const key = core.recordKey(table.namespace, target.dimension, target.pos);
+  const current = loadStored(key);
+  if (!current || current.uid !== target.uid) return;
+  const toPortal = !!table.warp_portals && current.type === table.warp_portals.type;
+  if (!toPortal && !table.networks[typeOf(table, current)]) return;
+  const dimension = world.getDimension(current.dimension);
+  const lower = blockAt(dimension, current.pos);
+  if (lower && (toPortal ? !isPortal(table, lower.typeId) : table.block_types[lower.typeId] !== typeOf(table, current))) {
+    // The block went without a player breaking it (isValidInLevel fails).
+    saveStored(key, undefined);
+    return fail("missing");
+  }
+  const points = core.cost(scrollRequirements(table, item, current), context(player, current));
+  if (!core.canAfford(player.getTotalXp(), points, creative(player))) return fail("not_enough_xp");
+  if (points > 0) player.addExperience(-points);
+  land(table, player, current, lower, dimension);
+  useUp(player, typeId);
+}
+
+/**
+ * BlankScrollItem#useOn L20-43: a bound scroll bound to `record`
+ * (WaystonesAPI#setBoundWaystone -> BoundScrollItem#setWaystoneAttunedTo
+ * L67-76: its uid and its name), when the inventory has a free slot or, outside
+ * creative, the blank scroll in hand is the last; one blank scroll is used up
+ * (not in creative), and the bound scroll goes into the inventory or, when it
+ * doesn't fit, is dropped at the player.
+ */
+function bind(table, player, record, held) {
+  const scrolls = table.scrolls;
+  const inventory = player.getComponent("minecraft:inventory");
+  const container = inventory && inventory.container;
+  if (!container) return;
+  const isCreative = creative(player);
+  // A bound scroll holds one (it carries script data), so no slot can take it on top.
+  if (!core.mayBind(container.emptySlotsCount ?? 0, false, isCreative, held.amount)) return;
+  useUp(player, held.typeId);
+  const stack = new ItemStack(scrolls.bound, 1);
+  stack.setDynamicProperty(scrolls.binding_property, record.uid);
+  const name = record.name && typeof record.name.text === "string" ? record.name.text : "";
+  if (name) stack.setLore([`${scrolls.name_style}${name}`]);
+  const left = container.addItem(stack);
+  if (left) player.dimension.spawnItem(left, player.location);
+}
+
 /** Register the waystones' custom component for one mod's data table. */
 export function registerWaystones(table) {
   system.beforeEvents.startup.subscribe((init) => {
@@ -1088,12 +1256,14 @@ export function registerWaystones(table) {
   });
   world.afterEvents.playerPlaceBlock.subscribe((event) => placed(table, event));
   if (table.warp_plates) system.runInterval(() => entityTicks(table), 1);
-  if (table.warp_portals) {
+  if (table.warp_portals || table.scrolls) {
     world.afterEvents.itemUse.subscribe((event) => scrollUsed(table, event));
-    // WarpDamageResetHandler#onDamage L10-15: damage stops a scroll's use.
+    // WarpDamageResetHandler#onDamage L10-15: damage stops a scroll's use
+    // (every scroll is an IResetUseOnDamage).
     world.afterEvents.entityHurt.subscribe((event) => {
       if (event.hurtEntity) charging.delete(event.hurtEntity.id);
     });
-    system.runInterval(() => portalInterval(table), 1);
+    if (table.warp_portals) system.runInterval(() => portalInterval(table), 1);
+    else system.runInterval(() => scrollTicks(table), 1);
   }
 }

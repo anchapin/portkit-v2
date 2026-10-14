@@ -386,3 +386,35 @@ export function mayUsePortal(uses, id, clock, cooldown) {
   uses.set(id, clock);
   return true;
 }
+
+// -- scrolls -----------------------------------------------------------------
+
+/**
+ * PlayerWaystoneManager#getNearestWaystone L104-117 (the return scroll's
+ * target when there is no return portal): of the player's activated waystones
+ * (in activation order) of `type` that still exist, those in the player's
+ * dimension, the one whose block centre is nearest (distanceToSqr; Stream#min
+ * keeps the first of equals); undefined when there is none.
+ */
+export function nearestWaystone(activated, records, type, dimensionId, location, fallback) {
+  let best;
+  let bestDistance = Infinity;
+  for (const record of targets(activated, records, null)) {
+    if (recordType(record, fallback) !== type || record.dimension !== dimensionId) continue;
+    const d = distance(location, record.pos);
+    if (d < bestDistance) {
+      best = record;
+      bestDistance = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * BlankScrollItem#useOn L29-38: whether binding goes ahead (an empty slot, a
+ * slot where the bound scroll would stack, or, outside creative, the last
+ * blank scroll in hand, whose slot it then takes).
+ */
+export function mayBind(emptySlots, stackableSlot, creative, heldAmount) {
+  return emptySlots > 0 || stackableSlot || (!creative && heldAmount === 1);
+}
