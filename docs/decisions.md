@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: the warp, return and bound scrolls teleport through the waystone runtime after the portal scroll's hold; a blank scroll binds a bound scroll, which keeps its waystone as item data
 
-- **Status:** proposed (PR #207, Part of #178); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #207, Part of #178).
 - **Decision:** Waystones' warp scroll (`WarpScrollItem`), return scroll
   (`ReturnScrollItem`) and bound scroll (`BoundScrollItem`), with the blank
   scroll (`BlankScrollItem`) that makes a bound scroll (`ModItems` L37-40),
