@@ -434,11 +434,11 @@ test("an unloaded target: the player lands on its front", async () => {
 
 test("shared targets: same type only, without the one in use, in placement order", () => {
   const records = [
-    { uid: "b", type: ORANGE, created: 2 },
-    { uid: "w", created: 0 },
-    { uid: "a", type: ORANGE, created: 1 },
-    { uid: "r", type: "waystones:red_sharestone", created: 3 },
-    { uid: "c", type: ORANGE, created: 2 },
+    { uid: "b", type: ORANGE, order: 2 },
+    { uid: "w", order: 0 },
+    { uid: "a", type: ORANGE, order: 1 },
+    { uid: "r", type: "waystones:red_sharestone", order: 3 },
+    { uid: "c", type: ORANGE, order: 2 },
   ];
   assert.deepEqual(core.sharedTargets(records, ORANGE, "a", TYPE).map((r) => r.uid), ["b", "c"]);
   assert.deepEqual(core.sharedTargets(records, TYPE, "x", TYPE).map((r) => r.uid), ["w"]);
@@ -548,7 +548,7 @@ test("a record stored before records carried a type is a waystone", async () => 
   const key = core.recordKey("waystones", "minecraft:overworld", { x: 0, y: 64, z: 0 });
   const old = JSON.parse(world.getDynamicProperty(key));
   delete old.type;
-  delete old.created;
+  delete old.order;
   world.setDynamicProperty(key, JSON.stringify(old));
   _respond({ canceled: false, selection: 0 });
   use(overworld, alex, { x: 5, y: 64, z: 0 });

@@ -9,7 +9,7 @@
 // @minecraft/server-ui 2.0.0 (ActionFormData, ModalFormData).
 //
 // Storage: a waystone is one world dynamic property keyed by its dimension
-// and lower-half position (JSON: uid, type, created, dimension, pos, facing,
+// and lower-half position (JSON: uid, type, order, dimension, pos, facing,
 // name, owner, origin); a player's activated waystones are a player dynamic
 // property (JSON list of uids, in activation order). Java keeps the same facts
 // in WaystoneManagerImpl and PlayerWaystoneManager's saved data.
@@ -88,6 +88,15 @@ function activate(table, player, uid) {
   player.setDynamicProperty(core.activatedKey(table.namespace), JSON.stringify(next));
 }
 
+/** The next placement number (a world counter), so sharestones list in the order they were placed. */
+function nextOrder(table) {
+  const key = core.orderKey(table.namespace);
+  const raw = world.getDynamicProperty(key);
+  const next = (typeof raw === "number" ? raw : 0) + 1;
+  world.setDynamicProperty(key, next);
+  return next;
+}
+
 function newUid() {
   return `${Date.now().toString(36)}${Math.floor(Math.random() * 0x7fffffff).toString(36)}`;
 }
@@ -108,7 +117,7 @@ function recordAt(table, dimension, pos, permutation, placer, typeId) {
     record = {
       uid: newUid(),
       type,
-      created: Date.now(),
+      order: nextOrder(table),
       dimension: dimension.id,
       pos,
       facing: permutation.getState("minecraft:cardinal_direction") || "north",

@@ -64,7 +64,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   0.01 points, 27 across dimensions, at most 27); a config line with a
   per-colour condition (`source_is_orange_sharestone`) now resolves instead
   of refusing the runtime.
-- **Storage:** records gain `type` and `created`; a record without a type
+- **Storage:** records gain `type` and `order` (a world placement counter,
+  the menu's order); a record without a type
   (written by #198's runtime) is a waystone (`default_type`), so existing
   worlds keep working; a record whose type is not the block's at its spot is
   stale and replaced by a fresh one (no owner), as Java's block entity would
