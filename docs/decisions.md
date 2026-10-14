@@ -89,7 +89,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   them.
 - **Not verified in-game:** placing, breaking, `/give` and `/setblock` with a
   hyphenated custom block id, and crafting a hyphenated recipe result.
-- **Links:** PR (this); deco-mods spike gap 4; #168 (texture keys).
+- **Links:** PR #211; deco-mods spike gap 4; #168 (texture keys).
 
 ## 2026-10-14: "Return to Portal" is pinned to the top of waystone menus, as in Java, below the player's fleeting memorials
 
