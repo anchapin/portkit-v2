@@ -266,3 +266,27 @@ def test_runtime_under_node(converted):
             capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_agent_skips_feast_residue():
+    from portkit.agent.residue import SKIP_KINDS
+
+    assert feasts.RESIDUE_KIND in SKIP_KINDS
+
+
+def test_agent_skips_every_runtime_residue_kind():
+    """Every converter that owns a runtime declares a RESIDUE_KIND; the agent must skip each one (#199)."""
+    import importlib
+    import pkgutil
+
+    import portkit.converters as converters
+    from portkit.agent.residue import SKIP_KINDS
+
+    kinds = {}
+    for mod in pkgutil.iter_modules(converters.__path__):
+        module = importlib.import_module(f"portkit.converters.{mod.name}")
+        kind = getattr(module, "RESIDUE_KIND", None)
+        if isinstance(kind, str):
+            kinds[mod.name] = kind
+    assert {"station_recipe", "feast", "waystone"} <= set(kinds.values())
+    assert {name: kind for name, kind in kinds.items() if kind not in SKIP_KINDS} == {}
