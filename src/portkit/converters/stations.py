@@ -160,6 +160,12 @@ class FacingBlock:
     int_state: bool = False
     # A tinted model the mod's renderer draws over the block (Overlay), or None.
     overlay: Overlay | None = None
+    # False for a block with no facing at all (Waystones' warp plate: its
+    # blockstate is ``status`` alone): no placement trait, one bone per model.
+    facing: bool = True
+    # Leave out model elements with a tinted face (``tintindex``): their colour
+    # is the mod's colour handler's, which the block can't carry. A note names them.
+    drop_tinted: bool = False
 
 
 # Farmer's Delight's cutting board, both corpus builds: FACING is

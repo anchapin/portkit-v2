@@ -8,7 +8,11 @@ const BLOCK_ITEMS = new Set(["minecraft:gravel", "minecraft:acacia_log", "minecr
 export const BlockTypes = { get: (id) => (BLOCK_ITEMS.has(id) ? { id } : undefined) };
 export const EnchantmentTypes = { get: (id) => ({ id }) };
 
-const MAX = { "minecraft:iron_shovel": 1, "farmersdelight:iron_knife": 1, "minecraft:wooden_shovel": 1 };
+const MAX = {
+  "minecraft:iron_shovel": 1, "farmersdelight:iron_knife": 1, "minecraft:wooden_shovel": 1,
+  // The warp plate's shards (AttunedShardItem stacksTo(1), CrumblingAttunedShardItem stacksTo(4)).
+  "waystones:attuned_shard": 1, "waystones:crumbling_attuned_shard": 4,
+};
 const DURABILITY = { "minecraft:iron_shovel": 250, "farmersdelight:iron_knife": 250, "minecraft:wooden_shovel": 59 };
 
 export class ItemStack {
@@ -24,6 +28,12 @@ export class ItemStack {
     this._durability = DURABILITY[typeId] ? { damage: 0, maxDurability: DURABILITY[typeId] } : undefined;
   }
   getLore() { return [...this._lore]; }
+  // Like Bedrock: dynamic properties only on non-stackable items.
+  getDynamicProperty(key) { return (this._props ?? {})[key]; }
+  setDynamicProperty(key, value) {
+    if (this.maxAmount > 1) throw new Error(`UnsupportedFunctionalityError: ${this.typeId} is stackable`);
+    this._props = { ...(this._props ?? {}), [key]: value };
+  }
   setLore(lore) { this._lore = [...lore]; }
   hasTag(tag) { return this._tags.includes(tag); }
   isStackableWith(other) {

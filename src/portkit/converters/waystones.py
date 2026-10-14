@@ -13,8 +13,10 @@ naming, breaking and teleport but list every sharestone of their own colour
 (one shared network per colour, nothing to activate); and the sixteen
 portstones (``PortstoneBlock``), which are no waystone themselves: using one
 lists its colour's sharestones (white: the player's activated waystones) and
-teleports from wherever the player stands. Warp plates, warp portals,
-fleeting memorials and the warp items keep their residue.
+teleports from wherever the player stands; and the warp plate
+(``WarpPlateBlock``), which attunes a dormant shard to itself and teleports
+whatever stands on it to the plate its attuned shard names. Warp portals,
+fleeting memorials and the warp stone, scrolls and feather keep their residue.
 
 Where each value comes from (no fabrication, #87):
 
@@ -24,6 +26,8 @@ Where each value comes from (no fabrication, #87):
   each a ``SharestoneBlock`` (:data:`SHARESTONE_BLOCKS`, cited), and its
   ``waystones:portstones`` tag, each a ``PortstoneBlock``
   (:data:`PORTSTONE_BLOCKS`, cited); the blockstate is ``facing`` x ``half``.
+  The warp plate is the block ``ModBlocks`` registers as ``WarpPlateBlock``
+  (:data:`WARP_PLATE_BLOCKS`); its blockstate is ``status`` alone.
 * **Which network**: a waystone's type is ``waystones:waystone`` (reached by
   activating it); a sharestone's is its colour's
   (``WaystoneTypes.getSharestone``), and its menu lists every sharestone of
@@ -156,7 +160,10 @@ WAYSTONE_TYPE = f"{NS}:waystone"
 
 
 def waystone_type(name: str) -> str:
-    """The Java waystone type of the block ``name`` (a WAYSTONE_BLOCKS or SHARESTONE_BLOCKS entry)."""
+    """The Java waystone type of the block ``name`` (a WAYSTONE_BLOCKS,
+    SHARESTONE_BLOCKS or WARP_PLATE_BLOCKS entry)."""
+    if name in WARP_PLATE_BLOCKS:
+        return WARP_PLATE_TYPE
     return f"{NS}:{name}" if name in SHARESTONE_BLOCKS else WAYSTONE_TYPE
 
 
@@ -166,6 +173,74 @@ def portstone_target(name: str) -> str:
     white has none of, so a white portstone lists waystones)."""
     color = name[:-len("_portstone")]
     return f"{NS}:{color}_sharestone" if f"{color}_sharestone" in SHARESTONE_BLOCKS else WAYSTONE_TYPE
+
+
+# The block ModBlocks registers as a WarpPlateBlock (ModBlocks.java L86, with
+# defaultProperties(), L112); its waystone type is WaystoneTypes.WARP_PLATE (L11,
+# WarpPlateBlockEntity#getWaystoneType L87-89).
+WARP_PLATE_BLOCKS = ("warp_plate",)
+WARP_PLATE_TYPE = f"{NS}:warp_plate"
+# WarpPlateBlock.STATUS (L83): WarpPlateStatus's values in enum order (L61-68),
+# serialized lower-case (L70-73); EMPTY is the default state (L87-89).
+STATUS_STATE = f"{NS}:status"
+WARP_PLATE_STATUSES = ("empty", "idle", "attuning", "warping", "warping_invalid", "redstone_disabled", "locked")
+# SHAPE (L78-81): box(0, 0, 0, 16, 1, 16) + box(3, 1, 3, 13, 2, 13), whose
+# bounding box is 16 x 2 x 16 pixels (the same at every turn; the block has no facing).
+WARP_PLATE_BOX = {"origin": [-8, 0, -8], "size": [16, 2, 16]}
+WARP_PLATE_SOURCES = (
+    _src("block/ModBlocks.java", "86"),
+    _src("block/WarpPlateBlock.java", "61-L106"),
+)
+WARP_PLATE_COMPONENT = f"{NS}:portkit_warp_plate"
+# The warp plate's shard items (ModItems L44-47): which is the dormant shard a
+# plate attunes, the attuned shard it makes, and the deepslate shard that locks
+# it. The shards a plate takes are the jar's waystones:warp_shards item tag
+# (ModItemTags.WARP_SHARDS L16); the single-use ones its
+# waystones:single_use_warp_shards tag (L17).
+SHARD_ROLES = {"dormant": "dormant_shard", "attuned": "attuned_shard", "locked": "deepslate_shard"}
+WARP_SHARDS_TAG = "data/waystones/tags/item/warp_shards.json"
+SINGLE_USE_SHARDS_TAG = "data/waystones/tags/item/single_use_warp_shards.json"
+# Item stack sizes the shard classes set in code (the item converter reads no
+# code, so it writes 64): AttunedShardItem L6 stacksTo(1),
+# CrumblingAttunedShardItem L17 stacksTo(4). A non-stackable attuned shard is
+# also what lets the runtime keep its attunement on the stack (Script API
+# ItemStack.setDynamicProperty works only on non-stackable items).
+SHARD_STACK_SIZES = {"attuned_shard": 1, "crumbling_attuned_shard": 4}
+SHARD_STACK_SOURCES = (
+    _src("item/AttunedShardItem.java", "6"),
+    _src("item/CrumblingAttunedShardItem.java", "17"),
+)
+# WarpPlateBlockEntity#getMaxAttunementTicks L377-379: a dormant shard attunes
+# after 30 ticks.
+ATTUNEMENT_TICKS = 30
+# The item dynamic property holding an attuned shard's waystone (Java's
+# ModComponents.attunement data component, AbstractAttunedShardItem L55-66).
+ATTUNEMENT_PROPERTY = f"{NS}:portkit_attunement"
+# ChatFormatting.DARK_RED, the style of every warp plate message
+# (WarpPlateBlockEntity L212-220, L284-290): section-sign code "4" (Minecraft
+# 1.21.1 ChatFormatting), the same colour code on Bedrock.
+ERROR_STYLE = "\u00a74"
+WARP_PLATE_MESSAGES = {
+    # WarpPlateBlockEntity#serverTick L212-220 (action bar).
+    "no_target": "chat.waystones.warp_plate_has_no_target",
+    "invalid_target": "chat.waystones.warp_plate_has_invalid_target",
+}
+WARP_PLATE_RUNTIME_SOURCES = (
+    _src("block/WarpPlateBlock.java", "108-L113"),
+    _src("block/WarpPlateBlock.java", "163-L201"),
+    _src("block/entity/WarpPlateBlockEntity.java", "60-L89"),
+    _src("block/entity/WarpPlateBlockEntity.java", "105-L249"),
+    _src("block/entity/WarpPlateBlockEntity.java", "265-L379"),
+    _src("block/entity/WarpPlateBlockEntity.java", "381-L434"),
+    _src("block/WaystoneBlockBase.java", "128-L133"),
+    _src("core/WaystoneTeleportManager.java", "141-L174"),
+    _src("core/WaystoneTeleportManager.java", "245-L284"),
+    _src("core/WaystonePermissionManager.java", "78-L81"),
+    _src("item/ModItems.java", "44-L47"),
+    _src("mixin/EntityMixin.java", "17-L28"),
+)
+# The config values only the warp plate reads.
+WARP_PLATE_CONFIG = ("general.warpPlateUseTime", "general.warpPlateCooldownTime", "teleports.entityDenyList")
 
 
 # -- runes -------------------------------------------------------------------------
@@ -447,6 +522,15 @@ PORTSTONE_UPPER_BOX = {"origin": [-5, 0, -1], "size": [10, 7, 6]}
 
 
 def _block(name: str, overlay: Overlay | None = None) -> FacingBlock:
+    if name in WARP_PLATE_BLOCKS:
+        # No facing; the model's tinted rune element (tintindex 1, coloured by
+        # WarpPlateBlock#getColorForBlock from the plate's galactic name) is
+        # left out.
+        return FacingBlock(
+            name, 0, dict(WARP_PLATE_BOX), WARP_PLATE_SOURCES,
+            java_state="status", values=WARP_PLATE_STATUSES, state=STATUS_STATE,
+            facing=False, drop_tinted=True,
+        )
     share = name in SHARESTONE_BLOCKS
     port = name in PORTSTONE_BLOCKS
     lower = PORTSTONE_LOWER_BOX if port else SHARESTONE_BOX if share else LOWER_BOX
@@ -534,6 +618,14 @@ SOUNDS = {
     "arrive": {"id": "portal.travel", "volume": 0.05, "pitch": 1.0},
 }
 
+# The warp plate's sound: WarpPlateBlockEntity#attuneShard L368 plays
+# CHICKEN_EGG (volume 1, pitch 1) when it pops out a shard attuned to itself.
+# entity.chicken.egg = mob/chicken/plop (mcmeta 1.21.1-assets 451045f2) =
+# Bedrock mob.chicken.plop (bedrock-samples 46ba6ea9 sound_definitions).
+WARP_PLATE_SOUNDS = {
+    "eject": {"id": "mob.chicken.plop", "volume": 1.0, "pitch": 1.0},
+}
+
 # How a requirement condition evaluates in this runtime, where every teleport
 # from a waystone starts at a waystone block and targets a waystone the player
 # activated (RequirementRegistry L294-L348). Conditions not here, except
@@ -578,6 +670,16 @@ def fixed_conditions(kind: str, portstone: bool = False) -> dict[str, bool]:
     """
     if kind == WAYSTONE_TYPE:
         fixed = dict(FIXED_CONDITIONS)
+    elif kind == WARP_PLATE_TYPE:
+        # A warp plate's teleport starts at the plate (setFromWaystone,
+        # WarpPlateBlockEntity L135, L267) and ends at the waystone its shard is
+        # attuned to, which here is always a warp plate (only a plate attunes a
+        # shard, L345-356); a plate's visibility is SHARD_ONLY
+        # (WaystoneVisibility#fromWaystoneType L58-59), so target_is_global is
+        # false; the warp item is the shard, not a scroll (L268).
+        fixed = dict(FIXED_CONDITIONS)
+        fixed.update({"source_is_waystone": False, "target_is_waystone": False,
+                      "source_is_warp_plate": True, "target_is_warp_plate": True})
     else:
         name = kind.split(":", 1)[1]
         if name not in SHARESTONE_BLOCKS:
@@ -695,6 +797,8 @@ def waystone_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
     names = [n for n in _tagged(mod) if n in WAYSTONE_BLOCKS]
     names += [n for n in _tagged(mod, SHARESTONE_TAG) if n in SHARESTONE_BLOCKS]
     names += [n for n in _tagged(mod, PORTSTONE_TAG) if n in PORTSTONE_BLOCKS]
+    # No tag names the warp plate; ModBlocks registers it by name (L86).
+    names += list(WARP_PLATE_BLOCKS)
     return {name: _block(name, _rune_overlay(mod, name))
             for name in names if (mod.assets / "blockstates" / f"{name}.json").is_file()}
 
@@ -715,6 +819,8 @@ def lang_keys(mod: SourceMod) -> set[str]:
     for name in blocks:
         if name in PORTSTONE_BLOCKS:
             keys |= portstone_keys(name)
+    if any(name in WARP_PLATE_BLOCKS for name in blocks):
+        keys |= set(WARP_PLATE_MESSAGES.values())
     return keys
 
 
@@ -823,10 +929,12 @@ def requirements(lines: list[str], enable_costs: bool, enable_cooldowns: bool,
 # -- loot ---------------------------------------------------------------------------
 
 
-def _loot(rel: str, table: dict, identifier: str, notes: list[str]) -> dict:
+def _loot(rel: str, table: dict, identifier: str, notes: list[str], single: bool = False) -> dict:
     """The lower half's Bedrock table from the jar's: one pool, gated on
     half=lower, survives_explosion, the block's own item; the silk-touch
-    copy_components (the item keeps the waystone's identity) is not carried."""
+    copy_components (the item keeps the waystone's identity) is not carried.
+    With ``single`` (the warp plate, one block, no halves) the pool has no
+    half condition, and the silk-touch copy_name is left out the same way."""
     pools = table.get("pools")
     if not isinstance(pools, list) or len(pools) != 1 or table.get("functions"):
         raise _Refuse("the table is not one pool")
@@ -850,11 +958,12 @@ def _loot(rel: str, table: dict, identifier: str, notes: list[str]) -> dict:
             lower = True
         else:
             raise _Refuse(f"pool condition {kind!r} is not half=lower or survives_explosion")
-    if not lower:
-        raise _Refuse("the pool is not gated on half=lower")
+    if lower == single:
+        raise _Refuse("the pool is gated on half=lower" if single else "the pool is not gated on half=lower")
+    silk_copies = {"minecraft:copy_components", "minecraft:copy_name"} if single else {"minecraft:copy_components"}
     for function in pool.get("functions") or []:
         silk = function.get("conditions") or []
-        if not (function.get("function") == "minecraft:copy_components" and function.get("source") == "block_entity"
+        if not (function.get("function") in silk_copies and function.get("source") == "block_entity"
                 and len(silk) == 1 and silk[0].get("condition") == "minecraft:match_tool"):
             raise _Refuse(f"pool function {function.get('function')!r} is not the silk-touch copy")
         notes.append("silk_touch")
@@ -876,6 +985,42 @@ def _jar_lang(mod: SourceMod) -> dict:
         return json.loads((mod.assets / "lang" / "en_us.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+# -- warp plates -------------------------------------------------------------------
+
+
+def _item_paths(files: dict) -> dict[str, str]:
+    """identifier -> behavior pack path of every item definition written so far."""
+    from .recipes import emitted_definitions
+
+    return {ident: path for ident, (kind, path, _) in emitted_definitions(files).items() if kind == "item"}
+
+
+def warp_shards(mod: SourceMod, files: dict) -> tuple[dict | None, str]:
+    """The shards a warp plate works with, as the runtime's table holds them,
+    or (None, why) when the jar's tag or the converted items don't have them."""
+    items = _item_paths(files)
+    tagged = _tagged(mod, WARP_SHARDS_TAG)
+    if not tagged:
+        return None, f"no readable {WARP_SHARDS_TAG} in the jar, so which shards a plate takes is unknown"
+    accepted = sorted(f"{NS}:{n}" for n in tagged if f"{NS}:{n}" in items)
+    roles = {}
+    for role, name in SHARD_ROLES.items():
+        ident = f"{NS}:{name}"
+        if ident in accepted:
+            roles[role] = ident
+        elif role != "locked":
+            return None, f"the {name} item did not convert (or is not in {WARP_SHARDS_TAG}), which a plate needs"
+    single = sorted(f"{NS}:{n}" for n in _tagged(mod, SINGLE_USE_SHARDS_TAG) if f"{NS}:{n}" in accepted)
+    return {"accepted": accepted, "attuned": roles["attuned"], "dormant": roles["dormant"],
+            "locked": roles.get("locked"), "single_use": single}, ""
+
+
+def _use_time(configured: int) -> int:
+    """WarpPlateBlockEntity#getWarpPlateUseTime L236-249 with no modifier items
+    (the multiplier stays 1): Mth.clamp((int) (configured * 1), 1, configured * 2)."""
+    return max(1, min(int(configured * 1.0), configured * 2))
 
 
 # -- the converter ------------------------------------------------------------------
@@ -904,11 +1049,16 @@ def _plan(mod: SourceMod, kinds: list[str], portstone_kinds: list[str] = ()) -> 
         (portstone_modifiers if portstone else modifiers)[kind] = kept
         left_out[label] = left
     # A line left out for every type is listed once; one left out for some
-    # types only names them.
+    # types is listed once too, naming them (or, when it is kept for fewer,
+    # the ones that keep it: the warp plate keeps source_is_warp_plate).
     labels = list(left_out)
     dropped = [line for line in left_out[labels[0]] if all(line in left for left in left_out.values())]
-    for label in labels:
-        dropped.extend(f"{line} (from {label})" for line in left_out[label] if line not in dropped)
+    partial = list(dict.fromkeys(line for label in labels for line in left_out[label] if line not in dropped))
+    for line in partial:
+        where = [label for label in labels if line in left_out[label]]
+        others = [label for label in labels if line not in left_out[label]]
+        dropped.append(f"{line} (from {', '.join(where)})" if len(where) <= len(others)
+                       else f"{line} (from all but {', '.join(others)})")
     return _Plan(modifiers, dropped, entry, portstone_modifiers)
 
 
@@ -977,6 +1127,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         identifier = f"{NS}:{name}"
         share = name in SHARESTONE_BLOCKS
         port = name in PORTSTONE_BLOCKS
+        plate = name in WARP_PLATE_BLOCKS
         block_path = f"blocks/{name}.json"
         body = files.get(block_path)
         loot = tables.get(name)
@@ -988,6 +1139,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
                 why = f"the jar's en_us.json lacks {', '.join(missing_port)}, which this portstone shows"
             elif not any(waystone_type(i.split(":", 1)[1]) == target for i in kept):
                 why = f"no {target} block works here, so the portstone has nothing to list"
+        if why is None and plate:
+            missing_plate = sorted(k for k in WARP_PLATE_MESSAGES.values() if k not in lang)
+            if missing_plate:
+                why = f"the jar's en_us.json lacks {', '.join(missing_plate)}, which a warp plate shows"
+            else:
+                shards, why_shards = warp_shards(mod, files)
+                why = why_shards or None
         if why is None and not (isinstance(body, dict) and body.get("minecraft:block", {})
                                 .get("description", {}).get("identifier") == identifier):
             why = f"the waystone block {identifier} did not convert"
@@ -998,14 +1156,14 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             else:
                 flags: list[str] = []
                 try:
-                    bedrock_loot = _loot(loot[0], loot[1], identifier, flags)
+                    bedrock_loot = _loot(loot[0], loot[1], identifier, flags, single=plate)
                 except _Refuse as refusal:
                     why = f"loot table {loot[0]}: {refusal}"
                 # A sharestone can't be silk-touched in Java either
                 # (WaystoneBlockBase#canSilkTouch L91-93, not overridden):
                 # its copied item places a new sharestone. A portstone's
                 # block entity holds nothing to copy.
-                silk = silk or ("silk_touch" in flags and not share and not port)
+                silk = silk or ("silk_touch" in flags and not share and not port and not plate)
         if why is not None:
             if loot is not None:
                 result.unhandled.append(Unhandled(loot[0], RESIDUE_KIND, why))
@@ -1019,7 +1177,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         new = json.loads(json.dumps(body))
         new["format_version"] = SCRIPT_FORMAT
         block = new["minecraft:block"]
-        block.setdefault("components", {})[COMPONENT] = {}
+        if plate:
+            # WarpPlateBlock#getTicker (L262-272): the block entity ticks every
+            # server tick; Bedrock's minecraft:tick sends onTick every tick.
+            block.setdefault("components", {})[WARP_PLATE_COMPONENT] = {}
+            block["components"]["minecraft:tick"] = {"interval_range": [1, 1], "looping": True}
+        else:
+            block.setdefault("components", {})[COMPONENT] = {}
         # Only the lower half drops (the pool's half=lower); breaking the
         # upper half takes the lower one with it (the runtime), which drops.
         block["components"]["minecraft:loot"] = loot_path
@@ -1039,8 +1203,10 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     kept.sort()
     kept_port = [i for i in kept if i.split(":", 1)[1] in PORTSTONE_BLOCKS]
     kept_share = [i for i in kept if i.split(":", 1)[1] in SHARESTONE_BLOCKS]
-    kept_ways = [i for i in kept if i not in kept_port and i not in kept_share]
-    block_types = {i: waystone_type(i.split(":", 1)[1]) for i in kept if i not in kept_port}
+    kept_plate = [i for i in kept if i.split(":", 1)[1] in WARP_PLATE_BLOCKS]
+    kept_ways = [i for i in kept if i not in kept_port and i not in kept_share and i not in kept_plate]
+    # A warp plate is never in a menu: it has its own table section.
+    block_types = {i: waystone_type(i.split(":", 1)[1]) for i in kept if i not in kept_port and i not in kept_plate}
     def _states(ident: str) -> dict:
         return ((files.get(f"blocks/{ident.split(':', 1)[1]}.json") or {}).get("minecraft:block", {})
                 .get("description", {}).get("states") or {})
@@ -1054,9 +1220,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     messages = dict(MESSAGES)
     if kept_share:
         messages.update(SHARESTONE_MESSAGES)
+    sounds = dict(SOUNDS)
+    if kept_plate:
+        messages.update(WARP_PLATE_MESSAGES)
+        sounds.update(WARP_PLATE_SOUNDS)
     table = {
         "block_types": block_types,
-        "blocks": kept,
+        "blocks": [i for i in kept if i not in kept_plate],
         "component": COMPONENT,
         # A record stored before records carried a type (#198) is a waystone's.
         "default_type": WAYSTONE_TYPE,
@@ -1072,20 +1242,50 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         # them (WaystoneRenderer L33-37), through this boolean state.
         "rune_blocks": rune_blocks,
         "rune_state": RUNE_STATE,
-        "sounds": SOUNDS,
+        "sounds": sounds,
     }
+    if kept_plate:
+        shards, _ = warp_shards(mod, files)
+        table["warp_plates"] = {
+            "attunement_property": ATTUNEMENT_PROPERTY,
+            "attunement_ticks": ATTUNEMENT_TICKS,
+            "blocks": kept_plate,
+            "component": WARP_PLATE_COMPONENT,
+            # warpPlateCooldownTime: ticks off the target plate before it warps that entity again.
+            "cooldown": values["general.warpPlateCooldownTime"],
+            # entityDenyList: entities never teleported (Java ids; Bedrock's vanilla ids are the same).
+            "deny": sorted(values["teleports.entityDenyList"]),
+            "error_style": ERROR_STYLE,
+            "requirements": plan.modifiers[WARP_PLATE_TYPE],
+            "shards": shards,
+            "status_state": STATUS_STATE,
+            "type": WARP_PLATE_TYPE,
+            "use_time": _use_time(values["general.warpPlateUseTime"]),
+        }
+        # The shard items' stack sizes from their classes (SHARD_STACK_SIZES).
+        items = _item_paths(files)
+        for name, size in SHARD_STACK_SIZES.items():
+            path = items.get(f"{NS}:{name}")
+            if path is None:
+                continue
+            body = json.loads(json.dumps(files[path]))
+            body["minecraft:item"].setdefault("components", {})["minecraft:max_stack_size"] = size
+            result.files[path] = body
     data_path = f"{_RUNTIME_DIR}/data/{NS}_waystone.js"
     config_sources = [f"{plan.defaults['repo']}/blob/{plan.defaults['commit']}/{v['source']}"
-                      for v in plan.defaults["values"].values()]
+                      for k, v in plan.defaults["values"].items() if kept_plate or k not in WARP_PLATE_CONFIG]
     header = (
-        f"// Generated by portkit from {NS}'s waystone, sharestone and portstone blocks, loot tables, config\n"
+        f"// Generated by portkit from {NS}'s waystone, sharestone and portstone blocks"
+        + (", warp plate, shard items" if kept_plate else "") + ", loot tables, config\n"
         f"// defaults and Java code; do not edit. Read by the fixed runtime {_RUNTIME_DIR}/waystone.js (portkit/runtime). Sources:\n"
         + "".join(f"//   {s}\n" for s in dict.fromkeys(
             (*(BLOCK_SOURCES if kept_ways else ()), *(SHARESTONE_SOURCES if kept_share else ()),
              *(PORTSTONE_SOURCES if kept_port else ()),
+             *(WARP_PLATE_SOURCES + SHARD_STACK_SOURCES if kept_plate else ()),
              *config_sources, *REQUIREMENT_SOURCES, *RUNTIME_SOURCES,
              *(SHARESTONE_RUNTIME_SOURCES if kept_share else ()),
-             *(PORTSTONE_RUNTIME_SOURCES if kept_port else ()))))
+             *(PORTSTONE_RUNTIME_SOURCES if kept_port else ()),
+             *(WARP_PLATE_RUNTIME_SOURCES if kept_plate else ()))))
         + "".join(f"// warpRequirements left out: {d}\n" for d in plan.dropped)
     ).rstrip("\n")
     result.files[data_path] = _js_module(header, table)
@@ -1094,6 +1294,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     blocks_ways = [n for n in blocks if n not in SHARESTONE_BLOCKS and n not in PORTSTONE_BLOCKS]
     blocks_share = [n for n in blocks if n in SHARESTONE_BLOCKS]
     blocks_port = [n for n in blocks if n in PORTSTONE_BLOCKS]
+    blocks_plate = [n for n in blocks if n in WARP_PLATE_BLOCKS]
+    blocks_ways = [n for n in blocks_ways if n not in WARP_PLATE_BLOCKS]
     if blocks_ways:
         result.stations[f"{NS}:waystones"] = {
             "converted": len(kept_ways),
@@ -1114,6 +1316,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "residue": len(blocks_port) - len(kept_port),
             "data": data_path,
             "block": ", ".join(kept_port),
+        }
+    if blocks_plate:
+        result.stations[f"{NS}:warp_plates"] = {
+            "converted": len(kept_plate),
+            "residue": len(blocks_plate) - len(kept_plate),
+            "data": data_path,
+            "block": ", ".join(kept_plate),
         }
     result.notes.extend(dict.fromkeys(notes))
     if rune_blocks:
@@ -1155,9 +1364,11 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "non-suffocating blocks like grass), the other half going when one is removed by anything but a "
             "player (an explosion), and config changes "
             "(the cited defaults are used). The item shows the lower half only. " + ways_runes
-            + "Village and wild waystone "
-            "generation, warp plates and portals, fleeting memorials and the warp "
-            "stone, scrolls, shards and feather are not converted."
+            + ("Village and wild waystone generation, warp portals, fleeting memorials and the warp stone, "
+               "scrolls and feather are not converted (warp plates have their own note)." if kept_plate else
+               "Village and wild waystone "
+               "generation, warp plates and portals, fleeting memorials and the warp "
+               "stone, scrolls, shards and feather are not converted.")
             + (" Silk touch drops a plain waystone." if silk else "")
         )
     runes_on = [i for i in kept_share if _has_runes(i)]
@@ -1222,6 +1433,36 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "carried), the menu's sorting, search and deleting, and the rest listed for waystones (pets and "
             "leashed mobs, waterlogging, the free-space tests, an unloaded target's room check, explosions "
             "taking one half, config changes)."
+        )
+    if kept_plate:
+        plate = table["warp_plates"]
+        locked = plate["shards"]["locked"]
+        result.notes.append(
+            f"{NS}: {len(kept_plate)} warp plate block(s) work through the same runtime ({data_path}): "
+            f"{', '.join(kept_plate)}. Placing one makes it a warp plate owned by the placer holding a dormant "
+            f"shard, which attunes to that plate after {ATTUNEMENT_TICKS} ticks and pops out as an attuned shard "
+            "(with the chicken-egg sound); using a plate with a warp shard puts one in when it holds none "
+            "(creative keeps the item), and sneak-using it with empty hands pops its shard out. A plate holding "
+            "a shard attuned to another plate teleports whatever stands on it (players, mobs, items; not the "
+            f"entities on the deny list, {', '.join(plate['deny'])}, nor riders) to that plate after "
+            f"{plate['use_time']} ticks (warpPlateUseTime); an entity that arrives may not use that plate again "
+            f"until it has been off it for {plate['cooldown']} ticks (warpPlateCooldownTime). The cost is the "
+            "warpRequirements default decided for a plate-to-plate teleport (free at the defaults: "
+            "source_is_warp_plate multiplies it by 0). A player is told on the action bar when the plate's "
+            "shard has no attunement or its plate is gone, or when they can't pay. The block shows Java's "
+            "status models (empty, attuning or attuned, "
+            + ("locked by a deepslate shard" if locked else "locked") + "). The attuned shard holds at most 1 "
+            "and the crumbling attuned shard 4, as in Java; the attunement rides on the attuned shard as "
+            "script data. Breaking a plate drops it and, outside creative, its shard. The item shows the empty "
+            "plate (Bedrock draws the block's default state; Java's item is the whole plate). Not carried over: "
+            "the rune mark tinted with the plate's galactic name colour (left out of the model), the item's tinted "
+            "runes, the settings screen (name, visibility, the modifier slots and every warp modifier: effects, "
+            "use-time amethyst and slime, quartz round-robin, spider eye, redstone torch), the generated name, "
+            "the particles of each status and the eject effect, shard tooltips and glint, pets and leashed "
+            "mobs travelling along, a crumbling shard's attunement (a stackable item can't hold script data, "
+            "so a crumbling shard warps nowhere), a silk-touched plate keeping its identity, and config "
+            "changes (the cited defaults are used). Entities count as on a plate when their position is in "
+            "its block (Java tests their bounding box)."
         )
     entry = (
         'import { registerWaystones } from "./waystone.js";\n'

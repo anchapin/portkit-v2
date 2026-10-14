@@ -876,3 +876,227 @@ def test_a_portstone_only_line_is_listed_per_variant():
     plan = _plan(mod, ["waystones:waystone"], ["waystones:waystone"])
     assert plan.portstone_modifiers["waystones:waystone"] == plan.modifiers["waystones:waystone"]
     assert plan.dropped.count("[source_is_scroll] multiply_xp_cost(0) (never applies here)") == 1
+
+
+# -- warp plates --------------------------------------------------------------
+
+PLATE_LANG = {
+    "block.waystones.warp_plate": "Warp Plate",
+    "chat.waystones.warp_plate_has_no_target": "This warp plate is not bound to another warp plate yet.",
+    "chat.waystones.warp_plate_has_invalid_target": "The shard inside this warp plate has lost its attunement.",
+    "item.waystones.dormant_shard": "Dormant Shard",
+    "item.waystones.attuned_shard": "Attuned Shard",
+    "item.waystones.crumbling_attuned_shard": "Crumbling Attuned Shard",
+    "item.waystones.deepslate_shard": "Deepslate Shard",
+}
+SHARDS = ("dormant_shard", "attuned_shard", "crumbling_attuned_shard", "deepslate_shard")
+PLATE_STATUSES = ("attuning", "empty", "idle", "locked", "redstone_disabled", "warping", "warping_invalid")
+
+
+def _plate_face(texture, tint=False):
+    return {"uv": [0, 0, 10, 10], "texture": texture, **({"tintindex": 1} if tint else {})}
+
+
+def _plate_loot(extra_condition=None):
+    silk = [{"condition": "minecraft:match_tool", "predicate": {"predicates": {"minecraft:enchantments": [
+        {"enchantments": "minecraft:silk_touch", "levels": {"min": 1}}]}}}]
+    conditions = [{"condition": "minecraft:survives_explosion"}]
+    if extra_condition:
+        conditions.append(extra_condition)
+    return {"type": "minecraft:block", "pools": [{
+        "bonus_rolls": 0.0, "conditions": conditions,
+        "entries": [{"type": "minecraft:item", "name": f"{NS}:warp_plate"}],
+        "functions": [{"conditions": silk, "function": "minecraft:copy_components", "source": "block_entity"},
+                      {"conditions": silk, "function": "minecraft:copy_name", "source": "block_entity"}],
+        "rolls": 1.0}]}
+
+
+def _with_warp_plate(root: Path, lang_drop=(), shards=SHARDS, loot=None) -> Path:
+    """Waystones' warp plate as the jar has it (WarpPlateBlock; models
+    warp_plate/_empty/_locked, the tinted rune element in warp_plate), its
+    shard items and item tags."""
+    png = PNG.read_bytes()
+    base = {"name": "base", "from": [0, 0, 0], "to": [16, 1, 16],
+            "faces": {f: _plate_face("#base") for f in FACES}}
+    border = {"name": "border", "from": [3, 1, 3], "to": [13, 2, 13],
+              "faces": {f: _plate_face("#texture") for f in FACES}}
+    tinted = {"name": "tinted", "from": [5, 2.01, 5], "to": [11, 2.02, 11],
+              "faces": {"up": _plate_face("#3", tint=True)}}
+    lock = {"name": "lock", "from": [5, 2.01, 5], "to": [11, 2.02, 11], "faces": {"up": _plate_face("#3")}}
+    textures = {"particle": f"{NS}:block/warp_plate", "texture": f"{NS}:block/warp_plate",
+                "base": f"{NS}:block/warp_plate_base"}
+    _write(root, f"assets/{NS}/models/block/warp_plate.json", {
+        "parent": "block/block", "textures": {**textures, "3": f"{NS}:block/warp_plate_runes"},
+        "elements": [base, border, tinted]})
+    _write(root, f"assets/{NS}/models/block/warp_plate_empty.json", {
+        "parent": "block/block", "textures": textures, "elements": [base]})
+    _write(root, f"assets/{NS}/models/block/warp_plate_locked.json", {
+        "parent": "block/block", "textures": {**textures, "3": f"{NS}:block/warp_plate_lock"},
+        "elements": [base, border, lock]})
+    models = {"attuning": "warp_plate", "empty": "warp_plate_empty", "idle": "warp_plate", "locked": "warp_plate_locked",
+              "redstone_disabled": "warp_plate", "warping": "warp_plate", "warping_invalid": "warp_plate"}
+    _write(root, f"assets/{NS}/blockstates/warp_plate.json", {"variants": {
+        f"status={k}": {"model": f"{NS}:block/{v}"} for k, v in models.items()}})
+    for texture in ("warp_plate", "warp_plate_base", "warp_plate_lock", "warp_plate_runes"):
+        _write(root, f"assets/{NS}/textures/block/{texture}.png", png)
+    _write(root, f"data/{NS}/loot_table/blocks/warp_plate.json", loot or _plate_loot())
+    for name in shards:
+        _write(root, f"assets/{NS}/models/item/{name}.json",
+               {"parent": "minecraft:item/generated", "textures": {"layer0": f"{NS}:item/{name}"}})
+        _write(root, f"assets/{NS}/textures/item/{name}.png", png)
+    _write(root, f"data/{NS}/tags/item/warp_shards.json", {"values": [f"{NS}:{n}" for n in SHARDS]})
+    _write(root, f"data/{NS}/tags/item/single_use_warp_shards.json",
+           {"values": [f"{NS}:crumbling_attuned_shard"]})
+    lang = json.loads((root / f"assets/{NS}/lang/en_us.json").read_text())
+    lang.update({k: v for k, v in PLATE_LANG.items() if k not in lang_drop})
+    _write(root, f"assets/{NS}/lang/en_us.json", lang)
+    return root
+
+
+@pytest.fixture
+def plated(tmp_path):
+    root = _with_warp_plate(_waystones_mod(tmp_path))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    return result, tmp_path / "out"
+
+
+def test_warp_plate_block_has_the_status_state_and_one_bone_per_model(plated):
+    _, tree = plated
+    block = _block(tree, "warp_plate")
+    assert block["description"]["states"] == {"waystones:status": list(waystones.WARP_PLATE_STATUSES)}
+    assert block["description"]["states"]["waystones:status"][0] == "empty"  # Java's default
+    assert "traits" not in block["description"]  # no facing
+    bones = block["components"]["minecraft:geometry"]["bone_visibility"]
+    assert set(bones) == {"warp_plate", "warp_plate_empty", "warp_plate_locked"}
+    assert bones["warp_plate_empty"] == "q.block_state('waystones:status') == 'empty'"
+    assert bones["warp_plate_locked"] == "q.block_state('waystones:status') == 'locked'"
+    for status in ("idle", "attuning", "warping", "warping_invalid", "redstone_disabled"):
+        assert f"== '{status}'" in bones["warp_plate"]
+    box = {"origin": [-8, 0, -8], "size": [16, 2, 16]}
+    assert block["components"]["minecraft:collision_box"] == box
+    assert block["components"]["minecraft:selection_box"] == box
+    assert block["components"]["minecraft:tick"] == {"interval_range": [1, 1], "looping": True}
+    assert block["components"][waystones.WARP_PLATE_COMPONENT] == {}
+    assert waystones.COMPONENT not in block["components"]
+    assert block["components"]["minecraft:loot"] == "loot_tables/blocks/warp_plate.json"
+    assert "permutations" not in block
+
+
+def test_warp_plate_leaves_out_the_tinted_rune_element(plated):
+    result, tree = plated
+    geo = json.loads((tree / "resource_pack/models/blocks/warp_plate.geo.json").read_text())
+    bones = {b["name"]: b for b in geo["minecraft:geometry"][0]["bones"]}
+    # base + border; the tinted element (tintindex 1) is not drawn, the lock is.
+    assert len(bones["warp_plate"]["cubes"]) == 2
+    assert len(bones["warp_plate_locked"]["cubes"]) == 3
+    assert len(bones["warp_plate_empty"]["cubes"]) == 1
+    assert any("drawn without tinted" in n for n in result.notes)
+
+
+def test_warp_plate_loot_drops_the_plate_without_the_silk_copies(plated):
+    _, tree = plated
+    loot = json.loads((tree / "behavior_pack/loot_tables/blocks/warp_plate.json").read_text())
+    assert loot == {"pools": [{"rolls": 1, "entries": [{"type": "item", "name": "waystones:warp_plate",
+                                                        "functions": [{"function": "explosion_decay"}]}]}]}
+
+
+def test_a_warp_plate_loot_gated_on_a_half_is_refused():
+    with pytest.raises(waystones._Refuse):
+        waystones._loot("x", _plate_loot({"block": "waystones:warp_plate", "condition": "minecraft:block_state_property",
+                                          "properties": {"half": "lower"}}), "waystones:warp_plate", [], single=True)
+    with pytest.raises(waystones._Refuse):
+        # copy_name is only read for the one-block table.
+        waystones._loot("x", _plate_loot(), "waystones:warp_plate", [])
+
+
+def test_warp_plate_table_holds_the_cited_rules(plated):
+    _, tree = plated
+    table = _table(tree)
+    plate = table["warp_plates"]
+    assert plate["blocks"] == ["waystones:warp_plate"]
+    assert "waystones:warp_plate" not in table["blocks"] and "waystones:warp_plate" not in table["block_types"]
+    assert "waystones:warp_plate" not in table["networks"]
+    assert plate["use_time"] == 15 and plate["cooldown"] == 20 and plate["attunement_ticks"] == 30
+    assert plate["deny"] == ["minecraft:wither"]
+    assert plate["shards"] == {
+        "accepted": sorted(f"waystones:{n}" for n in SHARDS), "attuned": "waystones:attuned_shard",
+        "dormant": "waystones:dormant_shard", "locked": "waystones:deepslate_shard",
+        "single_use": ["waystones:crumbling_attuned_shard"]}
+    # source_is_warp_plate multiplies the cost by 0 unconditionally.
+    assert {"args": [0.0], "fn": "multiply_xp_cost", "when": {}} in plate["requirements"]
+    assert table["messages"]["no_target"] == "chat.waystones.warp_plate_has_no_target"
+    assert table["messages"]["invalid_target"] == "chat.waystones.warp_plate_has_invalid_target"
+    assert table["sounds"]["eject"] == {"id": "mob.chicken.plop", "pitch": 1.0, "volume": 1.0}
+    assert plate["error_style"] == "\u00a74"
+    text = (tree / DATA).read_text()
+    assert "WaystonesConfigData.java#L75" in text and "WaystonesConfigData.java#L114" in text
+
+
+def test_without_a_warp_plate_the_table_has_no_plate_rules(converted):
+    _, tree = converted
+    table = _table(tree)
+    assert "warp_plates" not in table
+    assert "WaystonesConfigData.java#L75" not in (tree / DATA).read_text()
+
+
+def test_shard_items_take_their_classes_stack_sizes(plated):
+    _, tree = plated
+
+    def size(name):
+        body = json.loads((tree / f"behavior_pack/items/{name}.json").read_text())
+        return body["minecraft:item"]["components"]["minecraft:max_stack_size"]
+
+    assert size("attuned_shard") == 1
+    assert size("crumbling_attuned_shard") == 4
+    assert size("dormant_shard") == 64
+
+
+def test_warp_plate_conditions_are_decided_for_a_plate_to_plate_teleport():
+    fixed = waystones.fixed_conditions(waystones.WARP_PLATE_TYPE)
+    assert fixed["source_is_warp_plate"] is True and fixed["target_is_warp_plate"] is True
+    assert fixed["source_is_waystone"] is False and fixed["target_is_waystone"] is False
+    assert fixed["target_is_global"] is False
+    kept, _ = requirements(DEFAULTS, True, True, waystones.WARP_PLATE_TYPE)
+    assert [m["fn"] for m in kept] == [
+        "scaled_add_xp_cost", "add_xp_cost", "multiply_xp_cost", "min_xp_cost", "max_xp_cost"]
+
+
+def test_a_missing_warp_plate_text_leaves_only_the_plate_inert(tmp_path):
+    root = _with_warp_plate(_waystones_mod(tmp_path), lang_drop=("chat.waystones.warp_plate_has_no_target",))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    table = _table(tmp_path / "out")
+    assert "warp_plates" not in table and table["blocks"]
+    assert any(u.kind == "waystone" and u.source.endswith("warp_plate.json") and "warp_plate_has_no_target" in u.reason
+               for u in result.unhandled)
+
+
+def test_a_warp_plate_without_its_dormant_shard_item_stays_residue(tmp_path):
+    root = _with_warp_plate(_waystones_mod(tmp_path), shards=("attuned_shard", "deepslate_shard"))
+    result = convert(root, tmp_path / "out", emit_addon=False)
+    assert "warp_plates" not in _table(tmp_path / "out")
+    assert any(u.source.endswith("warp_plate.json") and "dormant_shard" in u.reason for u in result.unhandled)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_warp_plate_runtime_under_node(plated):
+    _, tree = plated
+    js = ROOT / "tests" / "js"
+    for test in ("warp_plate.test.mjs", "waystone.test.mjs"):
+        for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
+            proc = subprocess.run(
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
+            )
+            assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr
+
+
+def test_a_line_only_the_warp_plate_keeps_is_listed_once():
+    from types import SimpleNamespace
+
+    from portkit.converters.waystones import _plan
+
+    mod = SimpleNamespace(mods={NS: "21.1.46"})
+    plan = _plan(mod, ["waystones:orange_sharestone", "waystones:warp_plate", "waystones:waystone"])
+    plate_lines = [d for d in plan.dropped if d.startswith("[source_is_warp_plate]")]
+    assert plate_lines == ["[source_is_warp_plate] multiply_xp_cost(0) (never applies here) "
+                           "(from all but waystones:warp_plate)"]

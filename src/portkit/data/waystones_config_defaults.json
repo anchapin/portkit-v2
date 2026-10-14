@@ -36,6 +36,18 @@
         "general.defaultVisibility": {
           "value": "ACTIVATION",
           "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L57"
+        },
+        "general.warpPlateUseTime": {
+          "value": 15,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L75"
+        },
+        "general.warpPlateCooldownTime": {
+          "value": 20,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L79"
+        },
+        "teleports.entityDenyList": {
+          "value": ["minecraft:wither"],
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L114"
         }
       }
     }
