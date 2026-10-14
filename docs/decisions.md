@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: the portal scroll opens a warp portal through the waystone runtime; the portal sends what enters it to the chosen waystone and closes after its lifetime
 
-- **Status:** proposed (PR #206, Part of #178); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #206, Part of #178).
 - **Decision:** Waystones' warp portal (`WarpPortalBlock`, registered by name
   with no item, `ModBlocks` L87) converts with the one thing that makes one,
   the portal scroll (`PortalScrollItem`, `ModItems` L41), through the waystone
