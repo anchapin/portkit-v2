@@ -1,4 +1,4 @@
-// portkit station runtime: Waystones waystone, Bedrock binding (#178).
+// portkit station runtime: Waystones waystones and sharestones, Bedrock binding (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). The generated entry
@@ -9,10 +9,15 @@
 // @minecraft/server-ui 2.0.0 (ActionFormData, ModalFormData).
 //
 // Storage: a waystone is one world dynamic property keyed by its dimension
-// and lower-half position (JSON: uid, dimension, pos, facing, name, owner,
-// origin); a player's activated waystones are a player dynamic property
-// (JSON list of uids, in activation order). Java keeps the same facts in
-// WaystoneManagerImpl and PlayerWaystoneManager's saved data.
+// and lower-half position (JSON: uid, type, order, dimension, pos, facing,
+// name, owner, origin); a player's activated waystones are a player dynamic
+// property (JSON list of uids, in activation order). Java keeps the same facts
+// in WaystoneManagerImpl and PlayerWaystoneManager's saved data.
+//
+// Networks: the table maps each block to its Java waystone type and each type
+// to a network. A waystone's (not shared) lists the waystones the player
+// activated; a sharestone's (shared, one per colour) lists every sharestone of
+// its type and has nothing to activate.
 
 import { GameMode, system, world } from "@minecraft/server";
 import { ActionFormData, FormCancelationReason, ModalFormData } from "@minecraft/server-ui";
@@ -46,6 +51,14 @@ function blockAt(dimension, pos) {
   }
 }
 
+function typeOf(table, record) {
+  return core.recordType(record, table.default_type);
+}
+
+function network(table, record) {
+  return table.networks[typeOf(table, record)];
+}
+
 function lowerPos(table, block, permutation) {
   const half = permutation.getState(table.half_state);
   const { x, y, z } = block.location;
@@ -75,6 +88,15 @@ function activate(table, player, uid) {
   player.setDynamicProperty(core.activatedKey(table.namespace), JSON.stringify(next));
 }
 
+/** The next placement number (a world counter), so sharestones list in the order they were placed. */
+function nextOrder(table) {
+  const key = core.orderKey(table.namespace);
+  const raw = world.getDynamicProperty(key);
+  const next = (typeof raw === "number" ? raw : 0) + 1;
+  world.setDynamicProperty(key, next);
+  return next;
+}
+
 function newUid() {
   return `${Date.now().toString(36)}${Math.floor(Math.random() * 0x7fffffff).toString(36)}`;
 }
@@ -84,12 +106,18 @@ function newUid() {
  * not placed by a player: WaystoneBlockEntityBase initializes one with no
  * owner and the state's origin, UNKNOWN by default).
  */
-function recordAt(table, dimension, pos, permutation, placer) {
+function recordAt(table, dimension, pos, permutation, placer, typeId) {
   const key = core.recordKey(table.namespace, dimension.id, pos);
+  const type = table.block_types[typeId] || table.default_type;
   let record = loadStored(key);
-  if (!record) {
+  // A record of another type is stale (its block was swapped without a
+  // player breaking it); this block is a new waystone, as Java's block
+  // entity would be.
+  if (!record || typeOf(table, record) !== type) {
     record = {
       uid: newUid(),
+      type,
+      order: nextOrder(table),
       dimension: dimension.id,
       pos,
       facing: permutation.getState("minecraft:cardinal_direction") || "north",
@@ -130,16 +158,18 @@ function placed(table, event) {
   const pos = { ...block.location };
   // A fresh waystone replaces anything stale stored at this spot.
   saveStored(core.recordKey(table.namespace, block.dimension.id, pos), undefined);
-  const record = recordAt(table, block.dimension, pos, permutation, player);
-  activate(table, player, record.uid);
+  const record = recordAt(table, block.dimension, pos, permutation, player, block.typeId);
+  // activateWaystone L60: only a waystone joins the player's activated list.
+  if (!network(table, record).shared) activate(table, player, record.uid);
   system.run(() => rename(table, player, record));
 }
 
 /** The settings screen, name only (WaystoneEditScreen; EditWaystoneMessage#handle). */
 function rename(table, player, record) {
-  const shown = core.nameText(record.name, table.messages.unnamed);
   const form = new ModalFormData()
-    .title(message(table, "settings", [shown]))
+    // getSettingsMenuProvider L297: "Edit %s" with the block entity's name
+    // (WaystoneBlockEntity / SharestoneBlockEntity#getName).
+    .title(message(table, "settings", [{ translate: table.messages[network(table, record).name] }]))
     // Java's name box has no label (WaystoneEditScreen L53, Component.empty()).
     .textField("", "", { defaultValue: record.name && record.name.text ? record.name.text : "" })
     .submitButton({ translate: table.messages.save });
@@ -164,7 +194,7 @@ function interact(table, event) {
     if (!below || below.typeId !== block.typeId) return; // a lone upper half is no waystone
   }
   const pos = lowerPos(table, block, permutation);
-  const record = recordAt(table, dimension, pos, permutation, null);
+  const record = recordAt(table, dimension, pos, permutation, null, block.typeId);
   // handleEditActions L196-205: sneaking opens the settings.
   if (player.isSneaking) {
     if (core.editError(record, player.id, table.restricted_origins)) {
@@ -174,8 +204,9 @@ function interact(table, event) {
     system.run(() => rename(table, player, record));
     return;
   }
+  // SharestoneBlock#handleActivation L74-82: the menu, nothing to activate.
   // WaystoneBlock#handleActivation L81-123.
-  if (activated(table, player).includes(record.uid)) {
+  if (network(table, record).shared || activated(table, player).includes(record.uid)) {
     system.run(() => menu(table, player, record));
     return;
   }
@@ -193,12 +224,15 @@ function context(player, target) {
 
 /** The selection menu (WaystoneSelectionScreen), then the teleport. */
 function menu(table, player, from) {
-  const list = core.targets(activated(table, player), records(table), from.uid);
+  const net = network(table, from);
+  const list = net.shared
+    ? core.sharedTargets(records(table), typeOf(table, from), from.uid, table.default_type)
+    : core.targets(activated(table, player), records(table), from.uid).filter((r) => typeOf(table, r) === typeOf(table, from));
   const body = [message(table, "current_location", [core.nameText(from.name, table.messages.unnamed)])];
-  if (list.length === 0) body.push({ text: "\n" }, message(table, "none"));
+  if (list.length === 0) body.push({ text: "\n" }, message(table, net.none));
   const form = new ActionFormData().title({ translate: table.messages.title }).body({ rawtext: body });
   for (const target of list) {
-    const points = core.cost(table.requirements, context(player, target));
+    const points = core.cost(net.requirements, context(player, target));
     const label = [core.nameText(target.name, table.messages.unnamed)];
     if (points > 0) label.push({ text: "\n" }, message(table, "xp_cost", [{ text: String(points) }]));
     form.button({ rawtext: label });
@@ -219,15 +253,15 @@ function teleport(table, player, from, target) {
   }
   const key = core.recordKey(table.namespace, target.dimension, target.pos);
   const current = loadStored(key);
-  if (!current || current.uid !== target.uid) return fail("missing");
+  if (!current || current.uid !== target.uid || typeOf(table, current) !== typeOf(table, from)) return fail("missing");
   const dimension = world.getDimension(current.dimension);
   const lower = blockAt(dimension, current.pos);
-  if (lower && !table.blocks.includes(lower.typeId)) {
+  if (lower && table.block_types[lower.typeId] !== typeOf(table, current)) {
     // The block went without a player breaking it; Java's onRemove drops it.
     saveStored(key, undefined);
     return fail("missing");
   }
-  const points = core.cost(table.requirements, context(player, current));
+  const points = core.cost(network(table, from).requirements, context(player, current));
   const creative = player.getGameMode() === GameMode.Creative;
   if (!core.canAfford(player.getTotalXp(), points, creative)) return fail("not_enough_xp");
   let side = current.facing;

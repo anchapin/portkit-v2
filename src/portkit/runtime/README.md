@@ -34,16 +34,18 @@ entry `scripts/portkit/main.js` that wires the two.
   `onPlayerInteract`; the serving count is the block's integer state, so
   nothing is stored; clearing runs `setblock ... destroy`, which drops through
   the block's `minecraft:loot`).
-- `waystone_core.js`: Waystones waystone logic (the experience cost from the
-  table's warp requirement modifiers, affording, the teleport side and
-  destination, names, the edit rule, the menu's entries, storage keys), no
-  imports.
+- `waystone_core.js`: Waystones waystone and sharestone logic (the experience
+  cost from the table's warp requirement modifiers, affording, the teleport
+  side and destination, names, the edit rule, the menu's entries: activated
+  waystones, or every sharestone of one colour; storage keys), no imports.
 - `waystone.js`: its Bedrock binding (placement of both halves through
   `beforeOnPlayerPlace` and `world.afterEvents.playerPlaceBlock`, activation
   and the menu through `onPlayerInteract`, breaking through `onPlayerBreak`;
   the menu and the rename form are `@minecraft/server-ui` forms, so a pack
-  shipping it also declares that module; waystones and each player's
-  activated list are dynamic properties).
+  shipping it also declares that module; waystones, sharestones and each
+  player's activated list are dynamic properties; the table maps each block to
+  its network: a waystone's activation list or a sharestone colour's shared
+  list).
 - `station_storage.js`: helpers the bindings share (world dynamic property
   storage, stored stacks, giving and dropping items, sounds).
 

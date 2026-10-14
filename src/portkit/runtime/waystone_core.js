@@ -1,4 +1,4 @@
-// portkit station runtime: Waystones waystone logic (#178).
+// portkit station runtime: Waystones waystone and sharestone logic (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
 // (portkit/runtime/; see docs/decisions.md). No imports, so it runs under
@@ -160,6 +160,25 @@ export function targets(activated, records, fromUid) {
   return list;
 }
 
+/** A stored waystone's type; records written before records carried one are `fallback`'s (#198). */
+export function recordType(record, fallback) {
+  return (record && record.type) || fallback;
+}
+
+/**
+ * A sharestone's menu entries: every stored waystone of its type
+ * (PlayerWaystoneManager#getTargetsForWaystoneType L325-326 lists
+ * WaystoneManagerImpl#getWaystonesByType, every dimension), without the one in
+ * use, in the order they were placed (`order`, a world counter, then uid). Java's order is
+ * its manager's hash order appended to each player's sorting index, which no
+ * rule reproduces; placement order is stable for everyone.
+ */
+export function sharedTargets(records, type, fromUid, fallback) {
+  return records
+    .filter((r) => r.uid !== fromUid && recordType(r, fallback) === type)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
+}
+
 /** The player's activated list with `uid` added (PlayerWaystoneManager#activateWaystone). */
 export function withActivated(activated, uid) {
   return activated.includes(uid) ? activated : [...activated, uid];
@@ -172,6 +191,11 @@ export function recordKey(namespace, dimensionId, pos) {
 
 export function recordPrefix(namespace) {
   return `${namespace}:portkit_waystone|`;
+}
+
+/** World dynamic property counting placements (a record's `order`). */
+export function orderKey(namespace) {
+  return `${namespace}:portkit_waystone_order`;
 }
 
 /** Player dynamic property holding the uids the player activated, in order. */

@@ -27,6 +27,82 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: sharestones share one network per colour through the waystone runtime; the cost is the same cited default, decided per waystone type
+
+- **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR #201).
+- **Decision:** Waystones' fifteen coloured sharestones (the
+  `waystones:sharestones` block tag intersected with the colours `ModBlocks`
+  registers a `SharestoneBlock` for, L35-51 / L96-100: every dye colour but
+  white) run through the waystone runtime of #198 rather than a second one.
+  The data table now maps each block to its Java waystone type
+  (`block_types`: every waystone variant is `waystones:waystone`, a
+  sharestone is `waystones:<colour>_sharestone`, `WaystoneTypes`) and each
+  type to a network (`networks`: `shared`, the name and empty-list texts, its
+  own requirement modifiers). A sharestone places, names, breaks and
+  teleports like a waystone, but has nothing to activate: using one opens a
+  menu of every other sharestone of its colour in the world, any dimension
+  (`SharestoneBlock#handleActivation` L74-82,
+  `PlayerWaystoneManager#getTargetsForWaystoneType` L325-326 ->
+  `WaystoneManagerImpl#getWaystonesByType`), in placement order; placing
+  one makes the placer its owner (the rename rule is the waystone's) but
+  adds nothing to the player's activated list (`activateWaystone` L60 records
+  only `WAYSTONE`). The block is facing x `waystones:half` with a full box per
+  half (both Java shapes span 0-16) and the jar's loot table on the lower
+  half; silk touch drops a plain sharestone, which is Java's behaviour too
+  (`canSilkTouch` is false for sharestones). The settings form's title is now
+  Java's "Edit %s" with the block entity's name ("Edit Waystone" / "Edit
+  Sharestone", `getSettingsMenuProvider` L297 + `getName`), for waystones too
+  (#198 showed the waystone's own name there).
+- **Cost:** the `warpRequirements` default is parsed once per waystone type
+  with that type's conditions decided (`waystones.fixed_conditions`): from a
+  sharestone, `source_is_sharestone`/`target_is_sharestone` and its own
+  colour's `source_is_<colour>_sharestone`/`target_is_<colour>_sharestone`
+  are true, every other colour and `*_is_waystone` false, and
+  `target_is_global` false (a sharestone's visibility is its colour's,
+  `WaystoneVisibility#fromWaystoneType` L38-57). The defaults have no
+  sharestone line, so a sharestone pays what a waystone does (distance x
+  0.01 points, 27 across dimensions, at most 27); a config line with a
+  per-colour condition (`source_is_orange_sharestone`) now resolves instead
+  of refusing the runtime.
+- **Storage:** records gain `type` and `order` (a world placement counter,
+  the menu's order); a record without a type
+  (written by #198's runtime) is a waystone (`default_type`), so existing
+  worlds keep working; a record whose type is not the block's at its spot is
+  stale and replaced by a fresh one (no owner), as Java's block entity would
+  be. A teleport also checks the target's stored type and its block's type.
+- **Texts:** `container.waystones.waystone` joins the runtime's keys;
+  `container.waystones.sharestone` and
+  `gui.waystones.waystone_selection.no_sharestones_available` ship only with
+  sharestones, and a jar missing either keeps its sharestones residue (the
+  waystones still work).
+- **Why:** a sharestone is a waystone with a different target list (Java
+  shares `WaystoneBlockBase`, the teleport manager and the requirement
+  rules), so one runtime keeps one copy of placement, teleport, breaking and
+  storage; typing the networks keeps each value traceable to a line of
+  source.
+- **Rejected:** a separate sharestone runtime and table (a second copy of
+  the teleport code); per-player activation of sharestones (Java has none);
+  Java's menu order (its manager's `ConcurrentHashMap` order appended to each
+  player's sorting index: unspecified, so a per-player index would store a
+  list per player for no rule to reproduce) or name order (Java's default
+  sort is MANUAL); one shared requirement list for every type (a config line
+  naming sharestones would be wrong for one of them); drawing the coloured
+  runes (Java's `SharestoneRenderer` tints the `sharestone_runes` model with
+  `DyeColor#getTextureDiffuseColor` in code: Bedrock block geometry has no
+  arbitrary tint, so it would need generated per-colour textures, a later
+  slice) or keeping sharestones residue until then (the network works without
+  them; the colour is in the item's name); portstones in this slice.
+- **Not carried over (conversion note):** the coloured runes and the
+  floating warp stone (code-rendered; every colour looks the same), the
+  item tooltip, the menu's sorting, search and deleting (creative deletion
+  removes a sharestone from its network in Java), and what #198 lists for
+  waystones (pets and leashed mobs, waterlogging, particles, comparator and
+  observers, Java's free-space tests, an unloaded target's room check,
+  explosions taking one half, config changes, operator edit permission).
+- **Coverage:** Waystones 16.4 -> 20.8 (159 -> 204 files, residue 810 ->
+  778); no other corpus mod changed.
+- **Links:** #178, PR #198 (waystones), #87 (no fabrication), PR (this).
+
 ## 2026-10-13: waystones activate, list and teleport through a scripted block; the experience cost is the cited warpRequirements default, parsed and decided per runtime
 
 - **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR #198).

@@ -11,34 +11,48 @@ import { registerWaystones } from "../../src/portkit/runtime/waystone.js";
 import { _fire, _flush, _permutation, _startup, world, GameMode } from "@minecraft/server";
 import { _reset, _respond, _shown } from "@minecraft/server-ui";
 
+const REQUIREMENTS = [
+  { args: ["distance", 0.01], fn: "scaled_add_xp_cost", when: { is_interdimensional: false } },
+  { args: [27], fn: "add_xp_cost", when: { is_interdimensional: true } },
+  { args: [0], fn: "min_xp_cost", when: {} },
+  { args: [27], fn: "max_xp_cost", when: {} },
+];
+
 const FALLBACK = {
-  blocks: ["waystones:waystone", "waystones:mossy_waystone"],
+  block_types: {
+    "waystones:mossy_waystone": "waystones:waystone",
+    "waystones:orange_sharestone": "waystones:orange_sharestone",
+    "waystones:waystone": "waystones:waystone",
+  },
+  blocks: ["waystones:mossy_waystone", "waystones:orange_sharestone", "waystones:waystone"],
   component: "waystones:portkit_waystone",
+  default_type: "waystones:waystone",
   half_state: "waystones:half",
   messages: {
     activated: "chat.waystones.waystone_activated",
     current_location: "gui.waystones.waystone_selection.current_location",
     missing: "chat.waystones.waystone_missing",
     none: "gui.waystones.waystone_selection.no_waystones_activated",
+    none_shared: "gui.waystones.waystone_selection.no_sharestones_available",
     not_enough_xp: "chat.waystones.not_enough_xp",
     only_owner: "chat.waystones.only_owner_can_edit",
     out_of_range: "chat.waystones.source_waystone_out_of_range",
     save: "gui.waystones.waystone_settings.save",
     settings: "container.waystones.waystone_settings",
+    sharestone_name: "container.waystones.sharestone",
     title: "container.waystones.waystone_selection",
     unnamed: "gui.waystones.waystone_selection.unnamed_waystone",
     untitled: "waystones.untitled_waystone",
+    waystone_name: "container.waystones.waystone",
     xp_cost: "gui.waystones.waystone_selection.xp_requirement",
   },
   name_max_length: 128,
   namespace: "waystones",
+  networks: {
+    "waystones:orange_sharestone": { name: "sharestone_name", none: "none_shared", requirements: REQUIREMENTS, shared: true },
+    "waystones:waystone": { name: "waystone_name", none: "none", requirements: REQUIREMENTS, shared: false },
+  },
   range_sq: 64,
-  requirements: [
-    { args: ["distance", 0.01], fn: "scaled_add_xp_cost", when: { is_interdimensional: false } },
-    { args: [27], fn: "add_xp_cost", when: { is_interdimensional: true } },
-    { args: [0], fn: "min_xp_cost", when: {} },
-    { args: [27], fn: "max_xp_cost", when: {} },
-  ],
   restricted_origins: ["PLAYER"],
   sounds: {
     activate: { id: "random.levelup", pitch: 1.0, volume: 0.2 },
@@ -58,6 +72,7 @@ registerWaystones(table);
 const component = _startup()[table.component];
 const HALF = table.half_state;
 const TYPE = "waystones:waystone";
+const ORANGE = "waystones:orange_sharestone";
 
 // -- a tiny world --------------------------------------------------------------
 
@@ -159,7 +174,7 @@ function use(dimension, player, location) {
 // -- core ----------------------------------------------------------------------
 
 test("cost follows the warpRequirements default", () => {
-  const r = FALLBACK.requirements;
+  const r = REQUIREMENTS;
   assert.equal(core.cost(r, { is_interdimensional: false, distance: 99.9 }), 0);
   assert.equal(core.cost(r, { is_interdimensional: false, distance: 1500.7 }), 15);
   assert.equal(core.cost(r, { is_interdimensional: false, distance: 99999 }), 27);
@@ -413,4 +428,149 @@ test("an unloaded target: the player lands on its front", async () => {
   _flush();
   await tick();
   assert.deepEqual(alex.teleports.at(-1).location, { x: -0.5, y: 64.5, z: 0.5 });
+});
+
+// -- sharestones ---------------------------------------------------------------
+
+test("shared targets: same type only, without the one in use, in placement order", () => {
+  const records = [
+    { uid: "b", type: ORANGE, order: 2 },
+    { uid: "w", order: 0 },
+    { uid: "a", type: ORANGE, order: 1 },
+    { uid: "r", type: "waystones:red_sharestone", order: 3 },
+    { uid: "c", type: ORANGE, order: 2 },
+  ];
+  assert.deepEqual(core.sharedTargets(records, ORANGE, "a", TYPE).map((r) => r.uid), ["b", "c"]);
+  assert.deepEqual(core.sharedTargets(records, TYPE, "x", TYPE).map((r) => r.uid), ["w"]);
+  assert.equal(core.recordType({}, TYPE), TYPE);
+});
+
+test("placing a sharestone owns it and asks for its name, but activates nothing", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "7" });
+  _respond({ canceled: false, formValues: ["Market"] });
+  assert.equal(await place(overworld, alex, { x: 0, y: 64, z: 0 }, "east", ORANGE), true);
+  assert.equal(overworld.blockAt({ x: 0, y: 65, z: 0 }).permutation.getState(HALF), "upper");
+  const record = JSON.parse(world.getDynamicProperty(core.recordKey("waystones", "minecraft:overworld", { x: 0, y: 64, z: 0 })));
+  assert.equal(record.type, ORANGE);
+  assert.equal(record.owner, "7");
+  assert.deepEqual(record.name, { text: "Market" });
+  assert.equal(alex.getDynamicProperty(core.activatedKey("waystones")), undefined);
+  // "Edit %s" with the block entity's name (Sharestone), as Java's settings title.
+  assert.deepEqual(_shown[0].title.rawtext[0].with.rawtext, [{ translate: table.messages.sharestone_name }]);
+});
+
+test("using a sharestone opens its colour's network at once; choosing teleports and charges", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const nether = makeDimension("minecraft:nether");
+  const alex = makePlayer(overworld, { id: "1" });
+  const sam = makePlayer(overworld, { id: "2", name: "Sam", xp: 100 });
+  _respond({ canceled: false, formValues: ["A"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 }, "north", ORANGE);
+  _respond({ canceled: false, formValues: ["W"] });
+  await place(overworld, alex, { x: 20, y: 64, z: 0 });
+  alex.dimension = nether;
+  _respond({ canceled: false, formValues: ["N"] });
+  await place(nether, alex, { x: 0, y: 64, z: 0 }, "north", ORANGE);
+  alex.dimension = overworld;
+  alex.location = { x: 1000, y: 64, z: 0 };
+  _respond({ canceled: false, formValues: ["B"] });
+  await place(overworld, alex, { x: 1000, y: 64, z: 2 }, "south", ORANGE);
+  // Sam never touched any of them: no activation, no chat, the menu opens.
+  sam.location = { x: 1000, y: 64, z: 0 };
+  _respond({ canceled: false, selection: 0 });
+  use(overworld, sam, { x: 1000, y: 65, z: 2 });
+  _flush();
+  await tick();
+  assert.equal(sam.messages.length, 0);
+  assert.equal(sam.getDynamicProperty(core.activatedKey("waystones")), undefined);
+  const menu = _shown.at(-1);
+  assert.equal(menu.kind, "action");
+  // Every other orange sharestone, in placement order; never the waystone.
+  assert.deepEqual(menu.buttons.map((b) => b.text.rawtext[0]), [{ text: "A" }, { text: "N" }]);
+  assert.equal(menu.buttons[0].text.rawtext[2].rawtext[0].with.rawtext[0].text, "9");
+  assert.equal(menu.buttons[1].text.rawtext[2].rawtext[0].with.rawtext[0].text, "27");
+  assert.deepEqual(sam.teleports.at(-1).location, { x: 0.5, y: 64.5, z: -0.5 });
+  assert.equal(sam.xp, 91);
+});
+
+test("a lone sharestone says there are no matching sharestones", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  _respond({ canceled: false, formValues: ["A"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 }, "north", ORANGE);
+  _respond({ canceled: true });
+  use(overworld, alex, { x: 0, y: 64, z: 0 });
+  _flush();
+  await tick();
+  const menu = _shown.at(-1);
+  assert.equal(menu.buttons.length, 0);
+  assert.equal(menu.body.rawtext.at(-1).rawtext[0].translate, table.messages.none_shared);
+});
+
+test("a sharestone whose block became a waystone is no longer a sharestone target", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  _respond({ canceled: false, formValues: ["A"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 }, "north", ORANGE);
+  _respond({ canceled: false, formValues: ["B"] });
+  await place(overworld, alex, { x: 5, y: 64, z: 0 }, "north", ORANGE);
+  overworld.set({ x: 0, y: 64, z: 0 }, TYPE, { "minecraft:cardinal_direction": "north", [HALF]: "lower" });
+  _respond({ canceled: false, selection: 0 });
+  use(overworld, alex, { x: 5, y: 64, z: 0 });
+  _flush();
+  await tick();
+  assert.equal(alex.teleports.length, 0);
+  assert.equal(alex.actionbar.at(-1).rawtext[0].translate, table.messages.missing);
+});
+
+test("the waystone settings title is Edit Waystone, as Java's", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  _respond({ canceled: false, formValues: ["Home"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 });
+  assert.deepEqual(_shown[0].title.rawtext[0].with.rawtext, [{ translate: table.messages.waystone_name }]);
+});
+
+test("a record stored before records carried a type is a waystone", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1", xp: 100 });
+  _respond({ canceled: false, formValues: ["A"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 });
+  _respond({ canceled: false, formValues: ["B"] });
+  await place(overworld, alex, { x: 5, y: 64, z: 0 });
+  const key = core.recordKey("waystones", "minecraft:overworld", { x: 0, y: 64, z: 0 });
+  const old = JSON.parse(world.getDynamicProperty(key));
+  delete old.type;
+  delete old.order;
+  world.setDynamicProperty(key, JSON.stringify(old));
+  _respond({ canceled: false, selection: 0 });
+  use(overworld, alex, { x: 5, y: 64, z: 0 });
+  _flush();
+  await tick();
+  assert.equal(alex.teleports.length, 1);
+});
+
+test("a waystone record left where a sharestone now stands is replaced, not reused", async () => {
+  clearWorld();
+  const overworld = makeDimension("minecraft:overworld");
+  const alex = makePlayer(overworld, { id: "1" });
+  _respond({ canceled: false, formValues: ["Old"] });
+  await place(overworld, alex, { x: 0, y: 64, z: 0 });
+  const key = core.recordKey("waystones", "minecraft:overworld", { x: 0, y: 64, z: 0 });
+  const old = JSON.parse(world.getDynamicProperty(key));
+  overworld.set({ x: 0, y: 64, z: 0 }, ORANGE, { "minecraft:cardinal_direction": "north", [HALF]: "lower" });
+  _respond({ canceled: true });
+  use(overworld, alex, { x: 0, y: 64, z: 0 });
+  const now = JSON.parse(world.getDynamicProperty(key));
+  assert.notEqual(now.uid, old.uid);
+  assert.equal(now.type, ORANGE);
+  assert.equal(now.owner, null);
+  assert.equal(alex.messages.length, 0);
 });
