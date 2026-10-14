@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: the warp stone opens the warp scroll's menu through the waystone runtime after its own hold, and each teleport from it costs one of its 128 durability
 
-- **Status:** proposed (PR #208, Part of #178); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #208, Part of #178).
 - **Decision:** Waystones' warp stone (`WarpStoneItem`, `ModItems` L42) works
   through the waystone runtime of #198-#207: a `warp_stones` section in the
   same data table, no new block or component.
