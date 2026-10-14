@@ -27,6 +27,97 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-13: waystones activate, list and teleport through a scripted block; the experience cost is the cited warpRequirements default, parsed and decided per runtime
+
+- **Status:** proposed (PR for #178; design picks in the PR comment, for Alex).
+- **Decision:** Waystones' ten `WaystoneBlock` blocks (waystone, mossy,
+  sandy, deepslate, blackstone, end stone, red nether bricks, purpur,
+  prismarine, mud bricks) take the station split of #177: a generated table
+  (`scripts/portkit/data/waystones_waystone.js`: the blocks, the warp
+  requirement modifiers that can apply here, texts, sounds, the edit rule,
+  name length, range) read by a fixed runtime (`portkit/runtime/waystone.js`
+  + `waystone_core.js`, `@minecraft/server` 2.0.0 plus
+  `@minecraft/server-ui` 2.0.0 for the forms). The block is facing x a custom
+  `waystones:half` state (lower first, Java's default), one box per half from
+  Java's shapes. Placing one needs a free block above, sets the upper half,
+  makes a waystone owned by the placer, activates it for them and asks for a
+  name (Java opens the settings screen on placement); using it activates it
+  (chat "Activated Waystone: %s", level-up sound 0.2/1) or, once activated,
+  opens an `ActionFormData` menu of the player's activated waystones in
+  activation order (Java's default MANUAL sort over its sorting index), the
+  one in use left out and named as "Current Location"; choosing one checks
+  the player is still within 8 blocks of the waystone used, that the target
+  still exists, and that they can pay (creative always can), takes the
+  points (Java's consume runs in creative too) and teleports them to the
+  first free side of the target (its facing, then east, west, south, north;
+  its own block when none), turned to that side, with the portal-travel
+  sounds 0.01/0.05. Sneak-use renames (`ModalFormData`, 128 characters, a
+  blank name becomes "Untitled Waystone"), only by the owner while PLAYER is
+  restricted. Breaking either half removes both and the waystone; only the
+  lower half drops (its loot table), so breaking the upper half outside
+  creative destroys the lower one with its drops.
+- **Where each value comes from (no fabrication):** which blocks: the
+  `waystones:waystones` block tag (data) intersected with the blocks
+  `ModBlocks` registers as `WaystoneBlock` (L70-85); facing/half/placement/
+  breaking: `WaystoneBlockBase`/`WaystoneBlock`; drops: the jar's loot table
+  (one pool, `half=lower`, `survives_explosion` -> `explosion_decay`); the
+  cost: `teleports.warpRequirements`, `enableCosts`, `enableCooldowns`,
+  `restrictedWaystones`, `defaultVisibility` from `WaystonesConfigData` at
+  v21.1.46 (9d280c1a), in `portkit/data/waystones_config_defaults.json` with
+  a citation per value. The converter parses each requirement line as
+  `RequirementModifierParser` does and decides each condition for this
+  runtime (`waystones.FIXED_CONDITIONS`: the source is always a waystone,
+  the target always a waystone with ACTIVATION visibility); what is left
+  (`is_interdimensional`) is evaluated per teleport, with Java's float
+  arithmetic and int truncation. At the defaults: distance x 0.01 points in
+  one dimension, 27 between dimensions, clamped to 0..27; the scroll, warp
+  plate, global, memorial and inventory-button lines can't apply and are
+  listed in the table's header. A condition, function or variable without a
+  runtime, or a cooldown that would apply, means no runtime (blocks place,
+  do nothing; loot tables residue), never a guess. Texts: the jar's own lang
+  keys, shipped under their Java key in every locale
+  (`lang.convert(runtime_keys=...)`), shown with rawtext `translate`/`with`.
+  Sounds: `random.levelup` and `portal.travel` play the same files as Java's
+  `entity.player.levelup` and `block.portal.travel` (mcmeta 1.21.1 assets,
+  bedrock-samples sound_definitions).
+- **Storage:** one world dynamic property per waystone, keyed by dimension
+  and lower-half position (JSON: uid, dimension, pos, facing, name, owner,
+  origin); a player dynamic property holds the uids they activated, in
+  order. A waystone placed by a player replaces whatever was stored at its
+  spot; one without a record (placed by command or structure) gets one on
+  first use, with no owner and origin UNKNOWN (Java's block entity default).
+- **Why:** the same reason as the FD stations: the data says what varies
+  (blocks, drops, the cost rules), the behaviour is one fixed script, and the
+  cost is the mod's own rule language read from its own default, so a value
+  in the pack can be traced to a line of source.
+- **Rejected:** hard-coding "distance x 0.01, max 27" in the script (the
+  number would have no source in the table, and a different default would
+  be silently wrong); one registry property for all waystones (dynamic
+  property strings are size-capped); teleporting anywhere for free or
+  without the menu (#87, a gameplay change); the warp stone and scrolls in
+  this slice (their charge-up is `warpStoneUseTime`/`scrollUseTime` 32 ticks,
+  and `minecraft:use_modifiers` is documented only with food, shooter or
+  throwable; an instant `onUse` would drop it); listing the waystone in use
+  as a button that does nothing (`ActionFormData` can't disable one).
+- **Not carried over (conversion note):** visibility (every waystone is
+  visible upon activation), modifier slots and warp modifiers, groups,
+  aliases, favourites, menu sorting/search/deleting, pets and leashed mobs
+  travelling along, waterlogging, particles, comparator and observers, a
+  silk-touched waystone keeping its identity (it drops a plain waystone),
+  operator edit permission, the room test for a target in an unloaded chunk
+  (the player lands on its front side), Java's replaceable and suffocation
+  tests (placing needs air or liquid above, and only air or liquid count as
+  room beside a target; scripts can't read either), the other half going when
+  one is removed by anything but a player (an explosion), the player's reach in the
+  range test (the non-player 8-block rule, L531), config changes (cited
+  defaults), the item icon (Bedrock draws the lower half), village and wild
+  generation, sharestones, portstones, warp plates/portals, fleeting
+  memorials, and the warp stone, scrolls, shards and feather. Another
+  Waystones version gets no runtime.
+- **Coverage:** Waystones 12.7 -> 16.4 (124 -> 159 files, residue 851 -> 810);
+  no other corpus mod changed.
+- **Links:** #178, #177 (station pattern), #87 (no fabrication), PR (this).
+
 ## 2026-10-13: feasts serve portions through a scripted block; serving counts and leftovers come from the blockstate and loot table, the serving item and container from cited FD code
 
 - **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR

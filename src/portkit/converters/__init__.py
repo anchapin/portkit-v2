@@ -65,6 +65,10 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool] | None = 
             # (#177 feasts), so it waits like a station recipe.
             converted = fn(mod, context=context, deferred=deferred_loot,
                            station_tables=stations.station_loot(mod))
+        elif fn is lang.convert:
+            # Strings a station runtime shows (the waystone menu, #178) ship
+            # under their Java key.
+            converted = fn(mod, runtime_keys=stations.station_lang_keys(mod))
         else:
             converted = fn(mod)
         result = result.merge(converted)

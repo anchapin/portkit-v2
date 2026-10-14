@@ -11,6 +11,7 @@ the only one where we might be wrong.
 from __future__ import annotations
 
 import json
+import re
 
 from ..model import ConversionResult, SourceMod, Unhandled
 
@@ -102,6 +103,19 @@ def _one_line(value: str) -> str:
     return value.replace("\r\n", _LINEBREAK).replace("\n", _LINEBREAK).replace("\r", _LINEBREAK)
 
 
+# Java's lang loader rewrites numeric slots to string slots as it reads a
+# file (net.minecraft.locale.Language UNSUPPORTED_FORMAT_PATTERN
+# %(\d+\$)?[\d.]*[df] -> %$1s; described in Mojira MC-262117, still so in
+# 1.21), so "%d" always fills like "%s"; Bedrock's rawtext documents only %s and
+# %1 slots. A runtime key's numeric slots are written as string slots, which is
+# what Java reads them as.
+_INT_SLOT = re.compile(r"%(\d+\$)?[\d.]*[df]")
+
+
+def _runtime_value(value: str) -> str:
+    return _INT_SLOT.sub(lambda m: f"%{m.group(1) or ''}s", value)
+
+
 def _translate_key(key: str, namespace: str) -> str | None:
     parts = key.split(".")
     if len(parts) < 3:
@@ -120,15 +134,23 @@ def _is_code_string(key: str) -> bool:
     return key.split(".")[0] in _CODE_DOMAINS
 
 
-def _lines(entries: dict, namespace: str) -> tuple[list[str], list[str], list[str]]:
-    """Split one locale file into translated lines, code strings and unknown keys."""
+def _lines(entries: dict, namespace: str,
+           runtime_keys: frozenset = frozenset()) -> tuple[list[str], list[str], list[str]]:
+    """Split one locale file into translated lines, code strings and unknown keys.
+
+    ``runtime_keys`` are Java keys a fixed station runtime shows itself (the
+    waystone menu's title and chat messages, #178): they keep their Java key
+    as the Bedrock key, which the runtime names in a rawtext ``translate``.
+    """
     lines: list[str] = []
     code_strings: list[str] = []
     unknown: list[str] = []
     for key, value in entries.items():
-        translated = _translate_key(key, namespace)
+        runtime = key in runtime_keys
+        translated = key if runtime else _translate_key(key, namespace)
         if translated is not None:
-            lines.append(f"{translated}={_one_line(str(value))}")
+            text = _runtime_value(str(value)) if runtime else str(value)
+            lines.append(f"{translated}={_one_line(text)}")
         elif _is_code_string(key):
             code_strings.append(key)
         else:
@@ -136,8 +158,12 @@ def _lines(entries: dict, namespace: str) -> tuple[list[str], list[str], list[st
     return lines, code_strings, unknown
 
 
-def convert(mod: SourceMod) -> ConversionResult:
+def convert(mod: SourceMod, runtime_keys: set[str] | frozenset | None = None) -> ConversionResult:
+    """``runtime_keys``: Java keys a station runtime of this namespace shows
+    (:func:`portkit.converters.stations.station_lang_keys`); they ship under
+    their own name instead of counting as code strings."""
     result = ConversionResult()
+    runtime_keys = frozenset(runtime_keys or ())
     src = mod.assets / "lang"
     if not src.is_dir():
         return result
@@ -161,7 +187,7 @@ def convert(mod: SourceMod) -> ConversionResult:
             result.unhandled.append(Unhandled(rel, "lang", f"invalid JSON: {exc}"))
             continue
 
-        lines, code_strings, unknown = _lines(entries, mod.namespace)
+        lines, code_strings, unknown = _lines(entries, mod.namespace, runtime_keys)
 
         if locale == _PRIMARY:
             # The primary locale is where key shapes get reported. Every other

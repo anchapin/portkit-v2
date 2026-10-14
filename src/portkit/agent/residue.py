@@ -105,6 +105,8 @@ SKIP_KINDS = {
                          "(a config flag gates it), so converting it would ship content the mod doesn't have"),
     "station_recipe": ("a station recipe runs from the station's script data table, which the agent's "
                        "tools don't write; the reason says what the converter could not state exactly"),
+    "waystone": ("a waystone's loot table is wired by the waystone runtime (#178), which the agent's tools "
+                 "don't write; the reason says what the converter could not state exactly"),
 }
 
 # Where Bedrock keeps each kind of content. A hint, not a constraint: the

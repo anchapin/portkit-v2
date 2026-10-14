@@ -259,8 +259,12 @@ def _cutting_spec(loader: str) -> CuttingBoardSpec:
 
 def station_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
     """Blocks of ``mod`` that a station runtime makes work, by blockstate name."""
+    from .waystones import waystone_blocks
+
     if _unsupported(mod) is not None:
-        return {}
+        # Not Farmer's Delight at a version its runtimes follow; Waystones'
+        # waystone runtime (#178) is the other one.
+        return dict(waystone_blocks(mod))
     from .cooking_pot import COOKING_POT_BLOCKS
     from .feasts import feast_blocks
     from .skillet import SKILLET_BLOCKS
@@ -275,9 +279,20 @@ def station_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
 
 def station_loot(mod: SourceMod) -> set[str]:
     """Block loot tables (names under loot_table/blocks/) a station reads."""
-    from .feasts import loot_names
+    from . import feasts, waystones
 
-    return loot_names(mod)
+    return feasts.loot_names(mod) | waystones.loot_names(mod)
+
+
+def station_lang_keys(mod: SourceMod) -> set[str]:
+    """Java lang keys a station runtime shows itself (#178 waystone menu)."""
+    from . import waystones
+
+    return waystones.lang_keys(mod)
+
+
+def _loot_name(rel: str) -> str:
+    return rel.rsplit("/", 1)[-1][:-len(".json")]
 
 
 def _unsupported(mod: SourceMod, station: str = "cutting-board", block: str = "cutting board") -> str | None:
@@ -544,18 +559,23 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     :func:`portkit.converters.feasts.loot_names`). The entry :data:`ENTRY`
     imports every station that shipped.
     """
-    from . import cooking_pot, feasts, skillet, stove
+    from . import cooking_pot, feasts, skillet, stove, waystones
 
     result = ConversionResult()
     entries: list[str] = []
     cutting = [d for d in deferred if d[1].get("type") == CUTTING]
     cooking = [d for d in deferred if d[1].get("type") == COOKING]
     campfire = [d for d in deferred if d[1].get("type") == CAMPFIRE]
+    # Each station gets the loot tables it asked for (station_loot).
+    waystone_names = waystones.loot_names(mod)
+    feast_loot = [d for d in loot or [] if _loot_name(d[0]) not in waystone_names]
+    waystone_loot = [d for d in loot or [] if _loot_name(d[0]) in waystone_names]
     for converted, entry in (_convert_cutting(mod, cutting, files, context),
                              cooking_pot.convert(mod, cooking, files, context),
                              stove.convert(mod, campfire, files, context),
                              skillet.convert(mod, campfire, files, context),
-                             feasts.convert(mod, loot or [], files, context)):
+                             feasts.convert(mod, feast_loot, files, context),
+                             waystones.convert(mod, waystone_loot, files, context)):
         result = result.merge(converted)
         if entry:
             entries.append(entry)
