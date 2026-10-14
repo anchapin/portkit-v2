@@ -5,19 +5,28 @@ docs/decisions.md) applied to Waystones' waystone: the converter writes a
 generated data table (``scripts/portkit/data/waystones_waystone.js``) read by a
 hand-written runtime (``portkit/runtime/waystone.js`` and its node-tested
 logic ``waystone_core.js``) that does what Waystones' Java code does, cited per
-line there. This first slice covers the ten waystone blocks (``WaystoneBlock``):
-placing one (both halves), activating it, naming it, the menu of the
-waystones a player has activated, and the teleport with its experience cost.
-Sharestones, portstones, warp plates, warp portals, fleeting memorials and the
-warp items keep their residue.
+line there. It covers the ten waystone blocks (``WaystoneBlock``): placing
+one (both halves), activating it, naming it, the menu of the waystones a player
+has activated, and the teleport with its experience cost; and the fifteen
+coloured sharestones (``SharestoneBlock``), which take the same placement,
+naming, breaking and teleport but list every sharestone of their own colour
+(one shared network per colour, nothing to activate). Portstones, warp plates,
+warp portals, fleeting memorials and the warp items keep their residue.
 
 Where each value comes from (no fabrication, #87):
 
 * **Which blocks**: Waystones' own ``waystones:waystones`` block tag (data),
   each a block ``ModBlocks`` registers as a ``WaystoneBlock``
-  (:data:`WAYSTONE_BLOCKS`, cited), whose blockstate is ``facing`` x ``half``.
-* **Shape, facing, the two halves**: ``WaystoneBlock`` / ``WaystoneBlockBase``
-  (shapes, ``getStateForPlacement``, ``setPlacedBy``, ``playerWillDestroy``).
+  (:data:`WAYSTONE_BLOCKS`, cited), and its ``waystones:sharestones`` tag,
+  each a ``SharestoneBlock`` (:data:`SHARESTONE_BLOCKS`, cited); the
+  blockstate is ``facing`` x ``half``.
+* **Which network**: a waystone's type is ``waystones:waystone`` (reached by
+  activating it); a sharestone's is its colour's
+  (``WaystoneTypes.getSharestone``), and its menu lists every sharestone of
+  that type (``PlayerWaystoneManager#getTargetsForWaystoneType``).
+* **Shape, facing, the two halves**: ``WaystoneBlock`` / ``SharestoneBlock`` /
+  ``WaystoneBlockBase`` (shapes, ``getStateForPlacement``, ``setPlacedBy``,
+  ``playerWillDestroy``).
 * **Breaking drops**: the jar's loot table (one pool, the lower half only).
 * **The experience cost**: the ``warpRequirements`` config default, parsed
   here the way ``RequirementModifierParser`` parses it, with
@@ -25,7 +34,8 @@ Where each value comes from (no fabrication, #87):
   ``portkit/data/waystones_config_defaults.json`` (cited per value). Each
   modifier's conditions are decided for this runtime (:data:`FIXED_CONDITIONS`:
   a teleport here always starts at a waystone and ends at one with the default
-  ``ACTIVATION`` visibility); what is left is evaluated by the runtime.
+  ``ACTIVATION`` visibility, or at a sharestone and ends at one of its colour);
+  what is left is evaluated by the runtime.
   An unknown condition or function means no runtime (residue), never a guess.
 * **Texts**: the jar's own lang keys (:data:`MESSAGES`), shipped under their
   Java key (:func:`portkit.converters.lang.convert` ``runtime_keys``).
@@ -56,6 +66,8 @@ HALF_STATE = "waystones:half"
 COMPONENT = "waystones:portkit_waystone"
 DEFAULTS_DATA = "waystones_config_defaults.json"
 TAG = "data/waystones/tags/block/waystones.json"
+# ModBlockTags L12 (SHARESTONES); the jar's tag lists the fifteen sharestones.
+SHARESTONE_TAG = "data/waystones/tags/block/sharestones.json"
 # Vanilla Bedrock's empty loot table, for the upper half (as the feasts' empty
 # serving counts; Mojang/bedrock-samples 46ba6ea9 behavior_pack/loot_tables/empty.json).
 EMPTY_LOOT = "loot_tables/empty.json"
@@ -87,21 +99,55 @@ BLOCK_SOURCES = (
     _src("block/WaystoneBlockBase.java", "160-L173"),
 )
 
+# The colours ModBlocks registers a SharestoneBlock for (sharestoneColors
+# L35-51: every dye colour but white), each as <colour>_sharestone (L96-100),
+# in that order; WaystoneTypes.SHARESTONES L16-32 lists the same types.
+SHARESTONE_COLORS = (
+    "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray", "light_gray", "cyan", "purple",
+    "blue", "brown", "green", "red", "black",
+)
+SHARESTONE_BLOCKS = tuple(f"{color}_sharestone" for color in SHARESTONE_COLORS)
+SHARESTONE_SOURCES = (
+    _src("block/ModBlocks.java", "35-L51"),
+    _src("block/ModBlocks.java", "96-L100"),
+    # LOWER_SHAPE / UPPER_SHAPE; getShape by HALF.
+    _src("block/SharestoneBlock.java", "40-L52"),
+    _src("block/SharestoneBlock.java", "69-L72"),
+    _src("block/WaystoneBlockBase.java", "160-L173"),
+)
+# A waystone's type (WaystoneTypes.WAYSTONE L10; WaystoneBlockEntity) and a
+# sharestone's (WaystoneTypes.getSharestone L34-40 via
+# SharestoneBlockEntity#getWaystoneType L30-34).
+WAYSTONE_TYPE = f"{NS}:waystone"
+
+
+def waystone_type(name: str) -> str:
+    """The Java waystone type of the block ``name`` (a WAYSTONE_BLOCKS or SHARESTONE_BLOCKS entry)."""
+    return f"{NS}:{name}" if name in SHARESTONE_BLOCKS else WAYSTONE_TYPE
+
+
 # Java's shapes as one Bedrock box per half (origin/size in pixels, centred on
 # x and z): the bounding box of each union, the same at every facing (the
-# shapes are centred). LOWER_SHAPE spans 0-16 on every axis; UPPER_SHAPE's
-# widest part is box(1, 10, 1, 15, 12, 15), height 0-16.
+# shapes are centred). The waystone's LOWER_SHAPE spans 0-16 on every axis; its
+# UPPER_SHAPE's widest part is box(1, 10, 1, 15, 12, 15), height 0-16. Both
+# sharestone shapes span 0-16 on every axis (LOWER_SHAPE's box(0, 0, 0, 16, 3,
+# 16) .. box(3, 9, 3, 13, 16, 13); UPPER_SHAPE's box(3, 0, 3, 13, 7, 13) ..
+# box(0, 13, 0, 16, 16, 16)).
 LOWER_BOX = {"origin": [-8, 0, -8], "size": [16, 16, 16]}
 UPPER_BOX = {"origin": [-7, 0, -7], "size": [14, 16, 14]}
+SHARESTONE_BOX = {"origin": [-8, 0, -8], "size": [16, 16, 16]}
 
 
 def _block(name: str) -> FacingBlock:
+    share = name in SHARESTONE_BLOCKS
+    lower = SHARESTONE_BOX if share else LOWER_BOX
+    upper = SHARESTONE_BOX if share else UPPER_BOX
     return FacingBlock(
-        name, 180, LOWER_BOX, BLOCK_SOURCES,
+        name, 180, lower, SHARESTONE_SOURCES if share else BLOCK_SOURCES,
         java_state="half", values=("lower", "upper"), state=HALF_STATE,
         value_components={
-            "lower": {"minecraft:collision_box": dict(LOWER_BOX), "minecraft:selection_box": dict(LOWER_BOX)},
-            "upper": {"minecraft:collision_box": dict(UPPER_BOX), "minecraft:selection_box": dict(UPPER_BOX)},
+            "lower": {"minecraft:collision_box": dict(lower), "minecraft:selection_box": dict(lower)},
+            "upper": {"minecraft:collision_box": dict(upper), "minecraft:selection_box": dict(upper)},
         },
     )
 
@@ -135,6 +181,18 @@ MESSAGES = {
     "save": "gui.waystones.waystone_settings.save",
     # EditWaystoneMessage#makeNameLegal L84-87: a blank name.
     "untitled": "waystones.untitled_waystone",
+    # WaystoneBlockEntity#getName L32-34: the %s of the settings title
+    # (WaystoneBlockEntityBase#getSettingsMenuProvider L297).
+    "waystone_name": "container.waystones.waystone",
+}
+# The texts only a sharestone shows; a jar without them keeps its sharestones
+# residue (the waystones still work).
+SHARESTONE_MESSAGES = {
+    # SharestoneBlockEntity#getName L44-46: the %s of its settings title.
+    "sharestone_name": "container.waystones.sharestone",
+    # WaystoneSelectionScreenBase#getNoWaystonesMessage L349-357: the empty
+    # sharestone list.
+    "none_shared": "gui.waystones.waystone_selection.no_sharestones_available",
 }
 
 # Bedrock vanilla sound events playing the same audio as the Java events
@@ -152,9 +210,11 @@ SOUNDS = {
 }
 
 # How a requirement condition evaluates in this runtime, where every teleport
-# starts at a waystone block and targets a waystone the player activated
-# (RequirementRegistry L294-L348). Conditions not here, except
-# is_interdimensional (decided per teleport), have no runtime.
+# from a waystone starts at a waystone block and targets a waystone the player
+# activated (RequirementRegistry L294-L348). Conditions not here, except
+# is_interdimensional (decided per teleport), have no runtime. A sharestone's
+# teleports go sharestone -> sharestone of the same colour
+# (:func:`fixed_conditions`).
 FIXED_CONDITIONS = {
     "source_is_warp_plate": False,  # L295-L296: the source is a waystone
     "source_is_scroll": False,  # L311: no warp item starts a teleport here
@@ -171,7 +231,31 @@ FIXED_CONDITIONS = {
     "target_is_player": False,  # L332-L334: twinbound feathers don't convert
     "target_is_sharestone": False,  # L338-L340
     "target_is_waystone": True,  # L346-L348
+    # L303-L307 / L341-L345: source_is_<colour>_sharestone and
+    # target_is_<colour>_sharestone, one per WaystoneTypes.SHARESTONES entry.
+    **{f"{side}_is_{name}": False for name in SHARESTONE_BLOCKS for side in ("source", "target")},
 }
+
+
+def fixed_conditions(kind: str) -> dict[str, bool]:
+    """The conditions decided for teleports from a waystone of type ``kind``.
+
+    From a sharestone the source and the target are sharestones of its type
+    (getTargetsForWaystoneType L325-326 lists only that type), never a
+    waystone; the target's visibility is its colour's
+    (WaystoneVisibility#fromWaystoneType L38-57), so target_is_global stays
+    false.
+    """
+    if kind == WAYSTONE_TYPE:
+        return dict(FIXED_CONDITIONS)
+    name = kind.split(":", 1)[1]
+    if name not in SHARESTONE_BLOCKS:
+        raise _Refuse(f"no fixed conditions for waystone type {kind!r}")
+    fixed = dict(FIXED_CONDITIONS)
+    fixed.update({"source_is_waystone": False, "target_is_waystone": False,
+                  "source_is_sharestone": True, "target_is_sharestone": True,
+                  f"source_is_{name}": True, f"target_is_{name}": True})
+    return fixed
 DYNAMIC_CONDITIONS = {"is_interdimensional"}  # L294: target dimension != the player's
 # Experience-point functions (RequirementRegistry L122-L147) and the parameter
 # kinds their arguments parse as (L272-L286).
@@ -189,6 +273,7 @@ REQUIREMENT_SOURCES = (
     _src("requirement/RequirementModifierParser.java", "13-L25"),
     _src("requirement/RequirementRegistry.java", "122-L147"),
     _src("requirement/RequirementRegistry.java", "294-L348"),
+    _src("api/WaystoneVisibility.java", "38-L57"),
     _src("requirement/RequirementRegistry.java", "434"),
     _src("requirement/RequirementRegistry.java", "529-L530"),
     _src("requirement/ExperiencePointsRequirement.java", "17-L28"),
@@ -207,6 +292,14 @@ RUNTIME_SOURCES = (
     _src("client/gui/screen/WaystoneEditScreen.java", "54"),
     _src("client/gui/widget/WaystoneList.java", "46-L48"),
     _src("core/PersistentPlayerWaystoneData.java", "270-L290"),
+)
+SHARESTONE_RUNTIME_SOURCES = (
+    _src("block/SharestoneBlock.java", "74-L82"),
+    _src("block/entity/SharestoneBlockEntity.java", "30-L53"),
+    _src("core/PlayerWaystoneManager.java", "36-L62"),
+    _src("core/PlayerWaystoneManager.java", "306-L333"),
+    _src("core/WaystoneManagerImpl.java", "96-L99"),
+    _src("client/gui/screen/WaystoneSelectionScreenBase.java", "349-L357"),
 )
 NAME_MAX_LENGTH = 128  # WaystoneEditScreen L54: nameField.setMaxLength(128)
 # WaystoneTeleportManager#canInteractWithWaystone L531: a non-player must be
@@ -236,8 +329,8 @@ def _unsupported(mod: SourceMod) -> str | None:
     return None
 
 
-def _tagged(mod: SourceMod) -> list[str]:
-    path = mod.root / TAG
+def _tagged(mod: SourceMod, tag: str = TAG) -> list[str]:
+    path = mod.root / tag
     try:
         values = json.loads(path.read_text()).get("values") or []
     except (OSError, json.JSONDecodeError, AttributeError):
@@ -251,11 +344,12 @@ def _tagged(mod: SourceMod) -> list[str]:
 
 
 def waystone_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
-    """Waystone blocks of ``mod`` the runtime makes work, by blockstate name."""
+    """Waystone and sharestone blocks of ``mod`` the runtime makes work, by blockstate name."""
     if _unsupported(mod) is not None:
         return {}
-    return {name: _block(name) for name in _tagged(mod)
-            if name in WAYSTONE_BLOCKS and (mod.assets / "blockstates" / f"{name}.json").is_file()}
+    names = [n for n in _tagged(mod) if n in WAYSTONE_BLOCKS]
+    names += [n for n in _tagged(mod, SHARESTONE_TAG) if n in SHARESTONE_BLOCKS]
+    return {name: _block(name) for name in names if (mod.assets / "blockstates" / f"{name}.json").is_file()}
 
 
 def loot_names(mod: SourceMod) -> set[str]:
@@ -265,7 +359,13 @@ def loot_names(mod: SourceMod) -> set[str]:
 
 def lang_keys(mod: SourceMod) -> set[str]:
     """Java lang keys the runtime shows (shipped under their own name)."""
-    return set(MESSAGES.values()) if waystone_blocks(mod) else set()
+    blocks = waystone_blocks(mod)
+    if not blocks:
+        return set()
+    keys = set(MESSAGES.values())
+    if any(name in SHARESTONE_BLOCKS for name in blocks):
+        keys |= set(SHARESTONE_MESSAGES.values())
+    return keys
 
 
 # -- requirements -------------------------------------------------------------------
@@ -309,10 +409,13 @@ def _argument(kind: str, raw: str):
     return variable
 
 
-def requirements(lines: list[str], enable_costs: bool, enable_cooldowns: bool) -> tuple[list[dict], list[str]]:
-    """The warp requirement modifiers that can apply in this runtime, in order,
-    as {"when": {condition: wanted}, "fn": name, "args": [...]}, and the lines
-    left out (with why). Raises _Refuse for anything without a runtime."""
+def requirements(lines: list[str], enable_costs: bool, enable_cooldowns: bool,
+                 kind: str = WAYSTONE_TYPE) -> tuple[list[dict], list[str]]:
+    """The warp requirement modifiers that can apply in this runtime to a
+    teleport from a waystone of type ``kind``, in order, as {"when":
+    {condition: wanted}, "fn": name, "args": [...]}, and the lines left out
+    (with why). Raises _Refuse for anything without a runtime."""
+    fixed_table = fixed_conditions(kind)
     kept: list[dict] = []
     dropped: list[str] = []
     for line in lines:
@@ -327,8 +430,8 @@ def requirements(lines: list[str], enable_costs: bool, enable_cooldowns: bool) -
             base, negated = _negated(_local(match.group(1)))
             if match.group(2):
                 raise _Refuse(f"condition {match.group(1)!r} takes arguments; none is read here")
-            if base in FIXED_CONDITIONS:
-                if FIXED_CONDITIONS[base] == negated:
+            if base in fixed_table:
+                if fixed_table[base] == negated:
                     never = True
             elif base in DYNAMIC_CONDITIONS:
                 wanted = not negated
@@ -429,25 +532,50 @@ def _jar_lang(mod: SourceMod) -> dict:
 
 @dataclass(frozen=True)
 class _Plan:
-    modifiers: list
+    modifiers: dict  # waystone type -> its requirement modifiers
     dropped: list
     defaults: dict
 
 
-def _plan(mod: SourceMod) -> _Plan:
+def _plan(mod: SourceMod, kinds: list[str]) -> _Plan:
     entry = _defaults((mod.mods or {}).get(NS))
     values = {k: v["value"] for k, v in entry["values"].items()}
-    modifiers, dropped = requirements(values["teleports.warpRequirements"], values["teleports.enableCosts"],
-                                      values["teleports.enableCooldowns"])
+    modifiers: dict[str, list] = {}
+    left_out: dict[str, list[str]] = {}
+    for kind in kinds:
+        kept, left = requirements(values["teleports.warpRequirements"], values["teleports.enableCosts"],
+                                  values["teleports.enableCooldowns"], kind)
+        modifiers[kind] = kept
+        left_out[kind] = left
+    # A line left out for every type is listed once; one left out for some
+    # types only names them.
+    dropped = [line for line in left_out[kinds[0]] if all(line in left for left in left_out.values())]
+    for kind in kinds:
+        dropped.extend(f"{line} (from {kind})" for line in left_out[kind] if line not in dropped)
     return _Plan(modifiers, dropped, entry)
+
+
+def _network(kind: str, modifiers: list) -> dict:
+    """How the runtime treats one waystone type: a sharestone's menu lists
+    every sharestone of its type and nothing is activated
+    (SharestoneBlock#handleActivation L74-82; PlayerWaystoneManager
+    #activateWaystone L60 records only WAYSTONE activations); a waystone's
+    lists the waystones the player activated."""
+    shared = kind != WAYSTONE_TYPE
+    return {
+        "name": "sharestone_name" if shared else "waystone_name",
+        "none": "none_shared" if shared else "none",
+        "requirements": modifiers,
+        "shared": shared,
+    }
 
 
 def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             context: LoadContext) -> tuple[ConversionResult, str]:
-    """The waystones' runtime entry, loot tables and block components.
+    """The waystones' and sharestones' runtime entry, loot tables and block components.
 
-    ``deferred`` is (source path, table) for the waystones' block loot tables,
-    which the loot converter left to this one (:func:`loot_names`).
+    ``deferred`` is (source path, table) for their block loot tables, which
+    the loot converter left to this one (:func:`loot_names`).
     """
     result = ConversionResult()
     blocks = waystone_blocks(mod)
@@ -459,13 +587,18 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
 
     lang = _jar_lang(mod)
     why_all = None
+    why_share = None
     missing = sorted(k for k in MESSAGES.values() if k not in lang)
     if missing:
         why_all = f"the jar's en_us.json lacks {', '.join(missing)}, which the runtime shows"
+    missing_share = sorted(k for k in SHARESTONE_MESSAGES.values() if k not in lang)
+    if missing_share:
+        why_share = f"the jar's en_us.json lacks {', '.join(missing_share)}, which a sharestone shows"
+    kinds = sorted({waystone_type(name) for name in blocks})
     plan = None
     if why_all is None:
         try:
-            plan = _plan(mod)
+            plan = _plan(mod, kinds)
         except _Refuse as refusal:
             why_all = f"warpRequirements: {refusal}"
 
@@ -474,10 +607,11 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     silk = False
     for name in sorted(blocks):
         identifier = f"{NS}:{name}"
+        share = name in SHARESTONE_BLOCKS
         block_path = f"blocks/{name}.json"
         body = files.get(block_path)
         loot = tables.get(name)
-        why = why_all
+        why = why_all if why_all is not None else (why_share if share else None)
         if why is None and not (isinstance(body, dict) and body.get("minecraft:block", {})
                                 .get("description", {}).get("identifier") == identifier):
             why = f"the waystone block {identifier} did not convert"
@@ -491,7 +625,10 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
                     bedrock_loot = _loot(loot[0], loot[1], identifier, flags)
                 except _Refuse as refusal:
                     why = f"loot table {loot[0]}: {refusal}"
-                silk = silk or "silk_touch" in flags
+                # A sharestone can't be silk-touched in Java either
+                # (WaystoneBlockBase#canSilkTouch L91-93, not overridden):
+                # its copied item places a new sharestone.
+                silk = silk or ("silk_touch" in flags and not share)
         if why is not None:
             if loot is not None:
                 result.unhandled.append(Unhandled(loot[0], RESIDUE_KIND, why))
@@ -522,15 +659,24 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         return result, ""
 
     values = {k: v["value"] for k, v in plan.defaults["values"].items()}
+    kept_ways = [i for i in kept if i.split(":", 1)[1] not in SHARESTONE_BLOCKS]
+    kept_share = [i for i in kept if i.split(":", 1)[1] in SHARESTONE_BLOCKS]
+    block_types = {i: waystone_type(i.split(":", 1)[1]) for i in kept}
+    messages = dict(MESSAGES)
+    if kept_share:
+        messages.update(SHARESTONE_MESSAGES)
     table = {
+        "block_types": block_types,
         "blocks": kept,
         "component": COMPONENT,
+        # A record stored before records carried a type (#198) is a waystone's.
+        "default_type": WAYSTONE_TYPE,
         "half_state": HALF_STATE,
-        "messages": dict(MESSAGES),
+        "messages": messages,
         "name_max_length": NAME_MAX_LENGTH,
         "namespace": NS,
+        "networks": {kind: _network(kind, plan.modifiers[kind]) for kind in sorted(set(block_types.values()))},
         "range_sq": RANGE_SQ,
-        "requirements": plan.modifiers,
         "restricted_origins": sorted(values["general.restrictedWaystones"]),
         "sounds": SOUNDS,
     }
@@ -538,45 +684,73 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     config_sources = [f"{plan.defaults['repo']}/blob/{plan.defaults['commit']}/{v['source']}"
                       for v in plan.defaults["values"].values()]
     header = (
-        f"// Generated by portkit from {NS}'s waystone blocks, loot tables, config defaults and Java code;\n"
-        f"// do not edit. Read by the fixed runtime {_RUNTIME_DIR}/waystone.js (portkit/runtime). Sources:\n"
+        f"// Generated by portkit from {NS}'s waystone and sharestone blocks, loot tables, config defaults and\n"
+        f"// Java code; do not edit. Read by the fixed runtime {_RUNTIME_DIR}/waystone.js (portkit/runtime). Sources:\n"
         + "".join(f"//   {s}\n" for s in dict.fromkeys(
-            (*BLOCK_SOURCES, *config_sources, *REQUIREMENT_SOURCES, *RUNTIME_SOURCES)))
+            (*(BLOCK_SOURCES if kept_ways else ()), *(SHARESTONE_SOURCES if kept_share else ()),
+             *config_sources, *REQUIREMENT_SOURCES, *RUNTIME_SOURCES,
+             *(SHARESTONE_RUNTIME_SOURCES if kept_share else ()))))
         + "".join(f"// warpRequirements left out: {d}\n" for d in plan.dropped)
     ).rstrip("\n")
     result.files[data_path] = _js_module(header, table)
     for name in ("waystone.js", "waystone_core.js"):
         result.files[f"{_RUNTIME_DIR}/{name}"] = runtime_source(name)
-    result.stations[f"{NS}:waystones"] = {
-        "converted": len(kept),
-        "residue": len(blocks) - len(kept),
-        "data": data_path,
-        "block": ", ".join(kept),
-    }
+    blocks_ways = [n for n in blocks if n not in SHARESTONE_BLOCKS]
+    blocks_share = [n for n in blocks if n in SHARESTONE_BLOCKS]
+    if blocks_ways:
+        result.stations[f"{NS}:waystones"] = {
+            "converted": len(kept_ways),
+            "residue": len(blocks_ways) - len(kept_ways),
+            "data": data_path,
+            "block": ", ".join(kept_ways),
+        }
+    if blocks_share:
+        result.stations[f"{NS}:sharestones"] = {
+            "converted": len(kept_share),
+            "residue": len(blocks_share) - len(kept_share),
+            "data": data_path,
+            "block": ", ".join(kept_share),
+        }
     result.notes.extend(dict.fromkeys(notes))
-    result.notes.append(
-        f"{NS}: {len(kept)} waystone block(s) work through a Script API runtime ({SCRIPT_MODULE} {SCRIPT_VERSION} "
-        f"and {UI_MODULE} {UI_VERSION}, {data_path}): {', '.join(kept)}. Placing one sets its upper half "
-        "(it needs a free block above), activates it for the placer and asks for its name; using a waystone "
-        "activates it for that player, or opens a menu of the waystones the player has activated (in "
-        "activation order, the one in use left out); choosing one teleports the player beside it and takes "
-        "the experience cost of the warpRequirements default (distance x 0.01 points in the same dimension, "
-        "27 between dimensions, at most 27; creative players go even when they can't pay). Sneak-using renames it "
-        "(only its owner). Breaking either half removes both and the waystone. Not carried over: "
-        "visibility (every waystone is visible upon activation), the waystone's modifier slots and warp "
-        "modifiers, groups, aliases, favourites, sorting and search in the menu, deleting entries from it, "
-        "pets and leashed mobs travelling along, waterlogging, the particles, the comparator signal, "
-        "observers, a silk-touched waystone keeping its identity when moved (it is a new waystone), "
-        "operator edit permission, teleports into a chunk that is not loaded checking for room (the "
-        "player lands on the waystone's front), the 'free space' tests (placing needs air or liquid above, "
-        "and only air or liquid count as room beside a target, where Java also accepts replaceable or "
-        "non-suffocating blocks like grass), the other half going when one is removed by anything but a "
-        "player (an explosion), and config changes "
-        "(the cited defaults are used). The item shows the lower half only. Village and wild waystone "
-        "generation, sharestones, portstones, warp plates and portals, fleeting memorials and the warp "
-        "stone, scrolls, shards and feather are not converted."
-        + (" Silk touch drops a plain waystone." if silk else "")
-    )
+    if kept_ways:
+        result.notes.append(
+            f"{NS}: {len(kept_ways)} waystone block(s) work through a Script API runtime ({SCRIPT_MODULE} "
+            f"{SCRIPT_VERSION} and {UI_MODULE} {UI_VERSION}, {data_path}): {', '.join(kept_ways)}. Placing one "
+            "sets its upper half (it needs a free block above), activates it for the placer and asks for its name; "
+            "using a waystone activates it for that player, or opens a menu of the waystones the player has "
+            "activated (in activation order, the one in use left out); choosing one teleports the player beside it "
+            "and takes the experience cost of the warpRequirements default (distance x 0.01 points in the same "
+            "dimension, 27 between dimensions, at most 27; creative players go even when they can't pay). "
+            "Sneak-using renames it (only its owner). Breaking either half removes both and the waystone. Not "
+            "carried over: visibility (every waystone is visible upon activation), the waystone's modifier slots "
+            "and warp modifiers, groups, aliases, favourites, sorting and search in the menu, deleting entries from "
+            "it, pets and leashed mobs travelling along, waterlogging, the particles, the comparator signal, "
+            "observers, a silk-touched waystone keeping its identity when moved (it is a new waystone), "
+            "operator edit permission, teleports into a chunk that is not loaded checking for room (the "
+            "player lands on the waystone's front), the 'free space' tests (placing needs air or liquid above, "
+            "and only air or liquid count as room beside a target, where Java also accepts replaceable or "
+            "non-suffocating blocks like grass), the other half going when one is removed by anything but a "
+            "player (an explosion), and config changes "
+            "(the cited defaults are used). The item shows the lower half only. Village and wild waystone "
+            "generation, portstones, warp plates and portals, fleeting memorials and the warp "
+            "stone, scrolls, shards and feather are not converted."
+            + (" Silk touch drops a plain waystone." if silk else "")
+        )
+    if kept_share:
+        result.notes.append(
+            f"{NS}: {len(kept_share)} sharestone block(s) work through the same runtime ({data_path}): "
+            f"{', '.join(kept_share)}. Placing one sets its upper half, makes the placer its owner and asks for "
+            "its name; using one opens a menu of every other sharestone of the same colour in the world (any "
+            "dimension, in the order they were placed; nothing to activate), and choosing one teleports the "
+            "player beside it for the same warpRequirements experience cost as a waystone (the defaults have no "
+            "sharestone rule). Sneak-using renames it (only its owner); breaking either half removes both and "
+            "the sharestone. Not carried over: the coloured runes and the floating warp stone a Java client "
+            "draws on it (code-rendered, so every colour looks the same here; the colour is in the item's "
+            "name), the item tooltip, the menu's sorting, search and deleting (creative deletion removes a "
+            "sharestone from the network in Java), and the rest listed for waystones (pets and leashed mobs, "
+            "waterlogging, particles, comparator and observers, the free-space tests, an unloaded target's "
+            "room check, explosions taking one half, config changes)."
+        )
     entry = (
         'import { registerWaystones } from "./waystone.js";\n'
         f'import waystoneTable from "./data/{NS}_waystone.js";\n'
