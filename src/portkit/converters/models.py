@@ -482,6 +482,16 @@ def auto_uv(face: str, start: list, end: list) -> list[float]:
     }[face]
 
 
+def _zero_rotation(rotation) -> bool:
+    """Whether a Java element ``rotation`` turns by 0 degrees (an identity)."""
+    if not isinstance(rotation, dict):
+        return False
+    try:
+        return float(rotation.get("angle", 0)) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
 def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]:
     """An element as a Java blockstate y turn leaves it, or why not.
 
@@ -496,6 +506,10 @@ def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]
     quarters = (degrees // 90) % 4
     if quarters == 0:
         return element, ""
+    if _zero_rotation(element.get("rotation")):
+        # A rotation of 0 degrees moves nothing (and its rescale divides by
+        # cos 0 = 1): the element is unrotated (Waystones' fleeting memorial).
+        element = {k: v for k, v in element.items() if k != "rotation"}
     if element.get("rotation"):
         return None, "part turns a model whose elements are themselves rotated"
     try:

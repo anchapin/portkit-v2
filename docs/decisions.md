@@ -27,6 +27,111 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: a player who dies with an epitaph leaves a fleeting memorial, listed at the top of their menus through the waystone runtime until a teleport reaches it
+
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #209, Part of #178).
+- **Decision:** Waystones' fleeting memorial (`FleetingMemorialBlock`,
+  `ModBlocks` L88) and the epitaph (`ModItems` L49) work through the waystone
+  runtime of #198-#208: a `fleeting_memorials` section in the same data
+  table, the waystones' own component on the block, and one new event
+  (`world.afterEvents.entityDie`). Waystones v21.1.46 @9d280c1a throughout.
+  - **Making one** (`EpitaphDeathHandler` L12-31,
+    `FleetingMemorialManager#spawnMemorial` L27-54): when a player dies
+    carrying an epitaph, a memorial goes at `findMemorialPos` (L105-122): the
+    block above their feet, else for each height 0..3 above the feet
+    (`SEARCH_HEIGHT` L25) and each radius 1..2 (`SEARCH_RADIUS` L24) the
+    square around them in `BlockPos#betweenClosed` order (x fastest, then z:
+    Minecraft 1.21.1 `BlockPos$4#computeNext` L600-610, Mojang mappings),
+    the first block that is replaceable and inside the world
+    (`canPlaceMemorialAt` L124-126). It faces the player
+    (`Direction.fromYRot(yaw).getOpposite()`, L35, #206's `portalFacing`).
+    Only then is one epitaph used up (`shrink(1)`, L25) and the player hears
+    `TOTEM_USE` 1/1 for themselves (`ClientEpitaphActivationHandler`
+    L12-15: `forUI`; Java `item.totem.use` = `item/totem/use_totem` =
+    Bedrock `random.totem`, misode/mcmeta 1.21.1 vs bedrock-samples
+    46ba6ea9). No room: nothing happens, the epitaph stays.
+  - **Finding the epitaph on Bedrock (not from Java):** Java looks through
+    the inventory before anything drops; `entityDie` comes after Bedrock
+    dropped it (unless `keepInventory`). So the runtime looks through the
+    inventory (slots 0-35), then the off hand, then the epitaph item
+    entities within 2 blocks of where the player died (nearest first), and
+    removes the one it uses.
+  - **The waystone:** a record of type `waystones:fleeting_memorial`
+    (`WaystoneTypes` L13) owned by the player (`initializeWaystone` with the
+    player, origin PLAYER), named `block.waystones.fleeting_memorial` (L45;
+    shown through its Bedrock key `tile.waystones:fleeting_memorial.name`).
+  - **Where it lists** (`FleetingMemorialManager#getTargets` L56-63: the
+    owner's memorials): every menu Java builds from `getTargetsForPlayer` or
+    `getTargetsForWaystone` (`PlayerWaystoneManager` L292-320): waystone and
+    sharestone menus, the portal scroll's, the warp scroll's and the warp
+    stone's; not a portstone's (`getTargetsForWaystoneType`), not the return
+    scroll's nearest waystone. Pinned to the top
+    (`WaystoneSelectionScreenBase#isReturnPortal` L246-249,
+    `pinReturnPortalFirst` L447-450), in the order the memorials were made
+    (Java's is its manager's hash order). The label is its name and, in
+    LIGHT_PURPLE, `gui.waystones.waystone_selection.epitaph_requirement`
+    with the epitaph's name (`EpitaphRequirement#appendHoverText` L28-32;
+    its `canAfford` is always true and `consume` does nothing).
+  - **Cost:** the `warpRequirements` default decided per route with a new
+    `to_memorial` flag (`target_is_fleeting_memorial` true,
+    `RequirementRegistry` L329-331; ACTIVATION visibility, so
+    `target_is_global` false): from each waystone and sharestone menu type,
+    the warp portal's teleport, the portal scroll's menu, the warp and bound
+    scrolls and the warp stone. `[target_is_fleeting_memorial]
+    multiply_xp_cost(0)` makes every one free at the defaults.
+  - **Reaching it** (`handleTeleportComplete` L78-97 on every
+    `WaystoneTeleportEvent.Complete`, `ModEventHandlers` L19): after a
+    teleport that lands at a memorial (a menu, a bound scroll, a warp
+    portal, any entity) its block is destroyed without drops (`removeAfterUse`
+    L65-76; `setblock ... destroy` gives the break effects, its loot is empty)
+    and its waystone forgotten. A memorial whose block is gone says
+    "missing" and is forgotten (MissingWaystone -> `removeListing`). A warp
+    portal opened to one closes on the next entrant (target invalid,
+    `WarpPortalBlockEntity#onEntityInside` L107-119).
+  - **Block:** facing alone (`createBlockStateDefinition` L140-142; the
+    jar's blockstate), one bone per facing from the jar's model; Java's
+    shape differs by facing (`SHAPES` L30-54), so each facing gets its own
+    collision and selection box, the bounding box of its three Java boxes
+    (new generic `FacingBlock.facing_boxes` -> permutations). The model's
+    two elements with a 0-degree rotation now turn like unrotated ones (new
+    generic `models.turn_y` rule: an angle of 0 is an identity; no other
+    corpus mod changed). Light 6, no loot (`noLootTable`), no item, so in no
+    creative tab (`registerBlock`, L88). Using it does nothing
+    (`handleEditActions`/`handleActivation` give nothing, L98-102) except
+    that a blank scroll binds a bound scroll to it (`WaystoneBlockBase#useItemOn`
+    L257-262, `BlankScrollItem#useOn` L20-43); breaking it forgets it
+    (`onRemove` L217-237).
+  - **Epitaph:** `stacksTo(1)` (L49): `minecraft:max_stack_size` 1 (the item
+    converter wrote 64); it stays in the items tab.
+  - **Gating:** the memorial ships when a waystone or sharestone works, the
+    epitaph item converted and the jar has the requirement text and the two
+    names; otherwise its blockstate stays residue with the reason.
+  - **Coverage:** Waystones 30.7 -> 30.9 (324 -> 326 files, residue 732 ->
+    730), banked; no other mod changed.
+- **Why:** the memorial is a waystone record like the warp portal's (#206):
+  placed by the runtime, never by an item, a target in other menus, gone
+  after use. So it reuses the records, `menu()`, `land()`, the item
+  teleport and the portal, with a single `arrived()` hook standing in for
+  Java's teleport-complete handler, and every number read from the classes,
+  the config defaults and Minecraft's own `betweenClosed`.
+- **Rejected:** scanning every player's inventory each tick to remember who
+  carries an epitaph (a cost on every tick for a rare event; the dropped
+  items are still there when `entityDie` arrives); requiring the epitaph to
+  still be in the inventory (only true with `keepInventory`); listing
+  memorials after the other entries (Java pins them first); a cost line or
+  no requirement line (Java shows the epitaph requirement); Java's
+  replaceable-block test (scripts can't read it: only air and liquid count,
+  as for every Waystones placement here); mapping strength 2 / 6 (no
+  Waystones block maps Java's hardness).
+- **Not carried over:** the memorial's bobbing and the owner's name a Java
+  client draws on it (`FleetingMemorialRenderer`), its ash particles
+  (`animateTick` L77-91), the epitaph's activation animation, waterlogging,
+  pistons not moving it, not being pathfindable, the menu's sorting and
+  search, config changes.
+- **Links:** #178, PR #209; Waystones `FleetingMemorialManager`,
+  `FleetingMemorialBlock`, `EpitaphDeathHandler`, `EpitaphRequirement` at
+  https://github.com/TwelveIterations/Waystones/tree/9d280c1ac8d036516a2927e3d2cad8054e491074.
+
 ## 2026-10-14: the warp stone opens the warp scroll's menu through the waystone runtime after its own hold, and each teleport from it costs one of its 128 durability
 
 - **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #208, Part of #178).

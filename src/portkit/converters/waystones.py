@@ -25,8 +25,10 @@ portal scroll and teleporting through the same records and cost rules: the
 warp scroll through the menu of the player's activated waystones, the return
 scroll to their return portal or nearest activated waystone, the bound scroll
 to its waystone; and the warp stone, held for its own use time, opens the
-same menu as the warp scroll and wears down by one durability a teleport.
-Fleeting memorials and the feather keep their residue.
+same menu as the warp scroll and wears down by one durability a teleport;
+and the fleeting memorial (``FleetingMemorialBlock``) a player who dies with
+an epitaph leaves behind: it lists at the top of that player's menus, and
+the teleport that reaches it removes it. The feather keeps its residue.
 
 Where each value comes from (no fabrication, #87):
 
@@ -94,6 +96,7 @@ from .stations import (
     _RUNTIME_DIR,
     runtime_source,
 )
+from .lang import _translate_key
 from .textures import shortname
 
 NS = "waystones"
@@ -179,6 +182,8 @@ def waystone_type(name: str) -> str:
         return WARP_PLATE_TYPE
     if name in WARP_PORTAL_BLOCKS:
         return WARP_PORTAL_TYPE
+    if name in FLEETING_MEMORIAL_BLOCKS:
+        return FLEETING_MEMORIAL_TYPE
     return f"{NS}:{name}" if name in SHARESTONE_BLOCKS else WAYSTONE_TYPE
 
 
@@ -449,6 +454,87 @@ WARP_STONE_SOURCES = (
     f"{_MC}: net.minecraft.world.item.Item$Properties#durability L144-147",
     f"{_MC}: net.minecraft.world.item.ItemStack#hurtAndBreak L442-476",
     f"{_MC}: net.minecraft.world.entity.LivingEntity#breakItem L1368-1374, #onEquippedItemBroken L3571-3572",
+)
+
+# -- fleeting memorials ---------------------------------------------------------------
+# ModBlocks L88: the fleeting memorial (FleetingMemorialBlock), registerBlock with
+# no item, defaultProperties().noLootTable().strength(2, 6).lightLevel(6). Its
+# waystone is of type WaystoneTypes.FLEETING_MEMORIAL (L13,
+# FleetingMemorialBlockEntity#getWaystoneType L41-43). Only a player's death
+# makes one: EpitaphDeathHandler L20-31 finds an epitaph (ModItems L49,
+# stacksTo(1)) in the dying player's inventory and, when
+# FleetingMemorialManager#spawnMemorial L27-54 placed a memorial, uses one up.
+FLEETING_MEMORIAL_BLOCKS = ("fleeting_memorial",)
+FLEETING_MEMORIAL_TYPE = f"{NS}:fleeting_memorial"
+EPITAPH_ITEMS = ("epitaph",)
+EPITAPH_STACK = 1
+# ModBlocks L88: lightLevel(state -> 6).
+FLEETING_MEMORIAL_LIGHT = 6
+# FleetingMemorialBlock SHAPES (L30-54), by facing: three boxes each, whose
+# bounding box is x 3-13, y 1-15 and a one-pixel slab at z 8-9 (north), z 7-8
+# (south), x 7-8 (east), x 8-9 (west), here as Bedrock boxes (origin/size in
+# pixels, x and z centred).
+FLEETING_MEMORIAL_BOXES = {
+    "north": {"origin": [-5, 1, 0], "size": [10, 14, 1]},
+    "south": {"origin": [-5, 1, -1], "size": [10, 14, 1]},
+    "east": {"origin": [-1, 1, -5], "size": [1, 14, 10]},
+    "west": {"origin": [0, 1, -5], "size": [1, 14, 10]},
+}
+FLEETING_MEMORIAL_SOURCES = (
+    _src("block/ModBlocks.java", "88"),
+    _src("block/FleetingMemorialBlock.java", "30-L64"),
+    _src("block/WaystoneBlockBase.java", "140-L142"),
+)
+# FleetingMemorialManager.SEARCH_RADIUS / SEARCH_HEIGHT (L24-25), read by
+# findMemorialPos L105-122.
+MEMORIAL_SEARCH_RADIUS = 2
+MEMORIAL_SEARCH_HEIGHT = 3
+# Not from Java: on Bedrock the player's inventory is already on the ground
+# when a script hears of the death (world.afterEvents.entityDie), so the
+# epitaph is looked for among the item entities this many blocks from where
+# the player died as well as in the inventory (keepInventory).
+EPITAPH_DROP_RADIUS = 2
+# ChatFormatting.LIGHT_PURPLE, EpitaphRequirement#appendHoverText L28-32
+# (section-sign code "d", the same on Bedrock).
+EPITAPH_STYLE = "\u00a7d"
+MEMORIAL_MESSAGES = {
+    # EpitaphRequirement#appendHoverText L28-32: the requirement line under a
+    # memorial in a menu ("%s" with the epitaph's name).
+    "epitaph_requirement": "gui.waystones.waystone_selection.epitaph_requirement",
+}
+# Names the runtime shows under the Bedrock key the lang converter gives
+# their Java key (they are a block's and an item's names, already shipped):
+# FleetingMemorialManager#spawnMemorial L45 names the memorial's waystone
+# block.waystones.fleeting_memorial; EpitaphRequirement L31 shows the
+# epitaph's name (item.waystones.epitaph).
+MEMORIAL_NAMES = {
+    "memorial_name": "block.waystones.fleeting_memorial",
+    "epitaph": "item.waystones.epitaph",
+}
+# ClientEpitaphActivationHandler#playEffects L12-15: TOTEM_USE for the player
+# alone (forUI), volume 1, pitch 1. item.totem.use = item/totem/use_totem
+# (misode/mcmeta 1.21.1-assets sounds.json) = Bedrock random.totem
+# (sounds/random/use_totem, bedrock-samples 46ba6ea9 sound_definitions.json).
+MEMORIAL_SOUNDS = {
+    "epitaph": {"id": "random.totem", "volume": 1.0, "pitch": 1.0},
+}
+FLEETING_MEMORIAL_RUNTIME_SOURCES = (
+    _src("handler/EpitaphDeathHandler.java", "12-L31"),
+    _src("core/FleetingMemorialManager.java", "24-L126"),
+    _src("block/FleetingMemorialBlock.java", "93-L102"),
+    _src("block/WaystoneBlockBase.java", "217-L237"),
+    _src("block/WaystoneBlockBase.java", "257-L283"),
+    _src("block/entity/FleetingMemorialBlockEntity.java", "41-L58"),
+    _src("handler/ModEventHandlers.java", "19"),
+    _src("core/PlayerWaystoneManager.java", "292-L320"),
+    _src("core/WaystoneTeleportContextImpl.java", "115-L126"),
+    _src("requirement/EpitaphRequirement.java", "12-L33"),
+    _src("requirement/RequirementRegistry.java", "329-L331"),
+    _src("client/ClientEpitaphActivationHandler.java", "12-L15"),
+    _src("client/gui/screen/WaystoneSelectionScreenBase.java", "246-L249"),
+    _src("client/gui/screen/WaystoneSelectionScreenBase.java", "447-L450"),
+    _src("item/ModItems.java", "49"),
+    f"{_MC}: net.minecraft.core.BlockPos$4#computeNext L600-610 (betweenClosed: x fastest, then y, then z)",
 )
 
 
@@ -733,6 +819,14 @@ PORTSTONE_UPPER_BOX = {"origin": [-5, 0, -1], "size": [10, 7, 6]}
 
 
 def _block(name: str, overlay: Overlay | None = None) -> FacingBlock:
+    if name in FLEETING_MEMORIAL_BLOCKS:
+        # Facing alone (FACING = Direction.fromYRot(yaw).getOpposite(),
+        # FleetingMemorialManager L35, as Bedrock's placement trait at 180),
+        # one model turned per facing; Java's shape differs by facing.
+        return FacingBlock(
+            name, 180, dict(FLEETING_MEMORIAL_BOXES["north"]), FLEETING_MEMORIAL_SOURCES,
+            facing_boxes={d: dict(b) for d, b in FLEETING_MEMORIAL_BOXES.items()},
+        )
     if name in WARP_PORTAL_BLOCKS:
         # Facing x half like a waystone (the scroll sets both: spawnPortal
         # L46-52, facing = the player's yaw turned round, as Bedrock's
@@ -872,7 +966,9 @@ FIXED_CONDITIONS = {
     # L335-L337: every waystone keeps the default ACTIVATION visibility
     # (general.defaultVisibility); visibility isn't editable here.
     "target_is_global": False,
-    "target_is_fleeting_memorial": False,  # L329-L331: memorials don't convert
+    # L329-L331: a memorial is only ever the target of its own teleport
+    # (fixed_conditions with to_memorial).
+    "target_is_fleeting_memorial": False,
     "target_is_warp_plate": False,  # L323-L325
     "target_is_warp_portal": False,  # L326-L328
     "target_is_player": False,  # L332-L334: twinbound feathers don't convert
@@ -885,7 +981,7 @@ FIXED_CONDITIONS = {
 
 
 def fixed_conditions(kind: str, portstone: bool = False, scroll: bool | dict = False,
-                     to_portal: bool = False) -> dict[str, bool]:
+                     to_portal: bool = False, to_memorial: bool = False) -> dict[str, bool]:
     """The conditions decided for teleports from a waystone of type ``kind``,
     or, with ``portstone``, from a portstone listing targets of type ``kind``.
 
@@ -948,6 +1044,15 @@ def fixed_conditions(kind: str, portstone: bool = False, scroll: bool | dict = F
         # is the default ACTIVATION (WaystoneVisibility#fromWaystoneType L61).
         fixed.update({"target_is_waystone": False, "target_is_sharestone": False, "target_is_warp_plate": False,
                       "target_is_warp_portal": True, **{f"target_is_{n}": False for n in SHARESTONE_BLOCKS}})
+    if to_memorial:
+        # A fleeting memorial in a menu (FleetingMemorialManager#getTargets
+        # L56-63, added by getTargetsForPlayer / getTargetsForWaystone
+        # L292-320): the target is the memorial's waystone
+        # (target_is_fleeting_memorial L329-331), whose visibility is the
+        # default ACTIVATION (WaystoneVisibility#fromWaystoneType L61).
+        fixed.update({"target_is_waystone": False, "target_is_sharestone": False, "target_is_warp_plate": False,
+                      "target_is_warp_portal": False, "target_is_fleeting_memorial": True,
+                      **{f"target_is_{n}": False for n in SHARESTONE_BLOCKS}})
     return fixed
 DYNAMIC_CONDITIONS = {"is_interdimensional"}  # L294: target dimension != the player's
 # Experience-point functions (RequirementRegistry L122-L147) and the parameter
@@ -1060,6 +1165,8 @@ def waystone_blocks(mod: SourceMod) -> dict[str, FacingBlock]:
     names += list(WARP_PLATE_BLOCKS)
     if warp_portal_textures(mod):
         names += list(WARP_PORTAL_BLOCKS)
+    # ModBlocks L88 registers the fleeting memorial by name too.
+    names += list(FLEETING_MEMORIAL_BLOCKS)
     return {name: _block(name, _rune_overlay(mod, name))
             for name in names if (mod.assets / "blockstates" / f"{name}.json").is_file()}
 
@@ -1118,6 +1225,8 @@ def lang_keys(mod: SourceMod) -> set[str]:
         keys |= set(WARP_PORTAL_MESSAGES.values())
     if any((mod.root / f"assets/{NS}/models/item/{name}.json").is_file() for name in SCROLL_KINDS):
         keys |= set(SCROLL_MESSAGES.values())
+    if any(name in FLEETING_MEMORIAL_BLOCKS for name in blocks):
+        keys |= set(MEMORIAL_MESSAGES.values())
     return keys
 
 
@@ -1164,13 +1273,13 @@ def _argument(kind: str, raw: str):
 
 def requirements(lines: list[str], enable_costs: bool, enable_cooldowns: bool,
                  kind: str = WAYSTONE_TYPE, portstone: bool = False, scroll: bool | dict = False,
-                 to_portal: bool = False) -> tuple[list[dict], list[str]]:
+                 to_portal: bool = False, to_memorial: bool = False) -> tuple[list[dict], list[str]]:
     """The warp requirement modifiers that can apply in this runtime to a
     teleport from a waystone of type ``kind`` (with ``portstone``: from a
     portstone to a target of type ``kind``), in order, as {"when":
     {condition: wanted}, "fn": name, "args": [...]}, and the lines left out
     (with why). Raises _Refuse for anything without a runtime."""
-    fixed_table = fixed_conditions(kind, portstone, scroll, to_portal)
+    fixed_table = fixed_conditions(kind, portstone, scroll, to_portal, to_memorial)
     kept: list[dict] = []
     dropped: list[str] = []
     for line in lines:
@@ -1348,11 +1457,19 @@ def warp_stones(files: dict) -> list[str]:
     return [f"{NS}:{n}" for n in WARP_STONE_ITEMS if f"{NS}:{n}" in items]
 
 
-def scroll_requirements(mod: SourceMod, name: str, kinds: list[str], portal: bool) -> dict[str, list]:
+def epitaph_items(files: dict) -> list[str]:
+    """The epitaph items (EPITAPH_ITEMS) the item converter wrote."""
+    items = _item_paths(files)
+    return [f"{NS}:{n}" for n in EPITAPH_ITEMS if f"{NS}:{n}" in items]
+
+
+def scroll_requirements(mod: SourceMod, name: str, kinds: list[str], portal: bool,
+                        memorial: bool = False) -> dict[str, list]:
     """The requirement modifiers of a teleport with the warp item ``name`` (a
     scroll or the warp stone) to a
     target of each waystone type in ``kinds`` and, with ``portal``, to a warp
-    portal (the return portal: target_is_warp_portal), keyed by target type.
+    portal (the return portal: target_is_warp_portal), and, with ``memorial``,
+    to a fleeting memorial (target_is_fleeting_memorial), keyed by target type.
     Raises _Refuse like :func:`requirements`."""
     entry = _defaults((mod.mods or {}).get(NS))
     values = {k: v["value"] for k, v in entry["values"].items()}
@@ -1362,6 +1479,8 @@ def scroll_requirements(mod: SourceMod, name: str, kinds: list[str], portal: boo
     out = {kind: requirements(*args, kind, scroll=flags)[0] for kind in kinds}
     if portal:
         out[WARP_PORTAL_TYPE] = requirements(*args, WAYSTONE_TYPE, scroll=flags, to_portal=True)[0]
+    if memorial:
+        out[FLEETING_MEMORIAL_TYPE] = requirements(*args, WAYSTONE_TYPE, scroll=flags, to_memorial=True)[0]
     return out
 
 
@@ -1372,6 +1491,10 @@ def _use_time(configured: int) -> int:
 
 
 # -- the converter ------------------------------------------------------------------
+
+
+# The label ending of a teleport to a fleeting memorial in the lines left out.
+MEMORIAL_LABEL = " to a fleeting memorial"
 
 
 @dataclass(frozen=True)
@@ -1385,13 +1508,21 @@ class _Plan:
     # Portal" entry by the menu's waystone type (else empty).
     scroll_modifiers: list = ()
     return_modifiers: dict | None = None
+    # With fleeting memorials: a memorial's cost by the source waystone type
+    # (the menus of waystones and sharestones, and the warp portal's
+    # teleport), and in the portal scroll's menu.
+    memorial_modifiers: dict | None = None
+    memorial_scroll_modifiers: list = ()
 
 
 def _plan(mod: SourceMod, kinds: list[str], portstone_kinds: list[str] = (),
-          return_kinds: list[str] = ()) -> _Plan:
+          return_kinds: list[str] = (), memorial_kinds: list[str] = ()) -> _Plan:
     """The requirement modifiers per teleport kind. With ``return_kinds``
     (warp portals ship), also the portal scroll's menu and the "Return to
-    Portal" entry in the menus of those waystone types."""
+    Portal" entry in the menus of those waystone types. With
+    ``memorial_kinds`` (fleeting memorials ship), a teleport from each of
+    those waystone types to a memorial and, with portals, from the portal
+    scroll's menu to one."""
     entry = _defaults((mod.mods or {}).get(NS))
     values = {k: v["value"] for k, v in entry["values"].items()}
     modifiers: dict[str, list] = {}
@@ -1405,10 +1536,20 @@ def _plan(mod: SourceMod, kinds: list[str], portstone_kinds: list[str] = (),
         variants.append((WAYSTONE_TYPE, {"scroll": scroll_conditions(mod, PORTAL_SCROLL_ITEMS[0])},
                          "the portal scroll's menu"))
         variants += [(kind, {"to_portal": True}, f"{kind} to a warp portal") for kind in return_kinds]
+    variants += [(kind, {"to_memorial": True}, f"{kind}{MEMORIAL_LABEL}") for kind in memorial_kinds]
+    if return_kinds and memorial_kinds:
+        variants.append((WAYSTONE_TYPE, {"scroll": scroll_conditions(mod, PORTAL_SCROLL_ITEMS[0]), "to_memorial": True},
+                         f"the portal scroll's menu{MEMORIAL_LABEL}"))
+    memorial_modifiers: dict[str, list] = {}
+    memorial_scroll_modifiers: list = []
     for kind, flags, label in variants:
         kept, left = requirements(values["teleports.warpRequirements"], values["teleports.enableCosts"],
                                   values["teleports.enableCooldowns"], kind, **flags)
-        if flags.get("portstone"):
+        if flags.get("to_memorial") and flags.get("scroll"):
+            memorial_scroll_modifiers = kept
+        elif flags.get("to_memorial"):
+            memorial_modifiers[kind] = kept
+        elif flags.get("portstone"):
             portstone_modifiers[kind] = kept
         elif flags.get("scroll"):
             scroll_modifiers = kept
@@ -1426,9 +1567,15 @@ def _plan(mod: SourceMod, kinds: list[str], portstone_kinds: list[str] = (),
     for line in partial:
         where = [label for label in labels if line in left_out[label]]
         others = [label for label in labels if line not in left_out[label]]
+        if others and all(label.endswith(MEMORIAL_LABEL) for label in others) and len(others) > 1:
+            # Kept only for a memorial target (target_is_fleeting_memorial):
+            # one phrase instead of every menu's label.
+            dropped.append(f"{line} (from all but the teleports{MEMORIAL_LABEL})")
+            continue
         dropped.append(f"{line} (from {', '.join(where)})" if len(where) <= len(others)
                        else f"{line} (from all but {', '.join(others)})")
-    return _Plan(modifiers, dropped, entry, portstone_modifiers, scroll_modifiers, return_modifiers)
+    return _Plan(modifiers, dropped, entry, portstone_modifiers, scroll_modifiers, return_modifiers,
+                 memorial_modifiers, memorial_scroll_modifiers)
 
 
 def _network(kind: str, modifiers: list) -> dict:
@@ -1446,19 +1593,23 @@ def _network(kind: str, modifiers: list) -> dict:
     }
 
 
-def _not_converted(plate: bool, portal: bool, scrolls: bool = False, stone: bool = False) -> str:
+def _not_converted(plate: bool, portal: bool, scrolls: bool = False, stone: bool = False,
+                   memorial: bool = False) -> str:
     """The waystones note's closing list of what Waystones has and this
     conversion doesn't, given whether warp plates, warp portals, the warp,
-    return and bound scrolls and the warp stone shipped."""
+    return and bound scrolls, the warp stone and fleeting memorials shipped."""
     missing = ["village and wild waystone generation"]
     if not plate:
         missing.append("warp plates")
     if not portal:
-        missing.append("warp portals" if plate or scrolls or stone else "portals")
+        missing.append("warp portals" if plate or scrolls or stone or memorial else "portals")
     if scrolls or stone:
-        missing.append("fleeting memorials")
+        if not memorial:
+            missing.append("fleeting memorials")
         if not stone:
             missing.append("the warp stone")
+    elif memorial:
+        missing.append("the warp stone")
     else:
         missing.append("fleeting memorials and the warp stone")
     if not scrolls:
@@ -1467,12 +1618,13 @@ def _not_converted(plate: bool, portal: bool, scrolls: bool = False, stone: bool
         missing.append("shards")
     missing.append("the feather")
     own = [n for n, on in (("warp plates", plate), ("warp portals with the portal scroll", portal),
-                           ("the warp, return and bound scrolls", scrolls), ("the warp stone", stone)) if on]
-    if not plate and not portal and not scrolls and not stone:
+                           ("the warp, return and bound scrolls", scrolls), ("the warp stone", stone),
+                           ("fleeting memorials", memorial)) if on]
+    if not plate and not portal and not scrolls and not stone and not memorial:
         # The wording before any of them shipped (#198).
         return ("Village and wild waystone generation, warp plates and portals, fleeting memorials and the warp "
                 "stone, scrolls, shards and feather are not converted.")
-    if plate and not portal and not scrolls and not stone:
+    if plate and not portal and not scrolls and not stone and not memorial:
         return ("Village and wild waystone generation, warp portals, fleeting memorials and the warp stone, "
                 "scrolls and feather are not converted (warp plates have their own note).")
     text = ", ".join(missing[:-1]) + " and " + missing[-1] + " are not converted"
@@ -1526,16 +1678,37 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     missing_share = sorted(k for k in SHARESTONE_MESSAGES.values() if k not in lang)
     if missing_share:
         why_share = f"the jar's en_us.json lacks {', '.join(missing_share)}, which a sharestone shows"
-    kinds = sorted({waystone_type(name) for name in blocks if name not in PORTSTONE_BLOCKS})
+    # A memorial is never a menu's own network (it lists in other menus).
+    kinds = sorted({waystone_type(name) for name in blocks
+                    if name not in PORTSTONE_BLOCKS and name not in FLEETING_MEMORIAL_BLOCKS})
     port_kinds = sorted({portstone_target(name) for name in blocks if name in PORTSTONE_BLOCKS})
     # With a warp portal, every menu that can list "Return to Portal" (a
     # waystone's and a sharestone's, getTargetsForWaystone L306-320).
     return_kinds = (sorted(k for k in kinds if k not in (WARP_PLATE_TYPE, WARP_PORTAL_TYPE))
                     if any(n in WARP_PORTAL_BLOCKS for n in blocks) else [])
+    # With fleeting memorials, every menu that lists them (a waystone's and a
+    # sharestone's, getTargetsForWaystone L313; and the warp portal's
+    # teleport to one) gets a memorial's cost.
+    why_memorial = None
+    epitaphs = epitaph_items(files)
+    if any(n in FLEETING_MEMORIAL_BLOCKS for n in blocks):
+        missing_memorial = sorted(k for k in (*MEMORIAL_MESSAGES.values(), *MEMORIAL_NAMES.values())
+                                  if k not in lang)
+        if missing_memorial:
+            why_memorial = f"the jar's en_us.json lacks {', '.join(missing_memorial)}, which a fleeting memorial shows"
+        elif not epitaphs:
+            why_memorial = "the epitaph item did not convert, and only a player dying with an epitaph makes a memorial"
+
+    def _memorial_kinds() -> list[str]:
+        if why_memorial is not None or not any(n in FLEETING_MEMORIAL_BLOCKS for n in blocks):
+            return []
+        menus = [k for k in kinds if k not in (WARP_PLATE_TYPE, WARP_PORTAL_TYPE)]
+        return sorted(menus + ([WARP_PORTAL_TYPE] if WARP_PORTAL_TYPE in kinds else []))
+
     plan = None
     if why_all is None:
         try:
-            plan = _plan(mod, kinds or [WAYSTONE_TYPE], port_kinds, return_kinds)
+            plan = _plan(mod, kinds or [WAYSTONE_TYPE], port_kinds, return_kinds, _memorial_kinds())
         except _Refuse as refusal:
             why_all = f"warpRequirements: {refusal}"
 
@@ -1544,12 +1717,14 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     silk = False
     # Waystones and sharestones first: a portstone works only when the
     # network it lists did, and a warp portal only when waystones do.
-    for name in sorted(blocks, key=lambda n: (n in PORTSTONE_BLOCKS or n in WARP_PORTAL_BLOCKS, n)):
+    for name in sorted(blocks, key=lambda n: (n in PORTSTONE_BLOCKS or n in WARP_PORTAL_BLOCKS
+                                              or n in FLEETING_MEMORIAL_BLOCKS, n)):
         identifier = f"{NS}:{name}"
         share = name in SHARESTONE_BLOCKS
         port = name in PORTSTONE_BLOCKS
         plate = name in WARP_PLATE_BLOCKS
         portal = name in WARP_PORTAL_BLOCKS
+        memorial = name in FLEETING_MEMORIAL_BLOCKS
         block_path = f"blocks/{name}.json"
         body = files.get(block_path)
         loot = tables.get(name)
@@ -1576,12 +1751,18 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
                 why = "the portal_scroll item did not convert, and only a portal scroll opens a warp portal"
             elif not any(waystone_type(i.split(":", 1)[1]) == WAYSTONE_TYPE for i in kept):
                 why = "no waystone block works here, so a portal scroll has nothing to open a portal to"
+        if why is None and memorial:
+            if why_memorial is not None:
+                why = why_memorial
+            elif not any(waystone_type(i.split(":", 1)[1]) in (WAYSTONE_TYPE, *(f"{NS}:{n}" for n in SHARESTONE_BLOCKS))
+                         for i in kept):
+                why = "no waystone or sharestone block works here, so no menu would list a memorial"
         if why is None and not (isinstance(body, dict) and body.get("minecraft:block", {})
                                 .get("description", {}).get("identifier") == identifier):
             why = f"the waystone block {identifier} did not convert"
         bedrock_loot = None
-        if why is None and portal:
-            # noLootTable (ModBlocks L87): the jar has none and none is needed.
+        if why is None and (portal or memorial):
+            # noLootTable (ModBlocks L87, L88): the jar has none and none is needed.
             bedrock_loot = EMPTY_LOOT
         elif why is None:
             if loot is None:
@@ -1600,14 +1781,14 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         if why is not None:
             if loot is not None:
                 result.unhandled.append(Unhandled(loot[0], RESIDUE_KIND, why))
-            elif portal:
-                # The portal has no loot table (noLootTable): its blockstate says why.
+            elif portal or memorial:
+                # The portal and the memorial have no loot table (noLootTable): the blockstate says why.
                 result.unhandled.append(Unhandled(f"assets/{NS}/blockstates/{name}.json", RESIDUE_KIND, why))
             if isinstance(body, dict):
                 notes.append(f"{identifier}: places but does nothing ({why})")
             continue
 
-        if portal:
+        if portal or memorial:
             loot_path = EMPTY_LOOT
         else:
             loot_path = f"loot_tables/blocks/{name}.json"
@@ -1629,6 +1810,20 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             components["minecraft:destructible_by_explosion"] = False
             components["minecraft:loot"] = EMPTY_LOOT
             # registerBlock with no item (ModBlocks L87): not in any creative tab.
+            block["description"]["menu_category"] = {"category": "none"}
+            result.files[block_path] = new
+            kept.append(identifier)
+            continue
+        if memorial:
+            components = block.setdefault("components", {})
+            # The waystones' component: breaking one forgets the memorial
+            # (onRemove), and a blank scroll binds to it (useItemOn); using it
+            # does nothing else (handleEditActions and handleActivation give
+            # nothing, FleetingMemorialBlock L98-102).
+            components[COMPONENT] = {}
+            components["minecraft:light_emission"] = FLEETING_MEMORIAL_LIGHT
+            components["minecraft:loot"] = EMPTY_LOOT
+            # registerBlock with no item (ModBlocks L88): not in any creative tab.
             block["description"]["menu_category"] = {"category": "none"}
             result.files[block_path] = new
             kept.append(identifier)
@@ -1661,12 +1856,17 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     kept_share = [i for i in kept if i.split(":", 1)[1] in SHARESTONE_BLOCKS]
     kept_plate = [i for i in kept if i.split(":", 1)[1] in WARP_PLATE_BLOCKS]
     kept_portal = [i for i in kept if i.split(":", 1)[1] in WARP_PORTAL_BLOCKS]
+    kept_memorial = [i for i in kept if i.split(":", 1)[1] in FLEETING_MEMORIAL_BLOCKS]
     kept_ways = [i for i in kept if i not in kept_port and i not in kept_share and i not in kept_plate
-                 and i not in kept_portal]
-    # A warp plate and a warp portal are never a menu's own network: each has
-    # its own table section.
+                 and i not in kept_portal and i not in kept_memorial]
+    if plan.memorial_modifiers and not kept_memorial:
+        # The memorial was planned for but did not ship: plan without it, so
+        # the lines left out say nothing of memorials.
+        plan = _plan(mod, kinds or [WAYSTONE_TYPE], port_kinds, return_kinds)
+    # A warp plate, a warp portal and a fleeting memorial are never a menu's
+    # own network: each has its own table section.
     block_types = {i: waystone_type(i.split(":", 1)[1]) for i in kept
-                   if i not in kept_port and i not in kept_plate and i not in kept_portal}
+                   if i not in kept_port and i not in kept_plate and i not in kept_portal and i not in kept_memorial}
     def _states(ident: str) -> dict:
         return ((files.get(f"blocks/{ident.split(':', 1)[1]}.json") or {}).get("minecraft:block", {})
                 .get("description", {}).get("states") or {})
@@ -1689,7 +1889,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         sounds.update(WARP_PORTAL_SOUNDS)
     table = {
         "block_types": block_types,
-        "blocks": [i for i in kept if i not in kept_plate and i not in kept_portal],
+        "blocks": [i for i in kept if i not in kept_plate and i not in kept_portal and i not in kept_memorial],
         "component": COMPONENT,
         # A record stored before records carried a type (#198) is a waystone's.
         "default_type": WAYSTONE_TYPE,
@@ -1804,9 +2004,13 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
                 "items": {
                     ident: {
                         "kind": kind,
-                        # Each target type's cost, and the return portal's when portals ship.
+                        # Each target type's cost, the return portal's when portals ship,
+                        # and a memorial's when memorials ship (the warp scroll's menu
+                        # lists them, getTargetsForItem L299-304; a blank scroll binds
+                        # one, BlankScrollItem L23-27; the return scroll never goes to one).
                         "requirements": scroll_requirements(mod, ident.split(":", 1)[1], kinds_all,
-                                                            bool(kept_portal)),
+                                                            bool(kept_portal),
+                                                            bool(kept_memorial) and kind != "return"),
                     }
                     for ident, kind in sorted(scrolls_kept.items())
                 },
@@ -1858,9 +2062,10 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
                     "error_style": ERROR_STYLE,
                     "items": {
                         ident: {
-                            # Each target type's cost, and the return portal's when portals ship.
+                            # Each target type's cost, the return portal's when portals ship,
+                            # and a memorial's when memorials ship (getTargetsForItem L299-304).
                             "requirements": scroll_requirements(mod, ident.split(":", 1)[1], kinds_all,
-                                                                bool(kept_portal)),
+                                                                bool(kept_portal), bool(kept_memorial)),
                         }
                         for ident in stones
                     },
@@ -1890,6 +2095,39 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             # isFoil L152-155: always drawn with the enchantment glint.
             components["minecraft:glint"] = True
             result.files[items[ident]] = body
+    if kept_memorial:
+        table["fleeting_memorials"] = {
+            "blocks": kept_memorial,
+            # Not from Java (EPITAPH_DROP_RADIUS): how far from the death the
+            # dropped epitaph is looked for.
+            "drop_radius": EPITAPH_DROP_RADIUS,
+            # EpitaphDeathHandler L24: the item a dying player needs.
+            "epitaphs": epitaphs,
+            # EpitaphRequirement#appendHoverText L28-32: LIGHT_PURPLE.
+            "epitaph_style": EPITAPH_STYLE,
+            # A memorial's cost in a waystone's or sharestone's menu, by the menu's type.
+            "requirements": {k: plan.memorial_modifiers[k] for k in sorted(set(block_types.values()))
+                             if k in plan.memorial_modifiers},
+            # findMemorialPos L105-122 (SEARCH_RADIUS, SEARCH_HEIGHT L24-25).
+            "search_height": MEMORIAL_SEARCH_HEIGHT,
+            "search_radius": MEMORIAL_SEARCH_RADIUS,
+            "type": FLEETING_MEMORIAL_TYPE,
+        }
+        table["messages"].update(MEMORIAL_MESSAGES)
+        table["messages"].update({role: _translate_key(key, NS) for role, key in MEMORIAL_NAMES.items()})
+        table["sounds"].update(MEMORIAL_SOUNDS)
+        if kept_portal:
+            # The portal scroll's menu lists memorials (withTargetsForPlayer,
+            # getTargetsForPlayer L292-297), and a portal opened to one sends
+            # what enters it there.
+            table["warp_portals"]["memorial_requirements"] = plan.memorial_modifiers[WARP_PORTAL_TYPE]
+            table["warp_portals"]["scroll"]["memorial_requirements"] = plan.memorial_scroll_modifiers
+        # ModItems L49: the epitaph stacksTo(1) (the item converter wrote 64).
+        items = _item_paths(files)
+        for ident in epitaphs:
+            body = json.loads(json.dumps(result.files.get(items[ident]) or files[items[ident]]))
+            body["minecraft:item"].setdefault("components", {})["minecraft:max_stack_size"] = EPITAPH_STACK
+            result.files[items[ident]] = body
     data_path = f"{_RUNTIME_DIR}/data/{NS}_waystone.js"
     config_sources = [f"{plan.defaults['repo']}/blob/{plan.defaults['commit']}/{v['source']}"
                       for k, v in plan.defaults["values"].items()
@@ -1903,6 +2141,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         + (", " + ", ".join(i.split(":", 1)[1].replace("_", " ") for i in sorted(scrolls_kept))
            + (", blank scroll" if scroll_table and scroll_table["blank"] else "") if scroll_table else "")
         + (", warp stone" if stone_table else "")
+        + (", fleeting memorial, epitaph" if kept_memorial else "")
         + ", loot tables, config\n"
         f"// defaults and Java code; do not edit. Read by the fixed runtime {_RUNTIME_DIR}/waystone.js (portkit/runtime). Sources:\n"
         + "".join(f"//   {s}\n" for s in dict.fromkeys(
@@ -1915,7 +2154,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
              *(WARP_PLATE_RUNTIME_SOURCES if kept_plate else ()),
              *(WARP_PORTAL_SOURCES + WARP_PORTAL_RUNTIME_SOURCES if kept_portal else ()),
              *(SCROLL_SOURCES if scroll_table else ()),
-             *(WARP_STONE_SOURCES if stone_table else ()))))
+             *(WARP_STONE_SOURCES if stone_table else ()),
+             *(FLEETING_MEMORIAL_SOURCES + FLEETING_MEMORIAL_RUNTIME_SOURCES if kept_memorial else ()))))
         + "".join(f"// warpRequirements left out: {d}\n" for d in plan.dropped)
     ).rstrip("\n")
     result.files[data_path] = _js_module(header, table)
@@ -2002,7 +2242,8 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "non-suffocating blocks like grass), the other half going when one is removed by anything but a "
             "player (an explosion), and config changes "
             "(the cited defaults are used). The item shows the lower half only. " + ways_runes
-            + _not_converted(bool(kept_plate), bool(kept_portal), scroll_table is not None, stone_table is not None)
+            + _not_converted(bool(kept_plate), bool(kept_portal), scroll_table is not None, stone_table is not None,
+                             bool(kept_memorial))
             + (" Silk touch drops a plain waystone." if silk else "")
         )
     runes_on = [i for i in kept_share if _has_runes(i)]
@@ -2165,9 +2406,10 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "have the enchantment glint. Not carried over: letting go of the use button, the bow-drawing pose, "
             "the field-of-view change, slowed walking and the particles while a scroll is used, using one from "
             "the off hand, item tooltips (the blank scroll's, the return scroll's nearest waystone), pets and "
-            "leashed mobs travelling along, third-party waystones, fleeting memorials and twinbound feather "
-            "players in the warp scroll's menu (not converted), the menu's sorting and search, and config "
-            "changes (the cited defaults are used)."
+            "leashed mobs travelling along, third-party waystones"
+            + (" and twinbound feather players in the warp scroll's menu (not converted)" if kept_memorial else
+               ", fleeting memorials and twinbound feather players in the warp scroll's menu (not converted)")
+            + ", the menu's sorting and search, and config changes (the cited defaults are used)."
         )
     if stone_table:
         wear = (f"each teleport costs the stone one of its {WARP_STONE_DURABILITY} durability (enableDurability; not "
@@ -2188,9 +2430,47 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             "enchantment glint. Not carried over: letting go of the use button, the bow-drawing pose, the slowed "
             "walking and the particles while it is used, using it from the off hand, enchanting it (Java's "
             "enchantable/durability tag lets it take Unbreaking and Mending), repairing it by combining two, pets "
-            "and leashed mobs travelling along, third-party waystones, fleeting memorials and twinbound feather "
-            "players in its menu (not converted), the menu's sorting and search, and config changes (the cited "
-            "defaults are used)."
+            "and leashed mobs travelling along, third-party waystones"
+            + (" and twinbound feather players in its menu (not converted)" if kept_memorial else
+               ", fleeting memorials and twinbound feather players in its menu (not converted)")
+            + ", the menu's sorting and search, and config changes (the cited defaults are used)."
+        )
+    if kept_memorial:
+        mem = table["fleeting_memorials"]
+        menus = ["waystone and sharestone menus" if kept_share else "waystone menus"]
+        if kept_portal:
+            menus.append("the portal scroll's")
+        if scroll_table is not None and "warp" in scrolls_kept.values():
+            menus.append("the warp scroll's")
+        if stone_table is not None:
+            menus.append("the warp stone's")
+        listed = menus[0] if len(menus) == 1 else ", ".join(menus[:-1]) + " and " + menus[-1] + (
+            " menus" if len(menus) > 1 else "")
+        routes = []
+        if kept_portal:
+            routes.append("a warp portal opened to one sends what enters it there, and the first thing through "
+                          "removes it (the portal then closes on the next)")
+        if scroll_table is not None and scroll_table["bound"]:
+            routes.append("a blank scroll used on one binds a bound scroll to it")
+        result.notes.append(
+            f"{NS}: {len(kept_memorial)} fleeting memorial block(s) work through the same runtime ({data_path}): "
+            f"{', '.join(kept_memorial)}. A player who dies with an epitaph ({', '.join(mem['epitaphs'])}) leaves "
+            "a fleeting memorial where they died, facing them: in the block above their feet, else the first "
+            f"block with room up to {MEMORIAL_SEARCH_RADIUS} blocks around them (nearer rings first), from their "
+            f"feet's level up to {MEMORIAL_SEARCH_HEIGHT} blocks higher; the epitaph is used up and the totem sound plays for them (no "
+            "room: nothing happens and the epitaph stays). The memorial is owned by that player and appears, "
+            f"named 'Fleeting Memorial' with an 'Epitaph' line, at the top of their {listed} (not a "
+            "portstone's), in the order the memorials were made; choosing it teleports them beside it for free "
+            "(the warpRequirements default: target_is_fleeting_memorial multiplies the cost by 0) and removes "
+            "it" + ("; " + "; ".join(routes) if routes else "") + ". Using a memorial does nothing else; breaking "
+            "it removes it. It glows (light 6), drops nothing and is in no creative tab; the epitaph holds 1. "
+            "The epitaph is found in the inventory (keepInventory) or, since Bedrock has already dropped the "
+            f"inventory when a script hears of the death, among the items within {EPITAPH_DROP_RADIUS} blocks of "
+            "where the player died (not from Java). Not carried over: the memorial's bobbing and the owner's name "
+            "drawn on it, its ash particles, the epitaph's activation animation, waterlogging, Java's mining time "
+            "and blast resistance (strength 2 and 6; Bedrock's defaults apply, as for every Waystones block "
+            "here), pistons not moving it, Java's replaceable-block test (only air and liquid count as room), "
+            "the menu's sorting and search, and config changes (the cited defaults are used)."
         )
     entry = (
         'import { registerWaystones } from "./waystone.js";\n'
