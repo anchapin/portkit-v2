@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-13: waystones activate, list and teleport through a scripted block; the experience cost is the cited warpRequirements default, parsed and decided per runtime
 
-- **Status:** proposed (PR for #178; design picks in the PR comment, for Alex).
+- **Status:** approved (Alex, 2026-10-13), all ten of Hark's picks (PR #198).
 - **Decision:** Waystones' ten `WaystoneBlock` blocks (waystone, mossy,
   sandy, deepslate, blackstone, end stone, red nether bricks, purpur,
   prismarine, mud bricks) take the station split of #177: a generated table
