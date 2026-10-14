@@ -238,8 +238,14 @@ def test_unread_version_stays_residue(tmp_path, reference):
     assert not (tmp_path / "out" / DATA).exists()
     cutting = [u for u in result.unhandled if u.kind == "station_recipe"]
     assert cutting and all("1.2.9" in u.reason for u in cutting)
-    # The block's facing is the block code's, read for the cited versions only.
-    assert any(u.source.endswith("blockstates/cutting_board.json") for u in result.unhandled)
+    # No station runtime for this version: the board is a plain facing block
+    # now (#212), its placement and box the documented defaults (the fixture
+    # ships no class files), and the notes say both are defaults.
+    assert not any(u.source.endswith("blockstates/cutting_board.json") for u in result.unhandled)
+    assert not (result.tree / "behavior_pack/scripts/portkit/cutting_board.js").exists()
+    notes = " ".join(result.notes)
+    assert "Facing placement DEFAULT" in notes and "cutting_board" in notes
+    assert "Facing box DEFAULT" in notes
 
 
 def test_other_namespace_stays_residue(tmp_path, reference):

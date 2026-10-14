@@ -3,49 +3,49 @@
     "alexs_mobs": {
       "coverage": 20.1,
       "files": 1092,
-      "residue": 4345,
+      "residue": 4344,
       "errors": 0
     },
     "betterend": {
-      "coverage": 35.2,
+      "coverage": 35.3,
       "files": 3405,
-      "residue": 6264,
+      "residue": 6232,
       "errors": 0
     },
     "create": {
-      "coverage": 29.2,
-      "files": 3941,
-      "residue": 9554,
+      "coverage": 29.3,
+      "files": 3949,
+      "residue": 9544,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 34.0,
-      "files": 861,
-      "residue": 1670,
+      "coverage": 34.1,
+      "files": 862,
+      "residue": 1668,
       "errors": 0
     },
     "farmers_delight_neoforge": {
       "coverage": 38.5,
-      "files": 840,
-      "residue": 1343,
+      "files": 841,
+      "residue": 1341,
       "errors": 0
     },
     "mekanism": {
-      "coverage": 12.0,
-      "files": 1232,
-      "residue": 9012,
+      "coverage": 12.4,
+      "files": 1268,
+      "residue": 8966,
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 46.1,
-      "files": 1700,
-      "residue": 1986,
+      "coverage": 47.4,
+      "files": 1748,
+      "residue": 1936,
       "errors": 0
     },
     "silent_gear_1165": {
       "coverage": 32.8,
       "files": 1165,
-      "residue": 2383,
+      "residue": 2382,
       "errors": 0
     },
     "storage_drawers_1122": {
@@ -55,21 +55,21 @@
       "errors": 0
     },
     "storage_drawers_1192": {
-      "coverage": 38.8,
+      "coverage": 42.2,
       "files": 299,
-      "residue": 471,
+      "residue": 410,
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 26.2,
-      "files": 1457,
-      "residue": 4097,
+      "coverage": 26.4,
+      "files": 1463,
+      "residue": 4086,
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 42.7,
-      "files": 13592,
-      "residue": 18203,
+      "coverage": 42.8,
+      "files": 13605,
+      "residue": 18177,
       "errors": 0
     },
     "waystones": {

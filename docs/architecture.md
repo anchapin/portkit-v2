@@ -26,7 +26,9 @@ mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶
 
 1. **Ingest** (`ingest.py`) stages a `.jar` or directory onto disk: `assets/`,
    `data/` and loader metadata. Compiled classes and nested jars become residue
-   right away.
+   right away. The class files are also kept in memory (`bytecode.ClassIndex`,
+   never staged) so the block converter can read a facing block's placement
+   rule and shape from them (`blockcode.py`, see below).
 2. **Metadata** (`meta.py`) reads `fabric.mod.json`, `mods.toml` and the rest, for
    the pack name, version and the primary namespace.
 3. **Converters** run once per namespace (`converters/__init__.py:convert_all`),
@@ -109,8 +111,27 @@ blockstate + model ──(blocks.py, placement + shape cited)──▶ blocks/<s
   (world dynamic properties, since custom blocks have no inventory), sounds,
   item spawning and tool damage.
 - **The block** is the mod's own; a station block's facing-only variants
-  convert only because the station spec cites which way the block's code
-  points `facing` and its `SHAPE`.
+  convert with the placement rule and `SHAPE` the station spec cites.
+
+## Facing-only blocks (`blockcode.py`, `bytecode.py`)
+
+A block whose blockstate is exactly `facing=north|east|south|west` (one model,
+quarter turns about y) and that is no station converts as decoration: the
+model's geometry turned per `minecraft:cardinal_direction` by
+`minecraft:transformation` (a uvlocked model gets one bone per facing). Which
+way `facing` points when placed and the block's box are its code's, so they are
+read from the jar's class files: `bytecode.py` parses class files (JVMS ch. 4)
+and `blockcode.py` runs the registration (`DeferredRegister.register`,
+`Registry.register`, helpers), `getStateForPlacement` (the placement context's
+`getHorizontalDirection()` is a symbol) and `getShape` once per facing on a
+small abstract interpreter, with vanilla `Block.box` / `Shapes.*` /
+`Stream.reduce` / enum switch maps / `Map.get` modelled and everything else an
+unknown value. A branch on an unknown value runs both ways and counts only when
+both agree. Whatever can't be read falls back to a documented default
+(placement facing the player, box from the model's element bounds, collision =
+selection), and the conversion notes name every value as read (class#method) or
+DEFAULT, per block (#87). Jars with Forge SRG or Fabric intermediary member
+names are never read by name (a renamed override can't be told from none).
 - **Versions.** Script API `@minecraft/server` 2.0.0, the first with custom
   components v2 (Bedrock 1.21.90, also the first block format that reads a
   namespaced component), so a station block is written at 1.21.90 and the pack
