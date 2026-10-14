@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: facing-only blocks convert outside the station runtimes, placement and box read from the jar's bytecode, else a documented default
 
-- **Status:** proposed (PR #212); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14), all ten of Hark's picks (PR #212).
 - **Decision:** a block whose blockstate is exactly `facing=north|east|south|west`
   (one model, a quarter turn about y per facing, no x) and that is no station
   converts. Its geometry is the model as written, turned per
