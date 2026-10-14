@@ -158,8 +158,16 @@ def test_recipes_under_the_skillet_minimum_stay_on_the_stove(tmp_path, reference
 def test_unread_version_leaves_the_skillet_as_residue(tmp_path, reference):  # noqa: F811
     result = convert(_skillet_mod(tmp_path, version="1.2.9"), tmp_path / "out", emit_addon=False)
     assert not (tmp_path / "out" / DATA).exists()
-    assert not (tmp_path / "out/behavior_pack/items/skillet.json").exists()
-    assert any(u.source.endswith("blockstates/skillet.json") for u in result.unhandled)
+    # No station runtime for this version: the skillet is a plain facing and
+    # boolean block now (facing plus support), its placement, box and
+    # starting support the documented defaults (the fixture ships no class
+    # files), and the notes say so; nothing toggles it.
+    assert not any(u.source.endswith("blockstates/skillet.json") for u in result.unhandled)
+    block = json.loads((tmp_path / "out/behavior_pack/blocks/skillet.json").read_text())["minecraft:block"]
+    assert block["description"]["states"] == {"farmersdelight:support": [False, True]}
+    assert "farmersdelight:portkit_toggle" not in block["components"]
+    notes = " ".join(result.notes)
+    assert "Starting value DEFAULT" in notes and "skillet" in notes
 
 
 def test_output_is_deterministic(tmp_path, reference):  # noqa: F811

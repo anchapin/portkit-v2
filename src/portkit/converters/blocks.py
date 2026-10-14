@@ -1218,7 +1218,9 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
         return result
 
     readings = _read_facing_code(mod, src, stations or {})
+    bool_readings, bool_why = _read_bool_code(mod, src, stations or {})
     coded: list[dict] = []
+    coded_bool: list[dict] = []
     for path in sorted(src.glob("*.json")):
         rel = result.claim(mod, path)
         name = path.stem
@@ -1226,6 +1228,21 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             blockstate = json.loads(path.read_text())
         except json.JSONDecodeError as exc:
             result.unhandled.append(Unhandled(rel, "block", f"invalid JSON: {exc}"))
+            continue
+
+        if name in bool_readings:
+            # A block that doesn't convert leaves the models it looked at
+            # unclaimed, as they were before this path read them: claimed
+            # files count as converted, and nothing was.
+            claimed = set(result.consumed)
+            record = _convert_coded_bool(mod, result, rel, name, *bool_readings[name])
+            if record is not None:
+                coded_bool.append(record)
+            else:
+                result.consumed = claimed | {rel}
+            continue
+        if name in bool_why and name not in (stations or {}):
+            result.unhandled.append(Unhandled(rel, "block", bool_why[name]))
             continue
 
         if name in readings:
@@ -1307,7 +1324,9 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             mod.namespace, name, identifier, instances or {}
         )
     result.notes.extend(_coded_facing_notes(coded))
-    _add_light(mod, result, src)
+    result.notes.extend(_coded_bool_notes(coded_bool))
+    _toggle_table(mod, result, coded_bool)
+    _add_light(mod, result, src, skip={r["name"] for r in coded_bool})
     return result
 
 
@@ -2273,10 +2292,12 @@ def _has_light(definition: dict) -> bool:
                for p in block.get("permutations") or () if isinstance(p, dict))
 
 
-def _add_light(mod: SourceMod, result: ConversionResult, src) -> None:
+def _add_light(mod: SourceMod, result: ConversionResult, src, skip: set = frozenset()) -> None:
+    # ``skip``: blocks whose light was read per state already (facing plus
+    # booleans), with notes of their own.
     names = sorted(k[len("blocks/"):-len(".json")] for k, v in result.files.items()
                    if k.startswith("blocks/") and k.endswith(".json") and isinstance(v, dict)
-                   and not _has_light(v))
+                   and not _has_light(v) and k[len("blocks/"):-len(".json")] not in skip)
     if not names:
         return
     drawn = {}
@@ -2324,3 +2345,542 @@ def _light_notes(readings: list) -> list[str]:
         notes.append("Light emission NOT converted, the block emits none (Java may light it) - "
                      + _grouped(unread) + ".")
     return notes
+
+
+# --------------------------------------------------------------------------
+# Facing plus boolean states, outside stations.
+#
+# A blockstate that draws ``facing`` (north/east/south/west) and one or more
+# boolean states (lit, open, powered, ...), one model per combination (a
+# ``variants`` map with every combination, or a multipart where exactly one
+# part applies at each), converts the way a facing-only block does (#212:
+# placement and box read from bytecode, else the labelled DEFAULT), with:
+#
+# * one Bedrock state per boolean, ``<namespace>:<name>``, listing the value
+#   a placed block starts with first ("The first item in the values array is
+#   used as the default", Bedrock-OSS bedrock-wiki docs/blocks/block-states.md;
+#   blockcode.read_state_blocks: read from getStateForPlacement, the
+#   registered default state or StateDefinition#any, else DEFAULT false,
+#   labelled);
+# * one geometry with a bone per model drawn (per model and turn when the
+#   variant is uvlocked), each shown at the states that draw it;
+# * per (facing, booleans) the box read from getShape, and per booleans the
+#   light read from Properties.lightLevel;
+# * nothing that changes a boolean after placement, except a toggle read
+#   from useWithoutItem (see blockcode._read_toggle), which the fixed runtime
+#   portkit/runtime/toggle.js carries (onPlayerInteract flips the state): the
+#   block otherwise stays in the state it was placed in, and the notes say
+#   which of its methods change it in Java (redstone included: a Bedrock
+#   custom block has no redstone input).
+#
+# A block whose class reaches a vanilla block class with behaviour of its own
+# (FenceGateBlock, LanternBlock...) stays residue: its states are vanilla code.
+# waterlogged is not one of these booleans (a liquid, not a drawn state); a
+# blockstate that draws it is left to the other converters.
+
+_MAX_BOOLS = 4
+_BOOL_VALUES = {"true", "false"}
+
+
+def _quarter(entry) -> tuple[tuple[str, int, bool] | None, str]:
+    if isinstance(entry, list):
+        return None, "picks a model at random"
+    if not isinstance(entry, dict) or not isinstance(entry.get("model"), str):
+        return None, "has a variant without a model"
+    if entry.get("x"):
+        return None, "turns a model about x"
+    y = entry.get("y") or 0
+    if not isinstance(y, int) or isinstance(y, bool) or y % 90:
+        return None, "turns a model by other than a quarter turn"
+    return (entry["model"], y % 360, bool(entry.get("uvlock"))), ""
+
+
+def _bool_props(props: dict) -> tuple | None:
+    """The boolean names when ``props`` (name -> values) is facing plus
+    booleans, else None."""
+    if "facing" not in props or not set(props["facing"]) <= set(_CARDINALS):
+        return None
+    bools = tuple(sorted(p for p in props if p != "facing"))
+    if not bools or "waterlogged" in bools:
+        return None
+    if any(not set(props[p]) <= _BOOL_VALUES for p in bools):
+        return None
+    return bools
+
+
+def _when_matches(when, cell: dict) -> bool | None:
+    """Whether a multipart ``when`` holds at ``cell`` (name -> value), or
+    None when it uses a form not read here."""
+    if when is None:
+        return True
+    if not isinstance(when, dict):
+        return None
+    if set(when) == {"OR"} or set(when) == {"AND"}:
+        clauses = next(iter(when.values()))
+        if not isinstance(clauses, list):
+            return None
+        got = [_when_matches(c, cell) for c in clauses]
+        if None in got:
+            return None
+        return any(got) if "OR" in when else all(got)
+    for key, value in when.items():
+        if key in ("OR", "AND"):
+            return None
+        options = str(value).lower().split("|")
+        if cell.get(key) not in options:
+            return False
+    return True
+
+
+def _coded_bool_variants(blockstate: dict) -> tuple[dict | None, str]:
+    """{"bools": names, "cells": {(facing, combination): (model, y, uvlock)}}
+    when the blockstate draws facing and booleans; (None, why) when it does
+    but not in a form read here; (None, "") when it doesn't."""
+    from itertools import product
+
+    variants = blockstate.get("variants")
+    if isinstance(variants, dict) and variants:
+        parsed = {}
+        props: dict[str, set] = {}
+        for key in variants:
+            pairs = [p.split("=", 1) for p in key.split(",") if p]
+            if not pairs or any(len(p) != 2 for p in pairs):
+                return None, ""
+            cell = {a.strip(): b.strip() for a, b in pairs}
+            for a, b in cell.items():
+                props.setdefault(a, set()).add(b)
+            parsed[key] = cell
+        bools = _bool_props(props)
+        if bools is None:
+            return None, ""
+        if len(bools) > _MAX_BOOLS:
+            return None, f"facing with {len(bools)} booleans: more than {_MAX_BOOLS} aren't read"
+        cells = {}
+        for key, cell in parsed.items():
+            if set(cell) != {"facing", *bools}:
+                return None, "facing and booleans: some variants don't name every state"
+            got, why = _quarter(variants[key])
+            if got is None:
+                return None, f"facing and booleans: {key} {why}"
+            combo = tuple(int(cell[p] == "true") for p in bools)
+            cells[(cell["facing"], combo)] = got
+        if len(cells) != 4 * 2 ** len(bools):
+            return None, "facing and booleans: not every combination has a variant"
+        return {"bools": bools, "cells": cells}, ""
+    parts = blockstate.get("multipart")
+    if not isinstance(parts, list) or not parts:
+        return None, ""
+    props = {}
+    for name in _multipart_states(blockstate):
+        props[name] = set()
+    for part in parts:
+        when = part.get("when") if isinstance(part, dict) else None
+
+        def walk(c):
+            if isinstance(c, dict):
+                for k, v in c.items():
+                    if k in ("OR", "AND") and isinstance(v, list):
+                        for x in v:
+                            walk(x)
+                    elif k not in ("OR", "AND"):
+                        props.setdefault(k, set()).update(str(v).lower().split("|"))
+        walk(when)
+    bools = _bool_props(props)
+    if bools is None:
+        return None, ""
+    if len(bools) > _MAX_BOOLS:
+        return None, f"facing with {len(bools)} booleans: more than {_MAX_BOOLS} aren't read"
+    cells = {}
+    for facing in _CARDINALS:
+        for combo in product((0, 1), repeat=len(bools)):
+            cell = {"facing": facing, **{p: ("true" if v else "false") for p, v in zip(bools, combo)}}
+            hits = []
+            for part in parts:
+                ok = _when_matches(part.get("when") if isinstance(part, dict) else None, cell)
+                if ok is None:
+                    return None, ""
+                if ok:
+                    hits.append(part)
+            # A multipart this doesn't read is left to the multipart
+            # converters (_facing_parts drops parts gated on code-set
+            # states with a note), as before.
+            if len(hits) != 1:
+                return None, ""
+            got, why = _quarter(hits[0].get("apply"))
+            if got is None:
+                return None, ""
+            cells[(facing, combo)] = got
+    return {"bools": bools, "cells": cells}, ""
+
+
+def _read_bool_code(mod: SourceMod, src, stations: dict) -> dict:
+    """(spec, reading) per blockstate that draws facing and booleans and is
+    no station; (spec-less) residue reasons go in the second dict."""
+    specs, why = {}, {}
+    for path in sorted(src.glob("*.json")):
+        if path.stem in stations:
+            continue
+        try:
+            blockstate = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            continue
+        spec, reason = _coded_bool_variants(blockstate)
+        if spec is not None:
+            specs[path.stem] = spec
+        elif reason:
+            why[path.stem] = reason
+    if not specs:
+        return {}, why
+    readings = blockcode.read_state_blocks(getattr(mod, "classes", None),
+                                           {n: s["bools"] for n, s in specs.items()})
+    return {n: (specs[n], readings[n]) for n in specs}, why
+
+
+def _state_name(namespace: str, prop: str) -> str:
+    return f"{namespace}:{prop}"
+
+
+def _combo_test(namespace: str, bools: tuple, combo: tuple) -> str:
+    return " && ".join(("" if v else "!") + f"q.block_state('{_state_name(namespace, p)}')"
+                       for p, v in zip(bools, combo))
+
+
+def _cell_test(namespace: str, bools: tuple, facing: str | None, combo: tuple | None) -> str:
+    parts = []
+    if facing is not None:
+        parts.append(f"q.block_state('minecraft:cardinal_direction') == '{facing}'")
+    if combo is not None:
+        parts.append(_combo_test(namespace, bools, combo))
+    return " && ".join(parts)
+
+
+def _model_elements(mod: SourceMod, result: ConversionResult, model_ref: str) -> tuple[dict | None, str]:
+    """A model's flattened json with its elements (a plain cube expanded to
+    its vanilla parent's box)."""
+    flat, why = _flat_model(mod, result, model_ref)
+    if flat is None:
+        return None, why
+    if not flat.get("elements"):
+        expanded, why = models.expand_template(flat)
+        if expanded is None:
+            return None, f"{model_ref}: {why}"
+        flat = expanded
+    if not flat.get("elements"):
+        return None, f"{model_ref} has no elements"
+    return flat, ""
+
+
+def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                        spec: dict, reading) -> dict | None:
+    ns = mod.namespace
+    bools, cells = spec["bools"], spec["cells"]
+    combos = blockcode.combinations(bools)
+    if reading.vanilla_parent:
+        result.unhandled.append(Unhandled(rel, "block", (
+            f"facing and booleans: {reading.cls} is a vanilla {reading.vanilla_parent.rsplit('.', 1)[-1]}, "
+            "whose placement, shape and state changes are vanilla code that isn't read")))
+        return None
+    if reading.placement_conflict:
+        result.unhandled.append(Unhandled(rel, "block", f"facing: {reading.placement_conflict}"))
+        return None
+
+    # One bone per model (turned whole per cell by minecraft:transformation),
+    # or per (model, turn) for a uvlocked variant (turned here, its textures
+    # kept still as uvlock does).
+    flats: dict[str, dict] = {}
+    for model_ref, _y, _lock in cells.values():
+        if model_ref not in flats:
+            flat, why = _model_elements(mod, result, model_ref)
+            if flat is None:
+                result.unhandled.append(Unhandled(rel, "block", f"facing and booleans model: {why}"))
+                return None
+            flats[model_ref] = flat
+    textures: dict = {}
+    bone_of: dict = {}
+    parts: list = []
+    model_elements: dict[str, list] = {}
+    for k, (model_ref, flat) in enumerate(flats.items()):
+        kept = list(flat.get("elements") or [])
+        used = _face_keys(kept)
+        for key, ref in (flat.get("textures") or {}).items():
+            if textures.setdefault(key, ref) == ref or key not in used:
+                continue
+            own = next((x for x, r in textures.items() if r == ref and x.startswith(f"{key}_m")), f"{key}_m{k}")
+            if textures.setdefault(own, ref) != ref:
+                result.unhandled.append(Unhandled(rel, "block", f"models disagree about their {key!r} texture"))
+                return None
+            kept = [_rekey(e, key, own) for e in kept]
+        model_elements[model_ref] = kept
+    for cell, (model_ref, y, lock) in sorted(cells.items()):
+        key = (model_ref, y if lock else 0, lock)
+        if key in bone_of:
+            continue
+        bone = f"m{list(flats).index(model_ref)}" + (f"_y{y}" if lock else "")
+        els = model_elements[model_ref]
+        if lock:
+            turned = []
+            for element in els:
+                moved, why = models.turn_y(element, y, True)
+                if moved is None:
+                    result.unhandled.append(Unhandled(rel, "block", f"{model_ref} at y={y}: {why}"))
+                    return None
+                turned.append(moved)
+            els = turned
+        bone_of[key] = bone
+        parts.append((bone, els))
+
+    combined = {"textures": textures, "elements": [e for _, els in parts for e in els]}
+    by_face, why = models.element_materials(combined)
+    tag_faces = by_face is None and "disagree" in why
+    if tag_faces:
+        by_face, why = models.tagged_materials(combined)
+    if by_face is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return None
+    instances, why = _instances(mod, by_face, textures, tag_faces)
+    if instances is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return None
+    identifier = f"geometry.{ns}.{name}"
+    geo, why = models.geometry_bones(parts, identifier, tag_faces=tag_faces)
+    if geo is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return None
+
+    # Bone visibility: by booleans alone when a bone shows at every facing of
+    # those combinations, else per (facing, booleans).
+    visibility = {}
+    for key, bone in bone_of.items():
+        shown = [c for c, v in cells.items() if (v[0], v[1] if v[2] else 0, v[2]) == key]
+        by_combo: dict[tuple, set] = {}
+        for facing, combo in shown:
+            by_combo.setdefault(combo, set()).add(facing)
+        if len(shown) == len(cells):
+            visibility[bone] = "1.0"
+            continue
+        terms = []
+        for combo, facings in sorted(by_combo.items()):
+            if facings == set(_CARDINALS):
+                terms.append(_cell_test(ns, bools, None, combo))
+            else:
+                terms += [_cell_test(ns, bools, f, combo) for f in _CARDINALS if f in facings]
+        visibility[bone] = " || ".join(f"({t})" for t in terms) if len(terms) > 1 else terms[0]
+
+    # Boxes per cell: Java's (read) in the frame the cell's geometry is drawn in.
+    clamped = outside = False
+
+    def frame(box, turn):
+        nonlocal clamped, outside
+        out, cut = _clamped(_java_turn(box, turn))
+        clamped = clamped or cut
+        outside = outside or any(out[i + 3] <= out[i] for i in range(3))
+        return out
+
+    boxes = {}
+    for cell, (model_ref, y, lock) in cells.items():
+        if reading.shapes_by is not None:
+            world = _bbox(reading.shapes_by[cell])
+            boxes[cell] = None if world is None else frame(world, 0 if lock else 360 - y)
+        else:
+            bounds = _element_bounds(flats[model_ref].get("elements") or [])
+            boxes[cell] = None if bounds is None else frame(bounds, y if lock else 0)
+    if outside:
+        result.unhandled.append(Unhandled(rel, "block", "facing and booleans: Java's shape lies outside the "
+                                          "block at some state, and a Bedrock box can't"))
+        return None
+    collides = reading.collision if reading.collision is not None else True
+
+    def box_components(box) -> dict:
+        selection = _bedrock_box(box) if box is not None else False
+        return {"minecraft:collision_box": selection if collides else False,
+                "minecraft:selection_box": selection}
+
+    light = reading.light_by
+    placement = reading.placement if reading.placement is not None else DEFAULT_PLACEMENT
+    trait = {"enabled_states": ["minecraft:cardinal_direction"]}
+    if placement:
+        trait["y_rotation_offset"] = placement
+    defaults = {p: reading.defaults.get(p, (False, "DEFAULT", reading.placement_why or "the default state isn't read"))
+                for p in bools}
+    states = {}
+    for p in bools:
+        value = defaults[p][0]
+        states[_state_name(ns, p)] = [value, not value]
+    components = {"minecraft:geometry": {"identifier": identifier, "bone_visibility": visibility},
+                  "minecraft:material_instances": instances}
+    same_box = len({json.dumps(b) for b in boxes.values()}) == 1
+    if same_box:
+        components.update(box_components(next(iter(boxes.values()))))
+    same_light = light is None or len(set(light.values())) == 1
+    if light is not None and same_light and light[combos[0]]:
+        components["minecraft:light_emission"] = light[combos[0]]
+
+    extras = {}
+    for (facing, combo), (model_ref, y, lock) in cells.items():
+        extra = {}
+        if not lock and _bedrock_turn(y):
+            extra["minecraft:transformation"] = {"rotation": [0, _bedrock_turn(y), 0]}
+        if not same_box:
+            extra.update(box_components(boxes[(facing, combo)]))
+        if not same_light:
+            extra["minecraft:light_emission"] = light[combo]
+        extras[(facing, combo)] = extra
+    per_facing = all(len({json.dumps(extras[(f, c)], sort_keys=True) for c in combos}) == 1 for f in _CARDINALS)
+    permutations = []
+    if per_facing:
+        for f in _CARDINALS:
+            if extras[(f, combos[0])]:
+                permutations.append({"condition": _cell_test(ns, bools, f, None),
+                                     "components": extras[(f, combos[0])]})
+    else:
+        for f in _CARDINALS:
+            for c in combos:
+                if extras[(f, c)]:
+                    permutations.append({"condition": _cell_test(ns, bools, f, c), "components": extras[(f, c)]})
+
+    block = {
+        "description": {
+            "identifier": f"{ns}:{name}",
+            "menu_category": {"category": _MENU_CATEGORY},
+            "states": states,
+            "traits": {"minecraft:placement_direction": trait},
+        },
+        "components": components,
+    }
+    if permutations:
+        block["permutations"] = permutations
+    fmt = _BLOCK_FORMAT
+    if reading.toggle:
+        # The fixed toggle runtime flips it on use (toggle_table); the block
+        # carries its custom component, read from format 1.21.90.
+        from . import stations
+        components[toggle_component(ns)] = {}
+        fmt = stations.SCRIPT_FORMAT
+    result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = {"format_version": fmt, "minecraft:block": block}
+    extra_states = sorted(set(reading.states or ()) - {"facing", *bools})
+    return {
+        "name": name,
+        "bools": bools,
+        "placement": (reading.placement_from, placement) if reading.placement is not None
+        else (None, reading.placement_why),
+        "box": reading.shape_from if reading.shapes_by is not None else None,
+        "box_why": reading.shape_why,
+        "collision": reading.collision,
+        "collision_why": reading.collision_why,
+        "states": extra_states,
+        # A use toggle read is carried; the rest of the behaviour isn't.
+        "behaviour": [m for m in reading.behaviour if not (reading.toggle and m in ("useWithoutItem", "use"))],
+        "clamped": clamped,
+        "uvlock": any(lock for _, _, lock in cells.values()),
+        "defaults": defaults,
+        "toggle": reading.toggle,
+        "toggle_from": reading.toggle_from,
+        "toggle_why": reading.toggle_why,
+        "changed_by": dict(reading.changed_by),
+        "light": None if light is None else {c: light[c] for c in combos},
+        "light_kind": reading.light_kind,
+        "light_source": reading.light_source,
+        "light_why": reading.light_why,
+        "light_copied": reading.light_copied,
+    }
+
+
+def _coded_bool_notes(records: list[dict]) -> list[str]:
+    """Notes for facing-plus-boolean blocks: per block, each value read from
+    bytecode (class#method) or the labelled DEFAULT, never one for the other."""
+    if not records:
+        return []
+    notes = [
+        f"{len(records)} block(s) with facing and boolean states convert outside a station runtime: one "
+        "Bedrock state per boolean (<namespace>:<name>, the value a placed block starts with listed "
+        "first), the model drawn at each state shown by bone_visibility, geometry turned per "
+        "minecraft:cardinal_direction; placement, box, starting values, toggle and light read from the "
+        "jar's bytecode where it can be read deterministically, otherwise a documented DEFAULT, named "
+        "per block below (a DEFAULT is not a citation)."
+    ]
+    notes += _coded_facing_notes(records)[1:]
+    starts = []
+    for r in records:
+        for prop, (value, kind, src) in sorted(r["defaults"].items()):
+            if kind != "DEFAULT":
+                starts.append((f"{prop}={str(value).lower()} ({kind}: {src})", r["name"]))
+    if starts:
+        notes.append("Starting value read from bytecode (placed: getStateForPlacement sets it; registered: "
+                     "the default state its constructor registers, where placement reads the world; any: "
+                     "StateDefinition#any's first state, booleans true) - " + _grouped(starts) + ".")
+    unread = [(f"{prop} ({src})", r["name"]) for r in records
+              for prop, (value, kind, src) in sorted(r["defaults"].items()) if kind == "DEFAULT"]
+    if unread:
+        notes.append("Starting value DEFAULT, not read from code (false) - " + _grouped(unread) + ".")
+    toggles = [(f"{r['toggle']} ({r['toggle_from']})", r["name"]) for r in records if r["toggle"]]
+    if toggles:
+        notes.append("Using the block flips a state, read from bytecode (every way through the method puts "
+                     "the block back with that one boolean flipped) - " + _grouped(toggles) + ".")
+    static = []
+    for r in records:
+        for prop in r["bools"]:
+            if prop == r["toggle"]:
+                continue
+            by = r["changed_by"].get(prop)
+            how = (f"Java changes it in {', '.join(by)}" if by else
+                   "no method of the block's own classes sets it (other classes, such as a block entity, "
+                   "aren't scanned)")
+            if any(m.endswith("+redstone") for m in by or ()):
+                how += " (redstone: no Bedrock custom block input for it)"
+            static.append((f"{prop}: {how}", r["name"]))
+    if static:
+        notes.append("Boolean states that stay at their starting value on Bedrock (no use toggle read; "
+                     "nothing else is carried) - " + _grouped(static) + ".")
+    why_t = [(r["toggle_why"], r["name"]) for r in records if not r["toggle"] and r["toggle_why"]]
+    if why_t:
+        notes.append("Use toggle not read - " + _grouped(why_t) + ".")
+    per = [(f"{r['light_source']}: " + ", ".join(
+        f"{'+'.join(p for p, v in zip(r['bools'], c) if v) or 'none'}={lv}" for c, lv in r["light"].items()),
+        r["name"]) for r in records if r["light"] is not None and r["light_kind"] == "per_state"]
+    if per:
+        notes.append("Light emission read from bytecode per state (Properties.lightLevel run at each "
+                     "combination of the booleans that are true; minecraft:light_emission per permutation) - "
+                     + _grouped(per) + ".")
+    const = [(f"{r['light_source']} = {next(iter(r['light'].values()))}", r["name"]) for r in records
+             if r["light"] is not None and r["light_kind"] == "constant"]
+    if const:
+        notes.append("Light emission read from bytecode (Properties.lightLevel gives one value at every "
+                     "state) - " + _grouped(const) + ".")
+    dark = [r["name"] for r in records if r["light"] is not None and r["light_kind"] == "dark"]
+    if dark:
+        notes.append(f"No light, read from bytecode: {len(dark)} facing-and-boolean block(s) whose Properties "
+                     "never set one (BlockBehaviour$Properties default, state -> 0).")
+    nolight = [(r["light_why"], r["name"]) for r in records if r["light"] is None]
+    if nolight:
+        notes.append("Light emission NOT converted, the block emits none (Java may light it) - "
+                     + _grouped(nolight) + ".")
+    return notes
+
+
+TOGGLE_RUNTIME = "scripts/portkit/toggle.js"
+
+
+def toggle_component(namespace: str) -> str:
+    return f"{namespace}:portkit_toggle"
+
+
+def toggle_table_path(namespace: str) -> str:
+    return f"scripts/portkit/data/{namespace}_toggle.js"
+
+
+def _toggle_table(mod: SourceMod, result: ConversionResult, records: list[dict]) -> None:
+    """The toggle runtime's data table (block id -> the state using it flips)
+    and the runtime itself, when any converted block's use toggle was read;
+    stations.convert wires the table into scripts/portkit/main.js."""
+    from . import stations
+
+    blocks_ = {f"{mod.namespace}:{r['name']}": _state_name(mod.namespace, r["toggle"])
+               for r in records if r["toggle"]}
+    if not blocks_:
+        return
+    header = ("// Read by the fixed runtime scripts/portkit/toggle.js (portkit/runtime). Each block's "
+              "use flips the state named here, read from its useWithoutItem bytecode (see the notes).")
+    result.files[toggle_table_path(mod.namespace)] = stations._js_module(
+        header, {"component": toggle_component(mod.namespace), "blocks": blocks_})
+    result.files[TOGGLE_RUNTIME] = stations.runtime_source("toggle.js")

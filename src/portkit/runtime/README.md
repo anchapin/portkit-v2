@@ -64,6 +64,12 @@ entry `scripts/portkit/main.js` that wires the two.
   entry of waystone and sharestone menus; a player who dies with an epitaph
   (`world.afterEvents.entityDie`) leaves a fleeting memorial, listed at the top
   of their menus until a teleport reaches it).
+- `toggle.js`: not a station: the use toggle of a block with facing and
+  boolean states (`onPlayerInteract` flips the one boolean state the table
+  names per block). A block is in the table only when its Java
+  `useWithoutItem` was read from bytecode to flip that boolean on every way
+  through it (`portkit.blockcode.read_state_blocks`); the converter writes the
+  table (`scripts/portkit/data/<namespace>_toggle.js`).
 - `station_storage.js`: helpers the bindings share (world dynamic property
   storage, stored stacks, giving and dropping items, sounds).
 
