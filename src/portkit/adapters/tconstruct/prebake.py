@@ -1,5 +1,10 @@
 """Pre-baked icons and display-only items for Tinkers' Construct tools (#122, #128).
 
+Moved from ``converters/tinkers.py`` into the Tinkers' Construct adapter
+(#245): the core reaches it only through the adapter's ``convert`` hook (run
+by :func:`portkit.converters.adapter_data`) and its ``item_models`` hook (asked
+by :func:`portkit.converters.items.convert`, which leaves these models alone).
+
 Tinkers ships one pre-rendered sprite per tool part and material
 (``tool/pickaxe/head_tconstruct_iron.png``), about 11.7k of them, and composes a
 tool's look at runtime: its item model (``"loader": "tconstruct:tool"``) names a
@@ -77,10 +82,10 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import png
-from ..model import ConversionResult, SourceMod, Unhandled
-from . import models
-from .lang import _LOCALES, _one_line
+from ... import png
+from ...converters import models
+from ...converters.lang import _LOCALES, _one_line
+from ...model import ConversionResult, SourceMod, Unhandled
 
 _TOOL_LOADER = "tconstruct:tool"
 _PART_LOADER = "tconstruct:material"
@@ -551,6 +556,12 @@ def applies(mod: SourceMod) -> bool:
     return (mod.assets / "tinkering" / "generator_part_textures.json").is_file() and bool(
         _tool_models(mod)
     )
+
+
+def item_models(mod: SourceMod):
+    """The adapter's ``item_models`` hook: :func:`owns_model` in a mod this
+    pre-bake ``applies`` to, else None (``items.convert`` handles every model)."""
+    return owns_model if applies(mod) else None
 
 
 def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:

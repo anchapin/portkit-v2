@@ -7,7 +7,8 @@ material drew them.
 import json
 
 from portkit import png
-from portkit.converters import convert_all, tinkers
+from portkit.adapters.tconstruct import prebake as tinkers
+from portkit.converters import convert_all
 from portkit.model import ConversionResult, SourceMod
 
 NS = "examplemod"

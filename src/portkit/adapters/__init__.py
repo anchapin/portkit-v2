@@ -28,6 +28,12 @@ Hooks, and the core seam that asks each one:
   code reads (claimed as residue, or converted), run by
   :func:`portkit.converters.convert_all` after the entity converter, in
   registry order.
+- ``item_models``: ``SourceMod -> predicate | None``. The predicate takes a
+  parsed Java item model and says whether the adapter's ``convert`` hook
+  answers for it (turns it into items or reports it); None when the adapter
+  has nothing for this mod. Asked by :func:`portkit.converters.items.convert`,
+  which leaves such a model alone after claiming it (Tinkers' tool and part
+  models, #129).
 - ``books``: a :class:`BookReader` for guide books whose pages are data in
   the jar (Citadel's, #182). :func:`portkit.converters.convert_all` asks each
   reader, in registry order, for its plan once the items have converted, its
@@ -112,6 +118,7 @@ class Adapter:
     conditions: Mapping[str, ConditionHandler] = field(default_factory=_empty)
     recipe_reasons: Mapping[str, tuple[str, RecipeReason]] = field(default_factory=_empty)
     convert: Callable[["SourceMod"], "ConversionResult"] | None = None
+    item_models: Callable[["SourceMod"], Callable[[dict], bool] | None] | None = None
     books: BookReader | None = None
     station: StationHooks | None = None
 
@@ -176,6 +183,18 @@ def recipe_reasons(kind: str) -> dict[str, str]:
 def converters() -> list[Callable[["SourceMod"], "ConversionResult"]]:
     """The adapters' ``convert`` hooks, in registry order."""
     return [a.convert for a in ADAPTERS if a.convert is not None]
+
+
+def item_model_owners(mod: "SourceMod") -> list[Callable[[dict], bool]]:
+    """The predicates the adapters' ``item_models`` hooks give for ``mod``,
+    in registry order (an adapter with nothing for the mod gives none)."""
+    owners = []
+    for a in ADAPTERS:
+        if a.item_models is not None:
+            owns = a.item_models(mod)
+            if owns is not None:
+                owners.append(owns)
+    return owners
 
 
 def book_readers() -> list[BookReader]:

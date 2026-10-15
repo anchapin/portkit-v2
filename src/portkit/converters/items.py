@@ -663,6 +663,9 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
         context = LoadContext(mod)
 
     blocks = _block_names(mod)
+    from ..adapters import item_model_owners
+
+    owned_by_adapter = item_model_owners(mod)
     java: set[str] | None = None  # registered Java ids, read on the first item that needs them
     registered: set[str] = set()  # ...and their Bedrock ids under the converter's mapping
     variants: list[tuple[str, str]] = []  # (model name, texture) of skipped variants
@@ -712,6 +715,10 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
 
         if not isinstance(model, dict):
             result.unhandled.append(Unhandled(rel, "item", "item model is not a JSON object"))
+            continue
+        if any(owns(model) for owns in owned_by_adapter):
+            # An adapter's convert hook turns this model into items or says
+            # why it couldn't (#129, #245); generic residue would be wrong.
             continue
         fluid_why = fluid_container_reason(model)
         if fluid_why is not None:
