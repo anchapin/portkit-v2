@@ -27,6 +27,10 @@ anything, since upstream references a few ``common/`` files it doesn't publish.
 Adding a snapshot: copy ``schemas/bp/blocks`` and ``schemas/bp/items`` from a
 bedrock-schemas release into ``schemas/<version>/bp/``, add the version to
 ``SNAPSHOTS``, and record the commit in ``schemas/SOURCE.md``.
+
+Refreshing an existing snapshot (a prerelease replaced by the stable package
+for the same version, #155): ``portkit schemas check`` then ``portkit schemas
+refresh`` (``schema_upstream.py``); the steps are in ``schemas/SOURCE.md``.
 """
 from __future__ import annotations
 

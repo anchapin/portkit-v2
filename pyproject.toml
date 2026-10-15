@@ -20,6 +20,13 @@ build-backend = "setuptools.build_meta"
 "portkit.validate" = ["schemas/*/LICENSE", "schemas/*.md", "schemas/**/*.json"]
 # Reference set the agent's lookup_bedrock tool reads, with its attribution (#114).
 "portkit.agent.reference" = ["*.json", "*.md", "*.txt"]
+# Mod config-flag defaults cited from each mod's source, for load conditions (#183).
+"portkit.data" = ["*.json"]
+# Fixed station runtimes copied verbatim into behavior packs (#177).
+"portkit.runtime" = ["*.js", "*.md"]
+# Adapter runtimes and cited data (#245 picks 6a, 9a).
+"portkit.adapters.farmersdelight" = ["runtime/*.js"]
+"portkit.adapters.waystones" = ["runtime/*.js", "data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

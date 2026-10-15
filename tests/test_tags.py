@@ -1,11 +1,26 @@
-"""Tag-aware recipe emission (#88): a tag resolves when the addon can only mean one item."""
+"""Tag-aware recipe emission (#88): a tag resolves when the addon can only mean one item.
+
+The mod here declares NeoForge 1.21.1, and the tests read the tiny tag reference
+in tests/data/tag_reference (#160): NeoForge's share of c:ingots/steel is
+empty, so the mod's own file is the whole membership the addon can hold.
+"""
 import json
+from pathlib import Path
+
+import pytest
 
 from portkit.converters import recipes
 from portkit.model import SourceMod
 
+REFERENCE = Path(__file__).parent / "data" / "tag_reference"
 
-def _mod(tmp_path, ingredient, items=(), tag_files=None):
+
+@pytest.fixture(autouse=True)
+def _tag_reference(monkeypatch):
+    monkeypatch.setenv("PORTKIT_TAG_REFERENCE", str(REFERENCE))
+
+
+def _mod(tmp_path, ingredient, items=(), tag_files=None, loader="neoforge", minecraft="1.21.1"):
     root = tmp_path
     rec = root / "data" / "examplemod" / "recipes"
     rec.mkdir(parents=True, exist_ok=True)
@@ -22,7 +37,7 @@ def _mod(tmp_path, ingredient, items=(), tag_files=None):
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"values": values}))
-    return SourceMod(root=root, namespace="examplemod")
+    return SourceMod(root=root, namespace="examplemod", loader=loader, minecraft=minecraft)
 
 
 def _ingredients(result):
@@ -39,6 +54,12 @@ def test_convention_name_resolves_to_the_mods_only_matching_item(tmp_path):
 
 def test_convention_name_with_no_matching_item_stays_residue(tmp_path):
     result = recipes.convert(_mod(tmp_path, "c:ingots/steel", items=["bronze_ingot"]))
+    assert result.files == {}
+    assert "only other mods" in result.unhandled[0].reason
+
+
+def test_convention_name_with_no_matching_item_and_no_data_stays_residue(tmp_path):
+    result = recipes.convert(_mod(tmp_path, "c:ingots/steel", items=["bronze_ingot"], loader=None))
     assert result.files == {}
     assert "which covers more than one item" in result.unhandled[0].reason
 
@@ -109,4 +130,15 @@ def test_a_mods_addition_to_a_vanilla_tag_is_not_the_whole_tag(tmp_path):
     })
     result = recipes.convert(mod)
     assert result.files == {}
-    assert "covers more than one item" in result.unhandled[0].reason
+    reason = result.unhandled[0].reason
+    assert "covers 3 items" in reason and "minecraft:oak_leaves" in reason
+
+
+def test_without_vanilla_data_a_mods_vanilla_tag_share_stays_unknown(tmp_path):
+    mod = _mod(tmp_path, "minecraft:leaves", items=["steel_leaves"], tag_files={
+        "data/minecraft/tags/items/leaves.json": ["examplemod:steel_leaves"],
+    }, loader=None, minecraft=None)
+    result = recipes.convert(mod)
+    assert result.files == {}
+    assert "full membership isn't known" in result.unhandled[0].reason
+    assert "data/minecraft/tags/items/leaves.json" in result.consumed  # read, so owned

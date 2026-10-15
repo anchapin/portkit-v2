@@ -13,9 +13,32 @@ is the bridge from that list to the loop:
    bad session can never cost the player the installable addon.
 
 A group counts as resolved only when its session ended on its own, it wrote at
-least one file, and the validator found no new error. Declaring victory in prose
-is not enough, and neither is a session that wrote nothing because the Java behaviour
-has no Bedrock form: that one stays residue, with the agent's reason attached.
+least one file, the validator found no new error, and every item and tag its
+recipes name exists (in the pack, in the source mod, or in vanilla; see
+``refs.py``), and every gameplay number on the items and blocks it wrote
+(damage, durability, light, hardness, map colour, ...) is one the source mod
+states (see ``stats.py``), and
+every namespaced id in its files is in ``minecraft``, the conversion's
+namespace or one the mod ships (see ``refs.py``, #147), and every block
+state it declares or tests is one the Java blockstate has, with a value Java
+lists (see ``states.py``, #149), and every trim recipe it wrote names only
+vanilla ``minecraft:`` template and addition slots (see ``trim.py``, #86),
+and every item it defines in the mod's or the conversion's namespace is one
+the Java source registers (see ``items.py``, #86), under the mod config the
+conversion holds: an item a config flag gates off (cited default or
+``--config``) is neither defined nor named in any file it writes
+(``items.py``, #187).
+A group that ends
+with any kind of fabrication is rolled back, with the reason listed.
+Declaring victory in prose is not enough, and neither is a session that wrote nothing because the Java behaviour
+has no Bedrock form: that one stays residue, with the agent's reason attached,
+and is reported as ``declined`` rather than ``unresolved`` so a sweep can tell
+a reasoned "no Bedrock equivalent" from a session that gave up (#86).
+
+The run's ``status`` sums it up: ``complete`` when every group the agent could
+work on resolved, ``partial`` when some did, ``failed`` when none did. It is
+separate from whether the pack validates: rolling every group back leaves a
+valid pack and a failed agent run.
 
 Every group's spend (steps, tokens, dollars when priced) is reported. Token and
 dollar ceilings are per run: once one is reached, the session in flight stops
@@ -30,22 +53,85 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..conditions import LoadContext
 from ..meta import ModMetadata
-from ..model import Unhandled
+from ..model import SourceMod, Unhandled
 from ..pack import ENGINE_FLOOR, manifest
 from ..validate import validate_tree
 from .budget import Budget, Spend
+from .items import (
+    GatedItem,
+    UnknownItem,
+    gated_finding,
+    gated_ids,
+    gated_refs,
+    registered_ids,
+    unknown_items,
+)
+from .items import finding as item_finding
 from .loop import AgentSession, LLMClient
+from .refs import (
+    Ref,
+    finding,
+    namespace_finding,
+    source_items,
+    unknown_namespace_refs,
+    unresolved_refs,
+    valid_namespaces,
+)
+from .states import BadState, invented_states
+from .states import finding as state_finding
+from .stats import Stat, fabricated_stats
+from .stats import finding as stat_finding
+from .trim import Trim, fabricated_trims
+from .trim import finding as trim_finding
 from .tools import SYSTEM_PROMPT, ToolBox
 
 # Kinds no session can make progress on with the tools it has: bytecode is not
-# readable text, a nested jar is not unpacked, and a namespace collision is a
-# decision about the pack, not a file to convert. They stay residue, skipped
-# with a reason rather than burning a session.
+# readable text, a nested jar is not unpacked, and a namespace or output
+# collision is a decision about the pack (or a converter bug), not a file to
+# convert. They stay residue, skipped with a reason rather than burning a
+# session.
 SKIP_KINDS = {
     "java_code": "compiled bytecode; the agent's tools read text files only",
     "nested_jar": "nested jars are not unpacked, so there is nothing to read",
     "namespace_collision": "a collision is a packaging decision, not a file to convert",
+    "output_collision": "two converters wrote one output path; a converter bug, not a file to convert",
+    "conditional_recipe": ("Java doesn't load this recipe with only this mod (or whether it does "
+                           "can't be decided), so converting it would ship content the mod doesn't have"),
+    "conditional_loot_table": ("Java doesn't load this loot table with only this mod (or whether it "
+                               "does can't be decided), so converting it would ship content the mod doesn't have"),
+    "conditional_item": ("Java doesn't register this item with the mod config this conversion holds "
+                         "(a config flag gates it), so converting it would ship content the mod doesn't have"),
+    "station_recipe": ("a station recipe runs from the station's script data table, which the agent's "
+                       "tools don't write; the reason says what the converter could not state exactly"),
+    "feast": ("a feast's loot tables are wired per serving count by the feast runtime (#177), which the "
+              "agent's tools don't write; the reason says what the converter could not state exactly"),
+    "waystone": ("a waystone's loot table is wired by the waystone runtime (#178), which the agent's tools "
+                 "don't write; the reason says what the converter could not state exactly"),
+    "code_recipe": ("the recipe's result or station is the mod's Java code (#180); a Bedrock recipe "
+                    "would have to invent or drop part of it, and the reason says which"),
+    "fluid_recipe": ("the recipe melts, alloys, casts or fills with fluid measured in mB at a mod station "
+                     "(#174); Bedrock add-ons can't define a fluid or store an amount of one, so there is "
+                     "no fluid or station to write it for"),
+    "modular_tool": ("the recipe builds, changes or takes apart a modular tool, part or material whose stats "
+                     "Java computes per stack (#175); a Bedrock item's components are fixed per item type, "
+                     "so a stand-in would invent the numbers"),
+    "machine_recipe": ("the recipe runs in a mod machine that works over ticks, a Mekanism machine holding "
+                       "energy, chemicals or fluid (#172), a Create machine turned by its rotational network "
+                       "(#173) or an Alloy Forgery forge burning fuel at a tier (#171); Bedrock blocks have no "
+                       "ticking inventory, energy, fuel store or rotation, so there is no "
+                       "station to write it for, and the reason names the machine"),
+    "custom_fluid": ("the item holds a mod's fluid and its icon is drawn from that fluid at runtime (#174); "
+                     "Bedrock add-ons can't define the fluid, and drawing the icon would invent it"),
+    "machine_data": ("data a Java machine reads at runtime (Alloy Forgery forge definitions, tiers, fuels and "
+                     "its recipe tags, #171); there is no Bedrock machine to read it until a scripted forge "
+                     "exists, and the reason says what the data sets"),
+    "entity": ("the file only works with a Java entity (its spawn egg or loot table), and entities don't "
+               "convert: a mob's geometry, animations and AI are Java code, so a Bedrock entity would invent "
+               "them (#176); the reason says what the bytecode read"),
+    "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
+             "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
 
 # Where Bedrock keeps each kind of content. A hint, not a constraint: the
@@ -157,6 +243,13 @@ def build_task(group: ResidueGroup, source_root: Path, out_tree: Path, namespace
             + hint
         ).strip(),
         (
+            "Gameplay numbers (damage, durability, mining speed, armor, food, "
+            "cooldowns, enchantability, fuel) and block properties (hardness, blast "
+            "resistance, light, friction, flammability, map colour) come only from "
+            "the source mod: if it does not state one, omit that component rather "
+            "than guess, and say in your final message which ones you left out."
+        ),
+        (
             "Call validate after writing and fix every finding it names. If this "
             "has no faithful Bedrock equivalent, write nothing and say why in one "
             "sentence; that is a correct answer, not a failure."
@@ -168,14 +261,119 @@ def build_task(group: ResidueGroup, source_root: Path, out_tree: Path, namespace
 class _TrackingToolBox(ToolBox):
     """A ToolBox that remembers what each write replaced, so a group can roll back."""
 
-    def __init__(self, source: Path, out_tree: Path):
+    def __init__(self, source: Path, out_tree: Path, namespace: str | None = None,
+                 context: LoadContext | None = None):
         super().__init__(source, out_tree)
         self.originals: dict[str, bytes | None] = {}
+        self.namespace = namespace
+        # The conversion's mod config (cited defaults + --config), for gated
+        # items (#187); None checks no gating.
+        self.context = context
+        self._source_ids: set[str] | None = None  # the source does not change mid-session
+        self._registered: set[str] | None = None  # likewise, for the item guard
+        self._gated: dict[str, GatedItem] | None = None  # likewise, for gated items
 
     def _before_write(self, target: Path) -> None:
         rel = str(target.resolve().relative_to(self.out_tree.resolve()))
         if rel not in self.originals:
             self.originals[rel] = target.read_bytes() if target.is_file() else None
+
+    def unresolved(self) -> list[Ref]:
+        """Items and tags in this session's recipes that exist nowhere (#86)."""
+        return unresolved_refs(self.out_tree, list(self.originals), self.source)
+
+    def unknown_namespaces(self, unresolved: list[Ref] | None = None) -> list[Ref]:
+        """Ids in this session's files whose namespace the mod does not have (#147).
+
+        An id the recipe check already reports for the same file is left to it,
+        so one bad ingredient is one finding, not two.
+        """
+        if self._source_ids is None:
+            self._source_ids = source_items(self.source)
+        if unresolved is None:
+            unresolved = self.unresolved()
+        reported = {(ref.path, ref.ident) for ref in unresolved}
+        return [
+            ref for ref in unknown_namespace_refs(
+                self.out_tree, list(self.originals), self.source, self.namespace,
+                self.originals, _source_ids=self._source_ids,
+            )
+            if (ref.path, ref.ident) not in reported
+        ]
+
+    def valid_namespaces(self) -> set[str]:
+        return valid_namespaces(self.source, self.namespace)
+
+    def fabricated(self) -> list[Stat]:
+        """Stats on this session's items that the source never states (#135)."""
+        return fabricated_stats(self.out_tree, list(self.originals), self.source)
+
+    def invented(self) -> list[BadState]:
+        """Block states on this session's blocks that the Java blockstate lacks (#149)."""
+        return invented_states(self.out_tree, list(self.originals), self.source)
+
+    def unresolved_trims(self) -> list[Trim]:
+        """Written trim recipes whose template or addition is not vanilla (#86)."""
+        return fabricated_trims(self.out_tree, list(self.originals), self.source)
+
+    def gated(self) -> dict[str, GatedItem]:
+        """Bedrock id -> gated-off Java item under the conversion's config (#187)."""
+        if self._gated is None:
+            if self.context is None:
+                self._gated = {}
+            else:
+                if self._registered is None:
+                    self._registered = registered_ids(self.source)
+                if self._source_ids is None:
+                    self._source_ids = source_items(self.source)
+                self._gated = gated_ids(self._registered | self._source_ids,
+                                        self.context.gated_item, self.namespace)
+        return self._gated
+
+    def unknown_items(self) -> list[UnknownItem]:
+        """Items this session defined that the Java source never registers (#86),
+        including ones a config flag gates off here (#187)."""
+        if self._registered is None:
+            self._registered = registered_ids(self.source)
+        return unknown_items(
+            self.out_tree, list(self.originals), self.source, self.namespace, self.originals,
+            gated=self.gated(), _registered=self._registered,
+        )
+
+    def gated_refs(self, items: list[UnknownItem] | None = None) -> list[Ref]:
+        """Mentions of a gated-off item in this session's files (#187).
+
+        An item definition the item guard already reports is left to it.
+        """
+        gated = self.gated()
+        if not gated:
+            return []
+        if items is None:
+            items = self.unknown_items()
+        return gated_refs(self.out_tree, list(self.originals), gated, self.originals,
+                          exclude={(i.path, i.ident) for i in items})
+
+    def validate(self) -> dict:
+        # The structural validator only warns on an undeclared item, and does not
+        # look at tags at all. What the agent wrote is held to the stricter rule,
+        # and it hears about it here so it can fix the reference, not just get
+        # rolled back at the end.
+        report = super().validate()
+        unresolved = self.unresolved()
+        extra = [finding(ref) for ref in unresolved]
+        valid = self.valid_namespaces()
+        extra += [namespace_finding(ref, valid) for ref in self.unknown_namespaces(unresolved)]
+        extra += [stat_finding(stat) for stat in self.fabricated()]
+        extra += [state_finding(bad) for bad in self.invented()]
+        extra += [trim_finding(trim) for trim in self.unresolved_trims()]
+        items = self.unknown_items()
+        extra += [item_finding(item) for item in items]
+        extra += [gated_finding(ref, self.gated()) for ref in self.gated_refs(items)]
+        if extra:
+            report["findings"] = [*report["findings"], *extra]
+            report["error_count"] += len(extra)
+            report["ok"] = False
+        return report
 
     def rollback(self) -> None:
         for rel, original in self.originals.items():
@@ -191,7 +389,7 @@ class GroupOutcome:
     key: str
     kind: str
     source: str
-    status: str  # resolved | partial | unresolved | rolled_back | skipped | error
+    status: str  # resolved | partial | declined | unresolved | rolled_back | skipped | error
     stopped: str = ""  # the session's own stop reason: done | budget | error
     steps: int = 0
     written: list[str] = field(default_factory=list)
@@ -200,6 +398,24 @@ class GroupOutcome:
     spend: Spend = field(default_factory=Spend)
     tool_calls: int = 0
     format_failures: int = 0  # tool calls that didn't fit the toolbox (#77)
+    # Recipe refs the session wrote that resolve to nothing (#86); a group with
+    # any is rolled back.
+    unresolved_refs: list[str] = field(default_factory=list)
+    # Item stats the session wrote that the source never states (#135); a group
+    # with any is rolled back too.
+    fabricated_stats: list[str] = field(default_factory=list)
+    # Ids in a namespace neither vanilla nor the mod's (#147); rolled back too.
+    unknown_namespaces: list[str] = field(default_factory=list)
+    # Block states or values the Java blockstate doesn't have (#149); rolled back too.
+    invented_states: list[str] = field(default_factory=list)
+    # Trim recipes the session wrote whose template or addition is not vanilla
+    # (#86); a group with any is rolled back too.
+    unresolved_trims: list[str] = field(default_factory=list)
+    # Items the session defined whose id the Java source never registers, e.g.
+    # a per-variant item (#86); rolled back too.
+    unknown_items: list[str] = field(default_factory=list)
+    # Mentions of an item a mod config flag gates off here (#187); rolled back too.
+    gated_items: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -212,6 +428,13 @@ class GroupOutcome:
             "spend": self.spend.to_dict(),
             "tool_calls": self.tool_calls,
             "format_failures": self.format_failures,
+            "unresolved_refs": self.unresolved_refs,
+            "fabricated_stats": self.fabricated_stats,
+            "unknown_namespaces": self.unknown_namespaces,
+            "invented_states": self.invented_states,
+            "unresolved_trims": self.unresolved_trims,
+            "unknown_items": self.unknown_items,
+            "gated_items": self.gated_items,
             "note": self.note,
         }
 
@@ -240,6 +463,27 @@ class ResidueRun:
         return [o for o in self.outcomes if o.status == "resolved"]
 
     @property
+    def declined(self) -> list[GroupOutcome]:
+        return [o for o in self.outcomes if o.status == "declined"]
+
+    @property
+    def tasks(self) -> list[GroupOutcome]:
+        """Groups the agent could work on: everything but the SKIP_KINDS."""
+        return [o for o in self.outcomes if not (o.status == "skipped" and o.stopped != "budget")]
+
+    @property
+    def status(self) -> str:
+        """complete | partial | failed: how much of the agent's work landed.
+
+        Not the same thing as the pack being valid. A run whose every group was
+        rolled back leaves the tree exactly as valid as it found it (#86).
+        """
+        resolved = len(self.resolved)
+        if resolved == len(self.tasks):
+            return "complete"
+        return "partial" if resolved else "failed"
+
+    @property
     def files_written(self) -> int:
         """Files from resolved groups: the ones that count as converted."""
         return sum(len(o.written) for o in self.outcomes if o.status == "resolved")
@@ -252,8 +496,10 @@ class ResidueRun:
 
     def summary(self) -> dict[str, Any]:
         return {
+            "status": self.status,
             "groups": len(self.outcomes),
             "resolved": len(self.resolved),
+            "declined": len(self.declined),
             "files_written": self.files_written,
             "partial_files": self.partial_files,
             "spend": self.spend.to_dict(),
@@ -314,14 +560,21 @@ class ResidueAgent:
         unhandled: list[Unhandled],
         namespace: str,
         meta: ModMetadata | None = None,
+        context: LoadContext | None = None,
     ) -> ResidueRun:
-        scaffolded = _scaffold_manifests(out_tree, namespace, meta or ModMetadata())
+        """``context`` is the conversion's mod config (cited flag defaults plus
+        ``--config``), the one the converters decided with; the guards hold the
+        agent to it (#187). Without one, the defaults for ``meta``'s mods."""
+        meta = meta or ModMetadata()
+        if context is None:
+            context = LoadContext(SourceMod.from_metadata(source_root, namespace, meta))
+        scaffolded = _scaffold_manifests(out_tree, namespace, meta)
         outcomes: list[GroupOutcome] = []
         remaining: list[Unhandled] = []
         spent = Spend()
         try:
             for group in group_residue(unhandled):
-                outcome = self._run_group(group, source_root, out_tree, namespace, spent)
+                outcome = self._run_group(group, source_root, out_tree, namespace, spent, context)
                 outcomes.append(outcome)
                 if outcome.status != "resolved":
                     remaining.extend(group.items)
@@ -336,8 +589,10 @@ class ResidueAgent:
         out_tree: Path,
         namespace: str,
         spent: Spend,
+        context: LoadContext | None = None,
     ) -> GroupOutcome:
         outcome = GroupOutcome(group.key, group.kind, group.source, "skipped")
+        model_text = ""
         if group.kind in SKIP_KINDS:
             outcome.note = SKIP_KINDS[group.kind]
             return outcome
@@ -348,7 +603,7 @@ class ResidueAgent:
             return outcome
 
         before = _error_set(out_tree)
-        box = _TrackingToolBox(source_root, out_tree)
+        box = _TrackingToolBox(source_root, out_tree, namespace, context)
         session = AgentSession(
             self.client, box, self.system, budget=self.budget, run_spend=spent
         )
@@ -357,7 +612,7 @@ class ResidueAgent:
             result = session.run(task)
             outcome.stopped, outcome.steps, outcome.limit = result.stopped, result.steps, result.limit
             outcome.tool_calls, outcome.format_failures = result.tool_calls, result.format_failures
-            outcome.note = _final_text(result.messages)
+            outcome.note = model_text = _final_text(result.messages)
             if result.stopped == "done" and not outcome.note:
                 outcome.note = _empty_reply_note(result.messages)
             if result.stopped == "budget" and not outcome.note:
@@ -370,12 +625,81 @@ class ResidueAgent:
         outcome.spend = session.spend
 
         outcome.written = sorted(box.originals)
+        # A recipe naming an item or tag that exists nowhere is a fabrication,
+        # even when the structural validator only warns about it (#86).
+        unresolved = box.unresolved() if box.originals else []
+        outcome.unresolved_refs = [ref.describe() for ref in unresolved]
+        # So is a gameplay number the source never states (#135). Rolled back
+        # rather than stripped, like a bad ref: the agent was told by validate
+        # and chose to keep it, and editing its file behind its back would
+        # leave an item nobody reviewed.
+        fabricated = box.fabricated() if box.originals else []
+        outcome.fabricated_stats = [stat.describe() for stat in fabricated]
+        # And an id in a namespace the mod does not have, e.g. "sd:" for
+        # storagedrawers (#147).
+        foreign = box.unknown_namespaces(unresolved) if box.originals else []
+        outcome.unknown_namespaces = [ref.describe() for ref in foreign]
+        # And a block state or value the Java blockstate never has, such as an
+        # integer code for facing=north (#149).
+        states = box.invented() if box.originals else []
+        outcome.invented_states = [bad.describe() for bad in states]
+        # So is a trim recipe whose template or addition is not vanilla (#86):
+        # a Bedrock add-on can't apply a mod trim pattern or material, so the
+        # file would validate and the trim would do nothing in game.
+        bad_trims = box.unresolved_trims() if box.originals else []
+        outcome.unresolved_trims = [trim.describe() for trim in bad_trims]
+        # And an item the Java source never registers, such as a per-variant
+        # item for what Java keeps in block state or NBT (#86).
+        bad_items = box.unknown_items() if box.originals else []
+        outcome.unknown_items = [item.describe() for item in bad_items]
+        # And any mention of an item a mod config flag gates off here (#187).
+        gated = box.gated_refs(bad_items) if box.originals else []
+        outcome.gated_items = [f"{ref.describe()} ({box.gated()[ref.ident].explain()})" for ref in gated]
         # Judged against the tree as the session found it: a group is rolled back
         # for errors it introduced, never for ones the deterministic path left.
-        if box.originals and _error_set(out_tree) - before:
+        introduced = sorted(_error_set(out_tree) - before) if box.originals else []
+        if box.originals and (
+            unresolved or fabricated or foreign or states or bad_trims or bad_items
+            or gated or introduced
+        ):
             box.rollback()
             outcome.status = "rolled_back"
             outcome.written = []
+            reasons = []
+            if unresolved:
+                reasons.append(f"unresolved reference(s): {'; '.join(outcome.unresolved_refs)}")
+            if fabricated:
+                reasons.append(
+                    f"stat(s) the source does not state: {'; '.join(outcome.fabricated_stats)}"
+                )
+            if foreign:
+                reasons.append(
+                    f"unknown namespace(s): {'; '.join(outcome.unknown_namespaces)}"
+                )
+            if states:
+                reasons.append(
+                    f"block state(s) the Java blockstate does not have: {'; '.join(outcome.invented_states)}"
+                )
+            if bad_trims:
+                reasons.append(
+                    f"trim slot(s) with no working form: {'; '.join(outcome.unresolved_trims)}"
+                )
+            if bad_items:
+                reasons.append(
+                    f"item(s) the Java source does not register: {'; '.join(outcome.unknown_items)}"
+                )
+            if gated:
+                reasons.append(
+                    f"item(s) gated off by mod config: {'; '.join(outcome.gated_items)}"
+                )
+            if introduced:
+                # Name what broke, so a stub that never validated reads as one (#141).
+                shown = "; ".join(f"{path}: {rule}" for path, rule, _ in introduced[:3])
+                more = f" (+{len(introduced) - 3} more)" if len(introduced) > 3 else ""
+                reasons.append(f"validator error(s): {shown}{more}")
+            if reasons:
+                why = "rolled back: " + "; ".join(reasons)
+                outcome.note = f"{why}. {outcome.note}" if outcome.note else why
         elif outcome.stopped == "done" and box.originals:
             outcome.status = "resolved"
         elif outcome.stopped == "budget" and box.originals:
@@ -384,6 +708,10 @@ class ResidueAgent:
             outcome.status = "partial"
         elif outcome.stopped == "error":
             outcome.status = "error"
+        elif outcome.stopped == "done" and model_text:
+            # Wrote nothing and said why: the answer the task asks for when
+            # there is no faithful Bedrock form. Still residue, never resolved.
+            outcome.status = "declined"
         else:
             outcome.status = "unresolved"
         return outcome

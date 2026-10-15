@@ -67,6 +67,11 @@ class MatrixRow:
         return self.passed + self.failed
 
     @property
+    def declined(self) -> int:
+        """Failed tasks where the model wrote nothing and said why (#86)."""
+        return sum(1 for t in self.tasks if t["status"] == "declined")
+
+    @property
     def pass_rate(self) -> float | None:
         return self.passed / self.scored if self.scored else None
 
@@ -110,6 +115,7 @@ class MatrixRow:
             "pass": self.passed,
             "fail": self.failed,
             "unscored": self.unscored,
+            "declined": self.declined,
             "pass_rate": self.pass_rate,
             "steps": self.steps,
             "tool_calls": self.tool_calls,

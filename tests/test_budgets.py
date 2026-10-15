@@ -27,12 +27,14 @@ PER_CALL = Usage(input_tokens=1000, output_tokens=200)  # 1,200 tokens a complet
 
 
 def _recipe(name):
+    # A vanilla ingredient: hard_residue_mod defines no ingots, and an invented
+    # examplemod:<name>_ingot would now be rolled back as a fabrication (#86).
     return {
         "format_version": "1.20.10",
         "minecraft:recipe_shapeless": {
             "description": {"identifier": f"examplemod:{name}_block"},
             "tags": ["crafting_table"],
-            "ingredients": [{"item": f"examplemod:{name}_ingot", "count": 9}],
+            "ingredients": [{"item": "minecraft:iron_ingot", "count": 9}],
             "result": {"item": f"examplemod:{name}_block"},
         },
     }
@@ -115,7 +117,7 @@ def test_finishing_exactly_at_the_ceiling_is_not_a_cut(tmp_path):
     client = FakeLLM(script, usage=Usage(500, 100))  # 600 a call
     run = convert(HARD, tmp_path / "out", agent=ResidueAgent(client, budget=Budget(max_tokens=2400))).agent
     assert run.spend.tokens == 2400 and run.limit is None
-    assert [o.status for o in run.outcomes] == ["resolved", "unresolved", "unresolved"]
+    assert [o.status for o in run.outcomes] == ["resolved", "declined", "declined"]
 
 
 def test_session_budget_overrides_max_steps(tmp_path):

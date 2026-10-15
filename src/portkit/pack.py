@@ -18,7 +18,24 @@ from .model import ConversionResult
 # of installing beside it.
 _NS = uuid.UUID("6f0a7f1e-0a4a-4f2e-9a1b-6a5f0d1c2b3e")
 
-_BEHAVIOR_DIRS = ("recipes/", "entities/", "functions/", "loot_tables/", "blocks/", "items/")
+_BEHAVIOR_DIRS = ("recipes/", "entities/", "functions/", "loot_tables/", "blocks/", "items/", "scripts/")
+
+# A behavior pack that ships this file gets a script module running it, and a
+# dependency on the Script API version the station runtimes are written
+# against (#177; see portkit.converters.stations). Kept literal here so the
+# pack writer doesn't import the converters.
+SCRIPT_ENTRY = "scripts/portkit/main.js"
+SCRIPT_DEPENDENCY = {"module_name": "@minecraft/server", "version": "2.0.0"}
+# @minecraft/server 2.0.0 shipped with Bedrock 1.21.90 (minecraft.net,
+# "Minecraft 1.21.90 Bedrock Changelog").
+SCRIPT_ENGINE = (1, 21, 90)
+# A runtime that shows forms (the waystone menu, #178) imports
+# @minecraft/server-ui; the pack then declares it too. 2.0.0 is the stable
+# release published with @minecraft/server 2.0.0 for Bedrock 1.21.90 (npm
+# @minecraft/server-ui 2.0.0, 2025-06-17, depends on @minecraft/server ^2.0.0),
+# so the engine floor stays where the station scripts put it.
+SCRIPT_UI_DEPENDENCY = {"module_name": "@minecraft/server-ui", "version": "2.0.0"}
+SCRIPT_UI_IMPORT = 'from "@minecraft/server-ui"'
 
 
 def _uuid(*parts: str) -> str:
@@ -31,6 +48,8 @@ def manifest(
     meta: ModMetadata | None = None,
     depends_on: tuple[str, ...] = (),
     min_engine: tuple[int, int, int] = (1, 20, 20),
+    script_entry: str | None = None,
+    script_ui: bool = False,
 ) -> dict:
     """One Bedrock pack manifest.
 
@@ -62,6 +81,16 @@ def manifest(
             }
         ],
     }
+    if script_entry:
+        # learn.microsoft.com, Pack Manifest (modules: type "script", language
+        # "javascript"; dependencies: module_name for built-in script modules).
+        data["modules"].append({
+            "type": "script",
+            "language": "javascript",
+            "uuid": _uuid(namespace, meta.header_name(namespace, kind), kind, "script"),
+            "version": list(version),
+            "entry": script_entry,
+        })
     if depends_on:
         data["dependencies"] = [
             {
@@ -72,24 +101,38 @@ def manifest(
             }
             for other in depends_on
         ]
+    if script_entry:
+        data.setdefault("dependencies", []).append(dict(SCRIPT_DEPENDENCY))
+        if script_ui:
+            data["dependencies"].append(dict(SCRIPT_UI_DEPENDENCY))
     return data
+
+
+def uses_script_ui(files: dict) -> bool:
+    """Whether a shipped script imports @minecraft/server-ui."""
+    return any(path.startswith("scripts/") and isinstance(body, str) and SCRIPT_UI_IMPORT in body
+               for path, body in files.items())
 
 
 ENGINE_FLOOR = (1, 20, 20)
 
 
 def engine_floor(files: dict) -> tuple[int, int, int]:
-    """The oldest engine that loads every block in this pack.
+    """The oldest engine that loads every block and item in this pack.
 
-    The floor stays at ENGINE_FLOOR unless a block or a block geometry was
-    written at a newer format because it needs a newer feature, so a mod with only simple blocks
-    still loads on older versions.
+    The floor stays at ENGINE_FLOOR unless a block, a block geometry or an
+    item was written at a newer format because it needs a newer feature (an
+    item's ``minecraft:hand_equipped`` needs 1.20.30, ``minecraft:tags`` 1.20.50),
+    so a mod with only simple blocks and items still loads on older versions.
     """
     floor = ENGINE_FLOOR
+    if SCRIPT_ENTRY in files:
+        floor = max(floor, SCRIPT_ENGINE)
     for relpath, content in files.items():
         is_block = relpath.startswith("blocks/")
-        is_geometry = relpath.startswith("models/blocks/") and relpath.endswith(".geo.json")
-        if not ((is_block or is_geometry) and isinstance(content, dict)):
+        is_item = relpath.startswith("items/")
+        is_geometry = relpath.startswith(("models/blocks/", "models/entity/")) and relpath.endswith(".geo.json")
+        if not ((is_block or is_item or is_geometry) and isinstance(content, dict)):
             continue
         version = str(content.get("format_version", ""))
         try:
@@ -103,6 +146,24 @@ def engine_floor(files: dict) -> tuple[int, int, int]:
 
 def _is_behavior(relpath: str) -> bool:
     return relpath.startswith(_BEHAVIOR_DIRS)
+
+
+# File names Minecraft Creator Tools (mct 0.20.0, cli/index.mjs, the json
+# item-type switch on ``baseName``) reads as JavaScript tooling files wherever
+# they sit: a pack with scripts and a file named package.json anywhere fails
+# its SCRIPTMODULE check ("Could not find an package.json registration for
+# @minecraft/server"). Bedrock finds block and item definitions by folder,
+# not by file name, so such a definition is written as ``_<name>.json``.
+_TOOLING_NAMES = {"package", "package.lock", "tsconfig", "jsconfig", "jsdoc", "docfx", ".prettierrc"}
+
+
+def _written_as(relpath: str, files: dict) -> str:
+    """The path a definition is written at (see _TOOLING_NAMES)."""
+    folder, _, leaf = relpath.rpartition("/")
+    if folder not in ("blocks", "items") or not leaf.endswith(".json") or leaf[:-5] not in _TOOLING_NAMES:
+        return relpath
+    renamed = f"{folder}/_{leaf}"
+    return relpath if renamed in files else renamed
 
 
 def write_tree(
@@ -135,12 +196,14 @@ def write_tree(
         base = out_dir / f"{kind}_pack"
         base.mkdir(parents=True, exist_ok=True)
         depends_on = ("resource",) if kind == "behavior" and has_resource else ()
+        entry = SCRIPT_ENTRY if kind == "behavior" and SCRIPT_ENTRY in files else None
         (base / "manifest.json").write_text(
-            json.dumps(manifest(namespace, kind, meta, depends_on, floor), indent=2) + "\n"
+            json.dumps(manifest(namespace, kind, meta, depends_on, floor, entry,
+                                script_ui=bool(entry) and uses_script_ui(files)), indent=2) + "\n"
         )
         (base / ICON_NAME).write_bytes(icon)
         for relpath, content in files.items():
-            target = base / relpath
+            target = base / _written_as(relpath, files)
             target.parent.mkdir(parents=True, exist_ok=True)
             if isinstance(content, bytes):
                 target.write_bytes(content)

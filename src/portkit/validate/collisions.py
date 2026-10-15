@@ -45,7 +45,8 @@ def _identifier(data: dict, kind: str) -> str | None:
     for key in _DEFINITION_KEYS[kind]:
         body = data.get(key)
         if isinstance(body, dict):
-            name = (body.get("description") or {}).get("identifier")
+            description = body.get("description")
+            name = description.get("identifier") if isinstance(description, dict) else None
             if isinstance(name, str):
                 return name
     return None
@@ -70,6 +71,26 @@ def _definitions(tree: Path) -> dict[tuple[str, str], list[str]]:
                 if name:
                     rel = f"{pack}/{directory}/{path.name}"
                     found[(kind, name)].append(rel)
+    return found
+
+
+def _replaced_block_items(tree: Path) -> set[str]:
+    """Blocks whose item an item file declares on purpose (block_placer replace_block_item)."""
+    found: set[str] = set()
+    root = tree / "behavior_pack" / "items"
+    for path in sorted(root.glob("*.json")) if root.is_dir() else []:
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        item = data.get("minecraft:item") if isinstance(data, dict) else None
+        if not isinstance(item, dict):
+            continue
+        description, components = item.get("description"), item.get("components")
+        name = description.get("identifier") if isinstance(description, dict) else None
+        placer = components.get("minecraft:block_placer") if isinstance(components, dict) else None
+        if isinstance(placer, dict) and placer.get("replace_block_item") is True and placer.get("block") == name:
+            found.add(name)
     return found
 
 
@@ -99,8 +120,9 @@ def check_collisions(report: ValidationReport, tree: Path) -> None:
     for (kind, name), files in definitions.items():
         by_name[name].add(kind)
         files_by_name[name].extend(files)
+    replaced = _replaced_block_items(tree)
     for name, kinds in sorted(by_name.items()):
-        if {"block", "item"} <= kinds:
+        if {"block", "item"} <= kinds and name not in replaced:
             report.add(
                 sorted(files_by_name[name])[0],
                 "identifier.block_and_item",

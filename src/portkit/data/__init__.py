@@ -1,5 +1,8 @@
 """Bedrock reference data the converters read at runtime, fetched on demand (#124).
 
+(The loader and vanilla item tag sets, #160, live in :mod:`portkit.data.tags`
+and share this cache and error type.)
+
 The one piece today is the list of audio paths Bedrock's vanilla resource pack
 names in its ``sound_definitions.json``. It is derived from Mojang/bedrock-samples,
 which is (c) Mojang AB, all rights reserved, so the repository and the wheel

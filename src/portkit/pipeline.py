@@ -1,13 +1,18 @@
 """Top-level: source mod in, validated tree out, residue listed."""
 from __future__ import annotations
 
+import re
+
 import json
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
+                         resolve_config)
 from .converters import convert_all
+from .converters.blocks import EXPERIMENTS
 from .icon import resolve as resolve_icon
 from .ingest import ingest
 from .meta import ModMetadata, parse as parse_metadata
@@ -23,6 +28,9 @@ if TYPE_CHECKING:
 # How deep a leftover path is grouped before reporting. assets/<ns>/models/block/x.json
 # groups as assets/<ns>/models, which keeps a 300-model mod to one line.
 _GROUP_DEPTH = 3
+
+# The user's mod config settings, written next to the tree when there are any.
+CONFIG_RECORD = "config-overrides.json"
 
 
 def unowned(root: Path, consumed: set[str]) -> list[Unhandled]:
@@ -104,6 +112,7 @@ def merge_namespaces(results: dict[str, "ConversionResult"]) -> "ConversionResul
         merged.consumed |= result.consumed
         merged.unhandled.extend(result.unhandled)
         merged.notes.extend(result.notes)
+        merged.stations.update(result.stations)
         for path, value in result.files.items():
             if path not in merged.files:
                 merged.files[path] = value
@@ -124,6 +133,61 @@ def _texture_keys(files: dict, index_path: str) -> dict[str, dict]:
     return dict(index.get("texture_data") or {})
 
 
+_VANILLA_KEY = re.compile(r"^[a-z0-9_]+:vanilla/(block|item)/(.+)$")
+_VANILLA_FILE_DIR = {"block": "textures/blocks/", "item": "textures/items/"}
+
+
+def vanilla_entries(result: ConversionResult, namespace: str) -> None:
+    """Give each ``<ns>:vanilla/<lane>/<name>`` key the atlas entry it needs.
+
+    models.vanilla_texture names a vanilla short name directly where one shows
+    exactly the file; where none does it hands out such a key, which points
+    at the vanilla file (``textures/blocks/<name>``) the vanilla pack below
+    serves, so no art is copied. A mod's own keys flatten "/" (textures.shortname),
+    so these never collide with them. Blocks' keys go in the terrain atlas,
+    items' icons in the item atlas."""
+    wanted: dict[str, dict[str, str]] = {}
+    for path, body in result.files.items():
+        if not isinstance(body, dict):
+            continue
+        keys: list[tuple[str, str]] = []
+        if path.startswith("blocks/"):
+            components = (body.get("minecraft:block") or {}).get("components") or {}
+            for part in [components] + [p.get("components") or {} for p in
+                                        (body.get("minecraft:block") or {}).get("permutations") or []
+                                        if isinstance(p, dict)]:
+                for inst in (part.get("minecraft:material_instances") or {}).values():
+                    if isinstance(inst, dict) and isinstance(inst.get("texture"), str):
+                        keys.append(("textures/terrain_texture.json", inst["texture"]))
+        elif path.startswith("items/"):
+            icon = ((body.get("minecraft:item") or {}).get("components") or {}).get("minecraft:icon")
+            if isinstance(icon, dict):
+                icon = icon.get("texture") or (icon.get("textures") or {}).get("default")
+            if isinstance(icon, str):
+                keys.append(("textures/item_texture.json", icon))
+        for index_path, key in keys:
+            match = _VANILLA_KEY.match(key)
+            if match:
+                wanted.setdefault(index_path, {})[key] = _VANILLA_FILE_DIR[match.group(1)] + match.group(2)
+    for index_path, entries in sorted(wanted.items()):
+        index = dict(result.files.get(index_path) or {
+            "resource_pack_name": namespace,
+            "texture_name": "atlas.terrain" if "terrain" in index_path else "atlas.items",
+        })
+        data = dict(index.get("texture_data") or {})
+        for key, file in sorted(entries.items()):
+            data.setdefault(key, {"textures": file})
+        index["texture_data"] = data
+        result.files[index_path] = index
+
+
+def _vanilla_short_names(lane: str) -> frozenset[str]:
+    from .data import vanilla_textures
+
+    index = vanilla_textures.index()
+    return index.short_names(lane) if index is not None else frozenset()
+
+
 def drop_untextured(result: ConversionResult, namespace: str) -> None:
     """Withdraw blocks and items whose textures never made it into the pack.
 
@@ -139,6 +203,10 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
     """
     terrain = _texture_keys(result.files, "textures/terrain_texture.json")
     atlas = _texture_keys(result.files, "textures/item_texture.json")
+    # Vanilla short names (models.vanilla_texture) are in vanilla's atlases,
+    # which Bedrock merges with the pack's.
+    vanilla_terrain = _vanilla_short_names("terrain")
+    vanilla_items = _vanilla_short_names("item")
     borrowed: dict[str, dict] = {}
 
     for path in sorted(result.files):
@@ -155,14 +223,14 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
             missing = sorted({
                 inst["texture"] for inst in instances.values()
                 if isinstance(inst, dict) and isinstance(inst.get("texture"), str)
-                and inst["texture"] not in terrain
+                and inst["texture"] not in terrain and inst["texture"] not in vanilla_terrain
             })
             kind, source = "block", f"assets/{ns}/blockstates/{Path(path).name}"
         elif path.startswith("items/"):
             icon = ((body.get("minecraft:item") or {}).get("components") or {}).get("minecraft:icon")
             if isinstance(icon, dict):
                 icon = icon.get("texture")
-            if not isinstance(icon, str) or icon in atlas:
+            if not isinstance(icon, str) or icon in atlas or icon in vanilla_items:
                 continue
             if icon in terrain:
                 borrowed[icon] = terrain[icon]
@@ -184,6 +252,54 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
                 ),
             )
         )
+
+    # An item form written for a block (recipes._block_item) goes with it.
+    blocks = {
+        ((body.get("minecraft:block") or {}).get("description") or {}).get("identifier")
+        for path, body in result.files.items()
+        if path.startswith("blocks/") and isinstance(body, dict)
+    }
+    for path in sorted(result.files):
+        body = result.files[path]
+        if not path.startswith("items/") or not isinstance(body, dict):
+            continue
+        placer = ((body.get("minecraft:item") or {}).get("components") or {}).get("minecraft:block_placer")
+        if not isinstance(placer, dict):
+            continue
+        block = placer.get("block")
+        if (placer.get("replace_block_item") is True and isinstance(block, str)
+                and not block.startswith("minecraft:") and block not in blocks):
+            # The block's own residue entry already covers it.
+            del result.files[path]
+            result.notes.append(
+                f"{path}: dropped with its block {block}, which did not convert"
+            )
+
+    # A held model's attachable (items._attachable) goes with its item, and
+    # with its texture: an attachable naming a missing file renders untextured.
+    items = {
+        ((body.get("minecraft:item") or {}).get("description") or {}).get("identifier")
+        for path, body in result.files.items()
+        if path.startswith("items/") and isinstance(body, dict)
+    }
+    for path in sorted(p for p in result.files if p.startswith("attachables/")):
+        body = result.files[path]
+        if not isinstance(body, dict):
+            continue
+        description = (body.get("minecraft:attachable") or {}).get("description") or {}
+        texture = (description.get("textures") or {}).get("default")
+        geometry = (description.get("geometry") or {}).get("default")
+        if description.get("identifier") not in items:
+            why = f"dropped with its item {description.get('identifier')}, which did not convert"
+        elif isinstance(texture, str) and f"{texture}.png" not in result.files:
+            why = f"dropped: its texture {texture} did not convert (see that texture's own residue entry)"
+        else:
+            continue
+        del result.files[path]
+        geo = f"models/entity/{Path(path).stem}.held.geo.json"
+        if isinstance(geometry, str) and geo in result.files:
+            del result.files[geo]
+        result.notes.append(f"{path}: held model {why}")
 
     if borrowed:
         index = dict(result.files.get("textures/item_texture.json") or {
@@ -212,6 +328,14 @@ class PipelineResult:
 
     # What the residue agent did, when one ran (``convert(..., agent=...)``).
     agent: "ResidueRun | None" = None
+
+    # The user's mod config settings (``convert(..., config=...)``), one record
+    # per flag set; empty for a run at the cited defaults.
+    config: list[dict] = field(default_factory=list)
+
+    # Station runtimes (#177): recipe type -> recipes in its data table and
+    # recipes left as station_recipe residue, with the table's path.
+    stations: dict[str, dict] = field(default_factory=dict)
 
     @property
     def notes(self) -> list[str]:
@@ -252,6 +376,8 @@ class PipelineResult:
             },
             "notes": self.notes,
             "mcaddon": self.addon.name if self.addon else None,
+            **({"config": config_record(self.config)} if self.config else {}),
+            **({"stations": self.stations} if self.stations else {}),
             **({"agent": self.agent.summary()} if self.agent else {}),
         }
 
@@ -262,6 +388,8 @@ def convert(
     namespace: str | None = None,
     emit_addon: bool = True,
     agent: "ResidueAgent | None" = None,
+    config: "list[ConfigRequest] | None" = None,
+    experiments: "list[str] | None" = None,
 ) -> PipelineResult:
     """Convert a mod directory or .jar into a Bedrock pack tree under out_dir.
 
@@ -272,8 +400,26 @@ def convert(
     while the staged source is still on disk. Validation and the addon both run
     on the tree as the agent left it; residue the agent resolved drops out of
     ``unhandled`` and its files count as converted.
+
+    ``config`` holds the user's mod config settings (``--config``), the
+    conversion-time stand-in for editing the mod's config file in Java: each is
+    resolved against the flags this jar knows (an unknown one raises
+    :class:`portkit.conditions.ConfigError` before anything is written), and
+    replaces that flag's cited default. The settings are recorded in the notes
+    and in ``config-overrides.json`` next to the tree, which ``--config-file``
+    reads back to reproduce the run. Without settings the output is the
+    default-config conversion.
+
+    ``experiments`` (``--experiment``) are Bedrock experiments the user's
+    world runs; content that needs one ships only when it is named (see
+    ``portkit.converters.blocks.EXPERIMENTS``). An unknown name raises
+    ValueError before anything is written. Each is recorded in the notes.
     """
     out_dir = Path(out_dir)
+    chosen = frozenset(experiments or ())
+    unknown = sorted(chosen - set(EXPERIMENTS))
+    if unknown:
+        raise ValueError(f"unknown Bedrock experiment(s) {', '.join(unknown)}; known: {', '.join(EXPERIMENTS)}")
     with tempfile.TemporaryDirectory(prefix="portkit-ingest-") as staging:
         staged = ingest(Path(source), Path(staging))
         # An explicit namespace narrows the run to that one; otherwise every
@@ -288,10 +434,21 @@ def convert(
             selected.insert(0, meta.mod_id)
             namespace = meta.mod_id
 
+        overrides, records = {}, []
+        if config:
+            known = known_flags(staged.root, meta.mods, selected)
+            overrides, records = resolve_config(list(config), known, known_values(meta.mods, selected))
+            meta.notes.append(config_note(records))
+        if chosen:
+            meta.notes.append("Converted for a world running the Bedrock experiment(s) "
+                              + ", ".join(sorted(chosen)) + " (--experiment): the pack needs them on.")
         per_namespace = {
-            ns: convert_all(SourceMod(root=staged.root, namespace=ns)) for ns in selected
+            ns: convert_all(SourceMod.from_metadata(staged.root, ns, meta, classes=staged.classes),
+                            overrides=overrides or None, experiments=chosen)
+            for ns in selected
         }
         result = merge_namespaces(per_namespace)
+        vanilla_entries(result, namespace)
         drop_untextured(result, namespace)
         shorten_paths(result)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}
@@ -312,7 +469,12 @@ def convert(
         file_count = len(result.files)
         agent_run = None
         if agent is not None and unhandled:
-            agent_run = agent.run(staged.root, tree, unhandled, namespace, meta)
+            # The agent's guards decide config-gated items with the same
+            # settings the converters used (cited defaults + --config), so it
+            # can't write back an item the converters left out (#187).
+            context = LoadContext(SourceMod.from_metadata(staged.root, namespace, meta),
+                                  overrides=overrides or None)
+            agent_run = agent.run(staged.root, tree, unhandled, namespace, meta, context=context)
             unhandled = agent_run.remaining
             file_count += agent_run.files_written
         report = validate_tree(tree)
@@ -326,6 +488,15 @@ def convert(
             (out_dir / "unhandled.json").write_text(
                 json.dumps([u.__dict__ for u in unhandled], indent=2) + "\n"
             )
+        if records:
+            # Next to unhandled.json, outside the packs: a --config-file that
+            # reproduces this run, plus what each setting replaced.
+            (out_dir / CONFIG_RECORD).write_text(json.dumps(
+                {**config_record(records), "_settings": records}, indent=2) + "\n")
+        elif (out_dir / CONFIG_RECORD).is_file():
+            # A record left by an earlier run into the same folder would make
+            # this default-config tree read as overridden.
+            (out_dir / CONFIG_RECORD).unlink()
         return PipelineResult(
             tree,
             namespace,
@@ -337,4 +508,6 @@ def convert(
             counts,
             reductions=result.notes,
             agent=agent_run,
+            config=records,
+            stations=result.stations,
         )

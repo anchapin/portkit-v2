@@ -43,6 +43,8 @@ def message_to_dict(m: Message) -> dict[str, Any]:
         out["finish_reason"] = m.finish_reason
     if m.refusal:
         out["refusal"] = m.refusal
+    if m.extra:
+        out["extra"] = m.extra
     return out
 
 
@@ -61,6 +63,7 @@ def message_from_dict(d: dict[str, Any]) -> Message:
         usage=Usage(usage["input_tokens"], usage["output_tokens"]) if usage else None,
         finish_reason=d.get("finish_reason"),
         refusal=d.get("refusal") or "",
+        extra=d.get("extra") or {},
     )
 
 

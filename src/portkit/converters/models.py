@@ -131,12 +131,12 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
         textures = {**(current.get("textures") or {}), **textures}
         parent = current.get("parent")
         if not isinstance(parent, str):
-            return {**current, "textures": textures}, seen, ""
+            return _unfolded({**current, "textures": textures}, seen)
         parent = normalize(parent)
         if parent.startswith("minecraft:"):
             # Vanilla: either one of the shapes we have tabulated, or a refusal
             # for faces() to explain. Either way the chain stops here.
-            return {**current, "parent": parent, "textures": textures}, seen, ""
+            return _unfolded({**current, "parent": parent, "textures": textures}, seen)
 
         path = model_path(mod, parent)
         if path is None:
@@ -149,6 +149,18 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
         except json.JSONDecodeError as exc:
             return {}, seen, f"parent model {parent!r} is invalid JSON: {exc}"
     return {}, seen, "model parent chain is deeper than we follow"
+
+
+def _unfolded(flat: dict, seen: list[Path]) -> tuple[dict, list[Path], str]:
+    """A flattened model with any negative-size element unfolded (see
+    unfold_negative), so every reader downstream sees from <= to."""
+    elements = flat.get("elements")
+    if not isinstance(elements, list) or not elements:
+        return flat, seen, ""
+    unfolded, why = unfold_elements(elements)
+    if unfolded is None:
+        return {}, seen, why
+    return {**flat, "elements": unfolded}, seen, ""
 
 
 def faces(model: dict) -> tuple[dict[str, str] | None, str]:
@@ -402,6 +414,9 @@ def geometry_bones(
     switch parts on and off the way a Java multipart blockstate does."""
     bones = []
     for name, elements in parts:
+        elements, why = unfold_elements(elements)
+        if elements is None:
+            return None, f"{name}: {why}"
         cubes = []
         for element in elements:
             box, why = cube(element, tag_faces)
@@ -438,7 +453,7 @@ def texture_shortname(reference: str, namespace: str) -> tuple[str | None, str]:
     """Java texture reference -> the terrain_texture shortname the pack uses.
 
     The textures converter keys its index as "<namespace>:<subpath>", the path
-    below block/ or item/ with "/" flattened to "_", so a reference into this
+    below block/ or item/ with "/" and "-" flattened to "_", so a reference into this
     mod resolves. A reference into another namespace
     (vanilla, or a sibling mod) does not: Bedrock's own shortnames are named
     differently and picking one would be a guess.
@@ -456,6 +471,117 @@ def texture_shortname(reference: str, namespace: str) -> tuple[str | None, str]:
         # pre-1.13 blocks/ dir); keep the old stem key so the miss is reported.
         subpath = path.rsplit("/", 1)[-1]
     return texture_key(subpath, namespace), ""
+
+
+def texture_file(reference: str, namespace: str) -> tuple[str | None, str]:
+    """Java texture reference -> the pack path (no extension) the textures
+    converter writes it to, for files that name a texture by path (an
+    attachable) rather than by atlas key. Only this mod's block and item
+    textures, the lanes the textures converter places."""
+    if reference.startswith("#"):
+        return None, f"model leaves {reference!r} for a child model to fill in"
+    ref_ns, _, path = reference.rpartition(":")
+    if (ref_ns or "minecraft") != namespace:
+        return None, f"model points at {reference!r}, a texture from another namespace"
+    lane, _, subpath = path.partition("/")
+    bedrock = {"block": "textures/blocks", "blocks": "textures/blocks",
+               "item": "textures/items", "items": "textures/items"}.get(lane)
+    if bedrock is None or not subpath:
+        return None, f"model points at {reference!r}, outside the block and item textures"
+    return f"{bedrock}/{subpath}", ""
+
+
+# Java's texture dirs -> the vanilla Bedrock dir with the same files and the
+# atlas that indexes it. Pre-1.13 mods named the Java dirs blocks/ and items/.
+_VANILLA_DIRS = {
+    "block": ("textures/blocks/", "terrain"), "blocks": ("textures/blocks/", "terrain"),
+    "item": ("textures/items/", "item"), "items": ("textures/items/", "item"),
+}
+
+# Pick 2 (PR #220): a Java name that is a vanilla short name showing a file of
+# another name (oak_planks -> textures/blocks/planks_oak). Off: such a name
+# stays residue, since Bedrock's short names are not always Java's texture
+# (Bedrock's piston_top shows textures/blocks/piston_inner).
+MAP_RENAMED = False
+
+
+def is_vanilla(reference: str, namespace: str) -> bool:
+    """Is this texture reference into vanilla (minecraft:, or bare) from a mod?"""
+    if not isinstance(reference, str) or reference.startswith("#"):
+        return False
+    ref_ns, _, _ = reference.rpartition(":")
+    return (ref_ns or "minecraft") == "minecraft" and namespace != "minecraft"
+
+
+def vanilla_texture(
+    reference: str, namespace: str, atlas: str = "terrain",
+) -> tuple[str | None, str | None, str]:
+    """A vanilla Java texture -> how the Bedrock pack names Bedrock's own copy.
+
+    Returns (key, file, why). ``key`` is what a material instance (atlas
+    "terrain") or an item icon (atlas "item") names. ``file`` is None when the
+    key is a vanilla short name, which the vanilla atlas already defines (the
+    pack's atlas is merged with it); otherwise the pack's atlas needs an entry
+    ``key -> file`` pointing at the vanilla file, which the vanilla pack below
+    serves. No art is copied either way.
+
+    The rule is the file's name (pick 1): Java's ``block/<name>`` is Bedrock's
+    ``textures/blocks/<name>``, the same texture under the same name. A vanilla
+    short name showing just that file is named directly; a file the atlas only
+    lists inside a set of variants gets the pack entry (pick 3), unless vanilla
+    animates it (a flipbook keyed to vanilla's own short name; an entry of ours
+    would show the whole strip). Everything else stays residue with the reason.
+    """
+    from ..data import vanilla_textures
+
+    _, _, path = reference.rpartition(":")
+    lane, _, name = path.partition("/")
+    if lane not in _VANILLA_DIRS or not name:
+        return None, None, f"model points at {reference!r}, a vanilla texture outside block/ and item/"
+    index = vanilla_textures.index()
+    if index is None:
+        return None, None, (
+            f"model points at {reference!r}, a vanilla texture; Bedrock's vanilla texture "
+            f"index isn't cached (run `portkit reference fetch`)"
+        )
+    folder, home = _VANILLA_DIRS[lane]
+    file = folder + name
+    # pipeline.vanilla_entries reads the file back off this key
+    entry_key = f"{namespace}:vanilla/{'block' if home == 'terrain' else 'item'}/{name}"
+    animated = index.animated.get(file)
+    if file in index.files[home]:
+        if atlas == home:
+            names = index.sole[home].get(file) or []
+            if animated:
+                names = [n for n in names if n in animated]
+            if names:
+                return (name if name in names else names[0]), None, ""
+        if animated:
+            return None, None, (
+                f"model points at {reference!r}, a vanilla texture Bedrock animates ({file}) "
+                f"through vanilla's flipbook for {', '.join(animated)}, which a pack entry of "
+                f"its own would lose"
+            )
+        return entry_key, file, ""
+    renamed = (index.atlases[home].get(name) or {}).get("paths") or []
+    if len(renamed) == 1:
+        if (MAP_RENAMED and atlas == home and index.atlases[home][name].get("plain")
+                and not index.animated.get(renamed[0])):
+            return name, None, ""
+        return None, None, (
+            f"model points at {reference!r}, a vanilla texture: Bedrock has no {file}; its "
+            f"short name {name!r} shows {renamed[0]}, a file of another name, so it is not mapped"
+        )
+    if renamed:
+        return None, None, (
+            f"model points at {reference!r}, a vanilla texture: Bedrock has no {file}; its "
+            f"short name {name!r} is a set of {len(renamed)} textures, and which one Java's is "
+            f"isn't named"
+        )
+    return None, None, (
+        f"model points at {reference!r}, a vanilla texture: Bedrock's vanilla pack has no "
+        f"texture of that name ({file})"
+    )
 
 
 # A Java blockstate y turn spins the model clockwise seen from above, in Java's
@@ -482,6 +608,172 @@ def auto_uv(face: str, start: list, end: list) -> list[float]:
     }[face]
 
 
+# --------------------------------------------------------------------------
+# Negative-size elements. Java does not sort an element's corners: the model
+# deserializer only checks each coordinate lies in [-16, 32]
+# (BlockElement$Deserializer#getFrom/getTo L147-163), and FaceBakery#setupShape
+# (L114-121) files `from` under MIN_X/MIN_Y/MIN_Z and `to` under MAX_X/MAX_Y/
+# MAX_Z as written. Each face's four vertices are then read from those six
+# numbers through FaceInfo (FaceInfo <clinit> L7-32), vertex i taking
+# BlockFaceUV#getU(i)/getV(i) (L25-38). So on an axis where from > to, a face
+# keyed to that axis's minimum lands on the larger coordinate, and a face whose
+# in-plane axis is swapped is wound the other way round. FaceBakery#bakeQuad
+# (L49) then names the quad by the way it really faces (calculateFacing
+# L198-223: (v2 - v1) x (v0 - v1), nearest Direction), which is the side it is
+# drawn on. Blockbench's "inverted" cubes rely on this: their faces point in.
+# All MC 1.21.1 client jar, Mojang mappings.
+#
+# unfold_negative rewrites such an element as ordinary elements Java bakes to
+# the very same quads (same corners, same uv at each corner): a face pointing
+# out of the sorted box stays on that box under the name it really faces; a
+# face pointing into it becomes a zero-thickness element on its plane.
+# FaceInfo vertex corners: per face, four (x, y, z) picks, 0 = MIN (from), 1 = MAX (to).
+_FACE_INFO = {
+    "down": ((0, 0, 1), (0, 0, 0), (1, 0, 0), (1, 0, 1)),
+    "up": ((0, 1, 0), (0, 1, 1), (1, 1, 1), (1, 1, 0)),
+    "north": ((1, 1, 0), (1, 0, 0), (0, 0, 0), (0, 1, 0)),
+    "south": ((0, 1, 1), (0, 0, 1), (1, 0, 1), (1, 1, 1)),
+    "west": ((0, 1, 0), (0, 0, 0), (0, 0, 1), (0, 1, 1)),
+    "east": ((1, 1, 1), (1, 0, 1), (1, 0, 0), (1, 1, 0)),
+}
+NEGATIVE_MARK = "portkit_negative"
+# uvlock (FaceBakery#recomputeUVs L61-102) re-maps a face's uv by the face it
+# was declared as, not the way an unfolded face really points, so a turned,
+# uvlocked negative-size element is not mapped.
+_NEGATIVE_UVLOCK = (
+    "uvlock turns a negative-size element, and Java re-maps its uvs by the face "
+    "each was declared as (FaceBakery#recomputeUVs), which is not mapped"
+)
+
+
+def baked_quad(face: str, start: list, end: list, uv: list, rotation: int) -> list[tuple]:
+    """The four (corner, (u, v)) pairs Java bakes for one element face, from
+    the raw ``from``/``to`` (FaceBakery#setupShape, FaceInfo, BlockFaceUV)."""
+    shift = (int(rotation) % 360) // 90
+    corners = []
+    for i, pick in enumerate(_FACE_INFO[face]):
+        point = tuple(float(end[a] if hi else start[a]) for a, hi in enumerate(pick))
+        k = (i + shift) % 4
+        u = uv[0] if k in (0, 1) else uv[2]
+        v = uv[1] if k in (0, 3) else uv[3]
+        corners.append((point, (float(u), float(v))))
+    return corners
+
+
+def quad_facing(corners: list[tuple]) -> str | None:
+    """FaceBakery#calculateFacing: the face a quad's winding points out of."""
+    (p0, _), (p1, _), (p2, _) = corners[0], corners[1], corners[2]
+    a = [p2[i] - p1[i] for i in range(3)]
+    b = [p0[i] - p1[i] for i in range(3)]
+    n = (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    best, score = None, 0.0
+    for face, normal in _FACE_NORMAL.items():
+        d = sum(n[i] * normal[i] for i in range(3))
+        if d > score:
+            best, score = face, d
+    return best
+
+
+def _same_quad(a: list[tuple], b: list[tuple]) -> bool:
+    def key(corners):
+        return sorted((tuple(round(c, 6) for c in p), tuple(round(c, 6) for c in uv)) for p, uv in corners)
+    return key(a) == key(b)
+
+
+def unfold_negative(element: dict) -> tuple[list[dict] | None, str]:
+    """``element`` as elements with from <= to that Java renders identically,
+    or why not. An element that is not negative comes back alone, untouched."""
+    try:
+        start = [float(v) for v in element["from"]]
+        end = [float(v) for v in element["to"]]
+    except (KeyError, TypeError, ValueError):
+        return [element], ""
+    if len(start) != 3 or len(end) != 3 or all(s <= e for s, e in zip(start, end)):
+        return [element], ""
+    low = [min(s, e) for s, e in zip(start, end)]
+    high = [max(s, e) for s, e in zip(start, end)]
+    rest = {k: v for k, v in element.items() if k not in ("from", "to", "faces")}
+    rest[NEGATIVE_MARK] = True
+    outward: dict = {}
+    planes: list[dict] = []
+    for face, spec in (element.get("faces") or {}).items():
+        if face not in _FACE_INFO:
+            return None, f"negative-size element has an unknown {face!r} face"
+        if not isinstance(spec, dict):
+            return None, f"negative-size element's {face} face is not an object"
+        # BlockElement#fillUvs: a face without uv takes uvsByFace of the raw
+        # from/to, before anything is sorted.
+        corners = spec.get("uv")
+        try:
+            uv = [float(v) for v in corners] if corners is not None else auto_uv(face, start, end)
+            rotation = int(spec.get("rotation") or 0)
+        except (TypeError, ValueError):
+            return None, f"negative-size element has an unreadable uv or rotation on its {face} face"
+        if len(uv) != 4 or rotation % 90:
+            return None, f"negative-size element has an unreadable uv or rotation on its {face} face"
+        quad = baked_quad(face, start, end, uv, rotation)
+        facing = quad_facing(quad)
+        if facing is None:
+            return None, f"negative-size element's {face} face has no area"
+        axis = next(i for i, c in enumerate(_FACE_NORMAL[facing]) if c)
+        plane = quad[0][0][axis]
+        side = high[axis] if sum(_FACE_NORMAL[facing]) > 0 else low[axis]
+        box_lo, box_hi = list(low), list(high)
+        if plane != side:
+            box_lo[axis] = box_hi[axis] = plane
+        found = None
+        u0, v0, u1, v1 = uv
+        # The uv kept as written where a texture turn (uv_rotation, read in
+        # game: #68/#71) reproduces it; a mirrored uv only where one is needed.
+        for cand in ([u0, v0, u1, v1], [u1, v0, u0, v1], [u0, v1, u1, v0], [u1, v1, u0, v0]):
+            for turn in range(4):
+                r = (rotation + 90 * turn) % 360
+                if _same_quad(baked_quad(facing, box_lo, box_hi, cand, r), quad):
+                    found = (cand, r)
+                    break
+            if found:
+                break
+        if found is None:  # pragma: no cover - the square's 8 symmetries are all reached
+            return None, f"negative-size element's {face} face has no matching layout"
+        new = {k: v for k, v in spec.items() if k != "rotation"}
+        new["uv"] = found[0]
+        if found[1]:
+            new["rotation"] = found[1]
+        if plane == side:
+            outward[facing] = new
+        else:
+            planes.append({**rest, "from": box_lo, "to": box_hi, "faces": {facing: new}})
+    unfolded = []
+    if outward:
+        unfolded.append({**rest, "from": low, "to": high, "faces": outward})
+    unfolded.extend(planes)
+    return unfolded, ""
+
+
+def unfold_elements(elements: list) -> tuple[list | None, str]:
+    """unfold_negative over a model's element list."""
+    out: list = []
+    for element in elements:
+        if not isinstance(element, dict):
+            out.append(element)
+            continue
+        found, why = unfold_negative(element)
+        if found is None:
+            return None, why
+        out.extend(found)
+    return out, ""
+
+
+def _zero_rotation(rotation) -> bool:
+    """Whether a Java element ``rotation`` turns by 0 degrees (an identity)."""
+    if not isinstance(rotation, dict):
+        return False
+    try:
+        return float(rotation.get("angle", 0)) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
 def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]:
     """An element as a Java blockstate y turn leaves it, or why not.
 
@@ -496,6 +788,10 @@ def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]
     quarters = (degrees // 90) % 4
     if quarters == 0:
         return element, ""
+    if _zero_rotation(element.get("rotation")):
+        # A rotation of 0 degrees moves nothing (and its rescale divides by
+        # cos 0 = 1): the element is unrotated (Waystones' fleeting memorial).
+        element = {k: v for k, v in element.items() if k != "rotation"}
     if element.get("rotation"):
         return None, "part turns a model whose elements are themselves rotated"
     try:
@@ -504,6 +800,8 @@ def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]
         return None, "element is missing usable from/to coordinates"
     if not uvlock:
         return _turn_with_textures(element, quarters, [x1, y1, z1], [x2, y2, z2])
+    if element.get(NEGATIVE_MARK):
+        return None, _NEGATIVE_UVLOCK
 
     faces = element.get("faces") or {}
     for face, spec in faces.items():
@@ -526,6 +824,71 @@ def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]
         turned[face] = spec
     return {**element, "from": start, "to": end, "faces": turned}, ""
 
+
+
+_SIDES = ("north", "east", "south", "west")
+
+
+def zero_rotation(rotation) -> bool:
+    """Whether an element's ``rotation`` is one Java leaves as it is: an
+    object whose angle is 0 (rescale then scales by 1/cos 0 = 1)."""
+    if not isinstance(rotation, dict):
+        return False
+    try:
+        return float(rotation.get("angle") or 0) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def split_y(element: dict, at: float) -> tuple[tuple[dict, dict] | None, str]:
+    """``element`` cut at height ``at`` into the part below and the part above,
+    looking exactly as the whole did, or why not.
+
+    Each side face keeps its texture: its uv's v edge is cut where ``at``
+    falls between the top (Java's v1 edge) and the bottom (v2), linearly, as
+    Java maps the face's quad. The up face goes with the top part, the down
+    face with the bottom one. Only an unrotated element (or one rotated by 0
+    degrees, which Java leaves as it is) with unrotated side faces is cut.
+    """
+    rotation = element.get("rotation")
+    if rotation and not zero_rotation(rotation):
+        return None, "element is rotated"
+    try:
+        start = [float(v) for v in element["from"]]
+        end = [float(v) for v in element["to"]]
+    except (KeyError, TypeError, ValueError):
+        return None, "element is missing usable from/to coordinates"
+    low, high = sorted((start[1], end[1]))
+    if not low < at < high:
+        return None, f"element does not cross y={at}"
+    below = {k: v for k, v in element.items() if k not in ("rotation", "faces")}
+    above = dict(below)
+    below["from"], below["to"] = [start[0], low, start[2]], [end[0], at, end[2]]
+    above["from"], above["to"] = [start[0], at, start[2]], [end[0], high, end[2]]
+    faces_below: dict = {}
+    faces_above: dict = {}
+    for face, spec in (element.get("faces") or {}).items():
+        if not isinstance(spec, dict):
+            return None, f"element's {face} face is not an object"
+        if face == "up":
+            faces_above[face] = dict(spec)
+            continue
+        if face == "down":
+            faces_below[face] = dict(spec)
+            continue
+        if face not in _SIDES:
+            return None, f"element has an unknown {face!r} face"
+        if spec.get("rotation"):
+            return None, f"element's {face} face is rotated"
+        try:
+            u1, v1, u2, v2 = (float(v) for v in (spec.get("uv") or auto_uv(face, start, end)))
+        except (TypeError, ValueError):
+            return None, f"element's {face} face has no usable uv"
+        cut = round(v1 + (high - at) / (high - low) * (v2 - v1), 6)
+        faces_above[face] = {**spec, "uv": [u1, v1, u2, cut]}
+        faces_below[face] = {**spec, "uv": [u1, cut, u2, v2]}
+    below["faces"], above["faces"] = faces_below, faces_above
+    return (below, above), ""
 
 
 def _turn_with_textures(element: dict, quarters: int, start: list, end: list) -> tuple[dict | None, str]:
@@ -599,15 +962,56 @@ def _neg(v: tuple) -> tuple:
     return tuple(-c for c in v)
 
 
-def turn_rigid(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | None, str]:
-    """An element as a Java blockstate x/y turn without uvlock leaves it, or why not."""
+_AXIS_VECTOR = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}
+
+
+def _turned_rotation(rotation, xq: int, yq: int) -> tuple[dict | None, str]:
+    """An element rotation carried through a quarter-turn blockstate x/y turn.
+
+    The blockstate turn is rigid and applies to the baked quads after the
+    element's own rotation, so turn . rot(axis, angle) = rot(turn(axis),
+    angle) . turn: the axis goes where the turn sends it (the angle flips
+    sign when it lands on the negative axis, as rot(-a, t) = rot(a, -t)), the
+    origin moves with the box, and rescale is unchanged."""
+    if not isinstance(rotation, dict) or rotation.get("axis") not in _AXIS_VECTOR:
+        return None, "element has an unreadable rotation"
+    try:
+        angle = float(rotation.get("angle", 0))
+        origin = [float(c) for c in rotation.get("origin", (8, 8, 8))]
+    except (TypeError, ValueError):
+        return None, "element has an unreadable rotation"
+    if len(origin) != 3:
+        return None, "element has an unreadable rotation"
+    vector = _turn_vector(_AXIS_VECTOR[rotation["axis"]], xq, yq)
+    axis = "xyz"[next(i for i, c in enumerate(vector) if c)]
+    sign = sum(vector)
+    moved = [c + _HALF for c in _turn_vector(tuple(c - _HALF for c in origin), xq, yq)]
+    out = {**rotation, "axis": axis, "angle": angle * sign if angle else angle,
+           "origin": [int(c) if float(c).is_integer() else c for c in moved]}
+    if isinstance(rotation.get("angle"), int) and float(out["angle"]).is_integer():
+        out["angle"] = int(out["angle"])
+    return out, ""
+
+
+def turn_rigid(element: dict, x_degrees: int, y_degrees: int,
+               carry_rotation: bool = False) -> tuple[dict | None, str]:
+    """An element as a Java blockstate x/y turn without uvlock leaves it, or why not.
+
+    ``carry_rotation``: a rotated element turns too, its rotation carried by
+    _turned_rotation (used by the 6-way / attach-face path); otherwise it is
+    refused, as before."""
     if x_degrees % 90 or y_degrees % 90:
         return None, f"blockstate turn x={x_degrees} y={y_degrees} is not in quarter turns"
     xq, yq = (x_degrees // 90) % 4, (y_degrees // 90) % 4
     if not xq and not yq:
         return element, ""
+    rotation = None
     if element.get("rotation"):
-        return None, "blockstate turns a model whose elements are themselves rotated"
+        if not carry_rotation:
+            return None, "blockstate turns a model whose elements are themselves rotated"
+        rotation, why = _turned_rotation(element["rotation"], xq, yq)
+        if rotation is None:
+            return None, why
     try:
         start = [float(c) for c in element["from"]]
         end = [float(c) for c in element["to"]]
@@ -646,4 +1050,144 @@ def turn_rigid(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | No
         if cull in _FACE_NORMAL:
             spec["cullface"] = _face_for(_turn_vector(_FACE_NORMAL[cull], xq, yq))
         faces[target] = spec
-    return {**element, "from": new_start, "to": new_end, "faces": faces}, ""
+    out = {**element, "from": new_start, "to": new_end, "faces": faces}
+    if rotation is not None:
+        out["rotation"] = rotation
+    return out, ""
+
+
+# --------------------------------------------------------------------------
+# Vanilla templates. A stairs, slab or wall model names a vanilla parent
+# (minecraft:block/stairs) and only fills in textures; the boxes are vanilla's.
+# portkit reads those parents from the fetched reference set
+# (portkit.data.models), never from a copy in the repository.
+def expand_template(model: dict) -> tuple[dict | None, str]:
+    """A flattened model with its vanilla template's elements filled in.
+
+    A model that already has elements comes back as it is. Otherwise its
+    vanilla parent chain is read from the reference templates: the first
+    elements found on the way up are the model's, textures merge with the
+    model's own taking precedence, and ``#name`` texture variables are resolved
+    to what they finally point at, so each face names a real texture.
+    """
+    if model.get("elements"):
+        return model, ""
+    parent = model.get("parent")
+    if not isinstance(parent, str):
+        return None, "model has no parent and no elements"
+    from ..data import FETCH_COMMAND
+    from ..data.models import templates
+
+    known = templates()
+    if known is None:
+        return None, (
+            f"model extends {parent!r}, whose boxes are in vanilla's model, and the "
+            f"vanilla model templates aren't cached (run `{FETCH_COMMAND}`)"
+        )
+    if parent not in known:
+        return None, f"model parent {parent!r} is not one of the vanilla templates portkit reads"
+
+    textures = dict(model.get("textures") or {})
+    elements = None
+    current: str | None = parent
+    for _ in range(_MAX_PARENT_DEPTH):
+        if current is None:
+            break
+        body = known.get(current)
+        if not isinstance(body, dict):
+            return None, f"vanilla template {current!r} is missing from the reference data"
+        for key, value in (body.get("textures") or {}).items():
+            textures.setdefault(key, value)
+        if elements is None and body.get("elements"):
+            elements = body["elements"]
+        current = body.get("parent") if isinstance(body.get("parent"), str) else None
+    if not elements:
+        return None, f"vanilla template {parent!r} has no elements"
+
+    # Java derives a face's uv from the box when the model names none; write it
+    # down, so the geometry says it rather than leaving it to Bedrock.
+    elements = json.loads(json.dumps(elements))
+    for element in elements:
+        for face, spec in (element.get("faces") or {}).items():
+            if isinstance(spec, dict) and spec.get("uv") is None and face in _FACE_NORMAL:
+                try:
+                    spec["uv"] = auto_uv(face, element["from"], element["to"])
+                except (KeyError, TypeError, ValueError):
+                    return None, f"vanilla template {parent!r} has an element without usable from/to"
+
+    resolved: dict = {}
+    for key, value in textures.items():
+        seen = {key}
+        while isinstance(value, str) and value.startswith("#") and value[1:] in textures and value[1:] not in seen:
+            seen.add(value[1:])
+            value = textures[value[1:]]
+        resolved[key] = value
+    return {**model, "elements": elements, "textures": resolved}, ""
+
+
+def turn_locked(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | None, str]:
+    """An element as a Java blockstate x/y turn WITH uvlock leaves it, or why not.
+
+    uvlock keeps every face's texture fixed to the world while the box moves.
+    That is exactly the uv Java derives from a face's position (see auto_uv),
+    so the case taken is the one we can state: an unrotated element whose faces
+    carry position-derived uvs (or none) and no texture rotation. The box moves
+    as turn_rigid moves it, each face lands where its normal now points, and
+    wears the position-derived uv of where it landed.
+    """
+    if not (x_degrees % 360 or y_degrees % 360):
+        return element, ""
+    if element.get("rotation"):
+        return None, "blockstate turns a model whose elements are themselves rotated"
+    try:
+        start = [float(c) for c in element["from"]]
+        end = [float(c) for c in element["to"]]
+    except (KeyError, TypeError, ValueError):
+        return None, "element is missing usable from/to coordinates"
+    if element.get(NEGATIVE_MARK):
+        return None, _NEGATIVE_UVLOCK
+    for face, spec in (element.get("faces") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        corners = spec.get("uv")
+        if corners is not None:
+            try:
+                same = [float(v) for v in corners] == auto_uv(face, start, end)
+            except (TypeError, ValueError, KeyError):
+                same = False
+            if not same:
+                return None, (
+                    f"blockstate turns a model with a hand-set uv on its {face} face, and "
+                    "uvlock would replace it in a way that is not mapped yet"
+                )
+        if spec.get("rotation"):
+            return None, (
+                f"blockstate turns a model whose {face} face turns its texture, and uvlock "
+                "would undo that in a way that is not mapped yet"
+            )
+    moved, why = turn_rigid(element, x_degrees, y_degrees)
+    if moved is None:
+        return None, why
+    faces = {}
+    for face, spec in (moved.get("faces") or {}).items():
+        spec = {k: v for k, v in spec.items() if k != "rotation"}
+        spec["uv"] = auto_uv(face, moved["from"], moved["to"])
+        faces[face] = spec
+    return {**moved, "faces": faces}, ""
+
+
+def bounding_boxes(elements: list) -> tuple[list[dict] | None, str]:
+    """Bedrock collision boxes for unrotated elements, in the same mirrored
+    space cube() puts the geometry in."""
+    boxes = []
+    for element in elements:
+        if element.get("rotation"):
+            return None, "a rotated element has no box-shaped collision"
+        try:
+            x1, y1, z1 = (float(v) for v in element["from"])
+            x2, y2, z2 = (float(v) for v in element["to"])
+        except (KeyError, TypeError, ValueError):
+            return None, "element is missing usable from/to coordinates"
+        origin_x = _HALF - x2 if X_AXIS_IS_FLIPPED else x1 - _HALF
+        boxes.append({"origin": [origin_x, y1, z1 - _HALF], "size": [x2 - x1, y2 - y1, z2 - z1]})
+    return boxes, ""

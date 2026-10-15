@@ -1,0 +1,4 @@
+{"set": "vanilla-1.21.1", "note": "Minimal hand-written test fixture (#160).",
+ "tags": {
+  "minecraft:leaves": ["minecraft:oak_leaves", "minecraft:birch_leaves"]
+ }}

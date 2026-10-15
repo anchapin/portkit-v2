@@ -13,6 +13,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .bytecode import ClassIndex
 from .icon import declared_paths
 from .model import Unhandled
 
@@ -33,6 +34,7 @@ METADATA_NAMES = (
 _MAX_MEMBERS = 50_000
 _MAX_TOTAL_BYTES = 512 * 1024 * 1024
 _MAX_ICON_BYTES = 8 * 1024 * 1024
+_MAX_CLASS_BYTES = 4 * 1024 * 1024
 
 
 class IngestError(Exception):
@@ -52,6 +54,10 @@ class Ingested:
     # ships, path -> bytes, in declaration order. Most live outside assets/, so
     # they are read here rather than staged.
     icons: dict[str, bytes] = field(default_factory=dict)
+    # The compiled classes, kept (not staged) so a converter can read what a
+    # block's code says when nothing else does (portkit.blockcode). They are
+    # still reported as residue: reading a pattern is not converting code.
+    classes: ClassIndex = field(default_factory=lambda: ClassIndex({}))
 
     @property
     def namespace(self) -> str:
@@ -128,6 +134,7 @@ def from_directory(root: Path) -> Ingested:
         metadata=metadata,
         class_count=sum(1 for _ in root.rglob("*.class")),
         icons=icons,
+        classes=ClassIndex.from_source(root),
     )
 
 
@@ -143,6 +150,7 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
     workdir.mkdir(parents=True, exist_ok=True)
     metadata: dict[str, bytes] = {}
     class_count = 0
+    classes: dict[str, bytes] = {}
     nested: list[str] = []
     total = 0
 
@@ -159,6 +167,8 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
                 raise IngestError(f"{jar_path} expands past {_MAX_TOTAL_BYTES} bytes; refusing")
             if name.endswith(".class"):
                 class_count += 1
+                if not name.startswith("META-INF/") and info.file_size <= _MAX_CLASS_BYTES:
+                    classes[name[:-6]] = zf.read(info)
                 continue
             if name.endswith(".jar"):
                 nested.append(name)
@@ -193,6 +203,7 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
         class_count=class_count,
         nested_jars=nested,
         icons=icons,
+        classes=ClassIndex(classes),
     )
 
 

@@ -1,0 +1,67 @@
+{
+  "about": "Waystones config defaults the waystone runtime (#178) reads, cited from the mod's source at the pinned version (docs/decisions.md, 2026-10-13). Keyed by the mod version the jar's metadata declares; a version that is not here gets no runtime (its blocks stay residue), never these values. Each value is the field's initializer in WaystonesConfigData at the cited line; Balm writes these into the config file a Java player edits, so a pack that changed them behaves differently and this conversion follows the defaults (named in the conversion note).",
+  "versions": {
+    "21.1.46": {
+      "loader": "fabric",
+      "commit": "9d280c1ac8d036516a2927e3d2cad8054e491074",
+      "tag": "v21.1.46",
+      "repo": "https://github.com/TwelveIterations/Waystones",
+      "values": {
+        "teleports.warpRequirements": {
+          "value": [
+            "[is_not_interdimensional] scaled_add_xp_cost(distance, 0.01)",
+            "[is_interdimensional] add_xp_cost(27)",
+            "[source_is_warp_plate] multiply_xp_cost(0)",
+            "[source_is_scroll] multiply_xp_cost(0)",
+            "[target_is_global] multiply_xp_cost(0)",
+            "[target_is_fleeting_memorial] multiply_xp_cost(0)",
+            "min_xp_cost(0)",
+            "max_xp_cost(27)",
+            "[source_is_inventory_button] add_cooldown(inventory_button, 300)"
+          ],
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L17-L26"
+        },
+        "teleports.enableCosts": {
+          "value": true,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L89"
+        },
+        "teleports.enableCooldowns": {
+          "value": true,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L93"
+        },
+        "general.restrictedWaystones": {
+          "value": ["PLAYER"],
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L53"
+        },
+        "general.defaultVisibility": {
+          "value": "ACTIVATION",
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L57"
+        },
+        "general.warpPlateUseTime": {
+          "value": 15,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L75"
+        },
+        "general.warpPlateCooldownTime": {
+          "value": 20,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L79"
+        },
+        "general.scrollUseTime": {
+          "value": 32,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L83"
+        },
+        "teleports.entityDenyList": {
+          "value": ["minecraft:wither"],
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L114"
+        },
+        "general.warpStoneUseTime": {
+          "value": 32,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L71"
+        },
+        "teleports.enableDurability": {
+          "value": true,
+          "source": "common/src/main/java/net/blay09/mods/waystones/config/WaystonesConfigData.java#L97"
+        }
+      }
+    }
+  }
+}

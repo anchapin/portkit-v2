@@ -20,6 +20,8 @@ def test_three_groups_each_with_a_reason_the_agent_can_act_on(tmp_path):
     }
     alloy = groups["recipe:data/examplemod/recipes/alloy_block.json"]
     assert "examplemod:bronze_ingot" in alloy and "examplemod:steel_ingot" in alloy
+    # since #160 a fully emitted tag converts; tin keeps this group for the agent
+    assert alloy.endswith("not converted: examplemod:tin_ingot")
     assert "minecraft:recipe_smithing_trim" in groups["recipe:data/examplemod/recipes/steel_trim.json"]
 
 

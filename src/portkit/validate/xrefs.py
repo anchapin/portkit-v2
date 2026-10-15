@@ -24,7 +24,8 @@ from pathlib import Path
 
 from .report import ValidationReport
 
-_LANG_NAME = re.compile(r"^(tile|item)\.([a-z0-9_]+:[a-z0-9_/.]+)\.name$")
+# Same id shape as validate.rules._IDENTIFIER: a hyphenated id has a name too.
+_LANG_NAME = re.compile(r"^(tile|item)\.([a-z0-9_-]+:[a-z0-9_/.-]+)\.name$")
 _VANILLA = "minecraft"
 
 
@@ -33,6 +34,12 @@ def _load(path: Path):
         return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return None  # the per-pack rules report a broken file themselves
+
+
+def _obj(value) -> dict:
+    """``value`` when it is a JSON object, else ``{}``: a malformed file is the
+    per-pack rules' to report (doc.unknown_shape), never a crash here (#141)."""
+    return value if isinstance(value, dict) else {}
 
 
 def _texture_keys(pack: Path, index: str) -> set[str]:
@@ -57,10 +64,20 @@ class Index:
         self.items: dict[str, str] = {}
         self.terrain: set[str] = set()
         self.items_atlas: set[str] = set()
+        self.item_tags: set[str] = set()  # every tag an item's minecraft:tags names
 
         if resource is not None:
             self.terrain = _texture_keys(resource, "terrain_texture.json")
             self.items_atlas = _texture_keys(resource, "item_texture.json")
+        # Bedrock merges the pack's atlases with vanilla's, so a vanilla short
+        # name (converters.models.vanilla_texture) is defined too, when the
+        # fetched index says so.
+        from ..data import vanilla_textures
+
+        vanilla = vanilla_textures.index()
+        if vanilla is not None:
+            self.terrain |= vanilla.short_names("terrain")
+            self.items_atlas |= vanilla.short_names("item")
 
         if behavior is None:
             return
@@ -69,16 +86,19 @@ class Index:
             data = _load(path)
             if not isinstance(data, dict):
                 continue
-            ident = ((data.get("minecraft:block") or {}).get("description") or {}).get("identifier")
+            ident = _obj(_obj(data.get("minecraft:block")).get("description")).get("identifier")
             if isinstance(ident, str):
                 self.blocks[ident] = f"{prefix}/blocks/{path.name}"
         for path in sorted((behavior / "items").glob("*.json")):
             data = _load(path)
             if not isinstance(data, dict):
                 continue
-            ident = ((data.get("minecraft:item") or {}).get("description") or {}).get("identifier")
+            ident = _obj(_obj(data.get("minecraft:item")).get("description")).get("identifier")
             if isinstance(ident, str):
                 self.items[ident] = f"{prefix}/items/{path.name}"
+            tags = _obj(_obj(_obj(data.get("minecraft:item")).get("components")).get("minecraft:tags")).get("tags")
+            if isinstance(tags, list):
+                self.item_tags |= {t for t in tags if isinstance(t, str)}
 
     @property
     def obtainable(self) -> set[str]:
@@ -90,8 +110,8 @@ def _check_block_textures(report: ValidationReport, behavior: Path, index: Index
     prefix = behavior.name
     for path in sorted((behavior / "blocks").glob("*.json")):
         rel = f"{prefix}/blocks/{path.name}"
-        data = _load(path) or {}
-        components = ((data.get("minecraft:block") or {})).get("components") or {}
+        data = _obj(_load(path))
+        components = _obj(_obj(data.get("minecraft:block")).get("components"))
         instances = components.get("minecraft:material_instances")
         if not isinstance(instances, dict):
             continue
@@ -114,7 +134,7 @@ def _check_item_icons(report: ValidationReport, behavior: Path, index: Index) ->
         data = _load(path)
         if not isinstance(data, dict):
             continue
-        icon = ((data.get("minecraft:item") or {}).get("components") or {}).get("minecraft:icon")
+        icon = _obj(_obj(data.get("minecraft:item")).get("components")).get("minecraft:icon")
         if isinstance(icon, dict):  # 1.21 shape: {"texture": "..."}
             icon = icon.get("texture")
         if not isinstance(icon, str) or icon in index.items_atlas:
@@ -124,6 +144,31 @@ def _check_item_icons(report: ValidationReport, behavior: Path, index: Index) ->
             "xref.texture",
             f"icon {icon!r} is in no item_texture.json entry; the item would render untextured",
         )
+
+
+def _check_block_placers(report: ValidationReport, behavior: Path, index: Index) -> None:
+    """An item that places a block must name one the pack declares (or vanilla's).
+
+    ``replace_block_item`` makes the item the block's own item, which Bedrock
+    only accepts when the item's identifier is the block's (learn.microsoft.com,
+    Items Documentation - minecraft:block_placer).
+    """
+    prefix = behavior.name
+    for path in sorted((behavior / "items").glob("*.json")):
+        rel = f"{prefix}/items/{path.name}"
+        item = _obj(_obj(_load(path)).get("minecraft:item"))
+        placer = _obj(item.get("components")).get("minecraft:block_placer")
+        if not isinstance(placer, dict):
+            continue
+        block = placer.get("block")
+        if _is_custom(block) and block not in index.blocks:
+            report.add(rel, "xref.block_placer",
+                       f"minecraft:block_placer places {block!r}, which no block definition declares")
+        ident = _obj(item.get("description")).get("identifier")
+        if placer.get("replace_block_item") is True and isinstance(block, str) and block != ident:
+            report.add(rel, "xref.block_placer",
+                       f"replace_block_item needs the item's identifier ({ident!r}) to be the "
+                       f"block's ({block!r})")
 
 
 def _recipe_item_refs(body: dict) -> list[tuple[str, object]]:
@@ -158,6 +203,19 @@ def _recipe_item_refs(body: dict) -> list[tuple[str, object]]:
     return refs
 
 
+def _recipe_tag_refs(body: dict) -> list[tuple[str, str]]:
+    """(where, tag) for every tag ingredient a recipe names."""
+    refs: list[tuple[str, str]] = []
+    for slot, ingredient in (body.get("key") or {}).items():
+        if isinstance(ingredient, dict) and isinstance(ingredient.get("tag"), str):
+            refs.append((f"key[{slot!r}]", ingredient["tag"]))
+    ingredients = body.get("ingredients")
+    for i, ingredient in enumerate(ingredients if isinstance(ingredients, list) else []):
+        if isinstance(ingredient, dict) and isinstance(ingredient.get("tag"), str):
+            refs.append((f"ingredients[{i}]", ingredient["tag"]))
+    return refs
+
+
 def _check_recipes(report: ValidationReport, behavior: Path, index: Index) -> None:
     prefix = behavior.name
     obtainable = index.obtainable
@@ -172,6 +230,16 @@ def _check_recipes(report: ValidationReport, behavior: Path, index: Index) -> No
             if not key.startswith("minecraft:recipe_") or not isinstance(body, dict):
                 continue
             for where, ident in _recipe_item_refs(body):
+                if isinstance(ident, str) and ident.startswith("#"):
+                    # A Java tag string written as an item id (#194): no item
+                    # has that name, so the recipe can never be crafted.
+                    report.add(
+                        rel,
+                        "xref.item_tag",
+                        f"{where} names {ident!r} as an item; a '#' name is a Java tag, "
+                        f"which Bedrock takes as {{\"tag\": \"{ident[1:]}\"}} or not at all",
+                    )
+                    continue
                 if not _is_custom(ident) or ident in obtainable:
                     continue
                 report.add(
@@ -182,6 +250,18 @@ def _check_recipes(report: ValidationReport, behavior: Path, index: Index) -> No
                     f"refused: check the residue report for that identifier.",
                     severity="warning",
                 )
+            for where, tag in _recipe_tag_refs(body):
+                # A vanilla tag is Bedrock's own; a custom one only matches the
+                # pack items whose minecraft:tags name it (#160).
+                if not _is_custom(tag) or tag in index.item_tags:
+                    continue
+                report.add(
+                    rel,
+                    "xref.tag",
+                    f"{where} takes tag {tag!r}, which no item's minecraft:tags names; "
+                    f"the recipe can never be crafted.",
+                    severity="warning",
+                )
 
 
 def _check_loot(report: ValidationReport, behavior: Path, index: Index) -> None:
@@ -189,9 +269,11 @@ def _check_loot(report: ValidationReport, behavior: Path, index: Index) -> None:
     obtainable = index.obtainable
     for path in sorted((behavior / "loot_tables").rglob("*.json")):
         rel = f"{prefix}/{path.relative_to(behavior).as_posix()}"
-        data = _load(path) or {}
-        for i, pool in enumerate(data.get("pools") or []):
-            for j, entry in enumerate(pool.get("entries") or []):
+        data = _obj(_load(path))
+        pools = data.get("pools")
+        for i, pool in enumerate(pools if isinstance(pools, list) else []):
+            entries = _obj(pool).get("entries")
+            for j, entry in enumerate(entries if isinstance(entries, list) else []):
                 name = entry.get("name") if isinstance(entry, dict) else None
                 if not _is_custom(name) or name in obtainable:
                     continue
@@ -249,6 +331,7 @@ def check_cross_pack(report: ValidationReport, tree: Path) -> Index:
             _check_block_textures(report, behavior, index)
             _check_item_icons(report, behavior, index)
         _check_recipes(report, behavior, index)
+        _check_block_placers(report, behavior, index)
         _check_loot(report, behavior, index)
     if resource is not None:
         _check_lang(report, resource, index)

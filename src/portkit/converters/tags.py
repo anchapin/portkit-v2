@@ -3,18 +3,30 @@
 A Bedrock addon carries this mod's items and vanilla's, nothing from other
 mods. So a tag that only this mod and vanilla can fill often means exactly one
 item once it lands on Bedrock, and a recipe that names it can name that item.
-Two sources, in order of trust:
+
+A tag's membership is the union of everyone who writes to it:
 
 1. The mod's own tag file (``data/<ns>/tags/items/<path>.json``, or ``item/``
-   since 1.21). Its members are the membership. Other mods' entries are
-   dropped because the addon cannot contain them.
-2. No tag file: the convention-tag name (``c:ingots/steel``). If exactly one of
-   this mod's items carries the conventional name (``steel_ingot``), that is the
-   only item the tag can mean on Bedrock.
+   since 1.21). Other mods' entries are dropped because the addon cannot
+   contain them.
+2. For a tag in a shared namespace (``minecraft:``, ``c:``, ``forge:``,
+   ``neoforge:``, ``fabric:``), vanilla's and the loader's shares, from the
+   fetched reference data for the jar's loader and game version
+   (:mod:`portkit.data.tags`, #160). The mod's file there is only its own share
+   (Forge's ``forge:glass/colorless`` is ``minecraft:glass``, which a mod's
+   one-line file for the same tag doesn't repeat), so without the reference
+   the membership is unknown and the recipe stays residue rather than being
+   narrowed to the mod's share. A file that sets ``"replace": true`` is the
+   whole tag on its own.
+3. No tag file and no known share: the convention-tag name (``c:ingots/steel``).
+   If exactly one of this mod's items carries the conventional name
+   (``steel_ingot``), that is the only item the tag can mean on Bedrock.
 
-Anything that still leaves more than one item stays residue, and the reason
-lists the members, so the agent starts from the membership instead of the
-bare tag name (#88).
+Nested ``#tag`` entries are resolved the same way, recursively. Anything that
+still leaves more than one item stays residue for :meth:`TagResolver.resolve`,
+and the reason lists the members, so the agent starts from the membership
+instead of the bare tag name (#88). :meth:`TagResolver.members` gives the full
+membership to the recipe converter, which can express some multi-member tags.
 """
 from __future__ import annotations
 
@@ -22,6 +34,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..data import FETCH_COMMAND
+from ..data.tags import SHARED_NAMESPACES, TagReference, reference_for
 from ..model import SourceMod
 
 _CONVENTION_PREFIXES = ("c:", "forge:", "neoforge:")
@@ -48,11 +62,50 @@ class TagResolution:
     sources: list[str] = field(default_factory=list)  # tag files read, mod-relative
 
 
+@dataclass
+class MultiMembers:
+    """Every member a tag names, when all of them are known (see TagResolver.members)."""
+
+    tag: str
+    members: list[str]  # vanilla ids and ids in the converted namespace, in file order
+    dropped: list[str] = field(default_factory=list)  # other mods' ids the addon cannot contain
+    sources: list[str] = field(default_factory=list)  # tag files read, mod-relative
+
+
+@dataclass
+class _Membership:
+    """A tag's full membership, nested tags expanded."""
+
+    members: list[str]
+    sources: list[str]  # the mod's own tag files read
+    dropped_tags: list[str]  # other mods' nested tags, whose members the addon can't hold
+    reference: bool  # vanilla's or the loader's share came from the reference data
+
+
+@dataclass
+class _NotKnown:
+    """Why a tag's full membership isn't known, and the tag files read finding out."""
+
+    reason: str
+    sources: list[str]
+
+
+class _Unknown(Exception):
+    """Some part of the membership isn't known; carries why."""
+
+
+def _is_shared(tag: str) -> bool:
+    return tag.partition(":")[0] in SHARED_NAMESPACES
+
+
 class TagResolver:
-    def __init__(self, mod: SourceMod):
+    def __init__(self, mod: SourceMod, reference: TagReference | None = None):
         self.mod = mod
+        self.reference = reference if reference is not None else reference_for(mod.loader, mod.minecraft)
         self._items: set[str] | None = None
+        self._shipped: set[str] | None = None
         self._cache: dict[str, TagResolution] = {}
+        self._full_cache: dict[str, _Membership | _NotKnown] = {}
 
     # -- what the addon can contain --------------------------------------
     def mod_items(self) -> set[str]:
@@ -72,6 +125,17 @@ class TagResolver:
             return True
         return ns == self.mod.namespace and name in self.mod_items()
 
+    def _shipped_namespaces(self) -> set[str]:
+        """Namespaces this jar ships, which the pack may also convert."""
+        if self._shipped is None:
+            found: set[str] = set()
+            for top in ("assets", "data"):
+                folder = self.mod.root / top
+                if folder.is_dir():
+                    found |= {p.name for p in folder.iterdir() if p.is_dir()}
+            self._shipped = found
+        return self._shipped
+
     # -- tag files -------------------------------------------------------
     def _tag_file(self, tag: str) -> Path | None:
         ns, _, path = tag.partition(":")
@@ -83,38 +147,100 @@ class TagResolver:
                 return candidate
         return None
 
-    def _members(self, tag: str, seen: set[str], sources: list[str]) -> list[str] | None:
-        """Every item the tag lists, nested tags expanded; None when unknown.
+    def _unknown_shared(self, tag: str) -> str:
+        """Why a shared tag's membership is unknown (no reference covers it)."""
+        ns = tag.partition(":")[0]
+        missing = [s for s in self.reference.missing if ns in s.namespaces]
+        if missing:
+            return (f"vanilla and the loader add to {ns}: tags, and the {missing[0].label} "
+                    f"tag data isn't cached (run `{FETCH_COMMAND}`)")
+        if self.mod.loader is None or self.mod.minecraft is None:
+            return (f"vanilla and the loader add to {ns}: tags, and the jar doesn't declare "
+                    "the loader and game version whose tag data would say what they add")
+        return (f"vanilla and the loader add to {ns}: tags, and there is no {ns}: tag data "
+                f"for {self.mod.loader} {self.mod.minecraft}")
 
-        A mod's file for a ``minecraft:`` tag only adds to vanilla's own list,
-        which is not in the mod, so it says nothing about the full membership
-        unless it sets ``"replace": true``. Those count as unknown.
-        """
+    def _entries(self, tag: str, sources: list[str]) -> tuple[list, bool]:
+        """(raw entries, from reference?) for one tag; raises _Unknown."""
         path = self._tag_file(tag)
-        if path is None:
-            return None
-        try:
-            data = json.loads(path.read_text())
-        except json.JSONDecodeError:
-            data = {}
-        if tag.startswith("minecraft:") and not (isinstance(data, dict) and data.get("replace")):
-            return None
-        sources.append(str(path.relative_to(self.mod.root)))
+        entries: list = []
+        replace = False
+        if path is not None:
+            try:
+                data = json.loads(path.read_text())
+            except json.JSONDecodeError as exc:
+                raise _Unknown(f"its tag file is not valid JSON ({exc})") from exc
+            if not isinstance(data, dict):
+                raise _Unknown("its tag file is not a JSON object")
+            sources.append(str(path.relative_to(self.mod.root)))
+            entries.extend(data.get("values") or [])
+            replace = data.get("replace") is True
+        if not _is_shared(tag) or replace:
+            if path is None:
+                raise _Unknown("the mod ships no tag file for it")
+            return entries, False
+        share = self.reference.values(tag)
+        if share is None:
+            raise _Unknown(self._unknown_shared(tag))
+        return entries + share, True
+
+    def _expand(self, tag: str, seen: set[str], sources: list[str],
+                dropped_tags: list[str]) -> tuple[list[str], bool]:
+        entries, from_ref = self._entries(tag, sources)
         members: list[str] = []
-        for entry in data.get("values", []) if isinstance(data, dict) else []:
+        for entry in entries:
             ref = entry.get("id") if isinstance(entry, dict) else entry
             if not isinstance(ref, str):
                 continue
-            if ref.startswith("#"):
-                inner = ref[1:]
-                if inner in seen:
-                    continue
-                seen.add(inner)
-                nested = self._members(inner, seen, sources)
-                members.extend(nested or [])
-            elif ref not in members:
-                members.append(ref)
-        return members
+            if not ref.startswith("#"):
+                if ref not in members:
+                    members.append(ref)
+                continue
+            inner = ref[1:]
+            if inner in seen:
+                continue
+            seen.add(inner)
+            ns = inner.partition(":")[0]
+            if not _is_shared(inner) and ns != self.mod.namespace and ns not in self._shipped_namespaces():
+                # Another mod's tag: its members are that mod's, which the addon
+                # can't hold, same as another mod's item entry.
+                dropped_tags.append(ref)
+                continue
+            try:
+                nested, nested_ref = self._expand(inner, seen, sources, dropped_tags)
+            except _Unknown as exc:
+                raise _Unknown(f"it includes {ref}, whose membership isn't known: {exc}") from exc
+            from_ref = from_ref or nested_ref
+            members.extend(m for m in nested if m not in members)
+        return members, from_ref
+
+    def _full(self, tag: str) -> _Membership | _NotKnown:
+        """The tag's full membership, or why it isn't known."""
+        if tag not in self._full_cache:
+            sources: list[str] = []
+            dropped: list[str] = []
+            try:
+                members, from_ref = self._expand(tag, {tag}, sources, dropped)
+                self._full_cache[tag] = _Membership(members, sources, dropped, from_ref)
+            except _Unknown as exc:
+                self._full_cache[tag] = _NotKnown(str(exc), sources)
+        return self._full_cache[tag]
+
+    def own_share(self, tag: str) -> list[str]:
+        """This mod's own available items its jar adds to a tag (direct entries)."""
+        path = self._tag_file(tag)
+        if path is None:
+            return []
+        try:
+            data = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return []
+        found = []
+        for entry in (data.get("values") or []) if isinstance(data, dict) else []:
+            ref = entry.get("id") if isinstance(entry, dict) else entry
+            if isinstance(ref, str) and ref.startswith(f"{self.mod.namespace}:") and self._available(ref):
+                found.append(ref)
+        return found
 
     def _by_convention(self, tag: str) -> str | None:
         for prefix in _CONVENTION_PREFIXES:
@@ -131,36 +257,132 @@ class TagResolver:
         """Every tag looked up so far."""
         return dict(self._cache)
 
+    # -- full membership, for recipes that keep every member (#160) --------
+    def members(self, tag: str) -> MultiMembers | None:
+        """The full membership of a tag, or None unless all of it is known.
+
+        Stricter than :meth:`resolve`, because here every member ends up in the
+        recipe. Members in a namespace this jar ships but that is not the one
+        being converted make it unknown too, since the pack may convert them
+        under another namespace. Only members from mods this jar does not ship
+        are dropped, as :meth:`resolve` does: the addon cannot contain them.
+        """
+        full = self._full(tag)
+        if isinstance(full, _NotKnown):
+            return None
+        shipped = self._shipped_namespaces()
+        kept: list[str] = []
+        dropped: list[str] = list(full.dropped_tags)
+        for ref in full.members:
+            ns, _, name = ref.partition(":")
+            if not name:
+                return None
+            if ns == "minecraft" or ns == self.mod.namespace:
+                kept.append(ref)
+            elif ns in shipped:
+                return None
+            else:
+                dropped.append(ref)
+        return MultiMembers(tag=tag, members=kept, dropped=dropped, sources=list(full.sources))
+
+    def mod_additions(self, tag: str) -> list[str] | None:
+        """Members other than vanilla's that this addon holds in a vanilla tag.
+
+        For a tag Bedrock also has under the same name (``minecraft:planks``):
+        the ids in this mod's namespace that the merged membership (#160) puts
+        in it, nested tags included. ``[]`` when the jar adds nothing, so the
+        Bedrock tag alone means the same set. None when the jar's own file says
+        something the vanilla tag can't express: the membership isn't known, or
+        the file sets ``"replace": true`` and so may drop vanilla members.
+        Without a tag file in the jar and without reference data, ``[]``: the
+        jar can only add to the tag through its own file.
+        """
+        path = self._tag_file(tag)
+        if path is not None:
+            try:
+                data = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                return None
+            if isinstance(data, dict) and data.get("replace") is True:
+                return None
+        found = self.members(tag)
+        if found is None:
+            if path is None and self.reference.values(tag) is None:
+                # No vanilla data, so vanilla's nesting isn't known either: the
+                # jar's own share of a tag vanilla nests in this one (its
+                # minecraft:oak_logs feeding minecraft:logs) would be dropped.
+                return None if self.unknown_nested(tag) else []
+            return None
+        return [m for m in found.members if not m.startswith("minecraft:")]
+
+    def unknown_nested(self, tag: str) -> list[str]:
+        """The jar's other tag files in the tag's shared namespace, when the
+        reference data that would say whether vanilla nests them in ``tag``
+        isn't there. Empty when the data is there or the jar has no such file.
+        """
+        ns = tag.partition(":")[0]
+        if not _is_shared(tag) or self.reference.values(tag) is not None:
+            return []
+        found: list[str] = []
+        for folder in ("items", "item"):
+            base = self.mod.root / "data" / ns / "tags" / folder
+            if not base.is_dir():
+                continue
+            for path in sorted(base.rglob("*.json")):
+                other = f"{ns}:{path.relative_to(base).with_suffix('').as_posix()}"
+                if other != tag and other not in found:
+                    found.append(other)
+        return found
+
+    def context_members(self, tag: str) -> list[str] | None:
+        """Every id the tag names, nested tags expanded, or None when unknown.
+
+        For load conditions (#183): whether a tag has members once this mod
+        loads with only the loader and vanilla. Unlike :meth:`members`, other
+        mods' ids are kept (the caller decides which of them exist), and another
+        mod's nested tag is kept as ``#<tag>``.
+        """
+        full = self._full(tag)
+        if isinstance(full, _NotKnown):
+            return None
+        return [*full.members, *full.dropped_tags]
+
+    def unknown_reason(self, tag: str) -> str | None:
+        """Why the tag's full membership is unknown, or None when it is known."""
+        full = self._full(tag)
+        return full.reason if isinstance(full, _NotKnown) else None
+
     # -- the one call recipes make ----------------------------------------
     def resolve(self, tag: str) -> TagResolution:
         if tag not in self._cache:
             self._cache[tag] = self._resolve(tag)
         return self._cache[tag]
 
+    def _origin(self, full: _Membership) -> str:
+        parts = list(full.sources[:1])
+        if full.reference:
+            parts.append(f"the {self.reference.describe()} tag data")
+        return " and ".join(parts) or "nothing"
+
     def _resolve(self, tag: str) -> TagResolution:
-        sources: list[str] = []
-        members = self._members(tag, {tag}, sources)
-        if members is not None:
-            usable = [m for m in members if self._available(m)]
-            dropped = [m for m in members if m not in usable]
+        full = self._full(tag)
+        if isinstance(full, _Membership):
+            usable = [m for m in full.members if self._available(m)]
+            dropped = [m for m in full.members if m not in usable] + full.dropped_tags
             if len(usable) == 1:
                 tail = f"; dropped {', '.join(dropped)}, which this addon cannot contain" if dropped else ""
                 return TagResolution(
                     item=usable[0],
-                    note=f"tag {tag!r} resolved to {usable[0]} from {sources[0]}{tail}",
-                    sources=sources,
+                    note=f"tag {tag!r} resolved to {usable[0]} from {self._origin(full)}{tail}",
+                    sources=full.sources,
                 )
-            if not usable:
-                listed = ", ".join(members) or "nothing"
+            if len(usable) > 1:
                 return TagResolution(
-                    reason=f"ingredient uses tag {tag!r}, whose members ({listed}) are none of them in this addon",
-                    sources=sources,
+                    reason=f"ingredient uses tag {tag!r}, which covers {len(usable)} items: {', '.join(usable)}",
+                    sources=full.sources,
                 )
-            return TagResolution(
-                reason=f"ingredient uses tag {tag!r}, which covers {len(usable)} items: {', '.join(usable)}",
-                sources=sources,
-            )
-        item = self._by_convention(tag)
+        has_file = self._tag_file(tag) is not None
+        item = None if has_file else self._by_convention(tag)
         if item:
             return TagResolution(
                 item=item,
@@ -169,6 +391,30 @@ class TagResolver:
                     "is the only item in this addon with the conventional name"
                 ),
             )
+        if isinstance(full, _Membership) and not (full.members or full.dropped_tags):
+            return TagResolution(
+                reason=(f"ingredient uses tag {tag!r}, which nothing in this addon is in: neither "
+                        "this mod, the loader nor vanilla adds a member to it, only other mods"),
+                sources=full.sources,
+            )
+        if isinstance(full, _Membership):
+            listed = ", ".join([*full.members, *full.dropped_tags])
+            return TagResolution(
+                reason=f"ingredient uses tag {tag!r}, whose members ({listed}) are none of them in this addon",
+                sources=full.sources,
+            )
+        if not has_file:
+            # Said only when the jar declares its loader and version, so the
+            # reason can point at the data that would settle it.
+            tail = (f" ({full.reason})"
+                    if _is_shared(tag) and self.mod.loader and self.mod.minecraft else "")
+            return TagResolution(
+                reason=f"ingredient uses tag {tag!r}, which covers more than one item{tail}",
+                sources=full.sources,
+            )
         return TagResolution(
-            reason=f"ingredient uses tag {tag!r}, which covers more than one item"
+            reason=(f"ingredient uses tag {tag!r}, whose full membership isn't known (the mod's "
+                    f"file is only its own share): {full.reason}") if _is_shared(tag) and "includes #" not in full.reason
+            else f"ingredient uses tag {tag!r}, whose full membership isn't known: {full.reason}",
+            sources=full.sources,
         )

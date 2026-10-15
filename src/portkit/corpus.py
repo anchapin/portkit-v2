@@ -7,6 +7,10 @@ and sha512. ``portkit corpus fetch`` downloads them into a local cache and
 refuses any file whose hash differs, so a re-uploaded or deleted jar fails
 loudly instead of quietly changing what the corpus measures.
 
+Some mods are pinned but *optional* (``optional = true`` in the manifest):
+measured on request, left out of the default ``corpus fetch``, ``eval
+--corpus`` and the realmods gate. ``select`` decides which mods a run covers.
+
 The cache is content-addressed (``<name>-<sha512 prefix>.jar``), so bumping a
 pin never reuses a stale download. Set ``PORTKIT_CORPUS_CACHE`` to move it.
 """
@@ -42,6 +46,7 @@ class Mod:
     minecraft: str = ""
     source: str = ""
     notes: str = ""
+    optional: bool = False  # pinned, but only run when asked for (--include-optional, --fixture)
 
     def path(self, cache: Path) -> Path:
         return Path(cache) / f"{self.name}-{self.sha512[:12]}.jar"
@@ -71,11 +76,26 @@ def load(manifest: Path = MANIFEST) -> list[Mod]:
             raise CorpusError(f"{manifest}: mod {entry['name']!r} has unknown key(s) {', '.join(unknown)}")
         if entry["name"] in seen:
             raise CorpusError(f"{manifest}: duplicate mod name {entry['name']!r}")
+        if not isinstance(entry.get("optional", False), bool):
+            raise CorpusError(f"{manifest}: mod {entry['name']!r} optional must be true or false")
         if len(entry["sha512"]) != 128:
             raise CorpusError(f"{manifest}: mod {entry['name']!r} sha512 must be 128 hex chars")
         seen.add(entry["name"])
         mods.append(Mod(**entry))
     return mods
+
+
+def select(mods: list[Mod], names=(), include_optional: bool = False) -> list[Mod]:
+    """The mods a run covers. Named mods are taken whether optional or not (an
+    unknown name is an error); otherwise the default set, plus the optional mods
+    when asked for. Manifest order is kept."""
+    if names:
+        wanted = set(names)
+        unknown = sorted(wanted - {m.name for m in mods})
+        if unknown:
+            raise CorpusError(f"not in the corpus manifest: {', '.join(unknown)}")
+        return [m for m in mods if m.name in wanted]
+    return [m for m in mods if include_optional or not m.optional]
 
 
 def _sha512(path: Path) -> str:

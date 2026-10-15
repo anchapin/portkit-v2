@@ -7,7 +7,9 @@ import statistics
 import sys
 from pathlib import Path
 
+from .conditions import ConfigError, load_config_file, parse_config_arg
 from .ingest import IngestError
+from .converters.blocks import EXPERIMENTS
 from .pipeline import convert
 from .validate import validate_tree
 
@@ -53,12 +55,25 @@ def _numbered(path: str, run: int) -> str:
     return str(p.with_name(f"{p.stem if p.suffix else p.name}-{run}{suffix}"))
 
 
+def _run_cost_cap(per_run: float | None, remaining: float | None) -> float | None:
+    """The dollar ceiling for one run: its own, tightened to what the sweep has left."""
+    caps = [c for c in (per_run, remaining) if c is not None]
+    return min(caps) if caps else None
+
+
 def cmd_convert(args) -> int:
     repeat = getattr(args, "repeat", 1) or 1
+    total_cap = getattr(args, "agent_max_total_cost", None)
     if repeat < 1:
         print("--repeat must be at least 1", file=sys.stderr)
         return 2
+    if total_cap is not None and total_cap <= 0:
+        print("--agent-max-total-cost must be more than 0", file=sys.stderr)
+        return 2
     if repeat == 1:
+        if total_cap is not None:
+            args = argparse.Namespace(**vars(args))
+            args.agent_max_cost = _run_cost_cap(args.agent_max_cost, total_cap)
         code, _ = _convert_once(args)
         return code
     if not (args.agent or args.agent_replay):
@@ -66,10 +81,23 @@ def cmd_convert(args) -> int:
         return 2
 
     rows: list[dict] = []
+    skipped: list[int] = []
+    spent = 0.0
     worst = 0
     for run in range(1, repeat + 1):
+        # The sweep cap (#143): each run's dollar ceiling is tightened to what
+        # is left, and once nothing is, the remaining runs never start.
+        remaining = None if total_cap is None else round(total_cap - spent, 9)
+        if remaining is not None and remaining <= 0:
+            skipped = list(range(run, repeat + 1))
+            print(
+                f"\nthe sweep's ${total_cap:g} total-cost ceiling is reached "
+                f"(${spent:.4f} spent); skipping run(s) {run}..{repeat}"
+            )
+            break
         run_args = argparse.Namespace(**vars(args))
         run_args.out = str(Path(args.out) / f"run-{run}")
+        run_args.agent_max_cost = _run_cost_cap(args.agent_max_cost, remaining)
         if args.agent_record:
             run_args.agent_record = _numbered(args.agent_record, run)
         print(f"\n=== run {run} of {repeat} -> {run_args.out} ===")
@@ -79,7 +107,16 @@ def cmd_convert(args) -> int:
         worst = max(worst, code)
         if result is not None and result.agent is not None:
             rows.append(_run_row(run, result))
+            spent += result.agent.spend.cost or 0.0
     summary = _repeat_summary(rows)
+    if total_cap is not None:
+        summary["max_total_cost_usd"] = total_cap
+        summary["total_cost_usd"] = round(spent, 6)
+        summary["runs_requested"] = repeat
+        summary["skipped_runs"] = [
+            {"run": run, "status": "skipped", "reason": f"the ${total_cap:g} total-cost ceiling was reached"}
+            for run in skipped
+        ]
     print("\n" + _format_repeat(summary))
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -93,11 +130,16 @@ def _run_row(run: int, result) -> dict:
         "run": run,
         "groups": len(agent.outcomes),
         "resolved": len(agent.resolved),
+        "declined": len(agent.declined),
+        # How much of the agent's work landed, and separately whether the pack
+        # validates. One "ok" used to stand for the second and read like the
+        # first: a run with every group rolled back said ok: true (#86).
+        "agent_status": agent.status,
         "statuses": {o.key: o.status for o in agent.outcomes},
         "steps": agent.spend.steps,
         "tokens": agent.spend.tokens,
         "cost_usd": None if agent.spend.cost is None else round(agent.spend.cost, 6),
-        "ok": result.report.ok,
+        "valid": result.report.ok,
     }
 
 
@@ -116,16 +158,23 @@ def _repeat_summary(rows: list[dict]) -> dict:
     """Mean and sample stdev across runs, plus how often each group resolved."""
     costs = [r["cost_usd"] for r in rows if r["cost_usd"] is not None]
     per_group: dict[str, int] = {}
+    declined_in: dict[str, int] = {}
+    agent_status: dict[str, int] = {}
     for r in rows:
         for key, status in r["statuses"].items():
             per_group[key] = per_group.get(key, 0) + (status == "resolved")
+            declined_in[key] = declined_in.get(key, 0) + (status == "declined")
+        agent_status[r["agent_status"]] = agent_status.get(r["agent_status"], 0) + 1
     return {
         "runs": len(rows),
+        "agent_status": dict(sorted(agent_status.items())),
         "resolved": _stats([r["resolved"] for r in rows]),
+        "declined": _stats([r["declined"] for r in rows]),
         "steps": _stats([r["steps"] for r in rows]),
         "tokens": _stats([r["tokens"] for r in rows]),
         "cost_usd": _stats(costs) if len(costs) == len(rows) else None,
         "group_resolved_in": per_group,
+        "group_declined_in": declined_in,
         "per_run": rows,
     }
 
@@ -138,13 +187,40 @@ def _format_repeat(summary: dict) -> str:
         if s is None or s["mean"] is None:
             continue
         lines.append(f"  {name:<9} {s['mean']:g} ± {s['stdev']:g} [{s['min']:g}..{s['max']:g}]")
+    if summary.get("skipped_runs"):
+        lines.append(
+            f"  skipped: {len(summary['skipped_runs'])} of {summary['runs_requested']} run(s), "
+            f"the ${summary['max_total_cost_usd']:g} total-cost ceiling "
+            f"(spent ${summary['total_cost_usd']:.4f})"
+        )
+    if summary["agent_status"]:
+        statuses = ", ".join(f"{s} {c}" for s, c in summary["agent_status"].items())
+        lines.append(f"  agent runs: {statuses}")
+    declined_in = summary.get("group_declined_in", {})
     for key, hits in summary["group_resolved_in"].items():
-        lines.append(f"  {key}: resolved in {hits} of {n}")
+        declined = declined_in.get(key, 0)
+        tail = f", declined in {declined}" if declined else ""
+        lines.append(f"  {key}: resolved in {hits} of {n}{tail}")
     return "\n".join(lines)
+
+
+def _config_requests(args):
+    """The --config-file settings, then --config ones (later settings win)."""
+    requests = []
+    if getattr(args, "config_file", None):
+        requests += load_config_file(args.config_file)
+    for text in getattr(args, "config", None) or []:
+        requests.append(parse_config_arg(text))
+    return requests
 
 
 def _convert_once(args):
     """One conversion. Returns (exit code, result or None if it never ran)."""
+    try:
+        config = _config_requests(args)
+    except ConfigError as exc:
+        print(f"bad mod config: {exc}", file=sys.stderr)
+        return 2, None
     agent = None
     if args.agent or args.agent_replay:
         try:
@@ -159,15 +235,23 @@ def _convert_once(args):
             args.namespace,
             emit_addon=not args.no_addon,
             agent=agent,
+            config=config or None,
+            experiments=getattr(args, "experiment", None) or None,
         )
     except IngestError as exc:
         print(f"cannot read {args.source}: {exc}", file=sys.stderr)
         return 2, None
+    except ConfigError as exc:
+        print(f"bad mod config: {exc}", file=sys.stderr)
+        return 2, None
     print(json.dumps(result.summary(), indent=2))
     if result.agent:
+        declined = len(result.agent.declined)
         print(
-            f"\nagent resolved {len(result.agent.resolved)} of "
-            f"{len(result.agent.outcomes)} residue group(s):"
+            f"\nagent {result.agent.status}: resolved {len(result.agent.resolved)} of "
+            f"{len(result.agent.outcomes)} residue group(s)"
+            + (f", declined {declined}" if declined else "")
+            + ":"
         )
         for outcome in result.agent.outcomes:
             detail = f" ({outcome.note})" if outcome.note else ""
@@ -564,9 +648,11 @@ def _corpus_cases(args):
     except (OSError, corpus.CorpusError) as exc:
         print(f"cannot read corpus manifest: {exc}", file=sys.stderr)
         return 2
-    if args.fixture:
-        wanted = set(args.fixture)
-        mods = [m for m in mods if m.name in wanted]
+    try:
+        mods = corpus.select(mods, args.fixture or (), getattr(args, "include_optional", False))
+    except corpus.CorpusError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     cases, missing = [], []
     for mod in mods:
         try:
@@ -584,12 +670,38 @@ def _corpus_cases(args):
         return 2
     from . import data
 
+    from .data import tags as tag_data
+
+    from .data import models as model_data
+
     if args.fetch:
         try:
             data.fetch_sounds()
+            model_data.fetch()
+            for tag_set in tag_data.SETS:
+                tag_data.fetch(tag_set)
         except data.ReferenceDataError as exc:
             print(str(exc), file=sys.stderr)
             return 2
+    missing_tags = [s.id for s in tag_data.SETS if tag_data.load(s) is None]
+    if missing_tags:
+        # The corpus baseline is measured with the loader and vanilla tag data;
+        # without it shared tags stay residue (#160), which can move the numbers.
+        message = (f"tag reference data isn't cached ({', '.join(missing_tags)}), so loader and "
+                   f"vanilla tags stay residue and the numbers may differ from the baseline; "
+                   f"run `{data.FETCH_COMMAND}` or add --fetch")
+        print(f"warning: {message}", file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::warning title=tag reference::{message}")
+    if model_data.templates() is None:
+        # The corpus baseline is measured with the vanilla model templates;
+        # without them stairs, slabs, walls and turned pillars stay residue.
+        message = (f"the vanilla block model templates aren't cached, so stairs, slabs, walls "
+                   f"and turned pillars stay residue and the numbers may differ from the "
+                   f"baseline; run `{data.FETCH_COMMAND}` or add --fetch")
+        print(f"warning: {message}", file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::warning title=model templates::{message}")
     if data.bedrock_vanilla_sounds() is None:
         # The corpus baseline is measured with the list; without it vanilla
         # sound references are dropped, which can move the numbers.
@@ -618,6 +730,11 @@ def _corpus_verdict(args, baseline_path: Path, measured, error_counts: dict[str,
         data = _json.loads(bl.dump(measured))
         for name, entry in data["fixtures"].items():
             entry["errors"] = error_counts[name]
+        # Optional mods this run skipped keep their entries; mods no longer in
+        # the manifest drop out.
+        for name, entry in _skipped_baseline(args, baseline_path, error_counts).items():
+            data["fixtures"][name] = entry
+        data["fixtures"] = dict(sorted(data["fixtures"].items()))
         baseline_path.write_text(_json.dumps(data, indent=2) + "\n")
         print(f"\nbaseline written: {baseline_path}")
         return 0
@@ -634,6 +751,9 @@ def _corpus_verdict(args, baseline_path: Path, measured, error_counts: dict[str,
         return 2
     if args.fixture:  # a subset run: mods left out are not "dropped"
         regressions = [r for r in regressions if r.fixture in error_counts]
+    else:  # optional mods this run skipped are not "dropped" either
+        skipped = set(_skipped_baseline(args, baseline_path, error_counts, base))
+        regressions = [r for r in regressions if r.fixture not in skipped]
     for name, count in sorted(error_counts.items()):
         before = (base.get(name) or {}).get("errors")
         if before is not None and count > int(before):
@@ -656,6 +776,23 @@ def _corpus_verdict(args, baseline_path: Path, measured, error_counts: dict[str,
     return 0
 
 
+def _skipped_baseline(args, baseline_path: Path, ran, base=None) -> dict:
+    """Baseline entries for the manifest's optional mods this run left out:
+    kept on --update-baseline, never counted as missing."""
+    import json as _json
+
+    from . import corpus
+
+    manifest = Path(args.manifest) if args.manifest else corpus.MANIFEST
+    try:
+        optional = {m.name for m in corpus.load(manifest) if m.optional}
+        if base is None:
+            base = _json.loads(baseline_path.read_text())["fixtures"] if baseline_path.is_file() else {}
+    except (OSError, ValueError, KeyError, corpus.CorpusError):
+        return {}
+    return {name: entry for name, entry in base.items() if name in optional and name not in ran}
+
+
 def cmd_corpus(args) -> int:
     """``portkit corpus fetch|list``: the pinned real-mod jars (#21)."""
     from . import corpus
@@ -667,13 +804,22 @@ def cmd_corpus(args) -> int:
         print(f"cannot read corpus manifest: {exc}", file=sys.stderr)
         return 2
     cache = corpus.cache_dir()
+    try:
+        chosen = corpus.select(mods, args.fixture or (), args.include_optional)
+    except corpus.CorpusError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    hidden = [m.name for m in mods if m.optional and m not in chosen]
     if args.action == "list":
-        for mod in mods:
+        for mod in chosen:
             state = "cached" if corpus.cached(mod, cache) else "missing"
-            print(f"{mod.name:28} {mod.loader:9} {mod.minecraft:8} {mod.license:6} {state}")
+            flag = "optional" if mod.optional else "default"
+            print(f"{mod.name:28} {mod.loader:9} {mod.minecraft:8} {mod.license:6} {flag:8} {state}")
+        if hidden and not args.fixture:
+            print(f"({len(hidden)} optional, not shown: {', '.join(hidden)}; add --include-optional)")
         return 0
     failed = 0
-    for mod in mods:
+    for mod in chosen:
         try:
             path, downloaded = corpus.fetch(mod, cache)
         except corpus.CorpusError as exc:
@@ -681,24 +827,133 @@ def cmd_corpus(args) -> int:
             failed += 1
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} {mod.name} -> {path}")
+    if hidden and not args.fixture:
+        print(f"skipped {len(hidden)} optional: {', '.join(hidden)} (add --include-optional)")
     return 1 if failed else 0
 
 
+def _reference_sets(args):
+    """The tag sets ``reference fetch|list`` works on: every pinned one, or the
+    ones a given mod's loader and game version select (#160)."""
+    from .data import tags
+
+    if not getattr(args, "mod", None):
+        return list(tags.SETS), None
+    from .ingest import ingest
+    from .meta import parse as parse_metadata
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="portkit-ref-") as staging:
+        staged = ingest(Path(args.mod), Path(staging))
+        meta = parse_metadata(staged.metadata, staged.namespace)
+    return tags.select(meta.loader, meta.minecraft), meta
+
+
 def cmd_reference(args) -> int:
-    """``portkit reference fetch|list``: Mojang reference data, fetched on demand (#124)."""
+    """``portkit reference fetch|list``: reference data fetched on demand: Mojang's
+    vanilla sound list (#124), the loaders' and vanilla's item tags (#160),
+    the vanilla block model templates stairs, slabs and walls are built from,
+    vanilla's campfire recipes the Farmer's Delight stove cooks (#177) and
+    Bedrock's vanilla texture atlases (short names and file paths only)."""
     from . import data
+    from .data import tags
 
     cache = data.cache_dir()
+    sets, meta = _reference_sets(args)
+    if meta is not None:
+        chosen = ", ".join(s.id for s in sets) or "none"
+        print(f"{args.mod}: loader {meta.loader or '?'}, minecraft {meta.minecraft or '?'} -> tag data: {chosen}")
+    from .data import models as model_data
+    from .data import recipes as recipe_data
+    from .data import vanilla_textures
+
     if args.action == "list":
         state = "cached" if data.cached_sounds(cache) else "missing"
         print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
+        state = "cached" if model_data.cached(cache) else "missing"
+        print(f"{model_data.SET_ID:28} {model_data.LABEL} {state}")
+        state = "cached" if vanilla_textures.cached(cache) else "missing"
+        print(f"{vanilla_textures.SET_ID:28} {vanilla_textures.LABEL} {state}")
+        for recipe_set in recipe_data.SETS:
+            state = "cached" if recipe_data.cached(recipe_set, cache) else "missing"
+            print(f"{recipe_set.id:28} {recipe_set.label} {state}")
+        for tag_set in sets:
+            state = "cached" if tags.cached(tag_set, cache) else "missing"
+            print(f"{'tags-' + tag_set.id:28} {tag_set.label} {state}")
         return 0
+    failed = 0
     try:
         path, downloaded = data.fetch_sounds(cache)
+        print(f"{'fetched' if downloaded else 'cached ':7} vanilla-sounds -> {path}")
     except data.ReferenceDataError as exc:
         print(f"FAILED {exc}", file=sys.stderr)
-        return 1
-    print(f"{'fetched' if downloaded else 'cached ':7} vanilla-sounds -> {path}")
+        failed += 1
+    try:
+        path, downloaded = model_data.fetch(cache)
+        print(f"{'fetched' if downloaded else 'cached ':7} {model_data.SET_ID} -> {path}")
+    except data.ReferenceDataError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        failed += 1
+    try:
+        path, downloaded = vanilla_textures.fetch(cache)
+        print(f"{'fetched' if downloaded else 'cached ':7} {vanilla_textures.SET_ID} -> {path}")
+    except data.ReferenceDataError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        failed += 1
+    for recipe_set in recipe_data.SETS:
+        try:
+            path, downloaded = recipe_data.fetch(recipe_set, cache)
+        except data.ReferenceDataError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} {recipe_set.id} -> {path}")
+    for tag_set in sets:
+        try:
+            path, downloaded = tags.fetch(tag_set, cache)
+        except data.ReferenceDataError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} tags-{tag_set.id} -> {path}")
+    return 1 if failed else 0
+
+
+def cmd_schemas(args) -> int:
+    """``portkit schemas check|refresh`` (#155): is the stable npm release of
+    each vendored Bedrock schema snapshot out, and re-vendor a snapshot from it.
+    check exits 1 when a refresh is due, 2 when the registry can't be read."""
+    from .validate import schema_upstream as up
+
+    try:
+        packument = up.fetch_packument()
+    except up.SchemaUpstreamError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        return 2
+    if args.action == "check":
+        try:
+            statuses = up.check(packument)
+        except up.SchemaUpstreamError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            return 2
+        for st in statuses:
+            print(st.message())
+        return 1 if any(st.action_needed for st in statuses) else 0
+    snapshot = args.snapshot or up.pins()[-1].snapshot
+    tarball = Path(args.tarball).read_bytes() if args.tarball else None
+    try:
+        result = up.refresh_from_registry(
+            snapshot, args.version, packument, allow_prerelease=args.allow_prerelease,
+            tarball=tarball, dry_run=args.dry_run,
+        )
+    except up.SchemaUpstreamError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        return 2
+    for line in result.lines():
+        print(line)
+    if not args.dry_run:
+        print("next: python scripts/build_bedrock_reference.py (agent reference topics come from the "
+              "schema), pytest -q, portkit eval --corpus --mct; see src/portkit/validate/schemas/SOURCE.md")
     return 0
 
 
@@ -712,6 +967,37 @@ def main(argv=None) -> int:
     p.add_argument("--namespace")
     p.add_argument(
         "--no-addon", action="store_true", help="write the pack tree only, no .mcaddon"
+    )
+    p.add_argument(
+        "--config", action="append", metavar="MOD.FLAG=true|false",
+        help=(
+            "set a mod config flag for this conversion, as a Java player would in the "
+            "mod's config file (repeatable), e.g. mythicmetals.enableDusts=true. FLAG is "
+            "the flag as the mod's load conditions name it or the option's own config "
+            "key; it replaces the default cited from the mod's source, both ways. A cited "
+            "number option takes a number in the range the mod accepts, e.g. "
+            "farmersdelight.cuttingBoardFortuneBonus=0.25. An unknown mod or flag, or a "
+            "number out of range, is an error listing the valid ones"
+        ),
+    )
+    p.add_argument(
+        "--config-file", metavar="PATH",
+        help=(
+            "read mod config flags and number options from a JSON or TOML file "
+            "({\"mod\": {\"flag\": true}} "
+            "or {\"mod.flag\": true}); --config settings win over it. Every run with "
+            "settings writes OUT/config-overrides.json, which reproduces it"
+        ),
+    )
+    p.add_argument(
+        "--experiment", action="append", metavar="NAME", choices=list(EXPERIMENTS),
+        help=(
+            "convert for a world that runs this Bedrock experiment (repeatable). "
+            "upcoming_creator_features ships blocks that hold items behind a menu in "
+            "Java as Bedrock containers (minecraft:block_entity container, block "
+            "format 1.26.50); the pack then needs the world's Upcoming Creator "
+            "Features experiment on. Without it they stay decoration only"
+        ),
     )
     p.add_argument(
         "--agent", action="store_true",
@@ -733,6 +1019,14 @@ def main(argv=None) -> int:
         help=(
             "dollar ceiling for the whole agent run; needs PORTKIT_LLM_INPUT_PRICE "
             "and PORTKIT_LLM_OUTPUT_PRICE (USD per million tokens)"
+        ),
+    )
+    p.add_argument(
+        "--agent-max-total-cost", type=float, metavar="USD",
+        help=(
+            "dollar ceiling across all --repeat runs: each run's ceiling is tightened "
+            "to what is left, and once it is spent no further run starts (they are "
+            "listed as skipped in repeat-summary.json); needs the same prices"
         ),
     )
     p.add_argument(
@@ -814,6 +1108,9 @@ def main(argv=None) -> int:
     c.add_argument("--manifest", metavar="PATH", help="corpus manifest (default fixtures/real/mods.toml)")
     c.add_argument("--fetch", action="store_true",
                    help="with --corpus, download missing jars and the vanilla sound list first")
+    c.add_argument("--include-optional", action="store_true",
+                   help="with --corpus, also run the mods marked optional in the manifest "
+                        "(skipped by default; --fixture NAME runs any one mod)")
     c.add_argument(
         "--mct", action="store_true",
         help="also run Mojang's `mct validate` (@minecraft/creator-tools) on each converted tree "
@@ -849,14 +1146,40 @@ def main(argv=None) -> int:
     p = sub.add_parser("corpus", help="fetch or list the pinned real-mod jars (#21)")
     p.add_argument("action", choices=["fetch", "list"])
     p.add_argument("--manifest", metavar="PATH", help="corpus manifest (default fixtures/real/mods.toml)")
+    p.add_argument("--include-optional", action="store_true",
+                   help="also the mods marked optional in the manifest (skipped by default)")
+    p.add_argument("--fixture", action="append", metavar="NAME",
+                   help="only these mods, optional or not (repeatable)")
     p.set_defaults(func=cmd_corpus)
 
     p = sub.add_parser(
         "reference",
-        help="fetch or list Mojang reference data (the Bedrock vanilla sound list) (#124)",
+        help="fetch or list reference data: the Bedrock vanilla sound list (#124), "
+             "loader/vanilla item tag membership (#160) and the vanilla block model "
+             "templates stairs, slabs and walls are built from",
     )
     p.add_argument("action", choices=["fetch", "list"])
+    p.add_argument("--mod", metavar="JAR",
+                   help="only the tag data this mod's loader and game version need "
+                        "(default: every pinned set)")
     p.set_defaults(func=cmd_reference)
+
+    p = sub.add_parser(
+        "schemas",
+        help="check whether the stable @minecraft/bedrock-schemas release of each vendored "
+             "snapshot is out, or re-vendor a snapshot from it (#155)",
+    )
+    p.add_argument("action", choices=["check", "refresh"])
+    p.add_argument("--snapshot", metavar="VERSION",
+                   help="refresh: the snapshot directory (default: the newest in SOURCE.md)")
+    p.add_argument("--version", metavar="PKG_VERSION",
+                   help="refresh: the package version (default: the snapshot's stable release)")
+    p.add_argument("--allow-prerelease", action="store_true",
+                   help="refresh: allow a -beta package version")
+    p.add_argument("--tarball", metavar="PATH",
+                   help="refresh: use this downloaded .tgz (still checked against the registry hash)")
+    p.add_argument("--dry-run", action="store_true", help="refresh: report the diff, write nothing")
+    p.set_defaults(func=cmd_schemas)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -37,7 +37,14 @@ class ModMetadata:
     version: tuple[int, int, int] = (0, 1, 0)
     version_raw: str | None = None
     loader: str | None = None
+    # The Minecraft version the mod declares it runs on (the lower bound of a
+    # range, the newest of a list), as written; None when it doesn't say (#160).
+    minecraft: str | None = None
     notes: list[str] = field(default_factory=list)
+    # Every mod the file declares (id -> version as written), and the mods it
+    # declares as required dependencies; None when no metadata was read (#183).
+    mods: dict[str, str] | None = None
+    requires: list[str] | None = None
 
     def header_name(self, namespace: str, kind: str) -> str:
         return f"{self.name or self.mod_id or namespace} ({kind})"
@@ -100,6 +107,35 @@ def load_json(blob: bytes):
     return json.loads(text, strict=False)
 
 
+_MC_VERSION = re.compile(r"\d+\.\d+(?:\.\d+)?")
+
+
+def _mc_version(value) -> str | None:
+    """A Minecraft version out of a declared range or list.
+
+    ``[1.20.1,1.21)`` and ``>=1.21`` give their lower bound, ``~26.1`` the
+    version itself, and a list (``["1.21.6", "1.21.8"]``) its newest entry.
+    """
+    if isinstance(value, list):
+        found = [v for v in (_mc_version(x) for x in value) if v]
+        return max(found, key=lambda v: tuple(int(p) for p in v.split(".")), default=None)
+    if not isinstance(value, str):
+        return None
+    match = _MC_VERSION.search(value)
+    return match.group(0) if match else None
+
+
+def _toml_minecraft(data: dict) -> str | None:
+    """The minecraft dependency's versionRange in mods.toml / neoforge.mods.toml."""
+    deps = data.get("dependencies")
+    groups = deps.values() if isinstance(deps, dict) else []
+    for group in groups:
+        for dep in group if isinstance(group, list) else []:
+            if isinstance(dep, dict) and dep.get("modId") == "minecraft":
+                return _mc_version(dep.get("versionRange"))
+    return None
+
+
 def _text(value) -> str | None:
     """A free-text field, trimmed; None when empty or not a string."""
     if not isinstance(value, str):
@@ -115,7 +151,10 @@ def _fabric(blob: bytes, notes: list[str]) -> ModMetadata:
         description=_text(data.get("description")),
         version_raw=data.get("version"),
         loader="fabric",
+        minecraft=_mc_version((data.get("depends") or {}).get("minecraft")),
         notes=notes,
+        mods=_declared({data.get("id"): data.get("version"), **_provides(data.get("provides"), data.get("version"))}),
+        requires=sorted(k for k in (data.get("depends") or {}) if isinstance(k, str)),
     )
 
 
@@ -128,8 +167,59 @@ def _quilt(blob: bytes, notes: list[str]) -> ModMetadata:
         description=_text(meta.get("description")),
         version_raw=loader.get("version"),
         loader="quilt",
+        minecraft=_quilt_minecraft(loader.get("depends")),
         notes=notes,
+        mods=_declared({loader.get("id"): loader.get("version"),
+                        **_provides(loader.get("provides"), loader.get("version"))}),
+        requires=sorted(_quilt_depends(loader.get("depends"))),
     )
+
+
+def _declared(pairs: dict) -> dict[str, str]:
+    return {k: str(v) for k, v in pairs.items() if isinstance(k, str) and k}
+
+
+def _provides(provides, version) -> dict:
+    """Fabric/Quilt ``provides``: other ids this mod answers to, at its version."""
+    out = {}
+    for entry in provides if isinstance(provides, list) else []:
+        ident = entry.get("id") if isinstance(entry, dict) else entry
+        if isinstance(ident, str):
+            out[ident] = (entry.get("version") if isinstance(entry, dict) else None) or version
+    return out
+
+
+def _quilt_depends(depends) -> list[str]:
+    out = []
+    for dep in depends if isinstance(depends, list) else []:
+        ident = dep if isinstance(dep, str) else dep.get("id") if isinstance(dep, dict) else None
+        if isinstance(ident, str) and not (isinstance(dep, dict) and dep.get("optional")):
+            out.append(ident)
+    return out
+
+
+def _toml_requires(data: dict) -> list[str]:
+    """Mandatory dependencies in mods.toml (mandatory=true) or neoforge.mods.toml (type="required")."""
+    deps = data.get("dependencies")
+    found: set[str] = set()
+    for group in deps.values() if isinstance(deps, dict) else []:
+        for dep in group if isinstance(group, list) else []:
+            if not isinstance(dep, dict) or not isinstance(dep.get("modId"), str):
+                continue
+            kind = str(dep.get("type", "")).lower()
+            if dep.get("mandatory") is True or kind == "required":
+                found.add(dep["modId"])
+    return sorted(found)
+
+
+def _quilt_minecraft(depends) -> str | None:
+    for dep in depends if isinstance(depends, list) else []:
+        if isinstance(dep, dict) and dep.get("id") == "minecraft":
+            versions = dep.get("versions")
+            if isinstance(versions, dict):  # {"any": [...]} / {"all": [...]}
+                versions = next(iter(versions.values()), None)
+            return _mc_version(versions)
+    return None
 
 
 def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
@@ -137,7 +227,8 @@ def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
     mods = data.get("mods") or []
     if not mods:
         notes.append(f"{loader} metadata declares no [[mods]] entry")
-        return ModMetadata(loader=loader, notes=notes)
+        return ModMetadata(loader=loader, minecraft=_toml_minecraft(data), notes=notes,
+                           mods={}, requires=_toml_requires(data))
     if len(mods) > 1:
         ids = ", ".join(str(m.get("modId")) for m in mods)
         notes.append(f"{loader} metadata declares {len(mods)} mods ({ids}); using the first")
@@ -148,7 +239,10 @@ def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
         description=(first.get("description") or "").strip() or None,
         version_raw=first.get("version"),
         loader=loader,
+        minecraft=_toml_minecraft(data),
         notes=notes,
+        mods=_declared({m.get("modId"): m.get("version") for m in mods if isinstance(m, dict)}),
+        requires=_toml_requires(data),
     )
 
 
@@ -165,7 +259,11 @@ def _mcmod_info(blob: bytes, notes: list[str]) -> ModMetadata:
         description=_text(first.get("description")),
         version_raw=first.get("version"),
         loader="forge-legacy",
+        minecraft=_mc_version(first.get("mcversion")),
         notes=notes,
+        mods=_declared({e.get("modid"): e.get("version") for e in entries if isinstance(e, dict)}),
+        requires=sorted({d for e in entries if isinstance(e, dict)
+                         for d in (e.get("requiredMods") or []) if isinstance(d, str)}),
     )
 
 
@@ -197,6 +295,8 @@ def parse(metadata: dict[str, bytes], namespace: str) -> ModMetadata:
             if resolved:
                 meta.version_raw = resolved
                 notes.append(f"resolved {raw} from the jar manifest as {resolved}")
+                if meta.mods is not None:
+                    meta.mods = {k: (resolved if v == raw else v) for k, v in meta.mods.items()}
         meta.version = parse_version(meta.version_raw, notes)
 
         if meta.mod_id and meta.mod_id != namespace:

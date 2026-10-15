@@ -1,0 +1,8 @@
+{
+  "_comment": [
+    "#245 ratchet: mod namespace literals in core modules (src/portkit, py + runtime js), per file and namespace, as of develop 6e1fc1d (2026-10-15).",
+    "Counts may only go down. Detection rule: tests/test_core_namespace_free.py. Audit: docs/adapter-audit-2026-10-15.md."
+  ],
+  "total": 0,
+  "files": {}
+}

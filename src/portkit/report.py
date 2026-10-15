@@ -31,6 +31,7 @@ _CONTENT_TYPES = {
     "textures": "textures",
     "texts": "translations",
     "sounds": "sounds",
+    "scripts": "station runtimes",
 }
 _SEVERITY_ORDER = {"error": 0, "warning": 1}
 
@@ -97,6 +98,30 @@ def _mod_name(tree: Path) -> str:
             if isinstance(name, str) and name:
                 return name.removesuffix(" (behavior)").removesuffix(" (resources)")
     return tree.name
+
+
+def _setting_row(s: dict) -> tuple[str, str, str, str]:
+    """One user config setting as a report row: a flag (on/off) or a value option (a number)."""
+    default = s.get("cited_default")
+    if s.get("condition") is None:  # a non-boolean config value (#190)
+        return (f"`{s.get('mod')}.{s.get('flag')}`", f"{s.get('value'):g}",
+                "uncited" if default is None else f"{default:g}", f"`{s.get('as_written')}`")
+    return (f"`{s.get('condition')}`", "on" if s.get("value") else "off",
+            "uncited" if default is None else ("on" if default else "off"),
+            f"`{s.get('as_written')}`")
+
+
+def _config_settings(tree: Path) -> list[dict]:
+    """The user config settings the conversion recorded next to the tree, if any."""
+    path = tree / "config-overrides.json"
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return []
+    settings = data.get("_settings") if isinstance(data, dict) else None
+    return [s for s in settings if isinstance(s, dict)] if isinstance(settings, list) else []
 
 
 def _table(rows: list[tuple[str, ...]], headers: tuple[str, ...]) -> list[str]:
@@ -176,6 +201,23 @@ def render(tree: Path) -> str:
 
     lines += ["## Validator findings", ""]
     lines += _findings_section(report.findings)
+
+    settings = _config_settings(tree)
+    if settings:
+        lines += [
+            "## Mod config set by user config",
+            "",
+            "This tree was converted with these mod config settings in place of the "
+            "defaults cited from the mod's source (`portkit convert --config`). "
+            "`config-overrides.json` next to the tree reproduces the run with "
+            "`--config-file`.",
+            "",
+        ]
+        lines += _table(
+            [_setting_row(s) for s in settings],
+            ("Flag", "Set to", "Cited default", "As written"),
+        )
+        lines.append("")
 
     lines += [
         "## What to do with this",

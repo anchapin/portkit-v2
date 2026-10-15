@@ -15,6 +15,15 @@ from typing import Any, Protocol, runtime_checkable
 
 from .budget import Budget, Spend, Usage
 
+# When this few steps are left and nothing has been written yet, every tool
+# result says so plainly (#139): a model that keeps researching to the ceiling
+# ends with nothing, which is worse than a supported partial answer or a decline.
+NUDGE_AT = 3
+NUDGE = (
+    "Nothing written yet and few steps left: write the best answer the source "
+    "supports now and validate it, or decline in one sentence."
+)
+
 
 @dataclass
 class ToolCall:
@@ -42,6 +51,10 @@ class Message:
     # filter or a refusal. Never sent back to the model.
     finish_reason: str | None = None
     refusal: str = ""
+    # Opaque provider fields on an assistant message that must go back on the
+    # next request unchanged, e.g. OpenRouter's ``reasoning_details`` (which
+    # carry Gemini's thought signatures there). Empty for most.
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -101,6 +114,18 @@ class AgentSession:
         if self.run_spend is not None:
             self.run_spend.record(usage, pricing)
 
+    def _with_budget(self, output: Any, left: int) -> dict:
+        """Stamp a tool result with the steps left, and nudge near the end (#139).
+
+        Deterministic: it depends only on the step count and on whether the
+        toolbox has written anything, so a replayed run sends the same bytes.
+        """
+        stamped = dict(output) if isinstance(output, dict) else {"result": output}
+        stamped["steps_left"] = f"steps left: {left} of {self.max_steps}"
+        if 0 < left <= NUDGE_AT and not getattr(self.toolbox, "wrote_anything", True):
+            stamped["nudge"] = NUDGE
+        return stamped
+
     def run(self, task: str) -> AgentResult:
         self.messages.append(Message("user", task))
         for step in range(1, self.max_steps + 1):
@@ -130,6 +155,7 @@ class AgentSession:
                     output = self.toolbox.invoke(call.name, call.arguments)
                 except Exception as exc:  # a tool error is data, not a crash
                     output = {"error": f"{type(exc).__name__}: {exc}"}
+                output = self._with_budget(output, self.max_steps - step)
                 if self.on_step:
                     self.on_step(step, call, output)
                 self.messages.append(

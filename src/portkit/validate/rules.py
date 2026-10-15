@@ -20,7 +20,19 @@ from .report import ValidationReport
 from .xrefs import check_cross_pack
 
 _ICON_SIZES = {2, 4, 8, 16, 32, 64, 128, 256}
-_IDENTIFIER = re.compile(r"^[a-z0-9_]+:[a-z0-9_/.]+$")
+# A namespaced id of a block, item, recipe or loot entry. Bedrock's schemas take
+# a hyphen here (checked against the schemas, not in game): Mojang's block
+# description schema only asks for no whitespace (bedrock-schemas
+# bp/blocks/block_description.schema.json, "^\\S+$"), the item, recipe and
+# loot-entry schemas put no pattern on the id, and the biome schema spells the
+# set out as "^[a-z0-9._%+-]+:[a-z0-9._%+-]+$". Java ids are [a-z0-9_.-] with
+# "/" in the path, so a converted id keeps its hyphen and its Java spelling
+# (Wallpapercraft's wallpapercraft:woolblue-0). See docs/decisions.md.
+_IDENTIFIER = re.compile(r"^[a-z0-9_-]+:[a-z0-9_/.-]+$")
+# A terrain/item texture key. No published schema constrains these, and the
+# texture converter maps a Java path's "-" to "_" (#168), so the key check
+# stays as strict as it was.
+_TEXTURE_KEY = re.compile(r"^[a-z0-9_]+:[a-z0-9_/.]+$")
 _RECIPE_KEYS = {
     "minecraft:recipe_shaped",
     "minecraft:recipe_shapeless",
@@ -46,12 +58,78 @@ _RECIPE_REQUIRED: dict[str, tuple] = {
 }
 
 
+# Directories where every .json file is one Bedrock document, and the top-level
+# key(s) that name that document (#141). A file there with none of them, or with
+# one whose body is not an object, loads as nothing: Bedrock skips it, and an
+# agent's stub such as {"format_version": "1.20.80", "minecraft": "item"} would
+# otherwise pass as a valid pack. blocks/, recipes/ and loot_tables/ have their
+# own, stricter checks below. Directories not listed are not shape-checked.
+_DOCUMENT_KEYS: dict[str, dict[str, tuple[str, ...]]] = {
+    "behavior_pack": {
+        "items": ("minecraft:item",),
+        "entities": ("minecraft:entity",),
+        "spawn_rules": ("minecraft:spawn_rules",),
+        "biomes": ("minecraft:biome",),
+        "feature_rules": ("minecraft:feature_rules",),
+        "dimensions": ("minecraft:dimension",),
+        "animations": ("animations",),
+        "animation_controllers": ("animation_controllers",),
+    },
+    "resource_pack": {
+        "items": ("minecraft:item",),
+        "entity": ("minecraft:client_entity",),
+        "attachables": ("minecraft:attachable",),
+        "fogs": ("minecraft:fog_settings",),
+        "particles": ("particle_effect",),
+        "animations": ("animations",),
+        "animation_controllers": ("animation_controllers",),
+        "render_controllers": ("render_controllers",),
+    },
+}
+
+
+def _shape_error(report: ValidationReport, rel: str, data, expected: tuple[str, ...]) -> bool:
+    """Report a file that is not the Bedrock document its directory holds.
+
+    True when it reported, so a caller with its own checks can stop there.
+    """
+    want = " or ".join(expected)
+    if not isinstance(data, dict):
+        report.add(rel, "doc.unknown_shape",
+                   f"file must be a JSON object with {want}, got a {type(data).__name__}")
+        return True
+    present = [k for k in expected if k in data]
+    if not present:
+        found = ", ".join(sorted(map(str, data))) or "none"
+        message = f"no Bedrock document key: needs {want}; found keys: {found}"
+        if any(str(k) == "minecraft" for k in data):
+            message += " (a bare 'minecraft' key is usually a 'minecraft:...' key cut at the colon)"
+        report.add(rel, "doc.unknown_shape", message)
+        return True
+    body = data[present[0]]
+    if not isinstance(body, dict):
+        report.add(rel, "doc.unknown_shape",
+                   f"{present[0]} must be a JSON object, got {json.dumps(body)[:40]}")
+        return True
+    return False
+
+
+def _check_document(report: ValidationReport, path: Path, rel: str, expected: tuple[str, ...]) -> None:
+    data = _load(report, path, rel)
+    if data is not None:
+        _shape_error(report, rel, data, expected)
+
+
 def _load(report: ValidationReport, path: Path, rel: str):
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         report.add(rel, "json.parse", f"invalid JSON: {exc}")
         return None
+    if data is None:
+        # A literal ``null`` parses, then every check would skip it as unreadable.
+        report.add(rel, "doc.unknown_shape", "file is JSON null, not a Bedrock document")
+    return data
 
 
 def _check_manifest(report: ValidationReport, path: Path, rel: str) -> None:
@@ -81,6 +159,69 @@ def _check_manifest(report: ValidationReport, path: Path, rel: str) -> None:
         if mid in seen:
             report.add(rel, "manifest.uuid_unique", f"modules[{i}].uuid duplicates another UUID")
         seen.add(mid)
+        if module.get("type") == "script":
+            _check_script_module(report, rel, i, module, path.parent)
+    for i, dep in enumerate(data.get("dependencies") or []):
+        if isinstance(dep, dict) and "module_name" in dep:
+            _check_module_dependency(report, rel, i, dep)
+
+
+# Script modules (#177). learn.microsoft.com, Pack Manifest: a "script" module
+# says its language ("the only supported value is javascript") and names the
+# file Bedrock runs ("entry"); a dependency on a built-in script module names
+# it by "module_name" (e.g. @minecraft/server) with a version string.
+_SEMVER = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$")
+_SCRIPT_IMPORT = re.compile(r"""^\s*import\b[^'"]*?(?:from\s*)?['"]([^'"]+)['"]""", re.M)
+# Block JSON reads a namespaced custom component key from format 1.21.90
+# (minecraft.net, "Minecraft 1.21.90 Bedrock Changelog": "Custom components v2
+# is available in JSON versions 1.21.90 and higher").
+_CUSTOM_COMPONENT_FORMAT = (1, 21, 90)
+
+
+def _check_script_module(report: ValidationReport, rel: str, i: int, module: dict, pack_root: Path) -> None:
+    if module.get("language") != "javascript":
+        report.add(rel, "manifest.script", f"modules[{i}] is a script module without language \"javascript\"")
+    entry = module.get("entry")
+    if not isinstance(entry, str) or not entry.endswith(".js"):
+        report.add(rel, "manifest.script", f"modules[{i}] needs an entry naming a .js file")
+    elif not (pack_root / entry).is_file():
+        report.add(rel, "manifest.script", f"modules[{i}].entry {entry!r} is not a file in this pack")
+
+
+def _check_module_dependency(report: ValidationReport, rel: str, i: int, dep: dict) -> None:
+    name, version = dep.get("module_name"), dep.get("version")
+    if not isinstance(name, str) or not name.startswith("@minecraft/"):
+        report.add(rel, "manifest.dependency", f"dependencies[{i}].module_name {name!r} is not a built-in script module")
+    if not isinstance(version, str) or not _SEMVER.match(version):
+        report.add(rel, "manifest.dependency", f"dependencies[{i}] needs a version string like \"2.0.0\"")
+
+
+def _check_scripts(report: ValidationReport, pack_root: Path, prefix: str) -> None:
+    """Every import in the pack's scripts resolves: a relative path to a file in
+    the pack, or a built-in module the manifest declares a dependency on."""
+    scripts = sorted((pack_root / "scripts").rglob("*.js"))
+    if not scripts:
+        return
+    declared: set[str] = set()
+    has_script_module = False
+    try:
+        manifest = json.loads((pack_root / "manifest.json").read_text())
+        declared = {d.get("module_name") for d in manifest.get("dependencies") or [] if isinstance(d, dict)}
+        has_script_module = any(isinstance(m, dict) and m.get("type") == "script" for m in manifest.get("modules") or [])
+    except (OSError, json.JSONDecodeError, AttributeError):
+        pass
+    if not has_script_module:
+        report.add(f"{prefix}/manifest.json", "manifest.script",
+                   "the pack ships scripts/ but has no script module, so Bedrock never runs them", "warning")
+    for path in scripts:
+        rel = f"{prefix}/{path.relative_to(pack_root).as_posix()}"
+        for target in _SCRIPT_IMPORT.findall(path.read_text(encoding="utf-8", errors="replace")):
+            if target.startswith("."):
+                if not (path.parent / target).resolve().is_file():
+                    report.add(rel, "script.import", f"imports {target!r}, which is not a file in this pack")
+            elif target not in declared:
+                report.add(rel, "script.import",
+                           f"imports {target!r}, which the manifest declares no dependency on")
 
 
 def _is_empty(value) -> bool:
@@ -143,14 +284,23 @@ def _check_texture_index(report: ValidationReport, path: Path, rel: str, pack_ro
     if not entries:
         report.add(rel, "texture_index.empty", "texture index has no entries")
     for name, entry in entries.items():
-        if not _IDENTIFIER.match(name):
+        if not _TEXTURE_KEY.match(name):
             report.add(rel, "texture_index.identifier", f"bad texture key {name!r}")
         target = entry.get("textures")
         if not isinstance(target, str):
             report.add(rel, "texture_index.textures", f"{name}: textures must be a path")
             continue
-        if not (pack_root / f"{target}.png").is_file():
+        if not (pack_root / f"{target}.png").is_file() and target not in _vanilla_files():
             report.add(rel, "texture_index.missing", f"{name}: {target}.png not in pack")
+
+
+def _vanilla_files() -> frozenset[str]:
+    """Texture files the vanilla resource pack below every pack serves (the
+    fetched atlas index, portkit.data.vanilla_textures), or none without it."""
+    from ..data import vanilla_textures
+
+    index = vanilla_textures.index()
+    return index.all_files() if index is not None else frozenset()
 
 
 def _check_flipbook(report: ValidationReport, path: Path, rel: str, pack_root: Path) -> None:
@@ -195,9 +345,19 @@ _MENU_CATEGORIES = {
 }
 
 
+def _format_tuple(value) -> tuple[int, ...]:
+    try:
+        return tuple(int(p) for p in str(value).split("."))
+    except ValueError:
+        return ()
+
+
 def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path) -> None:
     data = _load(report, path, rel)
     if data is None:
+        return
+    if not isinstance(data, dict):
+        _shape_error(report, rel, data, ("minecraft:block",))
         return
     if "format_version" not in data:
         report.add(rel, "block.format_version", "missing format_version")
@@ -219,6 +379,10 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
     components = body.get("components") or {}
     if not components:
         report.add(rel, "block.components", "block has no components")
+    custom = [c for c in components if ":" in c and not c.startswith("minecraft:")]
+    if custom and _format_tuple(data.get("format_version")) < _CUSTOM_COMPONENT_FORMAT:
+        report.add(rel, "block.custom_component",
+                   f"custom component {custom[0]!r} needs block format_version 1.21.90 or later")
     instances = components.get("minecraft:material_instances")
     if instances is None:
         return
@@ -295,11 +459,17 @@ def _check_loot_table(report: ValidationReport, path: Path, rel: str) -> None:
     data = _load(report, path, rel)
     if data is None:
         return
+    if not isinstance(data, dict):
+        _shape_error(report, rel, data, ("pools",))
+        return
     pools = data.get("pools")
     if not isinstance(pools, list) or not pools:
         report.add(rel, "loot.pools", "table has no pools")
         return
     for i, pool in enumerate(pools):
+        if not isinstance(pool, dict):
+            report.add(rel, "loot.pools", f"pools[{i}] must be a JSON object")
+            continue
         rolls = pool.get("rolls")
         if not isinstance(rolls, (int, float)):
             report.add(rel, "loot.rolls", f"pools[{i}].rolls must be a number")
@@ -309,6 +479,9 @@ def _check_loot_table(report: ValidationReport, path: Path, rel: str) -> None:
             continue
         for j, entry in enumerate(entries):
             where = f"pools[{i}].entries[{j}]"
+            if not isinstance(entry, dict):
+                report.add(rel, "loot.entries", f"{where} must be a JSON object")
+                continue
             if entry.get("type") != "item":
                 report.add(rel, "loot.entry_type", f"{where}.type must be 'item'")
             name = entry.get("name")
@@ -377,11 +550,17 @@ def validate_pack(pack_root: Path) -> ValidationReport:
     for path in sorted((pack_root / "recipes").glob("*.json")):
         _check_recipe(report, path, f"{prefix}/recipes/{path.name}")
 
+    _check_scripts(report, pack_root, prefix)
+
     for path in sorted((pack_root / "blocks").glob("*.json")):
         _check_block(report, path, f"{prefix}/blocks/{path.name}", pack_root)
 
     for path in sorted((pack_root / "loot_tables").rglob("*.json")):
         _check_loot_table(report, path, f"{prefix}/{path.relative_to(pack_root).as_posix()}")
+
+    for folder, expected in _DOCUMENT_KEYS.get(prefix, {}).items():
+        for path in sorted((pack_root / folder).rglob("*.json")):
+            _check_document(report, path, f"{prefix}/{path.relative_to(pack_root).as_posix()}", expected)
 
     for index in ("textures/terrain_texture.json", "textures/item_texture.json"):
         path = pack_root / index
@@ -429,6 +608,8 @@ def _check_dependencies(report: ValidationReport, packs: list[Path]) -> None:
     for pack, data in manifests:
         rel = f"{pack.name}/manifest.json"
         for i, dep in enumerate(data.get("dependencies") or []):
+            if isinstance(dep, dict) and "module_name" in dep:
+                continue  # a built-in script module, checked with the manifest
             uid = str(dep.get("uuid"))
             if uid == str((data.get("header") or {}).get("uuid")):
                 report.add(rel, "manifest.dependency", f"dependencies[{i}] points at this pack")
