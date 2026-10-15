@@ -27,6 +27,71 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: a recipe whose result or station is Java code is `code_recipe` residue naming the code; the residue agent skips it
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #227.
+- **Decision:** In `converters/recipes.py`, a recipe whose type has no
+  converter is `code_recipe` residue (not `recipe`) when either holds:
+  (1) **special recipe:** its type is not `minecraft:` and its JSON holds
+  nothing but recipe-book fields (`type`, `group`, `category`,
+  `show_notification`) and the mod loader's load-condition keys
+  (`conditions.condition_keys`: on Fabric only `fabric:load_conditions`;
+  already decided, so a recipe Java doesn't load stays
+  `conditional_recipe`). Such a serializer reads no
+  ingredient and no result, so what the recipe matches and builds is the
+  mod's code: vanilla's `SimpleCraftingRecipeSerializer` reads `category`
+  only, and Supplementaries 1.20-3.1.43 (`ModRecipes`, 13 types) and Alex's
+  Mobs 1.22.9 (`AMRecipeRegistry`, 2 types) register theirs through it,
+  each a `CustomRecipe` subclass (jar bytecode). (2) **typed code recipe:**
+  one of seven types read from the mod's code at the corpus pin, each with
+  a reason naming the station or the code and what a stand-in would drop:
+  `betterend:infusion` (BetterEnd 21.800.2 @9c449fb7: InfusionRitual
+  PEDESTALS_MAP L42-51 and tick L128-172, PedestalBlock useItemOn L116-148
+  and the neighbour-driven shape L180-275), `bclib:smithing` (BCLib
+  21.800.2 @80a081d4: worked in the vanilla anvil screen, AnvilMenuMixin
+  L138-158, hammer from `allowedTools` taking `damage`, AnvilRecipe L160-195,
+  anvil level >= `anvilLevel`), `bclib:alloying` (two ingredients + fuel in
+  the End Stone Smelter screen, EndStoneSmelter#useWithoutItem L55-72,
+  AlloyingRecipe codec L228-238), `mythicmetals:tidesinger_smithing_transform`
+  (coral pattern component from the addition), `mythicmetals:fold_midas_sword`
+  (folded-gold count decides match and result),
+  `mythicmetals:upgrading` (addition stored in upgrade slots) (Mythic Metals
+  0.24.6+1.21 bytecode: TidesingerCoralRecipe/MidasFoldingRecipe/
+  UpgradeSmithingRecipe#craft), `supplementaries:sus_crafting` (the other
+  grid stack stored as the result's `BlockEntityTag.item`, SusRecipe#assemble).
+  `code_recipe` is in the residue agent's `SKIP_KINDS`. Vanilla
+  `minecraft:` special types and modded types that carry data keep the
+  `unsupported recipe type` residue.
+- **Why:** A fixed-result Bedrock recipe for any of these invents a result or
+  drops part of what Java does (the hammer, the anvil level, the second
+  smelter input, the ritual layout and time, the stored item or component),
+  which #87 rules out; left as `recipe` residue the agent was offered them
+  with no reason and could only write such a stand-in. The type-only rule
+  is read from the data (nothing to convert is in the file), so it needs no
+  per-mod list and can't claim a recipe that carries data.
+- **Measured:** 172 recipes move from `recipe` to `code_recipe` across the
+  13 corpus + 7 deco jars (BetterEnd 78, Mythic Metals 27, Fairy Lights port
+  27, Supplementaries 16, Silent Gear 6, Tinkers 4, Mekanism 3, Alex's Mobs,
+  Create, both Farmer's Delight and Storage Drawers 1192 2 each, Refurbished
+  1); every pack file is md5-identical (only `unhandled.json` kinds and
+  reasons move); agent-workable `recipe` residue 4,799 -> 4,627.
+- **Rejected:** *Stations in this slice.* The anvil and the smelter are
+  GUI stations: Bedrock has no anvil recipe type, its furnace recipes take one
+  input, and the only block components that open a screen are
+  `minecraft:crafting_table` and the experimental `minecraft:block_entity`
+  container (vendored bedrock-schemas 1.26.60 bp/blocks; recipe topics from
+  MicrosoftDocs/minecraft-creator @4186dc4), so any Bedrock version is a
+  new interaction (a decision for Alex). Infusion is in-world but needs
+  BetterEnd's pedestals first (six neighbour-driven shapes, one stored stack
+  each; all 15 pedestal blocks are residue today), which is its own slice.
+  *A per-type list for the special recipes:* the data already says it.
+  *Claiming `minecraft:` special types:* those are Bedrock's own crafting.
+- **Left:** the infusion ritual (pedestal blocks, then a data table + runtime
+  as the cutting board), anvil and alloying stations (policy), per-serializer
+  scripts for the special recipes (low value each), Alex's Mobs capsid
+  recipes (`capsid_recipes/` data files, not recipes).
+- **Links:** #180, PR #227, #87, #177 (station pattern), #171.
+
 ## 2026-10-15: a block that holds items behind a vanilla grid menu ships as a Bedrock container, slot count read from bytecode, only under `--experiment upcoming_creator_features`
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #226.
