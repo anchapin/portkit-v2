@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod
-from . import blocks, items, lang, loot, recipes, sounds, stations, textures
+from . import blocks, books, items, lang, loot, recipes, sounds, stations, textures
 
 CONVERTERS = [
     textures.convert,
@@ -48,6 +48,9 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
     # the items and the sounds it names against what the namespace emitted.
     deferred: list = []
     deferred_loot: list = []
+    # Citadel guide books (#182): read once the items have converted (which
+    # item opens a book is checked against them), shown by stations' entry.
+    book_plan = None
     for fn in CONVERTERS:
         if fn is textures.convert:
             # A station overlay's tinted textures (#178 sharestone runes).
@@ -71,11 +74,17 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
         elif fn is lang.convert:
             # Strings a station runtime shows (the waystone menu, #178) ship
             # under their Java key.
-            converted = fn(mod, runtime_keys=stations.station_lang_keys(mod))
+            # and the guide books' page text, per locale.
+            book_plan = books.plan(mod, result.files)
+            converted = fn(mod, runtime_keys=stations.station_lang_keys(mod),
+                           book_text=books.lang_text(mod, book_plan))
         else:
             converted = fn(mod)
         result = result.merge(converted)
-    result = result.merge(stations.convert(mod, deferred, result.files, context, loot=deferred_loot))
+    book_result, book_entry = books.convert(mod, book_plan)
+    result = result.merge(book_result)
+    result = result.merge(stations.convert(mod, deferred, result.files, context, loot=deferred_loot,
+                                           extra_entries=[book_entry] if book_entry else None))
     for note in (context.note(), context.user_note()):
         if note:
             result.notes.append(note)

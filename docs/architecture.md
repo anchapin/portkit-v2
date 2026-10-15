@@ -116,6 +116,22 @@ blockstate + model ──(blocks.py, placement + shape cited)──▶ blocks/<s
 - **The block** is the mod's own; a station block's facing-only variants
   convert with the placement rule and `SHAPE` the station spec cites.
 
+## Guide books (`converters/books.py`, `portkit/runtime/book*.js`)
+
+Citadel books (Alex's Mobs' Animal Dictionary, #182) keep their pages as data
+in the jar (`assets/<ns>/book/<book>/root.json`, one JSON per page, a text file
+per page per locale). The page text, read the way Citadel reads it, goes into
+every `texts/<Locale>.lang` the pack ships under `portkit.book.<ns>.<book>.<page>`
+(a locale without its own file gets `en_us`, Citadel's fallback); the pages
+reachable from `root.json` go into `scripts/portkit/data/<ns>_books.js`; the
+fixed viewer shows each page as an `ActionFormData` when the book's item is
+used. Which item opens the book is read from bytecode: the `GuiBasicBook`
+subclass whose `getRootPage` names it, the item class whose `use` builds that
+screen (directly or through a proxy override), and the item's registered name
+through `blockcode`'s registration reader; else the item named like the book
+directory (DEFAULT, said in the note). Pictures, unreachable pages and
+locales Bedrock lacks stay residue (docs/decisions.md, 2026-10-15).
+
 ## Facing-only blocks (`blockcode.py`, `bytecode.py`)
 
 A block whose blockstate is exactly `facing=north|east|south|west` (one model,

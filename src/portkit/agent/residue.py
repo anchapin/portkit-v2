@@ -109,6 +109,8 @@ SKIP_KINDS = {
               "agent's tools don't write; the reason says what the converter could not state exactly"),
     "waystone": ("a waystone's loot table is wired by the waystone runtime (#178), which the agent's tools "
                  "don't write; the reason says what the converter could not state exactly"),
+    "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
+             "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
 
 # Where Bedrock keeps each kind of content. A hint, not a constraint: the
