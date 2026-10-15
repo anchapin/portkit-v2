@@ -73,7 +73,6 @@ from pathlib import PurePosixPath
 from ..conditions import CONDITIONAL_TYPES, LoadContext, condition_keys
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
-from .alloy_forge import FORGING, forge_names, forging_reason
 from .tags import MultiMembers, TagResolver
 
 # Recipe types a station runtime writes into a data table (stations.RECIPE_TYPES;
@@ -127,7 +126,7 @@ _KNOWN_UNSUPPORTED = {
     ),
     "minecraft:crafting_transmute": "transmute recipes have no Bedrock equivalent",
     # alloy_forgery:forging is machine_recipe residue with a per-recipe reason
-    # (alloy_forge.forging_reason, #171).
+    # (its adapter, portkit.adapters.alloy_forgery, #171/#245).
 }
 
 # A recipe whose result Java computes in code, or that runs only at a station
@@ -1429,7 +1428,6 @@ def convert(mod: SourceMod, emitted: dict | None = None,
     reserved = set(names.values())
     owners: dict[str, str] = {}  # output path -> the source recipe that wrote it
     identifiers: dict[str, str] = {}  # recipe identifier -> the source recipe that declared it
-    forges: list[str] | None = None  # Alloy Forgery forges this namespace defines (#171)
 
     def taken(rel: str, outputs: list[tuple[str, str]]) -> str | None:
         """Why one of ``outputs`` ((path, identifier)) can't be written, if one can't."""
@@ -1511,11 +1509,6 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 result.unhandled.append(Unhandled(rel, MODULAR_TOOL, tool))
                 continue
             machine = machine_recipe_reason(java_type)
-            if java_type == FORGING:
-                # Alloy Forgery's forge (#171): the reason reads the recipe.
-                if forges is None:
-                    forges = forge_names(mod)
-                machine = forging_reason(recipe, forges)
             if machine is not None:
                 result.unhandled.append(Unhandled(rel, MACHINE_RECIPE, machine))
                 continue

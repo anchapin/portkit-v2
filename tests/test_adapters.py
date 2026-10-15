@@ -43,9 +43,10 @@ def test_hooks_default_to_empty_and_the_adapter_is_frozen():
 
 
 def test_adapter_data_runs_where_per_mod_data_converters_ran():
-    # Right after the entity converter, as alloy_forge.convert does.
+    # Right after the entity converter, where alloy_forge.convert ran before
+    # it moved into its adapter (#245 step 3).
     names = [fn.__name__ if fn is adapter_data else fn.__module__.rsplit(".", 1)[-1] for fn in CONVERTERS]
-    assert names.index("adapter_data") == names.index("entities") + 2
+    assert names.index("adapter_data") == names.index("entities") + 1
 
 
 def _mod(tmp_path, recipes_=None):

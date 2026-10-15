@@ -135,7 +135,7 @@ def test_list_over_the_cap_stays_residue(tmp_path):
 def test_alloy_forging_residue_names_the_forge(tmp_path):
     # Alloy Forgery's forging recipes need the forge from another mod's jar:
     # machine_recipe residue with the recipe's facts (#171, see
-    # tests/test_alloy_forge.py and docs/decisions.md, 2026-10-15).
+    # tests/adapters/alloy_forgery/test_alloy_forge.py and docs/decisions.md, 2026-10-15).
     recipe = {"type": "alloy_forgery:forging", "inputs": [{"item": "examplemod:a", "count": 2}],
               "output": {"id": "examplemod:b", "count": 1}, "min_forge_tier": 1, "fuel_per_tick": 5}
     result = recipes.convert(_mod(tmp_path, recipe), _emitted("a", "b"))

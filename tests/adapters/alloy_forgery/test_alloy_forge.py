@@ -15,8 +15,10 @@ from pathlib import Path
 
 import pytest
 
+from portkit import adapters
+from portkit.adapters import alloy_forgery as alloy_forge
 from portkit.agent.residue import SKIP_KINDS
-from portkit.converters import CONVERTERS, alloy_forge, recipes
+from portkit.converters import recipes
 from portkit.model import SourceMod
 
 ORE = {"type": "alloy_forgery:forging", "inputs": [{"tag": "mythicmetals:ores/adamantite"}],
@@ -72,7 +74,11 @@ def _forging(tmp_path, recipe, forge=None):
 
 def test_kinds_are_skipped_by_the_agent():
     assert "machine_recipe" in SKIP_KINDS and alloy_forge.MACHINE_DATA in SKIP_KINDS
-    assert alloy_forge.convert in CONVERTERS
+    # Registered (#245): the recipe type through recipe_reasons, the forge
+    # data through the convert hook that convert_all runs.
+    assert alloy_forge.ADAPTER in adapters.ADAPTERS
+    assert alloy_forge.convert in adapters.converters()
+    assert alloy_forge.ADAPTER.recipe_reasons[alloy_forge.FORGING][0] == recipes.MACHINE_RECIPE
 
 
 def test_ore_recipe_reason_carries_inputs_tier_fuel_and_override(tmp_path):
@@ -91,8 +97,8 @@ def test_ore_recipe_reason_carries_inputs_tier_fuel_and_override(tmp_path):
 def test_override_ranges_read_as_alloy_forgery_does(tmp_path):
     reason = _forging(tmp_path, AQUARIUM).reason
     assert "makes 3 mythicmetals:aquarium_ingot at tier 2 and 4 mythicmetals:aquarium_ingot at tier 3 and up" in reason
-    assert alloy_forge._range("1 to 3") == "tiers 1 to 3"
-    assert alloy_forge._range("x") is None
+    assert alloy_forge.forge._range("1 to 3") == "tiers 1 to 3"
+    assert alloy_forge.forge._range("x") is None
 
 
 def test_counted_alloy_and_many_inputs(tmp_path):

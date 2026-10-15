@@ -127,9 +127,10 @@ def converters() -> list[Callable[["SourceMod"], "ConversionResult"]]:
     return [a.convert for a in ADAPTERS if a.convert is not None]
 
 
-from . import mantle, mekanism  # noqa: E402  (each imports Adapter above)
+from . import alloy_forgery, mantle, mekanism  # noqa: E402  (each imports Adapter above)
 
 ADAPTERS = (
+    alloy_forgery.ADAPTER,
     mantle.ADAPTER,
     mekanism.ADAPTER,
 )

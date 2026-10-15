@@ -15,7 +15,9 @@ file, so the residue carries the forge's rules for later work instead of
 "unsupported":
 
 - :func:`forging_reason` is the reason for one ``alloy_forgery:forging``
-  recipe (``machine_recipe`` residue, written by :mod:`.recipes`): inputs,
+  recipe (``machine_recipe`` residue, written by
+  :mod:`portkit.converters.recipes` through this adapter's
+  ``recipe_reasons`` hook, #245): inputs,
   output, minimum forge tier, fuel per tick, tier overrides.
 - :func:`convert` claims the forge data Alloy Forgery reads from other mods
   as ``machine_data`` residue: forge definitions (``alloy_forges/`` from
@@ -34,7 +36,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..model import ConversionResult, SourceMod, Unhandled
+from ...model import ConversionResult, SourceMod, Unhandled
 
 FORGING = "alloy_forgery:forging"
 
