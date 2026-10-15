@@ -96,6 +96,42 @@ _BEHAVIOR_PARENTS = {
     "minecraft:item/template_bow": "a bow, whose draw behavior lives in compiled code",
 }
 
+# A bucket (or other container) whose icon a fluid-container model loader
+# draws from a fluid at runtime (#174): Forge's and NeoForge's
+# DynamicFluidContainerModel, registered as "fluid_container" (Forge 1.20.x
+# ClientForgeMod L32 @243490d7; NeoForge 1.21.x ClientNeoForgeMod L278
+# @0753a6a7), and Tinkers' Construct's FluidContainerModel, registered as
+# tconstruct:fluid_container (3.12.1.231 FluidClientEvents L43-44 @a5a03249;
+# its generated bucket models name forge:item/bucket_drip,
+# FluidBucketModelProvider L25-27). The icon is the parent's bucket with the
+# named `fluid`'s texture and tint masked in, and the fluid's texture and tint
+# are the fluid's client code; the masks and the vanilla bucket are not in the
+# mod's jar, and the pack must not carry Mojang's art (#24). The item exists to
+# carry a fluid Bedrock can't define (converters/recipes.py FLUID_RECIPE), so
+# it is residue of its own kind, which the residue agent skips: drawing its
+# icon would mean inventing one (#87). docs/decisions.md, 2026-10-15.
+CUSTOM_FLUID = "custom_fluid"
+
+
+def fluid_container_reason(model: dict) -> str | None:
+    """Why an item model drawn by a fluid-container loader isn't converted
+    (#174), or None when the model isn't one: its ``loader`` ends in
+    ``:fluid_container`` and it names a ``fluid`` outside ``minecraft:`` (a
+    vanilla fluid is not a custom one, so that model keeps the ordinary path)."""
+    loader, fluid = model.get("loader"), model.get("fluid")
+    if not (isinstance(loader, str) and loader.endswith(":fluid_container") and isinstance(fluid, str)):
+        return None
+    if fluid.startswith("minecraft:"):
+        return None
+    return (
+        f"a fluid container for the custom fluid {fluid!r}: model loader {loader!r} draws the icon at "
+        "runtime by masking the fluid's texture and tint into its parent's bucket, whose art and masks "
+        "are the loader's and vanilla's, not the jar's, so there is no icon to ship; and Bedrock add-ons "
+        "can't define a fluid for it to hold (no fluid block component; the script fluid container "
+        "holds only water, lava, powder snow or potion)"
+    )
+
+
 # Item format versions: 1.20.10 for a plain icon item; minecraft:hand_equipped
 # needs 1.20.30 or later (learn.microsoft.com, Items Documentation -
 # minecraft:hand_equipped).
@@ -675,6 +711,10 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
 
         if not isinstance(model, dict):
             result.unhandled.append(Unhandled(rel, "item", "item model is not a JSON object"))
+            continue
+        fluid_why = fluid_container_reason(model)
+        if fluid_why is not None:
+            result.unhandled.append(Unhandled(rel, CUSTOM_FLUID, fluid_why))
             continue
         views = None
         if model.get("loader") in _SEPARATE_LOADERS:

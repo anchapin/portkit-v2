@@ -111,6 +111,10 @@ SKIP_KINDS = {
                  "don't write; the reason says what the converter could not state exactly"),
     "code_recipe": ("the recipe's result or station is the mod's Java code (#180); a Bedrock recipe "
                     "would have to invent or drop part of it, and the reason says which"),
+    "fluid_recipe": ("the recipe melts, alloys, casts or fills with a mod's fluid (#174); Bedrock add-ons "
+                     "can't define a fluid, so there is no fluid or station to write it for"),
+    "custom_fluid": ("the item holds a mod's fluid and its icon is drawn from that fluid at runtime (#174); "
+                     "Bedrock add-ons can't define the fluid, and drawing the icon would invent it"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
