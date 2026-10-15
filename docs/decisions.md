@@ -27,6 +27,46 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: vendored Bedrock schemas are refreshed from the npm package by `portkit schemas`, and 1.26.60 stays on beta.24 until the stable package is out
+
+- **Decision:** `portkit schemas check` compares each row of
+  `src/portkit/validate/schemas/SOURCE.md` with the npm registry document of
+  `@minecraft/bedrock-schemas` and says per snapshot `current`, `waiting` (no
+  stable package for its version; names the latest stable and the newest
+  prerelease) or `REFRESH DUE` (exit 1; exit 2 when the registry can't be read).
+  A stable release above a snapshot's version is named as a new snapshot to
+  add, never folded into the old directory. `portkit schemas refresh` re-vendors
+  a snapshot from the package tarball (checked against the registry's sha512):
+  `bp/blocks` and `bp/items` mirrored exactly, the `common/` files they `$ref`
+  copied when the package ships them, the package `LICENSE`, and the row
+  rewritten with the version, the package's `gitHead` and the npm publish
+  date; it prints the files and block components added, removed or changed.
+  Prereleases only with `--allow-prerelease`. The 1.26.60 snapshot stays on
+  1.26.60-beta.24: as of 2026-10-15 the registry's `latest` is 1.26.50 and its
+  newest 1.26.60 package is 1.26.60-beta.28 (no stable 1.26.60), and
+  Mojang/bedrock-samples' newest non-preview tag is v1.26.50.4 (1.26.60 only
+  as v1.26.60.24/.28/.29-preview); the Minecraft Wiki gives 2026-10-27 as the
+  planned 26.60 release date. The steps after a refresh (regenerate the agent
+  reference, check emitted components, tests, corpus eval) are in SOURCE.md.
+- **Why:** #155 asks for the snapshot to move to the stable package once it is
+  published; a command makes "is it out?" a one-line check instead of a manual
+  registry read, and the tarball path is the one the vendored files came from:
+  re-vendoring 1.26.60-beta.24 with it is byte-identical to the committed tree
+  (0 added/removed/changed), and its `gitHead` is the recorded fc31f9af.
+- **Rejected:** vendoring beta.28 now as an interim step (#155 waits for the
+  stable package; a dry run shows beta.28 adds only the experimental
+  `minecraft:vibration_properties` block component (portkit doesn't emit it),
+  a looser `bone_visibility` (any object; the Molang strings portkit writes
+  still pass) and reworded collision-box limit text (a description, not a
+  check));
+  copying from the GitHub repo (its tags follow Preview builds, e.g.
+  v1.26.60.29-preview at 455e6928 has no npm package; the npm package is the
+  published unit and carries a registry hash); a scheduled CI job (left out:
+  it would need network in CI and an issue-opening token, and the check is
+  cheap to run by hand).
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
+- **Links:** #155, PR (this).
+
 ## 2026-10-14: any multipart keyed only on north/east/south/west booleans converts part for part, each part a bone shown through the connection trait
 
 - **Decision:** A multipart blockstate whose every `when` reads only
