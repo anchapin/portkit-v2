@@ -1,4 +1,4 @@
-"""Vanilla Java block model templates, fetched on demand (stairs, slabs, walls).
+"""Vanilla Java block model templates, fetched on demand (stairs, slabs, walls, panes, bars).
 
 A mod's stairs model is usually three lines: ``"parent": "minecraft:block/stairs"``
 and the three textures it wears. The boxes themselves live in vanilla's
@@ -15,6 +15,10 @@ transforms and comments are dropped), checks the result against
 These templates are byte-identical (after that derivation) in mcmeta's
 1.16.5, 1.19.2, 1.20.1, 1.21.1, 1.21.8 and 26.1 summaries, the versions the tag
 data is pinned for, so one set serves every mod. Checked on 2026-10-12.
+The glass pane and iron bars templates (#56) were added on 2026-10-14 and
+checked the same way: the panes are identical in all six; 26.1 moves the
+iron_bars_* models onto new template_bars_* parents, whose resolved elements
+and texture variable names are identical to 1.20.1's.
 
 Without the set, :func:`templates` returns None and the block converter keeps
 these shapes as residue, saying to run the fetch. ``PORTKIT_MODEL_REFERENCE``
@@ -48,12 +52,17 @@ TEMPLATES = (
     "block/slab", "block/slab_top",
     "block/template_wall_post", "block/template_wall_side", "block/template_wall_side_tall",
     "block/fence_post", "block/fence_side",
+    "block/template_glass_pane_post", "block/template_glass_pane_side",
+    "block/template_glass_pane_side_alt", "block/template_glass_pane_noside",
+    "block/template_glass_pane_noside_alt",
+    "block/iron_bars_post", "block/iron_bars_post_ends", "block/iron_bars_cap",
+    "block/iron_bars_cap_alt", "block/iron_bars_side", "block/iron_bars_side_alt",
     "block/cube", "block/cube_all", "block/cube_column", "block/cube_column_horizontal",
 )
 
 # sha256 of the derived JSON (see derive). `python -m portkit.data.models --pin`
 # prints it; bump it together with COMMIT.
-SHA256 = "eb5c8dad9972baef6cb2774932acecc5e2a959e43a0b938bc96b39fd6b8bc88a"
+SHA256 = "5b2d3fff3b1536e00e2f92b9951941f987f3d4a6c5a4f6dbac27791d8cfbcb49"
 
 
 def derive(summary: bytes) -> bytes:
