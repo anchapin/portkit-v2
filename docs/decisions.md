@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: a vanilla texture reference names Bedrock's own vanilla texture of the same file name; no art is copied
 
-- **Status:** proposed (PR #220); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14)
 - **Decision:** a mod model or item icon that borrows a vanilla texture
   (`minecraft:block/iron_block`, bare `block/stone`, pre-1.13
   `blocks/planks_oak`, `minecraft:item/stick`) points at the texture the
