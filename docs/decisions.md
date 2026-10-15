@@ -27,6 +27,51 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Mekanism machine recipes are `machine_recipe` residue naming the machine; `mek_data` crafting is `code_recipe`; the residue agent skips both
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #230.
+- **Decision:** a recipe of one of Mekanism's 26 machine types is
+  `machine_recipe` residue with a reason naming the machine block that runs it
+  and the Java it was read from (`converters/recipes.py` `_MACHINE_RECIPES`,
+  checked after `modular_tool` and before `code_recipe`; the kind is in the
+  residue agent's `SKIP_KINDS`). Source: Mekanism 10.7.19.85 for NeoForge
+  1.21.1 (mekanism/Mekanism tag v1.21.1-10.7.19.85 @a00109e4), serializers in
+  `MekanismRecipeSerializersInternal` L54-98; the machine is each recipe
+  class's own `getToastSymbol` (for example `BasicCrushingRecipe` L36 ->
+  `mekanism:crusher`, `SawmillRecipe` L104 -> `mekanism:precision_sawmill`,
+  `FluidToFluidRecipe` L89 -> the thermal evaporation controller). The two
+  conversion types have no machine: Java reads `energy_conversion` from every
+  energy slot (`EnergyInventorySlot#fillOrConvert`) and `chemical_conversion`
+  from chemical slots (`ChemicalInventorySlot#fillOrConvert`), and the reasons
+  say so. Each reason adds what Bedrock can't hold: chemicals (gases, infuse
+  types, pigments, slurries) where the recipe uses one, measured fluid where it
+  uses one (#174), the sawmill's `secondary_chance`, and always the ticking,
+  energy-holding machine. `mekanism:mek_data` (L102,
+  `MekanismShapedRecipe#assemble` L31-79 merges the ingredients' stored energy,
+  items, fluids, chemicals, upgrades, security and other data into the
+  result) joins `code_recipe`. Compat recipes gated on an absent mod stay
+  `conditional_recipe` (#183), which already covered #172's second residue
+  reason.
+- **Why:** the machine is block-entity code: it holds its inputs, outputs,
+  energy and any chemical or fluid in its own slots and tanks and works the
+  recipe over ticks, faster or cheaper with upgrades
+  (`TileEntityProgressMachine` L73-74, `MekanismUtils#getTicks`). A Bedrock
+  custom block has no ticking inventory, tank or energy store, and no
+  chemicals, so there is no Bedrock station to tag these recipes for. Naming
+  the machine makes the residue say where the work is and stops the agent
+  spending sessions on files no tool can convert.
+- **Rejected:** a crafting-table stand-in at the machine block for the
+  item-only types (crushing, enriching, smelting, sawing, combining): it turns
+  a timed, energy-using machine into instant free crafting and drops chance
+  outputs, a gameplay change #172 leaves to an explicit decision, as #171 did;
+  not made here. A scripted machine runtime (weeks; agent/runtime territory).
+  Converting `mek_data` as plain shaped crafting: the result would lose what
+  the ingredients stored, and most of its results are machines that don't
+  convert yet. Converting the machine blocks to display blocks: a shell that
+  looks like a machine and does nothing is a wrong-but-valid block (#56's
+  reasoning), as #172's own no-fabrication section says.
+- **Links:** #172, PR #230, #171, #174, #175, #180, #183, #87, #135.
+
 ## 2026-10-15: modular tool recipes (Tinkers' Construct, Silent Gear) are `modular_tool` residue naming the code; the residue agent skips them
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #229.
