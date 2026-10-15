@@ -141,7 +141,7 @@ blockstate + model ──(blocks.py, placement + shape cited)──▶ blocks/<s
 - **The block** is the mod's own; a station block's facing-only variants
   convert with the placement rule and `SHAPE` the station spec cites.
 
-## Guide books (`converters/books.py`, `portkit/runtime/book*.js`)
+## Guide books (`adapters/citadel/books.py`, `portkit/runtime/book*.js`)
 
 Citadel books (Alex's Mobs' Animal Dictionary, #182) keep their pages as data
 in the jar (`assets/<ns>/book/<book>/root.json`, one JSON per page, a text file

@@ -1,5 +1,10 @@
 """Guide books whose pages are data in the jar (#182, first slice: Citadel books).
 
+Part of the Citadel library adapter (#245, migration step 6): moved unchanged
+from ``portkit.converters.books``; the core asks it through the adapters'
+``books`` hook (:func:`portkit.adapters.book_readers`). The viewer JS
+(``portkit/runtime/book.js``, ``book_core.js``, ``forms.js``) stays core.
+
 Citadel's ``GuiBasicBook`` is the book screen Alex's Mobs' Animal Dictionary
 (and other Citadel mods' books) is drawn with. Everything that varies is data
 in the jar, under ``assets/<ns>/book/<book>/``:
@@ -64,8 +69,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..model import ConversionResult, SourceMod, Unhandled
-from .lang import _LOCALES, _LINEBREAK, _translate_key
+from ...converters.lang import _LOCALES, _LINEBREAK, _translate_key
+from ...model import ConversionResult, SourceMod, Unhandled
 
 CITADEL = ("https://github.com/AlexModGuy/Citadel", "8c09dce8a1574d210de72eb0bf5874fe1dc6532e")
 SOURCES = (
@@ -306,7 +311,7 @@ def _chain(classes, name: str) -> list[str]:
 
 
 def _code(classes, cf, method):
-    from ..bytecode import instructions
+    from ...bytecode import instructions
     try:
         return instructions(cf, method.code) if method.code else []
     except Exception:  # an undecodable method answers nothing
@@ -400,7 +405,7 @@ def book_items(classes, screens: dict[str, str]) -> dict[str, tuple[str, str]]:
 
 def _registered_items(classes, item_names: list[str], wanted: set[str]) -> dict[str, list[str]]:
     """Item class -> the registered names that build it (portkit.blockcode)."""
-    from ..blockcode import Lam, Machine, Obj, Unreadable, _wanted_classes
+    from ...blockcode import Lam, Machine, Obj, Unreadable, _wanted_classes
 
     machine = Machine(classes)
     machine.registrations = []
@@ -514,7 +519,7 @@ def lang_text(mod: SourceMod, book_plan: Plan | None) -> dict[str, dict[str, str
 def convert(mod: SourceMod, book_plan: Plan | None) -> tuple[ConversionResult, str]:
     """Each Citadel book's page table and the fixed viewer, plus the entry line
     that wires them (stations.convert writes it into scripts/portkit/main.js)."""
-    from .station_kit import FORMS, runtime_source
+    from ...converters.station_kit import FORMS, runtime_source
 
     result = ConversionResult()
     if book_plan is None:

@@ -181,7 +181,7 @@ def convert(mod: SourceMod, runtime_keys: set[str] | frozenset | None = None,
     (:func:`portkit.converters.stations.station_lang_keys`); they ship under
     their own name instead of counting as code strings. ``book_text``: Java
     locale -> {key: text} of the guide book pages the book viewer shows
-    (:func:`portkit.converters.books.lang_text`); every Bedrock locale the
+    (:func:`portkit.adapters.citadel.books.lang_text`); every Bedrock locale the
     pack ships, and every one a book folder maps to, gets them."""
     result = ConversionResult()
     runtime_keys = frozenset(runtime_keys or ())

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod
-from . import blocks, books, entities, items, lang, loot, recipes, sounds, stations, textures
+from . import blocks, entities, items, lang, loot, recipes, sounds, stations, textures
 from .station_kit import unresolved_imports
 
 
@@ -67,9 +67,13 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
     # the items and the sounds it names against what the namespace emitted.
     deferred: list = []
     deferred_loot: list = []
-    # Citadel guide books (#182): read once the items have converted (which
-    # item opens a book is checked against them), shown by stations' entry.
-    book_plan = None
+    # Guide books (#182; Citadel's through its library adapter, #245): read
+    # once the items have converted (which item opens a book is checked
+    # against them), shown by stations' entry.
+    from ..adapters import book_readers
+
+    readers = book_readers()
+    book_plans: list = [None] * len(readers)
     for fn in CONVERTERS:
         if fn is textures.convert:
             # A station overlay's tinted textures (#178 sharestone runes).
@@ -94,16 +98,23 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
             # Strings a station runtime shows (the waystone menu, #178) ship
             # under their Java key.
             # and the guide books' page text, per locale.
-            book_plan = books.plan(mod, result.files)
-            converted = fn(mod, runtime_keys=stations.station_lang_keys(mod),
-                           book_text=books.lang_text(mod, book_plan))
+            book_plans = [r.plan(mod, result.files) for r in readers]
+            book_text: dict[str, dict[str, str]] = {}
+            for reader, book_plan in zip(readers, book_plans):
+                for locale, entries in reader.lang_text(mod, book_plan).items():
+                    book_text.setdefault(locale, {}).update(entries)
+            converted = fn(mod, runtime_keys=stations.station_lang_keys(mod), book_text=book_text)
         else:
             converted = fn(mod)
         result = result.merge(converted)
-    book_result, book_entry = books.convert(mod, book_plan)
-    result = result.merge(book_result)
+    book_entries = []
+    for reader, book_plan in zip(readers, book_plans):
+        book_result, book_entry = reader.convert(mod, book_plan)
+        result = result.merge(book_result)
+        if book_entry:
+            book_entries.append(book_entry)
     result = result.merge(stations.convert(mod, deferred, result.files, context, loot=deferred_loot,
-                                           extra_entries=[book_entry] if book_entry else None))
+                                           extra_entries=book_entries or None))
     # Every relative import a shipped script makes must be shipped too (the
     # station kit's shared files, #245): a missing one is a converter bug, and
     # Bedrock would refuse the whole script pack, so fail loudly instead.

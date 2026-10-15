@@ -1,6 +1,6 @@
 // The fixed guide book viewer (src/portkit/runtime/book*.js), offline under node.
 // Run: node --import tests/js/register.mjs --test tests/js/book.test.mjs
-// (tests/test_books.py runs it with PORTKIT_BOOK_TABLE set to a data table the
+// (tests/adapters/citadel/test_books.py runs it with PORTKIT_BOOK_TABLE set to a data table the
 // converter just generated; without it a small table here is used.)
 import assert from "node:assert/strict";
 import { test } from "node:test";
