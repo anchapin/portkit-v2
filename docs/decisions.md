@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Farmer's Delight stations move into an adapter; the core names no mod
 
-- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR to be linked.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #254.
 - **Decision:** step 8 of the #245 migration, the last. The cutting board
   (the Farmer's Delight part of `converters/stations.py`, now
   `adapters/farmersdelight/cutting_board.py`: pinned sources, versions,
@@ -52,7 +52,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **Rejected:** keeping the cutting board in the core as the "reference"
   station (it names `farmersdelight` 13 times); a re-export shim at the old
   module paths (the core would still import an adapter).
-- **Links:** #245, #177, PR #253; `docs/adapter-audit-2026-10-15.md` section 7.
+- **Links:** #245, #177, PRs #253, #254; `docs/adapter-audit-2026-10-15.md` section 7.
 
 ## 2026-10-15: Waystones move into an adapter behind a `station` hook
 
