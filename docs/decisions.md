@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: a blockstate that draws waterlogged converts without it, and Bedrock holds the water through liquid_detection where getFluidState says the block holds water
 
-- **Status:** proposed (PR #217); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14)
 - **Decision:** a `variants` blockstate that draws `waterlogged` with the same
   model at `waterlogged=true` and `=false` for every other combination
   converts with the state dropped, through whichever converter its other
