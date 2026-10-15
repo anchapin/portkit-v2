@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: single-mod code reaches the core only through an explicit, ordered adapter registry
 
-- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #NNN; built to Alex's approved picks 1-4 (2026-10-15).
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #247; built to Alex's approved picks 1-4 (2026-10-15).
 - **Decision:** step 1 of the #245 migration (`docs/adapter-audit-2026-10-15.md`
   section 7). `src/portkit/adapters/__init__.py` defines `Adapter`, a frozen
   dataclass of optional hooks (`name`, `namespaces`, `library`, and the hooks
@@ -56,7 +56,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   installation or import order, and byte-identical output needs a fixed
   order); an abstract base class (pick 4); adding every station hook now
   (unused hooks would be guesses about the station moves' shape).
-- **Links:** #245, PR #246, PR #NNN; `docs/adapter-audit-2026-10-15.md`.
+- **Links:** #245, PR #246, PR #247; `docs/adapter-audit-2026-10-15.md`.
 
 ## 2026-10-15: the core may not gain mod namespace literals (ratchet lint, allowlist mode); the adapter interface stays open
 
