@@ -2,38 +2,38 @@
   "fixtures": {
     "alexs_mobs": {
       "coverage": 20.1,
-      "files": 1092,
-      "residue": 4344,
+      "files": 1094,
+      "residue": 4342,
       "errors": 0
     },
     "betterend": {
       "coverage": 35.4,
-      "files": 3409,
-      "residue": 6229,
+      "files": 3414,
+      "residue": 6217,
       "errors": 0
     },
     "create": {
-      "coverage": 30.2,
-      "files": 4070,
-      "residue": 9415,
+      "coverage": 30.6,
+      "files": 4126,
+      "residue": 9358,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 34.1,
-      "files": 862,
-      "residue": 1668,
+      "coverage": 34.3,
+      "files": 866,
+      "residue": 1661,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 38.5,
-      "files": 841,
-      "residue": 1341,
+      "coverage": 38.8,
+      "files": 845,
+      "residue": 1334,
       "errors": 0
     },
     "mekanism": {
-      "coverage": 12.6,
-      "files": 1288,
-      "residue": 8936,
+      "coverage": 12.7,
+      "files": 1296,
+      "residue": 8927,
       "errors": 0
     },
     "mythicmetals": {
@@ -61,15 +61,15 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 27.9,
-      "files": 1523,
-      "residue": 3929,
+      "coverage": 28.0,
+      "files": 1526,
+      "residue": 3925,
       "errors": 0
     },
     "tinkers_construct": {
       "coverage": 42.9,
-      "files": 13639,
-      "residue": 18145,
+      "files": 13643,
+      "residue": 18135,
       "errors": 0
     },
     "waystones": {

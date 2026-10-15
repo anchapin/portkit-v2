@@ -851,15 +851,56 @@ def _neg(v: tuple) -> tuple:
     return tuple(-c for c in v)
 
 
-def turn_rigid(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | None, str]:
-    """An element as a Java blockstate x/y turn without uvlock leaves it, or why not."""
+_AXIS_VECTOR = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}
+
+
+def _turned_rotation(rotation, xq: int, yq: int) -> tuple[dict | None, str]:
+    """An element rotation carried through a quarter-turn blockstate x/y turn.
+
+    The blockstate turn is rigid and applies to the baked quads after the
+    element's own rotation, so turn . rot(axis, angle) = rot(turn(axis),
+    angle) . turn: the axis goes where the turn sends it (the angle flips
+    sign when it lands on the negative axis, as rot(-a, t) = rot(a, -t)), the
+    origin moves with the box, and rescale is unchanged."""
+    if not isinstance(rotation, dict) or rotation.get("axis") not in _AXIS_VECTOR:
+        return None, "element has an unreadable rotation"
+    try:
+        angle = float(rotation.get("angle", 0))
+        origin = [float(c) for c in rotation.get("origin", (8, 8, 8))]
+    except (TypeError, ValueError):
+        return None, "element has an unreadable rotation"
+    if len(origin) != 3:
+        return None, "element has an unreadable rotation"
+    vector = _turn_vector(_AXIS_VECTOR[rotation["axis"]], xq, yq)
+    axis = "xyz"[next(i for i, c in enumerate(vector) if c)]
+    sign = sum(vector)
+    moved = [c + _HALF for c in _turn_vector(tuple(c - _HALF for c in origin), xq, yq)]
+    out = {**rotation, "axis": axis, "angle": angle * sign if angle else angle,
+           "origin": [int(c) if float(c).is_integer() else c for c in moved]}
+    if isinstance(rotation.get("angle"), int) and float(out["angle"]).is_integer():
+        out["angle"] = int(out["angle"])
+    return out, ""
+
+
+def turn_rigid(element: dict, x_degrees: int, y_degrees: int,
+               carry_rotation: bool = False) -> tuple[dict | None, str]:
+    """An element as a Java blockstate x/y turn without uvlock leaves it, or why not.
+
+    ``carry_rotation``: a rotated element turns too, its rotation carried by
+    _turned_rotation (used by the 6-way / attach-face path); otherwise it is
+    refused, as before."""
     if x_degrees % 90 or y_degrees % 90:
         return None, f"blockstate turn x={x_degrees} y={y_degrees} is not in quarter turns"
     xq, yq = (x_degrees // 90) % 4, (y_degrees // 90) % 4
     if not xq and not yq:
         return element, ""
+    rotation = None
     if element.get("rotation"):
-        return None, "blockstate turns a model whose elements are themselves rotated"
+        if not carry_rotation:
+            return None, "blockstate turns a model whose elements are themselves rotated"
+        rotation, why = _turned_rotation(element["rotation"], xq, yq)
+        if rotation is None:
+            return None, why
     try:
         start = [float(c) for c in element["from"]]
         end = [float(c) for c in element["to"]]
@@ -898,7 +939,10 @@ def turn_rigid(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | No
         if cull in _FACE_NORMAL:
             spec["cullface"] = _face_for(_turn_vector(_FACE_NORMAL[cull], xq, yq))
         faces[target] = spec
-    return {**element, "from": new_start, "to": new_end, "faces": faces}, ""
+    out = {**element, "from": new_start, "to": new_end, "faces": faces}
+    if rotation is not None:
+        out["rotation"] = rotation
+    return out, ""
 
 
 # --------------------------------------------------------------------------
