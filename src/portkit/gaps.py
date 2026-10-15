@@ -298,8 +298,8 @@ def leaderboard(shards: list[dict], previous: dict | None = None) -> dict:
         if previous is not None:
             old = prev.get(r["key"])
             r["trend"] = ({"new": True} if old is None else
-                          {"mods": r["mods"] - old["mods"], "files": r["files"] - old["files"],
-                           "rank": old["rank"] - rank})
+                          {"mods": r["mods"] - old.get("mods", 0), "files": r["files"] - old.get("files", 0),
+                           "rank": old.get("rank", rank) - rank})
 
     statuses = Counter(rec.get("status", "?") for rec in mods.values())
     ok = [rec for rec in mods.values() if rec.get("status") == "ok"]
@@ -358,7 +358,7 @@ def render_markdown(board: dict, top: int = 50) -> str:
     st = ", ".join(f"{k} {v}" for k, v in board["statuses"].items())
     lines.append(f"Generated {board['generated']} from `{board['manifest']}`: "
                  f"{board['mods_total']} mods ({st}); mean coverage of converted mods "
-                 f"{board['mean_coverage']}%.")
+                 + (f"{board['mean_coverage']}%." if board["mean_coverage"] is not None else "n/a."))
     prev = board.get("previous")
     if prev:
         lines.append(f"Trend against the run of {prev.get('generated')} "
