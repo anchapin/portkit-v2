@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: a blockstate that draws waterlogged converts without it, and Bedrock holds the water through liquid_detection where getFluidState says the block holds water
 
-- **Status:** proposed (PR #N); Alex decides the picks.
+- **Status:** proposed (PR #217); Alex decides the picks.
 - **Decision:** a `variants` blockstate that draws `waterlogged` with the same
   model at `waterlogged=true` and `=false` for every other combination
   converts with the state dropped, through whichever converter its other
@@ -78,9 +78,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   `liquid_detection` from the blockstate alone (a declared state with a
   vanilla `getFluidState` never holds water in Java); writing waterloggable
   blocks at 1.26.0 so `use_liquid_clipping` can be false (raises the floor of
-  every pack with one; Alex's call, pick 6); `on_liquid_touches: no_reaction`
+  every pack with one; Alex's call, pick 6 on PR #217); `on_liquid_touches: no_reaction`
   (Java's flowing water doesn't pass through a waterloggable block).
-- **Links:** PR #N; deco-mods spike gap 5; #212, #215.
+- **Links:** PR #217; deco-mods spike gap 5; #212, #215.
 
 ## 2026-10-14: a negative-size model element (from > to on an axis) converts as the quads Java bakes from it, unfolded into ordinary elements
 
