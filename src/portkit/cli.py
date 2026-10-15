@@ -917,6 +917,44 @@ def cmd_reference(args) -> int:
     return 1 if failed else 0
 
 
+def cmd_schemas(args) -> int:
+    """``portkit schemas check|refresh`` (#155): is the stable npm release of
+    each vendored Bedrock schema snapshot out, and re-vendor a snapshot from it.
+    check exits 1 when a refresh is due, 2 when the registry can't be read."""
+    from .validate import schema_upstream as up
+
+    try:
+        packument = up.fetch_packument()
+    except up.SchemaUpstreamError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        return 2
+    if args.action == "check":
+        try:
+            statuses = up.check(packument)
+        except up.SchemaUpstreamError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            return 2
+        for st in statuses:
+            print(st.message())
+        return 1 if any(st.action_needed for st in statuses) else 0
+    snapshot = args.snapshot or up.pins()[-1].snapshot
+    tarball = Path(args.tarball).read_bytes() if args.tarball else None
+    try:
+        result = up.refresh_from_registry(
+            snapshot, args.version, packument, allow_prerelease=args.allow_prerelease,
+            tarball=tarball, dry_run=args.dry_run,
+        )
+    except up.SchemaUpstreamError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        return 2
+    for line in result.lines():
+        print(line)
+    if not args.dry_run:
+        print("next: python scripts/build_bedrock_reference.py (agent reference topics come from the "
+              "schema), pytest -q, portkit eval --corpus --mct; see src/portkit/validate/schemas/SOURCE.md")
+    return 0
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="portkit")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1110,6 +1148,23 @@ def main(argv=None) -> int:
                    help="only the tag data this mod's loader and game version need "
                         "(default: every pinned set)")
     p.set_defaults(func=cmd_reference)
+
+    p = sub.add_parser(
+        "schemas",
+        help="check whether the stable @minecraft/bedrock-schemas release of each vendored "
+             "snapshot is out, or re-vendor a snapshot from it (#155)",
+    )
+    p.add_argument("action", choices=["check", "refresh"])
+    p.add_argument("--snapshot", metavar="VERSION",
+                   help="refresh: the snapshot directory (default: the newest in SOURCE.md)")
+    p.add_argument("--version", metavar="PKG_VERSION",
+                   help="refresh: the package version (default: the snapshot's stable release)")
+    p.add_argument("--allow-prerelease", action="store_true",
+                   help="refresh: allow a -beta package version")
+    p.add_argument("--tarball", metavar="PATH",
+                   help="refresh: use this downloaded .tgz (still checked against the registry hash)")
+    p.add_argument("--dry-run", action="store_true", help="refresh: report the diff, write nothing")
+    p.set_defaults(func=cmd_schemas)
 
     args = parser.parse_args(argv)
     return args.func(args)

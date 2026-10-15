@@ -199,7 +199,10 @@ a rule name and a message:
 - `schema.py`: shape checks against Mojang's own JSON schemas, vendored per
   snapshot under `validate/schemas/` and picked by `format_version`. An unknown
   `minecraft:` block component is an error, and other shape mismatches are
-  warnings. Every finding carries a JSON `pointer`.
+  warnings. Every finding carries a JSON `pointer`. `schema_upstream.py`
+  (`portkit schemas check|refresh`, #155) says when Mojang's stable package for
+  a snapshot vendored from a prerelease is out and re-vendors it; steps in
+  `validate/schemas/SOURCE.md`.
 
 The validator is deterministic and fast, which is why the agent can call it in a
 loop and why CI can gate on it. Making it stricter is always welcome, but a rule
