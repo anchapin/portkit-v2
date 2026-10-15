@@ -65,7 +65,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   it would need network in CI and an issue-opening token, and the check is
   cheap to run by hand).
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
-- **Links:** #155, PR (this).
+- **Links:** #155, PR #222.
 
 ## 2026-10-14: any multipart keyed only on north/east/south/west booleans converts part for part, each part a bone shown through the connection trait
 
