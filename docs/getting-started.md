@@ -89,6 +89,25 @@ There are three common kinds:
 `portkit report out/` turns a converted tree into a readable report, and
 `portkit validate out/` re-runs the validator after you edit the packs by hand.
 
+## Bedrock experiments
+
+Some Bedrock features a converted block could use are still behind one of the
+world's experiment toggles. portkit leaves them out unless you say your world
+runs that experiment, since a pack that needs an experiment the world doesn't
+have fails to load the blocks that use it.
+
+```bash
+portkit convert refurbished_furniture.jar out/ --experiment upcoming_creator_features
+```
+
+`upcoming_creator_features` (the world's *Upcoming Creator Features* toggle)
+turns blocks that hold items behind a plain chest-style menu in Java (Refurbished
+Furniture's drawers and fridges, Cluttered's cabinets and side tables) into
+Bedrock containers with the slot count their code gives
+(`minecraft:block_entity` `container`, block format 1.26.50). Without it they
+convert as decoration and the conversion notes list what was read. The notes
+name every block made a container and what of its Java behaviour isn't carried.
+
 ## Mod config options
 
 Some content only exists when an option in the mod's config file is on. In Java

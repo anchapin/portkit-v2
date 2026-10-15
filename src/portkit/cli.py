@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .conditions import ConfigError, load_config_file, parse_config_arg
 from .ingest import IngestError
+from .converters.blocks import EXPERIMENTS
 from .pipeline import convert
 from .validate import validate_tree
 
@@ -235,6 +236,7 @@ def _convert_once(args):
             emit_addon=not args.no_addon,
             agent=agent,
             config=config or None,
+            experiments=getattr(args, "experiment", None) or None,
         )
     except IngestError as exc:
         print(f"cannot read {args.source}: {exc}", file=sys.stderr)
@@ -985,6 +987,16 @@ def main(argv=None) -> int:
             "({\"mod\": {\"flag\": true}} "
             "or {\"mod.flag\": true}); --config settings win over it. Every run with "
             "settings writes OUT/config-overrides.json, which reproduces it"
+        ),
+    )
+    p.add_argument(
+        "--experiment", action="append", metavar="NAME", choices=list(EXPERIMENTS),
+        help=(
+            "convert for a world that runs this Bedrock experiment (repeatable). "
+            "upcoming_creator_features ships blocks that hold items behind a menu in "
+            "Java as Bedrock containers (minecraft:block_entity container, block "
+            "format 1.26.50); the pack then needs the world's Upcoming Creator "
+            "Features experiment on. Without it they stay decoration only"
         ),
     )
     p.add_argument(

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
 from .converters import convert_all
+from .converters.blocks import EXPERIMENTS
 from .icon import resolve as resolve_icon
 from .ingest import ingest
 from .meta import ModMetadata, parse as parse_metadata
@@ -388,6 +389,7 @@ def convert(
     emit_addon: bool = True,
     agent: "ResidueAgent | None" = None,
     config: "list[ConfigRequest] | None" = None,
+    experiments: "list[str] | None" = None,
 ) -> PipelineResult:
     """Convert a mod directory or .jar into a Bedrock pack tree under out_dir.
 
@@ -407,8 +409,17 @@ def convert(
     and in ``config-overrides.json`` next to the tree, which ``--config-file``
     reads back to reproduce the run. Without settings the output is the
     default-config conversion.
+
+    ``experiments`` (``--experiment``) are Bedrock experiments the user's
+    world runs; content that needs one ships only when it is named (see
+    ``portkit.converters.blocks.EXPERIMENTS``). An unknown name raises
+    ValueError before anything is written. Each is recorded in the notes.
     """
     out_dir = Path(out_dir)
+    chosen = frozenset(experiments or ())
+    unknown = sorted(chosen - set(EXPERIMENTS))
+    if unknown:
+        raise ValueError(f"unknown Bedrock experiment(s) {', '.join(unknown)}; known: {', '.join(EXPERIMENTS)}")
     with tempfile.TemporaryDirectory(prefix="portkit-ingest-") as staging:
         staged = ingest(Path(source), Path(staging))
         # An explicit namespace narrows the run to that one; otherwise every
@@ -428,9 +439,12 @@ def convert(
             known = known_flags(staged.root, meta.mods, selected)
             overrides, records = resolve_config(list(config), known, known_values(meta.mods, selected))
             meta.notes.append(config_note(records))
+        if chosen:
+            meta.notes.append("Converted for a world running the Bedrock experiment(s) "
+                              + ", ".join(sorted(chosen)) + " (--experiment): the pack needs them on.")
         per_namespace = {
             ns: convert_all(SourceMod.from_metadata(staged.root, ns, meta, classes=staged.classes),
-                            overrides=overrides or None)
+                            overrides=overrides or None, experiments=chosen)
             for ns in selected
         }
         result = merge_namespaces(per_namespace)

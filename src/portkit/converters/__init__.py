@@ -32,12 +32,16 @@ def emitted_blocks(files: dict) -> set[str]:
     return ids
 
 
-def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] | None = None) -> ConversionResult:
+def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] | None = None,
+                experiments: frozenset = frozenset()) -> ConversionResult:
     """Every converter on one namespace.
 
     ``overrides`` are the user's mod config settings (``portkit convert
     --config``), keyed by (condition type, flag); they replace the cited
     defaults wherever a load condition or a gated registration reads the flag.
+    ``experiments`` are the Bedrock experiments the user's world runs
+    (``--experiment``), passed to the converters that emit experimental
+    content (``blocks.EXPERIMENTS``).
     """
     result = ConversionResult()
     # One load-condition context for the namespace (#183), so the config flags
@@ -56,7 +60,7 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
             # A station overlay's tinted textures (#178 sharestone runes).
             converted = fn(mod, derived=stations.station_textures(mod))
         elif fn is blocks.convert:
-            converted = fn(mod, stations=stations.station_blocks(mod))
+            converted = fn(mod, stations=stations.station_blocks(mod), experiments=experiments)
         elif fn is items.convert:
             # Blocks ran first: an item named like a block that did not convert
             # is the only form of that item (a crop's seed, #177 rice).

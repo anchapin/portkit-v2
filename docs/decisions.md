@@ -27,6 +27,77 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: a block that holds items behind a vanilla grid menu ships as a Bedrock container, slot count read from bytecode, only under `--experiment upcoming_creator_features`
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #226.
+- **Decision:** A converted block is read as storage
+  (`portkit.blockcode.read_containers`) when its compiled code says all of:
+  `newBlockEntity` builds one block entity of the mod's (directly, or through
+  a registered `BlockEntityType`: a `DeferredRegister#register(id,
+  supplier)` holder runs its supplier, `BlockEntityType$Builder.of(factory,
+  ..)`/`build` keep the factory and `BlockEntityType#create(pos, state)`
+  calls it, as MC 1.21.1 does), built on `BaseContainerBlockEntity` or
+  `RandomizableContainerBlockEntity` (vanilla chests, barrels, furnaces and
+  hoppers add behaviour of their own and don't count); its
+  `getContainerSize` gives one constant, 1 to 54, on every path (the entity
+  run through its constructor); its `createMenu` builds only a vanilla grid
+  menu (`ChestMenu` and `ChestMenu.oneRow..sixRows`, `ShulkerBoxMenu`,
+  `DispenserMenu`, `HopperMenu`), not a mod menu or one made where the reader
+  doesn't follow; the block's use method (`useWithoutItem`/`useItemOn`/`use`,
+  nearest declaration, mod calls 3 deep) reaches `Player#openMenu` or
+  `NetworkHooks.openScreen`; and the block doesn't override `getTicker`.
+  With `portkit convert --experiment upcoming_creator_features` such a block
+  gets `"minecraft:block_entity": {"container": {"slot_count": N}}` in its
+  root components and block format 1.26.50 (a liquid_detection rule moved
+  past 1.26.0 keeps `use_liquid_clipping: true`, its old default; a block
+  whose JSON 1.26.x would read differently, `tag:*` components, boolean
+  `ambient_occlusion` or `geometry.full_block` below 1.26.0, isn't moved and
+  says so). Without the experiment nothing in the packs changes; the notes
+  list each block's slot count, menu and opening as read, and how to turn it
+  on. Every block read but not converted (no menu, a mod menu, a ticker, the
+  format) is named with its reason; nothing is a default. Unknown experiment
+  names are an error.
+- **Bedrock sources:** `minecraft:block_entity` `container.slot_count` 1-54
+  (learn.microsoft.com minecraftblock_block_entity, updated 2026-08-25;
+  `@minecraft/bedrock-schemas` 1.26.50 `block_container.schema.json`, also in
+  the vendored 1.26.60 snapshot); `container` added in 1.26.50 behind
+  Upcoming Creator Features, opened by interacting, contents dropped when the
+  block is destroyed, no hopper access, exclusive with `crafting_table`
+  (bedrock.dev Block Format History 1.26.50; still experimental in 1.26.60,
+  which adds `title`); Minecraft Preview 26.70.20 adds
+  `show_ui_on_interaction` (default true) and chest permissions.
+- **Measured (deco manifest, with the experiment):** 128 blocks become
+  containers: Refurbished Furniture 54 (drawers 10 x 9 slots, kitchen
+  drawers 26 x 9, coolers 16 x 9, fridges 2 x 27), Cluttered 74 (21 x 9 slots,
+  e.g. side and end tables; 25 x 18, e.g. kitchen cabinets and the filing
+  box; 27 x 27, e.g. counters and briefcases; the safe, 36; all 74 hold
+  water, so their liquid_detection keeps `use_liquid_clipping: true`). Read but left
+  decoration: Refurbished cutting boards, storage jars, plate, toasters, post
+  box (no menu), microwaves, electricity generators, recycle bin (mod menus or
+  ticking). Without the experiment all 20 corpus and deco trees are
+  md5-identical to develop; mct 0 errors with and without it.
+- **Why:** Bedrock now has a real custom-block container, so a Java chest-like
+  block can be one without a script or an entity, and its slot count, menu
+  and opening are in the jar, so nothing is invented (#87). The experiment is
+  the user's call: a pack that uses an experimental field in a world without
+  the toggle loses the block, so the default output must not need it.
+- **Rejected:** shipping the container by default (breaks the block for
+  worlds without the experiment); an entity-backed inventory or a
+  script/form storage (more moving parts than the engine's own container,
+  and the issue's options predate it); reading slots from a menu alone or a
+  Forge `ItemStackHandler` (a handler isn't always player-facing; next slice);
+  a vanilla chest stand-in (loses the block's look and identity).
+- **Left:** SRG/intermediary jars (most of the standard corpus: the reader
+  finds methods by Mojang name), blocks that don't convert yet (Farmer's
+  Delight cabinets, Refurbished crates and storage cabinets read 27 slots
+  but stay residue for their models), Cluttered multi-block storage, Storage
+  Drawers' drawers (script interaction, not a menu), Forge item handlers,
+  turning it on by default once `container` leaves the experiment.
+- **Unverified in game:** the container screen for each slot count, opening
+  from every face, drops on break, and a toggle/state block also being a
+  container.
+- **Links:** #179, PR #226, #87.
+
 ## 2026-10-15: a Citadel guide book ships as a form viewer: page text verbatim in .lang, pages from the jar, opened by the item read from bytecode
 
 - **Decision:** A directory `assets/<ns>/book/<book>/` whose `root.json` is a

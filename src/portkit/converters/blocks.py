@@ -1454,8 +1454,12 @@ def _model_block(
     return "minecraft:geometry.full_block", instances, None, ""
 
 
-def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
+def convert(mod: SourceMod, stations: dict | None = None, experiments: frozenset = frozenset()) -> ConversionResult:
     """Convert the mod's blocks.
+
+    ``experiments`` names the Bedrock experiments the user's world turns on
+    (``portkit convert --experiment``); only :data:`UPCOMING_CREATOR_FEATURES`
+    changes anything here (block containers, #179).
 
     ``stations`` maps blockstate name -> :class:`portkit.converters.stations.FacingBlock`
     for blocks a station runtime makes work (#177). Such a block's facing-only
@@ -1622,13 +1626,26 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
         result.files[f"blocks/{name}.json"] = _block_definition(
             mod.namespace, name, identifier, instances or {}
         )
+    # Containers go last: the format move reads every component the block
+    # has (liquid_detection included), and the records' behaviour notes drop
+    # what a container carries.
+    notes = result.notes
+    result.notes = []
+    _toggle_table(mod, result, coded_bool + directional_bool)
+    _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
+    _add_water(mod, result, sorted(water_dropped))
+    later, result.notes = result.notes, notes
+    containers = _add_containers(mod, result, stations or {}, experiments)
+    for record in coded + coded_bool + directional + directional_bool:
+        if record["name"] in containers:
+            # Carried: the block entity and the use that opens its menu.
+            record["behaviour"] = [m for m in record["behaviour"] if m not in _CONTAINER_CARRIED]
     result.notes.extend(_coded_facing_notes(coded))
     result.notes.extend(_coded_bool_notes(coded_bool))
     result.notes.extend(_directional_notes(directional))
     result.notes.extend(_directional_bool_notes(directional_bool))
-    _toggle_table(mod, result, coded_bool + directional_bool)
-    _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
-    _add_water(mod, result, sorted(water_dropped))
+    result.notes.extend(later)
+    result.notes.extend(containers.pop("", []))
     return result
 
 
@@ -4023,3 +4040,129 @@ def _directional_notes(records: list[dict]) -> list[str]:
         notes.append("The block's own classes override behaviour methods a converted block doesn't carry - "
                      + _grouped(acts) + ".")
     return notes
+
+
+# --------------------------------------------------------------------------
+# Containers (#179).
+#
+# A Java block that holds items behind a menu keeps them in a block entity:
+# newBlockEntity builds a vanilla Container, getContainerSize fixes its slot
+# count and the block's use hands it to Player#openMenu, whose menu is a
+# vanilla grid (ChestMenu and kin). portkit.blockcode.read_containers reads
+# all of that from the jar; nothing here is a default.
+#
+# Bedrock gives a custom block an inventory through minecraft:block_entity's
+# ``container`` (``slot_count`` 1-54; learn.microsoft.com
+# minecraftblock_block_entity, bedrock-schemas 1.26.50
+# block_container.schema.json): interacting opens it, its contents drop when
+# the block is destroyed, and other access such as hoppers is not supported
+# (bedrock.dev Block Format History, 1.26.50). The component left the
+# experiment in block format 1.26.50, but ``container`` is still behind the
+# Upcoming Creator Features experiment there and in 1.26.60. So a converted
+# block becomes a container only when the user says their world runs that
+# experiment (``portkit convert --experiment upcoming_creator_features``);
+# otherwise it stays decoration and the notes say what was read.
+
+UPCOMING_CREATOR_FEATURES = "upcoming_creator_features"
+EXPERIMENTS = (UPCOMING_CREATOR_FEATURES,)
+_CONTAINER_FORMAT = "1.26.50"
+# Block format 1.26.0 changed two defaults this converter's older blocks rely
+# on (bedrock.dev Block Format History, 1.26.0): "minecraft:geometry.full_block"
+# is full_block_v1 only below 1.26.0, and liquid_detection's
+# use_liquid_clipping defaults to true below 1.26.0 and false from it. 1.26.20
+# removed ``tag:*`` components and boolean ambient_occlusion.
+
+
+def _container_bump(definition: dict) -> str:
+    """Why ``definition`` can't be moved to the container's block format
+    without changing what it does, or ''."""
+    old = _version(definition.get("format_version", _BLOCK_FORMAT)) < _version("1.26.0")
+    block = definition.get("minecraft:block", {})
+    parts = [block.get("components", {})] + [p.get("components", {}) for p in block.get("permutations", [])]
+    for comps in parts:
+        if any(k.startswith("tag:") for k in comps):
+            return "it carries tag:* components, which block format 1.26.20 removed"
+        if old and comps.get("minecraft:geometry") == "minecraft:geometry.full_block":
+            return "it uses minecraft:geometry.full_block, which is a different geometry from block format 1.26.0"
+        for inst in (comps.get("minecraft:material_instances") or {}).values():
+            if isinstance(inst, dict) and isinstance(inst.get("ambient_occlusion"), bool):
+                return "a material instance sets ambient_occlusion as a boolean, which block format 1.26.20 removed"
+    return ""
+
+
+_CONTAINER_CARRIED = ("newBlockEntity", "useWithoutItem", "use", "useItemOn")
+
+
+def _add_containers(mod: SourceMod, result: ConversionResult, stations: dict, experiments: frozenset) -> dict:
+    """Make the converted blocks that hold items behind a menu containers
+    when the experiment is on. Returns {name: True} for each block made one,
+    plus the notes under the key ''."""
+    names = sorted(path[len("blocks/"):-len(".json")] for path, body in result.files.items()
+                   if path.startswith("blocks/") and path.endswith(".json") and isinstance(body, dict)
+                   and path[len("blocks/"):-len(".json")] not in stations)
+    if not names:
+        return {}
+    readings = blockcode.read_containers(getattr(mod, "classes", None), names)
+    found = [r for r in readings.values() if r.slots is not None]
+    if not found:
+        return {}
+    ready, held = [], []
+    for r in found:
+        why = ""
+        if not r.menu_from:
+            why = "its use method opens no menu (no Player#openMenu / NetworkHooks.openScreen reached)"
+        elif not r.menu:
+            why = r.menu_why
+        elif r.ticks:
+            why = f"it ticks ({r.ticks}), which a Bedrock container doesn't do"
+        else:
+            why = _container_bump(result.files[f"blocks/{r.name}.json"])
+        (held if why else ready).append((r, why))
+    on = UPCOMING_CREATOR_FEATURES in experiments
+    if on:
+        for r, _ in ready:
+            definition = result.files[f"blocks/{r.name}.json"]
+            components = definition["minecraft:block"].setdefault("components", {})
+            components["minecraft:block_entity"] = {"container": {"slot_count": r.slots}}
+            if _version(definition.get("format_version", _BLOCK_FORMAT)) < _version("1.26.0"):
+                for comps in [components] + [p.get("components", {}) for p in
+                                             definition["minecraft:block"].get("permutations", [])]:
+                    for rule in (comps.get("minecraft:liquid_detection") or {}).get("detection_rules", []):
+                        # Keep the pre-1.26.0 default (see _container_bump).
+                        rule.setdefault("use_liquid_clipping", True)
+            if _version(definition.get("format_version", _BLOCK_FORMAT)) < _version(_CONTAINER_FORMAT):
+                definition["format_version"] = _CONTAINER_FORMAT
+    made = {r.name: True for r, _ in ready} if on else {}
+    return {**made, "": _container_notes(ready, held, on)}
+
+
+def _container_notes(ready: list, held: list, on: bool) -> list[str]:
+    """Per block: the slot count and menu read from bytecode, and whether it
+    ships as a container."""
+    notes = []
+    if ready:
+        sizes = [(f"{_slots(r.slots)} ({r.slots_from}; menu {r.menu.rsplit('.', 1)[-1]} from {r.menu_where}, "
+                  f"opened by {r.menu_from})", r.name) for r, _ in ready]
+        if on:
+            notes.append(
+                f"{len(ready)} block(s) hold items behind a vanilla grid menu in Java and ship as Bedrock containers "
+                "(minecraft:block_entity container.slot_count, block format 1.26.50, Upcoming Creator Features "
+                "experiment: the world must have it on). Interacting from any face opens Bedrock's own container "
+                "screen; its contents drop when the block is destroyed; hoppers and other blocks don't reach it. "
+                "Java's menu layout, any face or sneak rule on opening, open/close sounds and animation, comparator "
+                "output, loot tables, items kept on the picked-up block and the other behaviour methods listed "
+                "above are not carried. Slot counts read from bytecode - " + _grouped(sizes) + ".")
+        else:
+            notes.append(
+                f"{len(ready)} block(s) hold items behind a vanilla grid menu in Java; on Bedrock they are "
+                "decoration only. A custom block's container (minecraft:block_entity container) needs the Upcoming "
+                "Creator Features experiment; convert with --experiment upcoming_creator_features to ship them as "
+                "containers with these slot counts, read from bytecode - " + _grouped(sizes) + ".")
+    if held:
+        notes.append("Hold items in Java (slot count read from bytecode) but don't convert to a container - "
+                     + _grouped([(f"{_slots(r.slots)}; {why}", r.name) for r, why in held]) + ".")
+    return notes
+
+
+def _slots(n: int) -> str:
+    return f"{n} slot" if n == 1 else f"{n} slots"
