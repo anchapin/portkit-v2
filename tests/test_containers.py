@@ -210,3 +210,19 @@ def test_emitted_block_passes_the_schema(tmp_path):
     report = ValidationReport()
     check_block(report, _def(result, "crate"), "blocks/crate.json")
     assert report.findings == []
+
+
+def test_water_added_by_the_block_converter_keeps_its_clipping(tmp_path, monkeypatch):
+    # A waterlogged crate that holds water (read_water stubbed to say so):
+    # _add_water runs before the container's format move.
+    monkeypatch.setattr(blocks.blockcode, "read_water", lambda classes, names: {
+        n: blockcode.WaterReading(n, holds=True, source="test") for n in names})
+    mod = _mod(tmp_path)
+    ns = mod.namespace
+    _write(mod.root, f"assets/{ns}/blockstates/crate.json", {"variants": {
+        "waterlogged=false": {"model": f"{ns}:block/crate"}, "waterlogged=true": {"model": f"{ns}:block/crate"}}})
+    result = blocks.convert(mod, experiments=EXP)
+    crate = _def(result, "crate")
+    rules = crate["minecraft:block"]["components"].get("minecraft:liquid_detection", {}).get("detection_rules", [])
+    assert crate["minecraft:block"]["components"]["minecraft:block_entity"] == {"container": {"slot_count": 27}}
+    assert rules and all(rule["use_liquid_clipping"] is True for rule in rules)

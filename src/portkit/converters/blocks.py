@@ -1626,6 +1626,15 @@ def convert(mod: SourceMod, stations: dict | None = None, experiments: frozenset
         result.files[f"blocks/{name}.json"] = _block_definition(
             mod.namespace, name, identifier, instances or {}
         )
+    # Containers go last: the format move reads every component the block
+    # has (liquid_detection included), and the records' behaviour notes drop
+    # what a container carries.
+    notes = result.notes
+    result.notes = []
+    _toggle_table(mod, result, coded_bool + directional_bool)
+    _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
+    _add_water(mod, result, sorted(water_dropped))
+    later, result.notes = result.notes, notes
     containers = _add_containers(mod, result, stations or {}, experiments)
     for record in coded + coded_bool + directional + directional_bool:
         if record["name"] in containers:
@@ -1635,10 +1644,8 @@ def convert(mod: SourceMod, stations: dict | None = None, experiments: frozenset
     result.notes.extend(_coded_bool_notes(coded_bool))
     result.notes.extend(_directional_notes(directional))
     result.notes.extend(_directional_bool_notes(directional_bool))
+    result.notes.extend(later)
     result.notes.extend(containers.pop("", []))
-    _toggle_table(mod, result, coded_bool + directional_bool)
-    _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
-    _add_water(mod, result, sorted(water_dropped))
     return result
 
 
@@ -4143,8 +4150,8 @@ def _container_notes(ready: list, held: list, on: bool) -> list[str]:
                 "experiment: the world must have it on). Interacting from any face opens Bedrock's own container "
                 "screen; its contents drop when the block is destroyed; hoppers and other blocks don't reach it. "
                 "Java's menu layout, any face or sneak rule on opening, open/close sounds and animation, comparator "
-                "output, loot tables, items kept on the picked-up block and the other behaviour methods listed above are not carried. Slot counts read from "
-                "bytecode - " + _grouped(sizes) + ".")
+                "output, loot tables, items kept on the picked-up block and the other behaviour methods listed "
+                "above are not carried. Slot counts read from bytecode - " + _grouped(sizes) + ".")
         else:
             notes.append(
                 f"{len(ready)} block(s) hold items behind a vanilla grid menu in Java; on Bedrock they are "
