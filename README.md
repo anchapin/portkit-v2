@@ -287,6 +287,7 @@ It's skipped with a note when `mct` isn't installed.
 - [Getting started](docs/getting-started.md): convert your own mod and read the residue.
 - [Architecture](docs/architecture.md): the deterministic core, the oracle, the residue loop, and why there's no graph framework.
 - [Writing a converter](docs/converter-guide.md): a worked example, end to end.
+- [Gap leaderboard](docs/gap-leaderboard.md): the random sample of popular mods and the nightly ranking of what blocks them (#234).
 - [Decision log](docs/decisions.md): the design decisions behind the converters' policies, and why. If your PR makes one, add an entry there.
 
 ## Layout
