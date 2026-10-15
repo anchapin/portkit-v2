@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: the generic station kit; shipped runtime bytes may change when behaviour is identical
 
-- **Status:** pick 8 (sub-question) **approved (Alex, 2026-10-15)**: "Yes, as long as behaviour is identical that's all that matters. Basically as long as the user in bedrock gets the same or similar enough experience, that's all we care about." The kit itself: approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #PR1.
+- **Status:** pick 8 (sub-question) **approved (Alex, 2026-10-15)**: "Yes, as long as behaviour is identical that's all that matters. Basically as long as the user in bedrock gets the same or similar enough experience, that's all we care about." The kit itself: approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #251.
 - **Decision:** step 5 of the #245 migration. The parts of the scripted
   station pattern that name no mod move into a kit any adapter can build on
   (#239's templates start here). Python: `converters/station_kit.py` holds the
