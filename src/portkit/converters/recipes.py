@@ -663,7 +663,8 @@ _MACHINE_RECIPES = {
     "mekanism:dissolution": _mek(
         "Chemical Dissolution Chamber recipe: `item_input` dissolves with `chemical_input` into the "
         "chemical `output` in mekanism:chemical_dissolution_chamber over time, using energy, the "
-        "chemical drawn each tick when `per_tick_usage` is true (ChemicalDissolutionRecipe, TileEntityChemicalDissolutionChamber)",
+        "chemical drawn each tick when `per_tick_usage` is true (ChemicalDissolutionRecipe, "
+        "TileEntityChemicalDissolutionChamber)",
         _NO_BEDROCK_CHEMICAL,
     ),
     "mekanism:oxidizing": _mek(
@@ -740,7 +741,8 @@ _MACHINE_RECIPES = {
     ),
     "mekanism:energy_conversion": _mek(
         "energy conversion: `input` placed in a Mekanism machine's or energy cube's energy slot is "
-        "used up for `output` energy (ItemStackToEnergyRecipe, EnergyInventorySlot#fillOrConvert); there is no "
+        "used up for `output` energy (ItemStackToEnergyRecipe, EnergyInventorySlot#fillOrConvert); "
+        "there is no "
         "crafted result, and Bedrock has no energy store to add to"
     ),
     "mekanism:chemical_conversion": _mek(

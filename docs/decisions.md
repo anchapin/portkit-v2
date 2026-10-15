@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Mekanism machine recipes are `machine_recipe` residue naming the machine; `mek_data` crafting is `code_recipe`; the residue agent skips both
 
-- **Status:** proposed, PR (this one).
+- **Status:** proposed, PR #230.
 - **Decision:** a recipe of one of Mekanism's 26 machine types is
   `machine_recipe` residue with a reason naming the machine block that runs it
   and the Java it was read from (`converters/recipes.py` `_MACHINE_RECIPES`,
@@ -70,7 +70,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   convert yet. Converting the machine blocks to display blocks: a shell that
   looks like a machine and does nothing is a wrong-but-valid block (#56's
   reasoning), as #172's own no-fabrication section says.
-- **Links:** #172, #171, #174, #175, #180, #183, #87, #135.
+- **Links:** #172, PR #230, #171, #174, #175, #180, #183, #87, #135.
 
 ## 2026-10-15: modular tool recipes (Tinkers' Construct, Silent Gear) are `modular_tool` residue naming the code; the residue agent skips them
 
