@@ -445,9 +445,10 @@ _TC_SEVERING = _tc_tool(
 # names from Const L28-46.
 _MODULAR_TOOL_RECIPES = {
     "tconstruct:tool_building": _tc_tool(
-        "tool building recipe: the parts placed in the Tinker Station (or the Tinker's Anvil for "
-        "four or more) build the `result` tool, and its stats come from each part's material "
-        "(ToolBuildingRecipe#assemble, ToolStack.createTool with the parts' materials)"
+        "tool building recipe: the parts placed in the Tinker Station (or the Tinker's Anvil when "
+        "parts and extra requirements number four or more) build the `result` tool, and its stats "
+        "come from each part's material (ToolBuildingRecipe#assemble, ToolStack.createTool with "
+        "the parts' materials)"
     ),
     "tconstruct:tipped_tool_transform": _tc_tool(
         "tool building recipe that turns tipped arrows into a tipped tool (TippedToolTransformRecipe, "
@@ -489,7 +490,7 @@ _MODULAR_TOOL_RECIPES = {
     ), _tc_tool(
         "crafting-table recipe whose result stores the tool materials of its grid ingredients on "
         "the stack (ShapedMaterialsRecipe/ShapelessMaterialsRecipe set the result's MaterialNBT; "
-        "traveler's armour, and the Tinker's Anvil and forge whose metal the grid chooses)"
+        "such as traveler's armour, or the Tinker's Anvil and forge whose metal the grid chooses)"
     )),
     **dict.fromkeys((
         "tconstruct:severing", "tconstruct:ageable_severing", "tconstruct:player_beheading",

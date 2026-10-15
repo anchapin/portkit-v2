@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: modular tool recipes (Tinkers' Construct, Silent Gear) are `modular_tool` residue naming the code; the residue agent skips them
 
-- **Status:** proposed, PR #TBD.
+- **Status:** proposed, PR #229.
 - **Decision:** a recipe that builds, modifies, repairs or takes apart a
   modular tool, or makes a part or material that stores its material on the
   stack, is `modular_tool` residue with a reason naming the station and the
