@@ -27,6 +27,52 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: entities don't convert; spawn eggs and entity loot tables are `entity` residue carrying what the bytecode reads
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #232.
+- **Decision:** a mod's entities still don't convert (#176). The two kinds of
+  file that only work with an entity become `entity` residue (a new kind in
+  the residue agent's `SKIP_KINDS`) instead of misleading item residue or
+  unowned files: an item model whose parent chain reaches
+  `minecraft:item/template_spawn_egg` (`converters/items.py`), and a loot
+  table at `loot_tables/entities/<name>.json` (`loot_table/` from 1.21) named
+  after an entity type the mod's bytecode registers (`converters/entities.py`;
+  Java's default entity table is `entities/<path>` of the entity id,
+  `EntityType#getDefaultLootTable`; tables in a jar's `minecraft/` namespace
+  override vanilla mobs and are left alone). The reasons record what
+  `portkit.entities` reads from the jar's bytecode, for later entity work:
+  each registration `register("name", lambda)` whose lambda returns
+  `EntityType` or `EntityType.Builder`, with the `MobCategory` and the
+  `sized(w, h)` hitbox when both are constants (Mojang names and Forge
+  1.20.1's SRG `m_20704_`/`m_20699_`, matched with their descriptors); and
+  each spawn egg built in a registered lambda as `new
+  ForgeSpawnEggItem|DeferredSpawnEggItem|SpawnEggItem(ENTITY, primary,
+  secondary, ...)`, with the entity resolved through the static field a
+  registration stored and both colours read only when they are integer
+  constants (written as Bedrock's `#RRGGBB`). Anything not matched is said
+  to be unread; nothing is filled in. Tables under `entities/` named after no
+  registered entity (Alex's Mobs' 15 variant tables such as
+  `catfish_large`) stay unowned. No pack output changes.
+- **Why:** a Java mob's geometry (ModelPart/Citadel calls), animations and AI
+  goals are code, and no corpus jar ships readable entity model data (no
+  GeckoLib/Blockbench/Tabula entity models), so a Bedrock entity would have
+  to invent its geometry, components and stats (#87, #135). On Bedrock a
+  spawn egg is the `spawn_egg` entry of its entity's client definition and an
+  entity loot table is named by the entity's `minecraft:loot` component, so
+  neither can ship before the entity does. As item residue the eggs invited
+  the agent to draw a flat icon that spawns nothing (a wrong-but-valid item,
+  #56's reasoning); as `entity` residue they are skipped and their reason
+  carries the colours and hitbox an entity converter will need, cited to the
+  class and method they were read from.
+- **Rejected:** behavior-pack entities with no AI or default stats as
+  stand-ins (fabrication, #176's own no-fabrication section); stand-in
+  vanilla mobs with the mod's textures (a gameplay change); converting the
+  loot tables and eggs ahead of the entity (dead files, or eggs with nothing
+  to spawn); matching entity textures to entities by file name (a guess;
+  textures/entity/ also holds block-entity art), left for a renderer-bytecode
+  read.
+- **Links:** #176, PR #232, #181, #87, #135, #56.
+
 ## 2026-10-15: Create's rotation-powered processing recipes are `machine_recipe` residue naming the machine; hand-used item application and sandpaper polishing are `code_recipe`
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #231.

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod
-from . import blocks, books, items, lang, loot, recipes, sounds, stations, textures
+from . import blocks, books, entities, items, lang, loot, recipes, sounds, stations, textures
 
 CONVERTERS = [
     textures.convert,
@@ -16,6 +16,7 @@ CONVERTERS = [
     items.convert,
     recipes.convert,
     loot.convert,
+    entities.convert,
     sounds.convert,
     lang.convert,
 ]

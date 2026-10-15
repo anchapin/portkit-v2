@@ -74,6 +74,7 @@ from __future__ import annotations
 import json
 
 from ..conditions import LoadContext
+from ..entities import ENTITY, SPAWN_EGG_PARENT, spawn_egg_reason
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..registry import registered_ids, variant_of
 from . import models
@@ -737,6 +738,11 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
             result.unhandled.append(Unhandled(rel, "item", why))
             continue
         parent = flat["parent"]
+        if parent == SPAWN_EGG_PARENT:
+            # A spawn egg is part of its entity on Bedrock, and entities
+            # don't convert (#176): the reason says what the bytecode read.
+            result.unhandled.append(Unhandled(rel, ENTITY, spawn_egg_reason(mod.classes, name)))
+            continue
         if parent in _BEHAVIOR_PARENTS:
             result.unhandled.append(Unhandled(rel, "item", _BEHAVIOR_PARENTS[parent]))
             continue
