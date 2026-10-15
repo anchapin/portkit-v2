@@ -432,6 +432,12 @@ class LoadContext:
                 return Verdict(None, f"{kind} on registry {cond.get('registry')}")
             values = cond.get("values")
             return self._items(kind, values if isinstance(values, list) else [None])
+        if not builtin:
+            # A condition type one mod's (or library's) code defines (#245).
+            from .adapters import condition_handler
+            handler = condition_handler(kind)
+            if handler is not None:
+                return handler(self, kind, cond)
         if builtin:
             return Verdict(None, f"{kind} isn't evaluated", unknown=[kind])
         return self._flag(kind, cond)

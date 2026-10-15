@@ -99,6 +99,20 @@ Where a fact can be settled without guessing, it's settled once and written
 down. `docs/rotation-convention.md` is the model for that, and `portkit probe`
 builds in-game probe packs for the questions only the game can answer.
 
+## Per-mod adapters (`portkit/adapters/`)
+
+The core converts any mod and names none (`tests/test_core_namespace_free.py`,
+a ratchet over mod namespace literals in `src/portkit` outside `adapters/`).
+Code that serves one mod, or one library many mods share, is an adapter:
+`portkit/adapters/<mod>/`, registered in the explicit, ordered `ADAPTERS`
+tuple of `portkit/adapters/__init__.py`. An `Adapter` is a frozen dataclass of
+optional hooks, and the core asks the registry at a few seams: a load-condition
+type it doesn't evaluate itself (`conditions.LoadContext`), a recipe type with
+no Bedrock mapping (`recipes.convert`: residue kind and reason), and per-mod
+data (`converters.adapter_data`, run after the entity converter). The moves
+into adapters follow `docs/adapter-audit-2026-10-15.md` section 7 (#245), each
+with md5-identical packs.
+
 ## Station runtimes (`converters/stations.py`, `portkit/runtime/`)
 
 Some recipes are data that a block's Java code interprets: Farmer's Delight's

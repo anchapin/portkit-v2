@@ -1496,6 +1496,12 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             continue
         mapping = _SUPPORTED.get(java_type)
         if mapping is None:
+            # A type one mod's code defines: its adapter says why (#245).
+            from ..adapters import recipe_reason
+            found = recipe_reason(java_type, recipe, mod)
+            if found is not None:
+                result.unhandled.append(Unhandled(rel, *found))
+                continue
             fluid = fluid_recipe_reason(java_type)
             if fluid is not None:
                 result.unhandled.append(Unhandled(rel, FLUID_RECIPE, fluid))

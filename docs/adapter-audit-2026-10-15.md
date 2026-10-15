@@ -239,6 +239,11 @@ the new code in an adapter once step 1 of section 7 exists.
 
 ## 6. Proposed adapter interface (sketch; picks open for Alex)
 
+**Update 2026-10-15:** Alex approved picks 1-10 as recommended (the (a)
+option each time). Pick 8's sub-question, whether the station-kit PR may
+change shipped JS bytes, is still open (section 8). The registry is
+`src/portkit/adapters/__init__.py` (migration step 1).
+
 ```python
 # src/portkit/adapters/__init__.py
 @dataclass(frozen=True)
