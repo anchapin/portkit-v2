@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Create's rotation-powered processing recipes are `machine_recipe` residue naming the machine; hand-used item application and sandpaper polishing are `code_recipe`
 
-- **Status:** proposed, PR #231.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #231.
 - **Decision:** a recipe of one of Create's 11 rotation-powered processing
   types (crushing, milling, cutting, pressing, compacting, mixing, splashing,
   haunting, deploying, mechanical_crafting, sequenced_assembly) is
