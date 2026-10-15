@@ -121,8 +121,9 @@ def test_every_registered_mekanism_machine_type_has_a_reason():
         "oxidizing", "pigment_extracting", "pigment_mixing", "metallurgic_infusing", "painting", "reaction",
         "rotary", "sawing",
     }
-    assert set(recipes._MACHINE_RECIPES) == {f"mekanism:{name}" for name in registered}
-    for java_type, reason in recipes._MACHINE_RECIPES.items():
+    mekanism = {t: r for t, r in recipes._MACHINE_RECIPES.items() if t.startswith("mekanism:")}
+    assert set(mekanism) == {f"mekanism:{name}" for name in registered}
+    for java_type, reason in mekanism.items():
         assert reason.startswith("a Mekanism "), java_type
         assert "#172" in reason, java_type
 

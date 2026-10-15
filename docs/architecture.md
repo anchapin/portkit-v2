@@ -53,7 +53,7 @@ mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶
    can't define a fluid; the agent skips it too (#174). A recipe that builds, modifies, repairs
    or takes apart a modular tool or its parts (Tinkers' tool station, part builder, worktable,
    modifiers and severing; Silent Gear gear crafting, smithing, gear salvaging) is `modular_tool`
-   residue, since those tools' stats are computed in Java per stack; the agent skips it (#175). A recipe that runs in a Mekanism machine (crusher, enrichment chamber, sawmill, chemical machines, energy and chemical conversion) is `machine_recipe` residue naming the machine, and Mekanism's data-keeping `mek_data` crafting is `code_recipe`; the agent skips both (#172). Mod config flags are decided at their defaults,
+   residue, since those tools' stats are computed in Java per stack; the agent skips it (#175). A recipe that runs in a Mekanism machine (crusher, enrichment chamber, sawmill, chemical machines, energy and chemical conversion) is `machine_recipe` residue naming the machine, and Mekanism's data-keeping `mek_data` crafting is `code_recipe`; the agent skips both (#172). Create's rotation-powered processing recipes (crushing, milling, cutting, pressing, compacting, mixing, fan splashing and haunting, deploying, mechanical crafting, sequenced assembly) are `machine_recipe` too, naming the Create machine, and its hand-used item application and sandpaper polishing are `code_recipe` (#173). Mod config flags are decided at their defaults,
    cited in `data/config_flag_defaults.json`, unless the user sets them
    (`portkit convert --config`, recorded in `config-overrides.json`); number
    options a converter reads (Farmer's Delight's `cuttingBoardFortuneBonus`)
