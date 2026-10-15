@@ -232,6 +232,11 @@ only shrinks. Baseline **313**:
 When a mod joins the corpus or deco set, add its namespaces to
 `MOD_NAMESPACES` in the test.
 
+Until the moves land, a PR that has to extend single-mod code in place
+(for example more Waystones or FD work) raises that file's count in the
+allowlist in the same diff, where review sees it. The better fix is to put
+the new code in an adapter once step 1 of section 7 exists.
+
 ## 6. Proposed adapter interface (sketch; picks open for Alex)
 
 ```python

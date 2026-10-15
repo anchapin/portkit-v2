@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: the core may not gain mod namespace literals (ratchet lint, allowlist mode); the adapter interface stays open
 
-- **Status:** lint and audit approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR (this); adapter interface picks 1-10 in `docs/adapter-audit-2026-10-15.md` section 6 **proposed, open for Alex**.
+- **Status:** lint and audit approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #246; adapter interface picks 1-10 in `docs/adapter-audit-2026-10-15.md` section 6 **proposed, open for Alex**.
 - **Decision:** first slice of #245 (step 1 + step 4 in allowlist mode), no
   code moves and no behaviour change. (1) `docs/adapter-audit-2026-10-15.md`
   lists the single-mod code in `src/portkit`: about 10,300 of 37,132 lines
@@ -57,7 +57,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   slip past); an allowlist that only caps counts (removed references could
   come back unnoticed); moving code in the same PR (the interface needs
   Alex's picks first).
-- **Links:** #245, #239, #234; `docs/adapter-audit-2026-10-15.md`.
+- **Links:** #245, PR #246, #239, #234; `docs/adapter-audit-2026-10-15.md`.
 
 ## 2026-10-15: Alloy Forgery forging recipes are `machine_recipe` residue carrying the recipe's rules; forge definitions, tiers, fuels and its recipe tags are `machine_data`
 
