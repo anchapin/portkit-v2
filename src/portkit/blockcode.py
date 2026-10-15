@@ -72,6 +72,7 @@ _PROPERTIES = "net/minecraft/world/level/block/state/BlockBehaviour$Properties"
 _GET_SHAPE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/BlockGetter;"
                    "Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/phys/shapes/CollisionContext;)"
                    "Lnet/minecraft/world/phys/shapes/VoxelShape;")
+_BE_BUILDER = "net/minecraft/world/level/block/entity/BlockEntityType$Builder"
 _PLACEMENT_DESC = ("(Lnet/minecraft/world/item/context/BlockPlaceContext;)"
                    "Lnet/minecraft/world/level/block/state/BlockState;")
 
@@ -454,6 +455,10 @@ class Machine:
         # BlockState#canSurvive answers true, and support_assumed records it.
         self.assume_support = False
         self.support_assumed = False
+        # While reading a block entity (read_containers): registry holders,
+        # BlockEntityType builders and BlockEntityType#create are followed
+        # (see _holder_call) instead of being unknown calls.
+        self.holders = False
 
     # -- classes ------------------------------------------------------------
 
@@ -919,6 +924,36 @@ class Machine:
             f.pc = target
         return None
 
+    def _holder_call(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
+        """Registry plumbing a block entity is made through, followed while
+        reading one (Machine.holders):
+
+        * a ``register`` call naming one id and passing one supplier lambda
+          (NeoForge/Forge ``DeferredRegister#register(String, Supplier)``)
+          returns a holder of that supplier, and ``get``/``value`` on the
+          holder runs it (what the registry does once, at registration);
+        * ``BlockEntityType$Builder.of(factory, blocks...)`` and its
+          ``build(type)`` keep the factory (BlockEntityType$Builder#of and
+          #build, MC 1.21.1: the type stores the factory), and
+          ``BlockEntityType#create(pos, state)`` calls it
+          (``this.factory.create(pos, state)``, MC 1.21.1).
+
+        Anything else is not handled here."""
+        if name == "register" and not static and not desc.endswith(")V"):
+            ids = [a for a in rest if isinstance(a, (str, RL))]
+            lams = [a for a in rest if isinstance(a, Lam)]
+            if len(ids) == 1 and len(lams) == 1 and len(rest) == 2:
+                return [Obj("__holder", {"supplier": lams[0]})]
+        if isinstance(recv, Obj) and recv.cls == "__holder" and name in ("get", "value") and not rest:
+            return self.call_lambda(recv.fields["supplier"], [])
+        if owner == _BE_BUILDER and static and name == "of" and rest and isinstance(rest[0], Lam):
+            return [Obj("__betype_builder", {"factory": rest[0]})]
+        if isinstance(recv, Obj) and recv.cls == "__betype_builder" and name == "build":
+            return [Obj("__betype", {"factory": recv.fields["factory"]})]
+        if isinstance(recv, Obj) and recv.cls == "__betype" and name == "create" and len(rest) == 2:
+            return self.call_lambda(recv.fields["factory"], list(rest))
+        return _NOT_HANDLED
+
     def _new(self, cls: str):
         if cls in ("java/util/EnumMap", "java/util/HashMap", "java/util/LinkedHashMap",
                    "java/util/TreeMap"):
@@ -1047,6 +1082,10 @@ class Machine:
     def vanilla(self, owner: str, name: str, desc: str, args: list, static: bool):
         recv = None if static else (args[0] if args else None)
         rest = args if static else args[1:]
+        if self.holders:
+            held = self._holder_call(owner, name, desc, recv, rest, static)
+            if held is not _NOT_HANDLED:
+                return held
         if owner in ("net/minecraft/world/level/block/Block",) or (
                 owner.startswith(_VANILLA_BLOCK_PACKAGE) and name == "box" and static):
             if name == "box" and static and len(rest) == 6:
@@ -2741,3 +2780,237 @@ def _read_dir_state_shapes(machine: Machine, obj: Obj, r: DirStateReading) -> No
     else:
         r.shapes_by = shapes
         r.shape_from = where
+
+
+# --- Containers (#179) -------------------------------------------------------
+#
+# A Java block that keeps items and opens a menu for them: newBlockEntity
+# builds a block entity that is a vanilla Container (it reaches
+# BaseContainerBlockEntity), getContainerSize says how many slots it has, and
+# the block's use method hands it to Player#openMenu. Each of the three is
+# read from the jar; a block missing any of them is not a container here.
+
+_NEW_BE_DESC = ("(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)"
+                "Lnet/minecraft/world/level/block/entity/BlockEntity;")
+_BE_PACKAGE = "net/minecraft/world/level/block/entity/"
+# Vanilla block entities whose only behaviour is holding items behind a menu
+# (MC 1.21.1, Mojang names): BaseContainerBlockEntity (abstract; Container,
+# MenuProvider, Nameable) and RandomizableContainerBlockEntity (adds a loot
+# table). Chests, barrels, furnaces, hoppers and the rest add behaviour of
+# their own (lids, ticking, smelting, moving items), so a mod block entity
+# built on one of them is not read as plain storage.
+_PLAIN_CONTAINERS = {
+    _BE_PACKAGE + "BaseContainerBlockEntity",
+    _BE_PACKAGE + "RandomizableContainerBlockEntity",
+}
+# Bedrock's custom-block container holds 1 to 54 slots
+# (minecraft:block_entity container.slot_count, bedrock-schemas 1.26.50
+# block_container.schema.json: minimum 1, maximum 54).
+MAX_SLOTS = 54
+# The block methods a player's use goes through (MC 1.21.1 BlockBehaviour:
+# useWithoutItem, useItemOn; before 1.20.5: use).
+_USE_METHODS = ("useWithoutItem", "useItemOn", "use")
+# What opens a menu: Player#openMenu(MenuProvider) (vanilla; NeoForge adds an
+# overload with a buffer writer), Forge's NetworkHooks.openScreen.
+_OPEN_MENU = ("openMenu", "openScreen")
+_SIZE_DESC = "()I"
+_CREATE_MENU_DESC = "(ILnet/minecraft/world/entity/player/Inventory;)Lnet/minecraft/world/inventory/AbstractContainerMenu;"
+# Vanilla menus that only show a container's slots and move stacks in and
+# out of them (MC 1.21.1 net.minecraft.world.inventory: ChestMenu, the 9xN
+# grid of MenuType.GENERIC_9x1..9x6 and ChestMenu.oneRow..sixRows;
+# ShulkerBoxMenu refuses shulker boxes in its slots; DispenserMenu the 3x3
+# grid; HopperMenu the 5-slot row). A mod menu, or a vanilla menu with
+# rules of its own (furnace, brewing stand...), is the mod's screen.
+_INVENTORY = "net/minecraft/world/inventory/"
+_GRID_MENUS = {_INVENTORY + c for c in ("ChestMenu", "ShulkerBoxMenu", "DispenserMenu", "HopperMenu")}
+
+
+@dataclass
+class ContainerReading:
+    """What a block's code says about the items it holds.
+
+    ``slots`` is the block entity's getContainerSize, or None with ``why``.
+    ``menu_from`` names the use method that opens the menu ("" when none
+    does). ``ticks`` names the block's getTicker when it overrides one (its
+    block entity then does something over time). ``be`` is the block
+    entity's class (dotted).
+    """
+
+    name: str
+    cls: str | None = None
+    be: str | None = None
+    slots: int | None = None
+    slots_from: str = ""
+    why: str = ""
+    menu_from: str = ""
+    ticks: str = ""
+    entity: bool = False  # newBlockEntity is overridden
+    # The vanilla menu class createMenu builds (dotted) and where it was
+    # read, or "" with menu_why.
+    menu: str = ""
+    menu_where: str = ""
+    menu_why: str = ""
+
+
+def _calls_in(machine: Machine, cls: str, method: str, depth: int = 3, seen: set | None = None) -> str:
+    """'Class#method' when ``method`` of ``cls`` (or a mod method it calls,
+    ``depth`` calls deep) invokes an openMenu/openScreen method, else ''."""
+    seen = set() if seen is None else seen
+    for cname in machine.chain(cls):
+        cf = machine.classes.get(cname)
+        if cf is None:
+            break
+        declared = [m for m in cf.methods if m.name == method and m.code is not None]
+        for m in declared:
+            if (cname, m.name, m.desc) in seen:
+                continue
+            seen.add((cname, m.name, m.desc))
+            for insn in instructions(cf, m.code):
+                if not isinstance(insn.arg, Ref) or insn.op not in (0xb6, 0xb7, 0xb8, 0xb9):
+                    continue
+                if insn.arg.name in _OPEN_MENU:
+                    return f"{cname.replace('/', '.')}#{m.name}"
+                if depth and machine.is_mod(insn.arg.owner):
+                    found = _calls_in(machine, insn.arg.owner, insn.arg.name, depth - 1, seen)
+                    if found:
+                        return found
+        if declared:
+            # The nearest declaration is the one Java runs; a super call
+            # in it was followed above.
+            return ""
+    return ""
+
+
+def _menu_built(machine: Machine, be: str) -> tuple[str, str, str]:
+    """(menu class, 'Class#createMenu', why): the menu class the block
+    entity's createMenu (or a mod method it calls) builds, when it is one of
+    _GRID_MENUS and the only menu it builds; else ('', where, why)."""
+    found = machine.find_method(be, "createMenu", _CREATE_MENU_DESC)
+    if found is None:
+        return "", "", f"{be.replace('/', '.')} doesn't implement createMenu in the mod's classes"
+    where = f"{found[0].name.replace('/', '.')}#createMenu"
+    menus: set[str] = set()
+    other: set[str] = set()
+    todo, seen = [(found[0], found[1], 2)], set()
+    while todo:
+        cf, m, depth = todo.pop()
+        if (cf.name, m.name, m.desc) in seen:
+            continue
+        seen.add((cf.name, m.name, m.desc))
+        for insn in instructions(cf, m.code):
+            if insn.op == 0xbb and isinstance(insn.arg, tuple):  # new
+                cls = insn.arg[1]
+                if cls in _GRID_MENUS:
+                    menus.add(cls)
+                elif cls.endswith("Menu") or (machine.is_mod(cls) and machine.vanilla_base(cls).startswith(_INVENTORY)):
+                    other.add(cls)
+            elif isinstance(insn.arg, Ref) and insn.op in (0xb6, 0xb7, 0xb8, 0xb9):
+                ref = insn.arg
+                if ref.owner == _INVENTORY + "ChestMenu" and insn.op == 0xb8:
+                    menus.add(ref.owner)
+                elif machine.is_mod(ref.owner) and depth:
+                    target = machine.find_method(ref.owner, ref.name, ref.desc)
+                    if target is not None:
+                        todo.append((target[0], target[1], depth - 1))
+                elif ref.desc.endswith(")L" + _INVENTORY + "AbstractContainerMenu;"):
+                    # A menu made somewhere the reader doesn't follow (a
+                    # platform service, an interface).
+                    other.add(f"{ref.owner}#{ref.name}")
+    if other:
+        return "", where, f"{where} builds the mod's own menu ({', '.join(sorted(o.replace('/', '.') for o in other))})"
+    if len(menus) != 1:
+        return "", where, f"{where} builds no vanilla grid menu it can read"
+    return menus.pop().replace("/", "."), where, ""
+
+
+def read_containers(classes: ClassIndex | None, names: list[str]) -> dict[str, ContainerReading]:
+    """A :class:`ContainerReading` per blockstate name in ``names``."""
+    readings = {n: ContainerReading(n) for n in names}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.why = "the mod ships no class files"
+        return readings
+    machine, registered = _registered(classes, names)
+    # Block entity types are registered apart from blocks; follow them fresh.
+    machine.holders = True
+    machine.statics.clear()
+    machine._clinit_done.clear()
+    machine._clinit_failed.clear()
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.why = why
+            continue
+        obj = objs[0]
+        r.cls = obj.cls.replace("/", ".")
+        found = machine.find_method(obj.cls, "newBlockEntity", _NEW_BE_DESC)
+        if found is None:
+            continue
+        r.entity = True
+        _read_container(machine, obj, found, r)
+    return readings
+
+
+def _read_container(machine: Machine, obj: Obj, found, r: ContainerReading) -> None:
+    where = f"{found[0].name.replace('/', '.')}#newBlockEntity"
+    machine.steps = 0
+    machine.new_epoch()
+    try:
+        built = machine.run(*found, [obj, UNKNOWN, UNKNOWN])
+    except Unreadable as exc:
+        r.why = f"{where} can't be followed ({exc})"
+        return
+    entities = [b for b in built if isinstance(b, Obj) and machine.is_mod(b.cls)]
+    if not entities or len(entities) != len(built):
+        r.why = f"{where} doesn't build a block entity of the mod's that can be read"
+        return
+    if len({e.cls for e in entities}) != 1:
+        r.why = f"{where} builds different block entities: " + ", ".join(sorted({e.cls for e in entities}))
+        return
+    be = entities[0].cls
+    r.be = be.replace("/", ".")
+    base = machine.vanilla_base(be)
+    if base not in _PLAIN_CONTAINERS:
+        r.why = (f"its block entity {r.be} is built on {base.replace('/', '.')}, which is not a plain "
+                 "container (BaseContainerBlockEntity / RandomizableContainerBlockEntity)")
+        return
+    if _renamed(machine, be):
+        r.why = (f"{r.be} uses Forge SRG or Fabric intermediary member names, so its getContainerSize "
+                 "can't be found by name")
+        return
+    size_m = machine.find_method(be, "getContainerSize", _SIZE_DESC)
+    if size_m is None:
+        r.why = f"{r.be} doesn't implement getContainerSize in the mod's classes"
+        return
+    size_where = f"{size_m[0].name.replace('/', '.')}#getContainerSize"
+    partial = [e.fields["__partial"] for e in entities if "__partial" in e.fields]
+    if partial:
+        r.why = f"{r.be}'s constructor can't be followed to the end ({partial[0]})"
+        return
+    sizes = set()
+    try:
+        for e in entities:
+            machine.steps = 0
+            sizes.update(machine.run(*size_m, [e]))
+    except Unreadable as exc:
+        r.why = f"{size_where} can't be followed ({exc})"
+        return
+    if len(sizes) != 1 or not all(isinstance(s, int) and not isinstance(s, bool) for s in sizes):
+        r.why = f"{size_where} doesn't give one slot count the code fixes"
+        return
+    size = sizes.pop()
+    if not 1 <= size <= MAX_SLOTS:
+        r.why = f"{size_where} gives {size} slots; a Bedrock block container holds 1 to {MAX_SLOTS}"
+        return
+    r.slots, r.slots_from = size, f"{size_where} via {where}"
+    for method in _USE_METHODS:
+        r.menu_from = _calls_in(machine, obj.cls, method)
+        if r.menu_from:
+            break
+    r.menu, r.menu_where, r.menu_why = _menu_built(machine, be)
+    ticker = machine.find_method(obj.cls, "getTicker", (
+        "(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/level/block/state/BlockState;"
+        "Lnet/minecraft/world/level/block/entity/BlockEntityType;)"
+        "Lnet/minecraft/world/level/block/entity/BlockEntityTicker;"))
+    if ticker is not None:
+        r.ticks = f"{ticker[0].name.replace('/', '.')}#getTicker"
