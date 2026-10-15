@@ -1,0 +1,136 @@
+name: gap-leaderboard
+
+# The random-sample corpus and gap leaderboard (#234). Converts every mod in
+# fixtures/sample/mods.toml (popular Modrinth mods, pinned by version id and
+# sha512, downloaded here and never committed), groups the residue by
+# normalized reason, and publishes a ranked leaderboard (JSON + markdown) with
+# a trend against the previous successful run. Report-only: it never fails on
+# what it finds. See docs/gap-leaderboard.md.
+on:
+  push: # TEMPORARY: first runs on the PR branch (a new workflow can't be dispatched until it is on develop)
+    branches: [hark/issue-234-gap-leaderboard]
+  schedule:
+    - cron: "41 8 * * *"
+  workflow_dispatch:
+    inputs:
+      mct:
+        description: "Also count Mojang mct findings per mod (report-only, slower)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read # to download the previous run's leaderboard for the trend
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # Round-robin over the manifest (gaps.shard_of). Four shards keep each
+        # job well inside the time limit at 50 mods; raise this with the sample.
+        shard: [1, 2, 3, 4]
+    env:
+      SHARDS: 4
+      PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.sample-cache
+      PORTKIT_REFERENCE_CACHE: ${{ github.workspace }}/.reference-cache
+      MCT_FLAG: ${{ (github.event_name == 'schedule' || inputs.mct) && '--mct' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - uses: actions/cache@v4
+        with:
+          path: .sample-cache
+          key: sample-${{ matrix.shard }}-${{ hashFiles('fixtures/sample/mods.toml') }}
+          restore-keys: |
+            sample-${{ matrix.shard }}-
+
+      - uses: actions/cache@v4
+        with:
+          path: .reference-cache
+          key: reference-${{ hashFiles('src/portkit/data/__init__.py', 'src/portkit/data/tags.py') }}
+
+      - name: Fetch reference data (sha256-checked)
+        run: portkit reference fetch
+
+      - uses: actions/setup-node@v4
+        if: env.MCT_FLAG != ''
+        with:
+          node-version: "22"
+
+      - name: Install Minecraft Creator Tools (mct)
+        if: env.MCT_FLAG != ''
+        continue-on-error: true
+        run: |
+          npm install -g @minecraft/creator-tools@0.20.0
+          mct eula --accept
+          mct --version
+
+      # Fetches each jar (sha512-checked, cached), converts it in a child
+      # process with a timeout, and records its residue by normalized reason.
+      # A fetch failure, crash or timeout is a row in the shard, not a failure.
+      - name: Convert shard ${{ matrix.shard }}/${{ env.SHARDS }}
+        run: portkit gaps run --shard ${{ matrix.shard }}/$SHARDS $MCT_FLAG --out gap-shard-${{ matrix.shard }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gap-shard-${{ matrix.shard }}
+          path: gap-shard-${{ matrix.shard }}.json
+          retention-days: 14
+
+  board:
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e .
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gap-shard-*
+          path: shards
+          merge-multiple: true
+
+      # The trend compares against the newest successful run on this branch.
+      # The first run (or one whose predecessor's artifact expired) has none.
+      - name: Previous leaderboard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow gap-leaderboard.yml \
+            --branch "$GITHUB_REF_NAME" --status success --limit 1 \
+            --json databaseId -q '.[0].databaseId' || true)
+          if [ -n "$prev" ]; then
+            gh run download "$prev" --repo "$GITHUB_REPOSITORY" -n gap-leaderboard -D previous || true
+          fi
+          ls previous 2>/dev/null || echo "no previous leaderboard"
+
+      - name: Leaderboard
+        run: |
+          portkit gaps board shards/*.json --previous previous/gap-leaderboard.json \
+            --json gap-leaderboard.json --md gap-leaderboard.md
+          cat gap-leaderboard.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gap-leaderboard
+          path: |
+            gap-leaderboard.json
+            gap-leaderboard.md
+          retention-days: 90
