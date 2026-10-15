@@ -27,6 +27,63 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: any multipart keyed only on north/east/south/west booleans converts part for part, each part a bone shown through the connection trait
+
+- **Decision:** A multipart blockstate whose every `when` reads only
+  `north`/`east`/`south`/`west` as booleans (`true`, `false`, `true|false`,
+  several keys ANDed, `AND`/`OR` lists), with at least one part keyed on one,
+  converts after the wall and palisade paths have passed on it: one bone per
+  part (`part_<i>`, in blockstate order), its model turned by the part's x/y
+  and uvlock as the other shape paths turn them (`models.turn_y`; without
+  uvlock an element that is itself rotated turns as a solid, `turn_rigid` with
+  its rotation carried; with x, `turn_locked`/`turn_rigid`), and a
+  `bone_visibility` Molang test per keyed part over
+  `minecraft:connection_<dir>` from the `minecraft:connection` trait
+  (`cardinal_connections`), block format 1.26.0 (pack floor follows). An
+  unconditional part has no test. Parts whose models give one texture key
+  different meanings get that key renamed per part (`<key>_p<i>`), so they share
+  one geometry. A part that picks at random between models ships the first,
+  the rest named in the note (as `_random_variant` does for variants).
+  Collision and selection stay a full block, as on the palisade path. The
+  fetched vanilla templates add the glass pane (`template_glass_pane_*`) and
+  iron bars (`iron_bars_*`) parents (re-pinned; identical 1.16.5 to 1.21.8 and,
+  resolved, in 26.1, which moves bars onto `template_bars_*`). A part that
+  can't be turned exactly, or a texture that doesn't resolve, keeps the block
+  residue with a reason naming the part (`connection multipart part N
+  (model): ...`). Multiparts keyed on anything else (`up`/`down`, `low|tall`,
+  `facing`, ages, mod states) keep the general refusal naming their states.
+- **Why:** Measured on develop 0ed8556 (13 corpus mods + 7 deco mods, every
+  blockstate with a `multipart`): 203 multipart blocks were residue (deco:
+  Cluttered 43, Refurbished 29; corpus: Tinkers 47, BetterEnd 39, Create 27,
+  Supplementaries 10, Alex's Mobs 3, Farmer's Delight 2+2, Silent Gear 1); the
+  largest class, 9-13-part panes, bars, hedges, lattice fences and balustrades
+  keyed on the four booleans, matched neither the palisade (5 parts, one side
+  model) nor the wall shape. Those four booleans are exactly the states Java's
+  CrossCollisionBlock family computes from neighbours and the states Bedrock's
+  connection trait reports ("contains information about whether the block
+  connects to other blocks, and if so, on what faces", Block Traits:
+  connection, learn.microsoft.com; stable without experiments from 1.26.0 per
+  the 1.26.0 creator update notes; `minecraft:connection_rule` names fences,
+  walls, bars and glass panes as the blocks it governs). `bone_visibility`
+  takes a Molang string per bone (vendored 1.26.60 `block_components`
+  schema). Bedrock has no other data-driven way to set such states, so
+  mapping the part conditions onto the trait's states is the most general
+  correct conversion; palisades (#67, checked in game) and walls already use
+  it. After: 72 more blocks convert (Cluttered +15 window panes, +3
+  balustrades; Refurbished +10 lattice fences, +3 hedges; Create +13 panes and
+  bars; Tinkers +24 panes and bars; BetterEnd +2 bars; Farmer's Delight +1
+  rope fence per loader), 131 multipart blocks stay residue.
+- **Rejected:** Reading which neighbours join from each mod's code (the
+  trait's rule is what Bedrock offers; named per block in its note, as for
+  palisades and walls); per-permutation collision boxes from the visible
+  parts (Java's boxes are code, not the model; the palisade precedent keeps a
+  full block); dropping the `false` parts (panes draw their `noside` faces on
+  them); a script-set state (no scripts for static blocks); converting
+  `up`/`down` six-way connections (no Bedrock trait reports vertical
+  connections).
+- **Status:** proposed (PR pending).
+- **Links:** #56, #67, #220.
+
 ## 2026-10-14: a vanilla texture reference names Bedrock's own vanilla texture of the same file name; no art is copied
 
 - **Status:** approved (Alex, 2026-10-14)

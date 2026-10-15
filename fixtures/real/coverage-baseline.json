@@ -7,27 +7,27 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 35.6,
-      "files": 3434,
-      "residue": 6201,
+      "coverage": 35.7,
+      "files": 3436,
+      "residue": 6187,
       "errors": 0
     },
     "create": {
-      "coverage": 31.0,
-      "files": 4168,
-      "residue": 9273,
+      "coverage": 31.4,
+      "files": 4185,
+      "residue": 9141,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 34.4,
-      "files": 868,
-      "residue": 1657,
+      "coverage": 34.5,
+      "files": 870,
+      "residue": 1653,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 38.9,
-      "files": 847,
-      "residue": 1330,
+      "coverage": 39.0,
+      "files": 849,
+      "residue": 1326,
       "errors": 0
     },
     "mekanism": {
@@ -67,9 +67,9 @@
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 42.9,
-      "files": 13644,
-      "residue": 18134,
+      "coverage": 43.2,
+      "files": 13668,
+      "residue": 17978,
       "errors": 0
     },
     "waystones": {

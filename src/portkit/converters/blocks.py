@@ -8,8 +8,10 @@ So this converter takes the half that is declarative and refuses the rest. A
 block that is a plain cube converts to a Bedrock block definition with its
 geometry and material instances. A block with real states converts only when a
 Bedrock placement or connection trait sets the same states Java's block code
-does: pillars (axis), fences and walls (connections), seats (facing), stairs
-(facing, half, corner) and slabs (half). A block whose only state is facing
+does: pillars (axis), fences and walls (connections), any other multipart
+keyed only on north/east/south/west booleans such as panes, bars and hedges
+(connections, one bone per part), seats (facing), stairs (facing, half,
+corner) and slabs (half). A block whose only state is facing
 converts too, its placement rule and box read from its compiled code
 (portkit.blockcode) or, where that can't be read, a default the notes name as
 one (see "Facing-only blocks" below). Anything else goes to the residue with
@@ -1078,6 +1080,245 @@ def _palisade_definition(namespace: str, name: str, geometry: str, instances: di
     }
 
 
+# --------------------------------------------------------------------------
+# Connection-keyed multiparts (#56).
+#
+# Fences, panes, bars, hedges, lattices and balustrades all draw their sides
+# with a multipart whose conditions read only north/east/south/west as
+# booleans. Java's block code works those booleans out from the neighbours;
+# Bedrock's connection trait does the same job and reports it as
+# minecraft:connection_<dir> (Block Traits: connection, learn.microsoft.com;
+# no experiment from 1.26.0, 1.26.0 creator update notes). So any such
+# multipart converts part for part: one bone per part, turned the way its
+# apply turns it, shown by bone_visibility (a Molang expression per bone,
+# vendored 1.26.60 block_components schema) when its `when` holds over the
+# connection states. Palisades and walls keep their own paths above, which
+# this reproduces for them; this path takes the shapes those don't.
+#
+# Which neighbours join is the trait's rule, not the mod's (the same caveat
+# as palisades and walls), and the collision and selection boxes stay a full
+# block, as on the palisade path: Java's are code (CrossCollisionBlock shapes),
+# not the model. Both are named in the block's note.
+_TRUTH = {"true": True, "false": False}
+
+
+def _connection_clause(clause) -> tuple[list[tuple[str, bool]] | None, bool]:
+    """[(direction, wanted)] for an AND clause over cardinal booleans, and
+    whether it read at all. ``a|b`` naming both values tests nothing."""
+    if not isinstance(clause, dict) or not clause:
+        return None, False
+    tests = []
+    for key, value in clause.items():
+        if key not in _CARDINALS:
+            return None, False
+        values = {v.strip().lower() for v in str(value).split("|")}
+        if not values or not values <= set(_TRUTH):
+            return None, False
+        if len(values) == 1:
+            tests.append((key, _TRUTH[values.pop()]))
+    return tests, True
+
+
+def _connection_condition(when) -> tuple[list[list[tuple[str, bool]]] | None, bool]:
+    """A ``when`` as OR-of-AND clauses over the cardinal booleans, or (None, False)."""
+    if when is None:
+        return [[]], True
+    if not isinstance(when, dict):
+        return None, False
+    if set(when) == {"OR"} and isinstance(when["OR"], list) and when["OR"]:
+        clauses = []
+        for clause in when["OR"]:
+            tests, ok = _connection_clause(clause)
+            if not ok:
+                return None, False
+            clauses.append(tests)
+        return clauses, True
+    if set(when) == {"AND"} and isinstance(when["AND"], list) and when["AND"]:
+        tests = []
+        for clause in when["AND"]:
+            more, ok = _connection_clause(clause)
+            if not ok:
+                return None, False
+            tests.extend(more)
+        return [tests], True
+    tests, ok = _connection_clause(when)
+    return ([tests], True) if ok else (None, False)
+
+
+def _connection_molang(clauses: list[list[tuple[str, bool]]]) -> str | None:
+    """The Molang test for OR-of-AND clauses; None when it always holds."""
+    if any(not tests for tests in clauses):
+        return None
+    parts = []
+    for tests in clauses:
+        terms = [("" if wanted else "!") + f"q.block_state('minecraft:connection_{d}')"
+                 for d, wanted in tests]
+        parts.append(" && ".join(terms))
+    if len(parts) == 1:
+        return parts[0]
+    return " || ".join(f"({p})" for p in parts)
+
+
+def _connection_parts(blockstate: dict) -> tuple[list[dict] | None, str]:
+    """The parts of a multipart keyed only on cardinal connection booleans.
+
+    Each part: {model, x, y, uvlock, test (Molang or None), random [models]}.
+    (None, "") when the multipart is some other shape, so it falls through to
+    the general refusal; (None, why) when it is this shape but can't convert.
+    """
+    parts = blockstate.get("multipart")
+    if not isinstance(parts, list) or not parts:
+        return None, ""
+    out = []
+    keyed = False
+    for part in parts:
+        if not isinstance(part, dict):
+            return None, ""
+        clauses, ok = _connection_condition(part.get("when"))
+        if not ok:
+            return None, ""
+        keyed = keyed or any(tests for tests in clauses)
+        apply = part.get("apply")
+        choices = apply if isinstance(apply, list) else [apply]
+        choices = [c for c in choices if isinstance(c, dict) and isinstance(c.get("model"), str)]
+        if not choices:
+            return None, "connection multipart: a part names no model"
+        first = choices[0]
+        try:
+            x, y = int(first.get("x") or 0), int(first.get("y") or 0)
+        except (TypeError, ValueError):
+            return None, "connection multipart: a part's x/y turn isn't a number"
+        out.append({
+            "model": first["model"], "x": x, "y": y, "uvlock": bool(first.get("uvlock")),
+            "test": _connection_molang(clauses),
+            "random": [c["model"] for c in choices[1:] if c["model"] != first["model"]],
+        })
+    if not keyed:
+        return None, ""
+    return out, ""
+
+
+def _keyed_textures(flat: dict, index: int, merged: dict) -> dict:
+    """``flat`` with any texture key that means something else in ``merged``
+    renamed for this part, so parts with clashing keys share one geometry."""
+    own = flat.get("textures") or {}
+    textures = {}
+    for key, value in own.items():
+        # Follow this model's own "#var" chain first, so a renamed key never
+        # leaves another key pointing at the other part's meaning.
+        seen = {key}
+        while isinstance(value, str) and value.startswith("#") and value[1:] in own \
+                and value[1:] not in seen:
+            seen.add(value[1:])
+            value = own[value[1:]]
+        textures[key] = value
+    rename = {}
+    for key, value in textures.items():
+        if key in merged and merged[key] != value:
+            new = f"{key}_p{index}"
+            rename[key] = new
+            merged[new] = value
+        else:
+            merged.setdefault(key, value)
+    if not rename:
+        return flat if textures == own else {**flat, "textures": textures}
+    elements = []
+    for element in flat.get("elements") or []:
+        faces = {}
+        for face, spec in (element.get("faces") or {}).items():
+            if isinstance(spec, dict) and isinstance(spec.get("texture"), str) \
+                    and spec["texture"].startswith("#") and spec["texture"][1:] in rename:
+                spec = {**spec, "texture": "#" + rename[spec["texture"][1:]]}
+            faces[face] = spec
+        elements.append({**element, "faces": faces})
+    return {**flat, "textures": textures, "elements": elements}
+
+
+def _convert_connection_multipart(mod: SourceMod, result: ConversionResult, rel: str,
+                                  name: str, parts: list[dict]) -> None:
+    """One bone per multipart part, shown while its connection test holds."""
+    textures: dict = {}
+    bones: list[tuple[str, list]] = []
+    visibility: dict[str, str] = {}
+    flats: dict[str, dict] = {}
+    random_models: list[str] = []
+    for index, part in enumerate(parts):
+        label = f"connection multipart part {index + 1} ({part['model']})"
+        flat = flats.get(part["model"])
+        if flat is None:
+            flat, why = _flat_model(mod, result, part["model"])
+            if flat is None:
+                result.unhandled.append(Unhandled(rel, "block", f"{label}: {why}"))
+                return
+            flats[part["model"]] = flat
+        flat = _keyed_textures(flat, index, textures)
+        elements = flat.get("elements") or []
+        if part["x"]:
+            elements, why = _turn_all(elements, part["x"], part["y"], part["uvlock"])
+        else:
+            turned = []
+            for element in elements:
+                moved, why = models.turn_y(element, part["y"], part["uvlock"])
+                if moved is None and not part["uvlock"]:
+                    # Without uvlock the element turns as a solid, its own
+                    # rotation carried along (a hedge's leaning sprigs).
+                    moved, why = models.turn_rigid(element, 0, part["y"], carry_rotation=True)
+                if moved is None:
+                    turned = None
+                    break
+                turned.append(moved)
+            elements = turned
+        if elements is None:
+            result.unhandled.append(Unhandled(rel, "block", f"{label}: {why}"))
+            return
+        bone = f"part_{index}"
+        bones.append((bone, elements))
+        if part["test"] is not None:
+            visibility[bone] = part["test"]
+        for ref in part["random"]:
+            path = models.model_path(mod, ref)
+            if path is not None and path.is_file():
+                result.claim(mod, path)
+            random_models.append(ref)
+    if not any(els for _, els in bones):
+        result.unhandled.append(Unhandled(rel, "block", "connection multipart: its models have no elements"))
+        return
+    bones = [(b, els) for b, els in bones if els]
+    visibility = {b: t for b, t in visibility.items() if any(b == n for n, _ in bones)}
+    identifier, instances, geo, why = _shape_geometry(mod, name, bones, textures)
+    if identifier is None:
+        result.unhandled.append(Unhandled(rel, "block", f"connection multipart: {why}"))
+        return
+    result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = {
+        "format_version": _CONNECTION_FORMAT,
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{mod.namespace}:{name}",
+                "menu_category": {"category": _MENU_CATEGORY},
+                "traits": {
+                    "minecraft:connection": {"enabled_states": ["minecraft:cardinal_connections"]}
+                },
+            },
+            "components": {
+                "minecraft:geometry": {"identifier": identifier, "bone_visibility": visibility},
+                "minecraft:material_instances": instances,
+            },
+        },
+    }
+    note = (
+        f"{name}: its {len(parts)} multipart parts show through Bedrock's connection trait "
+        "(minecraft:connection_north/east/south/west), which decides on its own which "
+        "neighbours connect; Java's block code may join a different set. Collision and "
+        "selection stay a full block (Java's are code, not the model). Needs Bedrock 1.26.0 "
+        "or newer."
+    )
+    if random_models:
+        note += (f" Java picks at random between models for some parts; Bedrock ships the "
+                 f"first of each everywhere ({len(random_models)} passed over).")
+    result.notes.append(note)
+
+
 def _texture(mod: SourceMod, reference: str) -> tuple[str | None, str]:
     """The terrain key a face wearing this Java texture names: the mod's own,
     or Bedrock's copy of a vanilla one (models.vanilla_texture; the pipeline
@@ -1351,6 +1592,14 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
         facing_ref, facing_uvlock, dropped = _facing_parts(blockstate)
         if facing_ref is not None:
             _convert_facing_block(mod, result, rel, name, facing_ref, facing_uvlock, dropped)
+            continue
+
+        connection, why = _connection_parts(blockstate)
+        if connection is not None:
+            _convert_connection_multipart(mod, result, rel, name, connection)
+            continue
+        if why:
+            result.unhandled.append(Unhandled(rel, "block", why))
             continue
 
         model_ref, why = _single_model(blockstate)
