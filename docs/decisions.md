@@ -27,6 +27,61 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: a blockstate that draws waterlogged converts without it, and Bedrock holds the water through liquid_detection where getFluidState says the block holds water
+
+- **Status:** proposed (PR #N); Alex decides the picks.
+- **Decision:** a `variants` blockstate that draws `waterlogged` with the same
+  model at `waterlogged=true` and `=false` for every other combination
+  converts with the state dropped, through whichever converter its other
+  states fit (a plain block, facing-only (#212), facing plus booleans (#215),
+  stairs/slabs...). waterlogged is never a Bedrock state, so it doesn't count
+  toward #215's four booleans and adds no permutations. A blockstate whose
+  model depends on waterlogged, that leaves it out of some variants or lacks
+  one of its values, or a multipart that tests it, stays residue with that
+  reason. Stations are left as they were. A converted block gets
+  `minecraft:liquid_detection` `{"detection_rules": [{"liquid_type": "water",
+  "can_contain_liquid": true, "on_liquid_touches": "blocking"}]}` when its
+  code holds water while waterlogged (`blockcode.read_water`: `getFluidState`
+  run at waterlogged=true and false gives `Fluids.WATER.getSource(false)` only
+  at true), nothing when it never holds a fluid (`getFluidState` is vanilla
+  `BlockBehaviour`'s, so Java's state is cosmetic), and the labelled DEFAULT
+  `can_contain_liquid: true` when the code isn't read (the blockstate draws a
+  waterlogged state). Such a block is written at block format 1.21.60 at least
+  (a higher one, such as the toggle's 1.21.90 or the shapes' 1.26.0, is kept),
+  and the pack floor follows (`pack.engine_floor`). Notes name each block's
+  reading (class#getFluidState) or DEFAULT, and the blocks that aren't a
+  `SimpleWaterloggedBlock` in Java (no bucket there).
+- **Why:** waterlogged draws nothing in Java. The water is the state's fluid,
+  drawn by the fluid renderer, and what makes it water is `getFluidState`:
+  vanilla `BlockBehaviour#getFluidState` (L248) returns
+  `Fluids.EMPTY.defaultFluidState()`, and a waterloggable block returns
+  `Fluids.WATER.getSource(false)` (`FlowingFluid#getSource` L251) when
+  WATERLOGGED is true. Java's flowing water doesn't enter a waterloggable block
+  (`FlowingFluid#canHoldFluid` L408-411 asks
+  `LiquidBlockContainer#canPlaceLiquid`, and `SimpleWaterloggedBlock#canPlaceLiquid`
+  L22 accepts only `Fluids.WATER`, the source), which is Bedrock's `blocking`
+  (MC 1.21.1 client jar, Mojang mappings, javap). Bedrock keeps water in a
+  block position's second layer (Bedrock-OSS bedrock-wiki
+  `docs/blocks/block-colocation.md`), and `minecraft:liquid_detection` lets a
+  custom block hold it ("Whether this block can contain the liquid. For
+  example, if the liquid type is water, this means the block can be
+  waterlogged"; "requires a format version of at least 1.21.60",
+  MicrosoftDocs/minecraft-creator `minecraftBlock_liquid_detection.md`). It
+  left the Upcoming Creator Features experiment for block format 1.21.60 and
+  above (Minecraft 1.21.60 Bedrock changelog). `use_liquid_clipping` needs
+  1.26.0 and is left out: below 1.26.0 it defaults to true (the water is
+  clipped to the block's collision box). Placement in water is the engine's:
+  Java sets waterlogged in `getStateForPlacement` from the fluid at the
+  clicked position, and nothing is emitted for it.
+- **Rejected:** keeping waterlogged as a Bedrock boolean state (it draws
+  nothing, doubles the permutations, and Bedrock already has a water layer);
+  `liquid_detection` from the blockstate alone (a declared state with a
+  vanilla `getFluidState` never holds water in Java); writing waterloggable
+  blocks at 1.26.0 so `use_liquid_clipping` can be false (raises the floor of
+  every pack with one; Alex's call, pick 6); `on_liquid_touches: no_reaction`
+  (Java's flowing water doesn't pass through a waterloggable block).
+- **Links:** PR #N; deco-mods spike gap 5; #212, #215.
+
 ## 2026-10-14: a negative-size model element (from > to on an axis) converts as the quads Java bakes from it, unfolded into ordinary elements
 
 - **Status:** reproduces Java's renderer; no new policy

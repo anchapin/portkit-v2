@@ -1050,8 +1050,18 @@ class Machine:
                 return [int(rest[0].name in dict(recv.values))]
             if name == "getBlock" and "__block" in dict(recv.values):
                 return [dict(recv.values)["__block"]]
+        # Fluids (see read_water): Fluids.WATER.getSource(false) is a still
+        # water source (FlowingFluid#getSource L251), Fluids.EMPTY's default
+        # state no fluid, and so is vanilla BlockBehaviour#getFluidState
+        # (L248) under a plain vanilla block class.
+        if recv == Const(_FLUIDS, "WATER") and name == "getSource" and len(rest) == 1 and rest[0] in (0, False):
+            return [WATER_SOURCE]
+        if recv == Const(_FLUIDS, "EMPTY") and name == "defaultFluidState" and not rest:
+            return [NO_FLUID]
         if isinstance(recv, Obj) and self.is_block_class(recv.cls):
             base = self.vanilla_base(recv.cls)
+            if name == "getFluidState" and desc == _FLUID_STATE_DESC and base in _PLAIN_VANILLA:
+                return [NO_FLUID]
             if name == "defaultBlockState":
                 return [recv.fields.get("__default", State())]
             if name == "registerDefaultState" and rest:
@@ -2121,3 +2131,142 @@ def _read_state_light(machine: Machine, obj: Obj, r: StateReading, placed: list 
         return
     r.light_by, r.light_source = out, src
     r.light_kind = "constant" if len(set(out.values())) == 1 else "per_state"
+
+
+# --- Water ------------------------------------------------------------------
+#
+# Java's ``waterlogged`` (BlockStateProperties.WATERLOGGED) draws nothing: the
+# water is the block state's fluid, rendered by the fluid renderer, and what
+# makes a waterlogged state hold water is the block's ``getFluidState``. The
+# vanilla one returns no fluid whatever the state (BlockBehaviour#getFluidState
+# L248: ``Fluids.EMPTY.defaultFluidState()``); a waterloggable block overrides
+# it to return ``Fluids.WATER.getSource(false)`` (FlowingFluid#getSource L251)
+# when WATERLOGGED is true (MC 1.21.1 client jar + Mojang mappings
+# client.txt). :func:`read_water` runs that method at waterlogged=true and
+# waterlogged=false.
+
+_FLUIDS = "net/minecraft/world/level/material/Fluids"
+_FLUID_STATE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;)"
+                     "Lnet/minecraft/world/level/material/FluidState;")
+_WATERLOGGED_IFACE = "net/minecraft/world/level/block/SimpleWaterloggedBlock"
+
+
+@dataclass(frozen=True)
+class FluidVal:
+    """A FluidState the interpreter knows: ``water`` (a still water source)
+    or ``empty``."""
+
+    kind: str
+
+
+WATER_SOURCE = FluidVal("water")
+NO_FLUID = FluidVal("empty")
+
+
+@dataclass
+class WaterReading:
+    """Whether one block holds water when waterlogged, as its code says.
+
+    ``holds`` is True when getFluidState gives a water source at
+    waterlogged=true (and not at false), False when the block never holds a
+    fluid (getFluidState is vanilla BlockBehaviour's), or None with ``why``.
+    ``source`` cites the method read. ``bucket`` says whether the block's
+    classes implement SimpleWaterloggedBlock (a bucket can fill and empty
+    it in Java), None if unread.
+    """
+
+    name: str
+    cls: str | None = None
+    holds: bool | None = None
+    source: str = ""
+    why: str = ""
+    bucket: bool | None = None
+
+
+def _implements(machine: Machine, cls: str, iface: str) -> bool | None:
+    """Whether ``cls`` or a mod superclass lists ``iface`` (or a mod
+    interface that extends it); None when the chain leaves the mod's classes
+    at a vanilla class other than a plain one (which may implement it)."""
+    todo = []
+    for cname in machine.chain(cls):
+        cf = machine.classes.get(cname)
+        if cf is None:
+            if cname not in _PLAIN_VANILLA:
+                return None
+            break
+        todo += list(cf.interfaces)
+    seen = set()
+    while todo:
+        name = todo.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        if name == iface:
+            return True
+        cf = machine.classes.get(name)
+        if cf is not None:
+            todo += list(cf.interfaces)
+    return False
+
+
+def read_water(classes: ClassIndex | None, names: list[str]) -> dict[str, WaterReading]:
+    """A :class:`WaterReading` per blockstate name in ``names``."""
+    readings = {n: WaterReading(n) for n in names}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.why = "the mod ships no class files"
+        return readings
+    machine, registered = _registered(classes, names)
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.why = why
+            continue
+        got = []
+        for obj in objs:
+            one = WaterReading(name)
+            _read_water(machine, obj, one)
+            got.append(one)
+        first = got[0]
+        if any((g.holds, g.why) != (first.holds, first.why) for g in got[1:]):
+            r.cls, r.why = first.cls, "registered twice with different fluid code"
+            continue
+        readings[name] = first
+    return readings
+
+
+def _read_water(machine: Machine, obj: Obj, r: WaterReading) -> None:
+    r.cls = obj.cls.replace("/", ".")
+    r.bucket = _implements(machine, obj.cls, _WATERLOGGED_IFACE)
+    found = machine.find_method(obj.cls, "getFluidState", _FLUID_STATE_DESC)
+    base = machine.vanilla_base(obj.cls)
+    if found is None:
+        if base in _PLAIN_VANILLA:
+            r.holds = False
+            r.source = "net.minecraft.world.level.block.state.BlockBehaviour#getFluidState (vanilla, inherited)"
+        else:
+            r.why = (f"getFluidState is inherited from the vanilla {base.replace('/', '.')}, "
+                     "whose code isn't read")
+        return
+    where = f"{found[0].name.replace('/', '.')}#getFluidState"
+    default = obj.fields.get("__default", State())
+    default = default if isinstance(default, State) else State()
+    out = {}
+    try:
+        for v in (1, 0):
+            machine.steps = 0
+            results = machine.call(obj.cls, "getFluidState", _FLUID_STATE_DESC, [obj, default.set("waterlogged", v)])
+            kinds = {x for x in results}
+            if len(kinds) != 1 or not isinstance(next(iter(kinds)), FluidVal):
+                raise Unreadable(f"the fluid at waterlogged={'true' if v else 'false'} is not one it can read")
+            out[v] = kinds.pop()
+    except Unreadable as exc:
+        r.why = f"{where}: {exc}"
+        return
+    if out[1] == WATER_SOURCE and out[0] != WATER_SOURCE:
+        r.holds, r.source = True, where
+    elif out[1] == NO_FLUID and out[0] == NO_FLUID:
+        r.holds, r.source = False, where
+    else:
+        r.why = (f"{where}: gives {out[1].kind} at waterlogged=true and {out[0].kind} at false, "
+                 "which isn't water only when waterlogged")
