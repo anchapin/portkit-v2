@@ -64,9 +64,14 @@ _RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?<![\w<])#?[a-z0-9_.-]+:[a-z0-9_./-]*[a-z0-9_]"), "<id>"),
     # paths: assets/x/models/y.json, data/ns/recipe/
     (re.compile(r"(?<![\w<])(?:[\w.-]+/)+[\w.-]*"), "<path>"),
+    # file names left after the paths: chunky-ffcbedca6a0b.jar, en_us.json
+    (re.compile(r"(?<![\w<])[\w.-]+\.(?:jar|json|png|ogg|class|mcmeta|nbt)\b"), "<file>"),
     # a condition's arguments after its id: "(<id> immersiveengineering)"
     (re.compile(r"\(<id>(?: [\w.:<>-]+)+\)"), "(<id> …)"),
     (re.compile(r"(?<![\w<])\d+(?:\.\d+)*(?![\w>])"), "N"),
+    # lists of blanked things: "<id>, <id> and N more", "['…', '…']"
+    (re.compile(r"<id>(?:,? (?:and )?<id>)+(?: and N more)?"), "<ids>"),
+    (re.compile(r"\['…'(?:, '…')*\]"), "[…]"),
 ]
 
 
@@ -153,16 +158,21 @@ def convert_one(jar: Path, workdir: Path, timeout: float = DEFAULT_TIMEOUT, runn
         return {"status": "crashed", "seconds": seconds, "detail": last[:300],
                 "exit": proc.returncode}
     record = json.loads(result.read_text())
-    record["status"] = "ok"
+    record.setdefault("status", "ok")
     record["seconds"] = seconds
     return record
 
 
 def _child(jar: str, out: str, result: str) -> int:
     """The child process: one conversion, numbers written to ``result``."""
+    from .ingest import IngestError
     from .pipeline import convert
 
-    res = convert(Path(jar), Path(out), emit_addon=False)
+    try:
+        res = convert(Path(jar), Path(out), emit_addon=False)
+    except IngestError as exc:  # e.g. a jar with no assets/ or data/ tree
+        Path(result).write_text(json.dumps({"status": "ingest_error", "detail": str(exc)[:300]}))
+        return 0
     data = {
         "namespace": res.namespace,
         "files": res.file_count,
@@ -240,6 +250,8 @@ def _status_reason(record: dict) -> tuple[str, str] | None:
         return "conversion", f"conversion crashed: {normalize(record.get('detail', ''))}"
     if status == "timeout":
         return "conversion", "conversion timed out"
+    if status == "ingest_error":
+        return "conversion", f"cannot ingest: {normalize(record.get('detail', ''))}"
     return None
 
 
@@ -272,7 +284,7 @@ def leaderboard(shards: list[dict], previous: dict | None = None) -> dict:
             agg["mods"] += 1
             agg["entries"] += slot["entries"]
             agg["files"] += slot["files"]
-            agg["mod_names"].append(name)
+            agg["mod_names"].append((slot["files"], name))
             for ex in slot.get("examples", []):
                 if len(agg["examples"]) < _EXAMPLES:
                     agg["examples"].append({"mod": name, **ex})
@@ -281,7 +293,8 @@ def leaderboard(shards: list[dict], previous: dict | None = None) -> dict:
     prev = {r["key"]: r for r in (previous or {}).get("reasons", [])}
     for rank, r in enumerate(ranked, 1):
         r["rank"] = rank
-        r["mod_names"] = r["mod_names"][:_MOD_LIST]
+        # the mods it covers most first, so the e.g. column is the best example
+        r["mod_names"] = [n for _, n in sorted(r["mod_names"], key=lambda t: (-t[0], t[1]))][:_MOD_LIST]
         if previous is not None:
             old = prev.get(r["key"])
             r["trend"] = ({"new": True} if old is None else

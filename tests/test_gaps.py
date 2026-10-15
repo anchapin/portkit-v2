@@ -43,6 +43,12 @@ ROOT = Path(__file__).resolve().parents[1]
     ("the drop copies block components (minecraft:copy_components)",
      "the drop copies block components (<id>)"),
     ("texture assets/x/textures/block/a.png is missing", "texture <path> is missing"),
+    ("chunky-ffcbedca6a0b.jar has no assets/<namespace> or data/<namespace> tree; nothing to convert",
+     "<file> has no <path><namespace> or <path><namespace> tree; nothing to convert"),
+    ("unknown load condition forge:mod_loaded, forge:not", "unknown load condition <ids>"),
+    ("but this jar adds to c:a, c:b, c:d and 3 more, which", "but this jar adds to <ids>, which"),
+    ("blockstate covers only ['x', 'z'] of the three axes (missing ['y'])",
+     "blockstate covers only […] of the three axes (missing […])"),
 ])
 def test_normalize_blanks_specifics(raw, expected):
     assert gaps.normalize(raw) == expected
@@ -130,6 +136,21 @@ def test_convert_one_runs_a_real_child(tmp_path):
     assert (tmp_path / "out").is_dir()  # left for mct
 
 
+def test_convert_one_reports_a_jar_with_nothing_to_convert(tmp_path):
+    import zipfile
+
+    empty = tmp_path / "empty-1234.jar"
+    with zipfile.ZipFile(empty, "w") as zf:
+        zf.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+    work = tmp_path / "work"
+    work.mkdir()
+    record = gaps.convert_one(empty, work, timeout=120)
+    assert record["status"] == "ingest_error", record
+    board = gaps.leaderboard([_shard("1/1", {"empty": record})])
+    assert board["reasons"][0]["key"].startswith("conversion: cannot ingest: ")
+    assert "1234" not in board["reasons"][0]["key"]
+
+
 def test_convert_one_reports_a_crash_and_a_timeout(tmp_path):
     def crash(cmd, **kw):
         return subprocess.CompletedProcess(cmd, 1, "", "Traceback...\nKeyError: 'model'\n")
@@ -170,7 +191,7 @@ def test_leaderboard_ranks_by_mods_then_files():
     keys = [r["key"] for r in board["reasons"]]
     assert keys[:2] == ["loot: table has N pools", "block: model has no parent and no elements"]
     top = board["reasons"][0]
-    assert (top["mods"], top["files"], top["mod_names"]) == (2, 11, ["a", "c"])
+    assert (top["mods"], top["files"], top["mod_names"]) == (2, 11, ["c", "a"])  # most files first
     crash = next(r for r in board["reasons"] if r["kind"] == "conversion")
     assert crash["reason"] == "conversion crashed: KeyError: '…'" and crash["mods"] == 1
     assert board["statuses"] == {"crashed": 1, "ok": 3}
@@ -209,7 +230,7 @@ def test_markdown_has_the_ranked_table_trend_and_mods():
     previous = gaps.leaderboard(_two_shards())
     md = gaps.render_markdown(gaps.leaderboard(_two_shards(), previous))
     assert md.startswith("# Gap leaderboard")
-    assert "| 1 | 2 | 11 | 2 | loot | table has N pools | a | +0 mods, +0 files |" in md
+    assert "| 1 | 2 | 11 | 2 | loot | table has N pools | c | +0 mods, +0 files |" in md
     assert "| d | crashed: KeyError: 'model' |" in md
     assert "## Mods" in md
 
