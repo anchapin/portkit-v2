@@ -27,6 +27,78 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: 6-way facing and attach-face blocks with booleans convert, combining the #218 placement with the #215 booleans
+
+- **Status:** proposed (PR #N); Alex decides the picks. Everything but item 7 combines rules Alex approved in #215 and #218.
+- **Decision:** a blockstate drawing 6-way `facing` or `face` + `facing` and
+  one to four booleans (variants naming every combination, or a multipart
+  with exactly one part per combination; waterlogged dropped first, #217)
+  converts through the #218 converter with #215's boolean half:
+  1. **Placement** exactly as #218 (`blockcode.read_directional_states` runs
+     `read_directional`'s rule per clicked face; same DEFAULT, same conflicts,
+     canSurvive not emulated).
+  2. **Booleans** exactly as #215: one Bedrock state `<ns>:<name>` per
+     boolean, values `[start, other]`; start = what getStateForPlacement puts
+     on every path of the six clicked-face runs (*placed*), else the
+     registered default state, else StateDefinition#any's, else labelled
+     DEFAULT false. A start that differs between clicked faces falls back
+     like any start that differs between paths.
+  3. **Box** per (Java variant, booleans) from getShape, else the turned
+     model's bounds (DEFAULT); **light** per combination of the booleans from
+     Properties.lightLevel with the placement states unknown (#213's
+     refusals; a light reading facing/face is refused).
+  4. **Toggle** as #215 (useWithoutItem flips exactly one drawn boolean on
+     every path, server side, no useItemOn), checked at every (face, facing,
+     booleans); it must leave facing/face as they were. The fixed
+     `toggle.js` sets the permutation with that one state flipped
+     (`permutation.withState`), so the placement states, and the Java
+     variant they stand for, stay.
+  5. **Vanilla parents:** `FaceAttachedHorizontalDirectionalBlock` counts as
+     plain (its placement is the vanilla code #218 supplies, cited L39-52;
+     it changes no boolean). `ButtonBlock` and `LeverBlock` flip `powered` in
+     vanilla code the jar doesn't hold (use, scheduled tick), so a block
+     reaching them stays residue, as #215 does for FenceGateBlock. Where the
+     classes can't be read (SRG/intermediary jars, Registrate), the class
+     isn't known and the block takes the labelled DEFAULTs, static, as #215.
+  6. **Permutations:** a component that follows the placement states alone
+     (the y turn) goes in one permutation per Java variant, one that follows
+     the booleans alone (light) in one per combination, the rest (a box) per
+     (variant, combination). At most block_face (6) x cardinal_direction (4)
+     x facing_direction (6) x 2^4 = 2,304 permutations per block, under
+     Bedrock's 65,536 per block ("A block cannot have more than 65,536
+     permutations", Bedrock-OSS bedrock-wiki docs/blocks/block-permutations.md);
+     the world-wide 65,536 is a performance warning (MicrosoftDocs
+     minecraft-creator BlockStatesAndPermutations.md, "Unlimited* Power");
+     the largest converted pack here (Create) declares 3,041.
+  7. **Pack file names (new, pick 1):** Minecraft Creator Tools (mct 0.20.0)
+     reads any file named `package.json` (also `package.lock`, `tsconfig`,
+     `jsconfig`, `jsdoc`, `docfx`, `.prettierrc`) as a JavaScript tooling
+     file wherever it sits, and a pack with scripts and such a file fails its
+     SCRIPTMODULE check with an error ("Could not find an package.json
+     registration for @minecraft/server"). Refurbished has an item named
+     `package`, and its pack now carries the toggle runtime, so mct went from
+     0 to 1 error. A block or item definition with such a name is written as
+     `blocks/_<name>.json` / `items/_<name>.json` (`pack.write_tree`; Bedrock
+     finds definitions by folder; the identifier inside is unchanged), unless
+     that name is taken. mct back to 0 errors.
+- **Why:** the deco spike's ceiling fans, ceiling lights and light switches
+  (MrCrayfish Refurbished) and buttons (Cluttered, BetterEnd) were residue
+  only because #218 left booleans out of scope. Every value is read by a
+  rule Alex already approved; nothing new is guessed. Deco (not banked):
+  Refurbished 230 -> 252 blocks (29.8 -> 30.8%): 20 ceiling fans (placement
+  read: facing = clicked face's opposite; lit read as a use toggle; light 15
+  at lit+powered, powered set only by the block entity's power network so
+  static false) and 2 light switches (vanilla attach placement, enabled read
+  as a toggle); boxes DEFAULT (Refurbished builds shapes from a generated
+  map). Its pack now carries the toggle runtime (pack floor 1.21.90). The
+  2 ceiling lights stay residue (a model with no elements); Cluttered's 10
+  buttons stay residue (vanilla ButtonBlock). mct 0 errors.
+- **Rejected:** treating vanilla ButtonBlock's press as a toggle (Java
+  unpresses it on a scheduled tick; inventing that is #87); one Bedrock
+  permutation per cell for every component (correct but bigger); for item 7,
+  keeping the file name and accepting mct's false positive.
+- **Links:** #215, #218, #213, #217, #87.
+
 ## 2026-10-14: 6-way facing and attach-face blocks convert, placement read per clicked face onto block_face / cardinal_direction / facing_direction
 
 - **Status:** approved (Alex, 2026-10-14)

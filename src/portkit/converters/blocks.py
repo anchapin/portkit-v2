@@ -1236,6 +1236,7 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
     bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded)
     dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded)
     directional: list[dict] = []
+    directional_bool: list[dict] = []
     coded: list[dict] = []
     coded_bool: list[dict] = []
     for path in sorted(src.glob("*.json")):
@@ -1274,7 +1275,7 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             if record is not None:
                 if name in water_dropped:
                     record["states"] = [x for x in record["states"] if x != "waterlogged"]
-                directional.append(record)
+                (directional_bool if record.get("bools") else directional).append(record)
             else:
                 result.consumed = claimed | {rel}
             continue
@@ -1365,8 +1366,9 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
     result.notes.extend(_coded_facing_notes(coded))
     result.notes.extend(_coded_bool_notes(coded_bool))
     result.notes.extend(_directional_notes(directional))
-    _toggle_table(mod, result, coded_bool)
-    _add_light(mod, result, src, skip={r["name"] for r in coded_bool}, loaded=loaded)
+    result.notes.extend(_directional_bool_notes(directional_bool))
+    _toggle_table(mod, result, coded_bool + directional_bool)
+    _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
     _add_water(mod, result, sorted(water_dropped))
     return result
 
@@ -2851,6 +2853,13 @@ def _coded_bool_notes(records: list[dict]) -> list[str]:
         "per block below (a DEFAULT is not a citation)."
     ]
     notes += _coded_facing_notes(records)[1:]
+    return notes + _bool_state_notes(records)
+
+
+def _bool_state_notes(records: list[dict]) -> list[str]:
+    """The boolean half of the notes (start values, toggle, static states,
+    light) for facing-plus-boolean and 6-way/attach-plus-boolean blocks."""
+    notes = []
     starts = []
     for r in records:
         for prop, (value, kind, src) in sorted(r["defaults"].items()):
@@ -3165,8 +3174,135 @@ def _directional_variants(blockstate: dict) -> tuple[str | None, dict | None, st
     return kind, cells, ""
 
 
+# 6-way facing / attach-face blocks with booleans (ceiling fans, light
+# switches): a blockstate drawing 6-way ``facing`` or ``face`` + ``facing``
+# and one to four booleans converts through _convert_directional with the
+# placement half read as above (blockcode.read_directional_states runs
+# read_directional's rule) and the boolean half as facing + boolean blocks
+# (#215): one Bedrock state per boolean starting at its read value, a bone
+# shown at the (placement states, booleans) that draw it, box per cell,
+# light per combination of the booleans, a use toggle through the fixed
+# toggle runtime (it sets the block's permutation with that one state
+# flipped, so the placement states, and with them the Java variant, stay).
+# A permutation follows the placement states alone (the y turn), the
+# booleans alone (light) or both (a box). At most block_face x
+# cardinal_direction x facing_direction x 2^4 = 2,304 permutations per
+# block, under Bedrock's 65,536 ("A block cannot have more than 65,536
+# permutations", Bedrock-OSS bedrock-wiki docs/blocks/block-permutations.md).
+
+
+def _dir_entry(entry, label: str, key: str) -> tuple[tuple | None, str]:
+    if isinstance(entry, list):
+        return None, f"{label}: {key} picks a model at random"
+    if not isinstance(entry, dict) or not isinstance(entry.get("model"), str):
+        return None, f"{label}: {key} has no model"
+    x, y = entry.get("x") or 0, entry.get("y") or 0
+    if any(not isinstance(v, int) or isinstance(v, bool) or v % 90 for v in (x, y)):
+        return None, f"{label}: {key} turns a model by other than a quarter turn"
+    return (entry["model"], x % 360, y % 360, bool(entry.get("uvlock"))), ""
+
+
+def _dir_kind(props: dict, multipart: bool = False) -> tuple[str | None, tuple]:
+    """(kind, booleans) when ``props`` (name -> values) is 6-way facing or
+    face + facing plus one or more booleans, else (None, ()). A multipart
+    names only the values its conditions test: 6-way when one is vertical."""
+    rest = {p: v for p, v in props.items() if p not in ("face", "facing")}
+    if not rest or "waterlogged" in rest or any(not set(v) <= _BOOL_VALUES for v in rest.values()):
+        return None, ()
+    facing = set(props.get("facing") or ())
+    face = set(props.get("face") or ())
+    if multipart:
+        six = "face" not in props and facing and facing <= set(_SIX) and facing & {"up", "down"}
+        attach = face and face <= set(_ATTACH_FACES) and facing <= set(_CARDINALS)
+    else:
+        six = "face" not in props and facing == set(_SIX)
+        attach = face == set(_ATTACH_FACES) and facing == set(_CARDINALS)
+    if six:
+        kind = "facing6"
+    elif attach:
+        kind = "attach"
+    else:
+        return None, ()
+    return kind, tuple(sorted(rest))
+
+
+def _directional_bool_variants(blockstate: dict) -> tuple[str | None, tuple, dict | None, str]:
+    """(kind, booleans, {((face, facing), combination): (model, x, y,
+    uvlock)}, "") for a 6-way facing or attach-face blockstate with one to
+    four booleans (variants naming every combination, or a multipart where
+    exactly one part applies at each); (None, (), None, why) when it is one
+    but not in a form read here; (None, (), None, "") when it isn't."""
+    from itertools import product
+
+    variants = blockstate.get("variants")
+    parts = blockstate.get("multipart")
+    props: dict[str, set] = {}
+    parsed = {}
+    if isinstance(variants, dict) and variants:
+        for key in variants:
+            pairs = [p.split("=", 1) for p in key.split(",") if p]
+            if not pairs or any(len(p) != 2 for p in pairs):
+                return None, (), None, ""
+            cell = {a.strip(): b.strip() for a, b in pairs}
+            for a, b in cell.items():
+                props.setdefault(a, set()).add(b)
+            parsed[key] = cell
+    elif isinstance(parts, list) and parts:
+        for part in parts:
+            def walk(c):
+                if isinstance(c, dict):
+                    for k, v in c.items():
+                        if k in ("OR", "AND") and isinstance(v, list):
+                            for x in v:
+                                walk(x)
+                        elif k not in ("OR", "AND"):
+                            props.setdefault(k, set()).update(str(v).lower().split("|"))
+            walk(part.get("when") if isinstance(part, dict) else None)
+    else:
+        return None, (), None, ""
+    kind, bools = _dir_kind(props, multipart=not parsed)
+    if kind is None:
+        return None, (), None, ""
+    label = _DIR_LABEL[kind] + " and booleans"
+    if len(bools) > _MAX_BOOLS:
+        return None, (), None, f"{label}: {len(bools)} booleans, more than {_MAX_BOOLS} aren't read"
+    keys = blockcode.directional_keys(kind)
+    cells = {}
+    if parsed:
+        for key, cell in parsed.items():
+            if set(cell) != {"facing", *bools, *({"face"} if kind == "attach" else ())}:
+                return None, (), None, f"{label}: some variants don't name every state"
+            got, why = _dir_entry(variants[key], label, key)
+            if got is None:
+                return None, (), None, why
+            combo = tuple(int(cell[p] == "true") for p in bools)
+            cells[((cell.get("face", ""), cell["facing"]), combo)] = got
+        if len(cells) != len(keys) * 2 ** len(bools):
+            return None, (), None, f"{label}: not every combination has a variant"
+        return kind, bools, cells, ""
+    for jkey in keys:
+        for combo in product((0, 1), repeat=len(bools)):
+            cell = {"facing": jkey[1], **({"face": jkey[0]} if jkey[0] else {}),
+                    **{p: ("true" if v else "false") for p, v in zip(bools, combo)}}
+            hits = []
+            for part in parts:
+                ok = _when_matches(part.get("when") if isinstance(part, dict) else None, cell)
+                if ok is None:
+                    return None, (), None, f"{label}: a multipart condition isn't one this reads"
+                if ok:
+                    hits.append(part)
+            if len(hits) != 1:
+                return None, (), None, (f"{label}: the multipart draws {len(hits)} parts at "
+                                        f"{_key_label(jkey)}, not exactly one")
+            got, why = _dir_entry(hits[0].get("apply"), label, _key_label(jkey))
+            if got is None:
+                return None, (), None, why
+            cells[(jkey, combo)] = got
+    return kind, bools, cells, ""
+
+
 def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, dict]:
-    specs, why = {}, {}
+    specs, why, bool_specs = {}, {}, {}
     for stem, blockstate in loaded.items():
         if stem in stations:
             continue
@@ -3175,10 +3311,22 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict) -> tupl
             specs[stem] = (kind, cells)
         elif reason:
             why[stem] = reason
-    if not specs:
-        return {}, why
-    readings = blockcode.read_directional(getattr(mod, "classes", None), {n: k for n, (k, _) in specs.items()})
-    return {n: (specs[n][0], specs[n][1], readings[n]) for n in specs}, why
+        else:
+            kind, bools, cells, reason = _directional_bool_variants(blockstate)
+            if kind is not None:
+                bool_specs[stem] = (kind, bools, cells)
+            elif reason:
+                why[stem] = reason
+    out = {}
+    classes = getattr(mod, "classes", None)
+    if specs:
+        readings = blockcode.read_directional(classes, {n: k for n, (k, _) in specs.items()})
+        out.update({n: (specs[n][0], {(k, ()): v for k, v in specs[n][1].items()}, readings[n], ())
+                    for n in specs})
+    if bool_specs:
+        readings = blockcode.read_directional_states(classes, {n: (k, b) for n, (k, b, _) in bool_specs.items()})
+        out.update({n: (k, c, readings[n], b) for n, (k, b, c) in bool_specs.items()})
+    return out, why
 
 
 def _bedrock_cells(rule: dict) -> list[tuple[tuple, tuple]]:
@@ -3229,12 +3377,21 @@ def _molang(conds_list: list[tuple]) -> str:
 
 
 def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, name: str,
-                         kind: str, cells: dict, reading) -> dict | None:
+                         kind: str, cells: dict, reading, bools: tuple = ()) -> dict | None:
+    """``cells`` maps (Java key, combination) to (model, x, y, uvlock); the
+    combination is () without booleans (#218), else 0/1 per name in
+    ``bools`` (with a :class:`blockcode.DirStateReading`)."""
     ns = mod.namespace
-    label = _DIR_LABEL[kind]
-    if reading.rule_conflict:
-        result.unhandled.append(Unhandled(rel, "block", f"{label}: {reading.rule_conflict}"))
+    label = _DIR_LABEL[kind] + (" and booleans" if bools else "")
+    if bools and reading.vanilla_parent:
+        result.unhandled.append(Unhandled(rel, "block", (
+            f"{label}: {reading.cls} is a vanilla {reading.vanilla_parent.rsplit('.', 1)[-1]}, "
+            "whose state changes are vanilla code that isn't read")))
         return None
+    if reading.rule_conflict:
+        result.unhandled.append(Unhandled(rel, "block", f"{_DIR_LABEL[kind]}: {reading.rule_conflict}"))
+        return None
+    combos = blockcode.combinations(bools)
     rule = reading.rule if reading.rule is not None else blockcode.default_rule(kind)
     bedrock = _bedrock_cells(rule)
     conds_of: dict[tuple, list] = {}
@@ -3242,10 +3399,11 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         conds_of.setdefault(key, []).append(conds)
     reachable = [k for k in blockcode.directional_keys(kind) if k in conds_of]
     unreachable = [k for k in blockcode.directional_keys(kind) if k not in conds_of]
+    live = [(k, c) for k in reachable for c in combos]
 
     flats: dict[str, dict] = {}
-    for key in reachable:
-        model_ref = cells[key][0]
+    for cell in live:
+        model_ref = cells[cell][0]
         if model_ref not in flats:
             flat, why = _model_elements(mod, result, model_ref)
             if flat is None:
@@ -3271,8 +3429,8 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
     bone_of: dict = {}
     parts: list = []
     bone_elements: dict = {}
-    for key in reachable:
-        model_ref, x, y, lock = cells[key]
+    for cell in live:
+        model_ref, x, y, lock = cells[cell]
         bkey = (model_ref, x, y if lock else 0, lock)
         if bkey in bone_of:
             continue
@@ -3310,17 +3468,41 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         result.unhandled.append(Unhandled(rel, "block", why))
         return None
 
-    def bone_key(key):
-        model_ref, x, y, lock = cells[key]
+    def bone_key(cell):
+        model_ref, x, y, lock = cells[cell]
         return bone_of[(model_ref, x, y if lock else 0, lock)]
+
+    def condition(keys: list, combo: tuple | None) -> str:
+        """Molang for: the placement states give one of ``keys`` (any key
+        when they are every reachable one), and the booleans are ``combo``
+        (any when None)."""
+        traits = "" if len(keys) == len(reachable) and combo is not None else \
+            _molang([c for k in keys for c in conds_of[k]])
+        test = _combo_test(ns, bools, combo) if combo else ""
+        if traits and test:
+            return f"({traits}) && {test}" if " || " in traits else f"{traits} && {test}"
+        return traits or test
 
     visibility = {}
     for bone in bone_elements:
-        keys = [k for k in reachable if bone_key(k) == bone]
-        if len(keys) == len(reachable):
+        shown = [cell for cell in live if bone_key(cell) == bone]
+        if len(shown) == len(live):
             visibility[bone] = "1.0"
-        else:
-            visibility[bone] = _molang([c for k in keys for c in conds_of[k]])
+            continue
+        by_key: dict = {}
+        for key, combo in shown:
+            by_key.setdefault(key, []).append(combo)
+        groups: dict = {}
+        for key in reachable:
+            if key in by_key:
+                groups.setdefault(tuple(by_key[key]), []).append(key)
+        terms = []
+        for got, keys in groups.items():
+            if len(got) == len(combos):
+                terms.append(condition(keys, None))
+            else:
+                terms += [condition(keys, c) for c in got]
+        visibility[bone] = terms[0] if len(terms) == 1 else " || ".join(f"({t})" for t in terms)
 
     clamped = outside = False
 
@@ -3332,14 +3514,15 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         return out
 
     boxes = {}
-    for key in reachable:
-        model_ref, x, y, lock = cells[key]
+    for cell in live:
+        key, combo = cell
+        model_ref, x, y, lock = cells[cell]
         if reading.shapes_by is not None:
-            world = _bbox(reading.shapes_by[key])
-            boxes[key] = None if world is None else frame(world, 0 if lock else 360 - y)
+            world = _bbox(reading.shapes_by[cell] if bools else reading.shapes_by[key])
+            boxes[cell] = None if world is None else frame(world, 0 if lock else 360 - y)
         else:
-            bounds = _element_bounds(bone_elements[bone_key(key)])
-            boxes[key] = None if bounds is None else frame(bounds, 0)
+            bounds = _element_bounds(bone_elements[bone_key(cell)])
+            boxes[cell] = None if bounds is None else frame(bounds, 0)
     if outside:
         result.unhandled.append(Unhandled(rel, "block", f"{label}: Java's shape lies outside the block at "
                                           "some state, and a Bedrock box can't"))
@@ -3351,26 +3534,62 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         return {"minecraft:collision_box": selection if collides else False,
                 "minecraft:selection_box": selection}
 
+    light = getattr(reading, "light_by", None) if bools else None
     components = {"minecraft:geometry": {"identifier": identifier, "bone_visibility": visibility},
                   "minecraft:material_instances": instances}
-    same_box = len({json.dumps(boxes[k]) for k in reachable}) == 1
+    same_box = len({json.dumps(boxes[c]) for c in live}) == 1
     if same_box:
-        components.update(box_components(boxes[reachable[0]]))
-    permutations = []
-    for key in reachable:
-        model_ref, x, y, lock = cells[key]
+        components.update(box_components(boxes[live[0]]))
+    same_light = light is None or len(set(light.values())) == 1
+    if light is not None and same_light and light[combos[0]]:
+        components["minecraft:light_emission"] = light[combos[0]]
+
+    # Each component's value per cell; a component whose value follows the
+    # placement states alone goes in one permutation per Java key, one that
+    # follows the booleans alone in one per combination, the rest per cell.
+    extras = {}
+    for cell in live:
+        key, combo = cell
+        model_ref, x, y, lock = cells[cell]
         extra = {}
         if not lock and _bedrock_turn(y):
             extra["minecraft:transformation"] = {"rotation": [0, _bedrock_turn(y), 0]}
         if not same_box:
-            extra.update(box_components(boxes[key]))
+            extra.update(box_components(boxes[cell]))
+        if not same_light:
+            extra["minecraft:light_emission"] = light[combo]
+        extras[cell] = extra
+    names = list(dict.fromkeys(n for e in extras.values() for n in e))
+
+    def follows(comp: str, part: int) -> bool:
+        seen: dict = {}
+        for cell, extra in extras.items():
+            value = json.dumps(extra.get(comp), sort_keys=True)
+            if seen.setdefault(cell[part], value) != value:
+                return False
+        return True
+
+    by_key_names = [n for n in names if follows(n, 0)]
+    by_combo_names = [n for n in names if n not in by_key_names and follows(n, 1)]
+    by_cell_names = [n for n in names if n not in by_key_names and n not in by_combo_names]
+    permutations = []
+    for key in reachable:
+        extra = {n: v for n, v in extras[(key, combos[0])].items() if n in by_key_names}
         if not extra:
             continue
-        condition = _molang(conds_of[key])
-        if not condition:
+        cond = _molang(conds_of[key])
+        if not cond:
             components.update(extra)
             continue
-        permutations.append({"condition": condition, "components": extra})
+        permutations.append({"condition": cond, "components": extra})
+    for combo in combos:
+        extra = {n: v for n, v in extras[(reachable[0], combo)].items() if n in by_combo_names}
+        if extra:
+            permutations.append({"condition": _combo_test(ns, bools, combo), "components": extra})
+    for cell in live:
+        extra = {n: v for n, v in extras[cell].items() if n in by_cell_names}
+        if extra:
+            permutations.append({"condition": condition([cell[0]], cell[1]), "components": extra})
 
     used = {s for conds, _ in bedrock for s, _v in conds}
     traits = {}
@@ -3380,15 +3599,26 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
     if direction:
         traits["minecraft:placement_direction"] = {"enabled_states": direction}
     description = {"identifier": f"{ns}:{name}", "menu_category": {"category": _MENU_CATEGORY}}
+    defaults = {}
+    if bools:
+        defaults = {p: reading.defaults.get(p, (False, "DEFAULT", reading.rule_why or "the default state isn't read"))
+                    for p in bools}
+        description["states"] = {_state_name(ns, p): [defaults[p][0], not defaults[p][0]] for p in bools}
     if traits:
         description["traits"] = traits
     block = {"description": description, "components": components}
     if permutations:
         block["permutations"] = permutations
+    fmt = _BLOCK_FORMAT
+    toggle = getattr(reading, "toggle", None) if bools else None
+    if toggle:
+        from . import stations
+        components[toggle_component(ns)] = {}
+        fmt = stations.SCRIPT_FORMAT
     result.files[f"models/blocks/{name}.geo.json"] = geo
-    result.files[f"blocks/{name}.json"] = {"format_version": _BLOCK_FORMAT, "minecraft:block": block}
+    result.files[f"blocks/{name}.json"] = {"format_version": fmt, "minecraft:block": block}
     drawn = {"facing"} if kind == "facing6" else {"face", "facing"}
-    return {
+    record = {
         "name": name,
         "kind": kind,
         "rule": reading.rule_from if reading.rule is not None else None,
@@ -3399,12 +3629,27 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         "box_why": reading.shape_why,
         "collision": reading.collision,
         "collision_why": reading.collision_why,
-        "states": sorted(set(reading.states or ()) - drawn - {"facing6"}),
-        "behaviour": list(reading.behaviour),
+        "states": sorted(set(reading.states or ()) - drawn - {"facing6"} - set(bools)),
+        "behaviour": [m for m in reading.behaviour if not (toggle and m in ("useWithoutItem", "use"))],
         "clamped": clamped,
-        "uvlock": any(cells[k][3] for k in reachable),
+        "uvlock": any(cells[c][3] for c in live),
         "unreachable": [_key_label(k) for k in unreachable],
     }
+    if bools:
+        record.update({
+            "bools": bools,
+            "defaults": defaults,
+            "toggle": toggle,
+            "toggle_from": reading.toggle_from,
+            "toggle_why": reading.toggle_why,
+            "changed_by": dict(reading.changed_by),
+            "light": None if light is None else {c: light[c] for c in combos},
+            "light_kind": reading.light_kind,
+            "light_source": reading.light_source,
+            "light_why": reading.light_why,
+            "light_copied": reading.light_copied,
+        })
+    return record
 
 
 def _rule_text(rule: dict) -> str:
@@ -3441,6 +3686,24 @@ _DIR_RULE_DEFAULT = {
                "floor, clicked bottom -> ceiling (facing = the player's facing), clicked side -> wall facing "
                "away from it"),
 }
+
+
+def _directional_bool_notes(records: list[dict]) -> list[str]:
+    """Notes for 6-way facing / attach-face blocks with booleans: the
+    placement half as _directional_notes, the boolean half as
+    _coded_bool_notes, per block, read (class#method) or labelled DEFAULT."""
+    if not records:
+        return []
+    notes = [
+        f"{len(records)} 6-way facing / attach-face block(s) with boolean states convert: placement as the "
+        "6-way / attach-face blocks below (permutations on minecraft:block_face / cardinal_direction / "
+        "facing_direction), plus one Bedrock state per boolean (<namespace>:<name>, the value a placed block "
+        "starts with listed first), the model drawn at each state shown by bone_visibility; placement, box, "
+        "starting values, toggle and light read from the jar's bytecode where it can be read "
+        "deterministically, otherwise a documented DEFAULT, named per block below (a DEFAULT is not a "
+        "citation)."
+    ]
+    return notes + _directional_notes(records)[1:] + _bool_state_notes(records)
 
 
 def _directional_notes(records: list[dict]) -> list[str]:

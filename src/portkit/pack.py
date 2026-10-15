@@ -148,6 +148,24 @@ def _is_behavior(relpath: str) -> bool:
     return relpath.startswith(_BEHAVIOR_DIRS)
 
 
+# File names Minecraft Creator Tools (mct 0.20.0, cli/index.mjs, the json
+# item-type switch on ``baseName``) reads as JavaScript tooling files wherever
+# they sit: a pack with scripts and a file named package.json anywhere fails
+# its SCRIPTMODULE check ("Could not find an package.json registration for
+# @minecraft/server"). Bedrock finds block and item definitions by folder,
+# not by file name, so such a definition is written as ``_<name>.json``.
+_TOOLING_NAMES = {"package", "package.lock", "tsconfig", "jsconfig", "jsdoc", "docfx", ".prettierrc"}
+
+
+def _written_as(relpath: str, files: dict) -> str:
+    """The path a definition is written at (see _TOOLING_NAMES)."""
+    folder, _, leaf = relpath.rpartition("/")
+    if folder not in ("blocks", "items") or not leaf.endswith(".json") or leaf[:-5] not in _TOOLING_NAMES:
+        return relpath
+    renamed = f"{folder}/_{leaf}"
+    return relpath if renamed in files else renamed
+
+
 def write_tree(
     result: ConversionResult,
     namespace: str,
@@ -185,7 +203,7 @@ def write_tree(
         )
         (base / ICON_NAME).write_bytes(icon)
         for relpath, content in files.items():
-            target = base / relpath
+            target = base / _written_as(relpath, files)
             target.parent.mkdir(parents=True, exist_ok=True)
             if isinstance(content, bytes):
                 target.write_bytes(content)

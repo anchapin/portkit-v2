@@ -1885,6 +1885,9 @@ _USE_ITEM_ON = "useItemOn"
 _REDSTONE_READS = ("hasNeighborSignal", "getBestNeighborSignal", "getDirectSignal", "getSignal",
                    "hasSignal", "getDirectSignalTo")
 _STATE_CHANGES = ("setValue", "cycle")
+# The drawn states placement sets (horizontal facing, 6-way facing, attach
+# face): a toggle must leave them as they are.
+_PLACED_KEYS = ("facing", "facing6", "face")
 
 
 @dataclass
@@ -2010,8 +2013,10 @@ def _bool_value(state: State, prop: str):
     return v if v in (0, 1) and not isinstance(v, bool) else UNKNOWN
 
 
-def _read_defaults(machine: Machine, obj: Obj, r: StateReading, placed: list | None) -> None:
-    where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+def _read_defaults(machine: Machine, obj: Obj, r: StateReading, placed: list | None,
+                   where: str | None = None) -> None:
+    if where is None:
+        where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
     default = obj.fields.get("__default")
     ctor = f"{r.cls}#<init> (registerDefaultState)"
     for prop in r.bools:
@@ -2082,7 +2087,10 @@ def _read_shape_collision(machine: Machine, obj: Obj, r: Reading) -> None:
     r.collision = bool(props.has_collision)
 
 
-def _read_toggle(machine: Machine, obj: Obj, r: StateReading) -> None:
+def _read_toggle(machine: Machine, obj: Obj, r: StateReading, cells: list | None = None) -> None:
+    """``cells`` are the drawn states other than the booleans (each a
+    function from the default state to that state), every horizontal facing
+    when None."""
     found = None
     for name, desc in _USE_DESCS:
         found = machine.find_method(obj.cls, name, desc) if machine.is_mod(obj.cls) else None
@@ -2105,10 +2113,12 @@ def _read_toggle(machine: Machine, obj: Obj, r: StateReading) -> None:
     level = Obj(_LEVEL, {"isClientSide": 0})
     pos = Obj("__pos")
     flipped = set()
+    if cells is None:
+        cells = [lambda s, d=d: s.set("facing", Dir(d)) for d in HORIZONTAL]
     try:
         for combo in combinations(r.bools):
-            for d in HORIZONTAL:
-                state = _with(default, r.bools, combo).set("facing", Dir(d))
+            for cell in cells:
+                state = cell(_with(default, r.bools, combo))
                 args = [obj, state, level, pos, UNKNOWN, UNKNOWN]
                 if m.name == "use":
                     args.append(UNKNOWN)
@@ -2132,8 +2142,8 @@ def _read_toggle(machine: Machine, obj: Obj, r: StateReading) -> None:
                     at, new = effects[0]
                     if at is not pos or not isinstance(new, State):
                         raise Unreadable("it sets another block, or a state it can't read")
-                    changed = {k for k in (*r.bools, "facing") if new.get(k) != state.get(k)}
-                    if len(changed) != 1 or changed <= {"facing"}:
+                    changed = {k for k in (*r.bools, *_PLACED_KEYS) if new.get(k) != state.get(k)}
+                    if len(changed) != 1 or changed <= set(_PLACED_KEYS):
                         raise Unreadable("it doesn't flip exactly one drawn boolean")
                     prop = changed.pop()
                     if new.get(prop) != 1 - state.get(prop):
@@ -2192,7 +2202,8 @@ def _changed_by(machine: Machine, cls: str, bools: tuple) -> dict:
     return out
 
 
-def _read_state_light(machine: Machine, obj: Obj, r: StateReading, placed: list | None) -> None:
+def _read_state_light(machine: Machine, obj: Obj, r: StateReading, placed: list | None,
+                      unknown: tuple = ("facing",)) -> None:
     """The light per boolean combination: Properties.lightLevel run on the
     state with those booleans (other states at their placed value, which
     Bedrock keeps since it doesn't carry them). The same refusals as
@@ -2234,7 +2245,10 @@ def _read_state_light(machine: Machine, obj: Obj, r: StateReading, placed: list 
             machine.steps = 0
             machine.state_reads = set()
             try:
-                vals = _light_values(_apply_light(machine, fn, _with(base, r.bools, combo).set("facing", UNKNOWN)))
+                state = _with(base, r.bools, combo)
+                for key in unknown:
+                    state = state.set(key, UNKNOWN)
+                vals = _light_values(_apply_light(machine, fn, state))
             finally:
                 reads, machine.state_reads = machine.state_reads, None
             if "?" in reads or vals is None or len(vals) != 1:
@@ -2583,6 +2597,145 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
             if len({x for x in results}) != 1:
                 raise Unreadable(f"the shape at {label} depends on more than the drawn states")
             shapes[key] = results[0].boxes
+    except Unreadable as exc:
+        r.shape_why = f"{where}: {exc}"
+    else:
+        r.shapes_by = shapes
+        r.shape_from = where
+
+
+# --- Six-way facing / attach-face blocks with booleans ------------------------
+#
+# A blockstate drawing 6-way ``facing`` or ``face`` + ``facing`` together with
+# one to four boolean states is read as both readers read their halves: the
+# placement rule per clicked face as read_directional (the same rule, the
+# same DEFAULT and the same conflicts), and each boolean's start value, box,
+# use toggle and light as read_state_blocks, run at every (face, facing,
+# booleans) the blockstate draws. A boolean's start is what placement gives on
+# every path of all six clicked-face runs (else the registered default state,
+# else DEFAULT false), so a start that depends on the clicked face falls back
+# like one that reads the world. FaceAttachedHorizontalDirectionalBlock counts
+# as plain here (its placement is supplied, see Machine; it changes no
+# boolean); ButtonBlock and LeverBlock flip ``powered`` in vanilla code
+# (useWithoutItem, tick) the jar doesn't hold, so a block reaching them is a
+# vanilla parent, as FenceGateBlock is for read_state_blocks.
+
+_DIR_STATE_PLAIN = _PLAIN_VANILLA | {_FACE_ATTACHED}
+
+
+@dataclass
+class DirStateReading(DirReading):
+    """A :class:`DirReading` with booleans. ``shapes_by`` maps (key,
+    combination) to Java's boxes; the boolean fields are
+    :class:`StateReading`'s."""
+
+    bools: tuple = ()
+    vanilla_parent: str = ""
+    defaults: dict = field(default_factory=dict)
+    toggle: str | None = None
+    toggle_from: str = ""
+    toggle_why: str = ""
+    changed_by: dict = field(default_factory=dict)
+    light_by: dict | None = None
+    light_kind: str = ""
+    light_source: str = ""
+    light_why: str = ""
+    light_copied: str = ""
+
+
+def _dir_placed_states(machine: Machine, obj: Obj) -> list | None:
+    """Every state getStateForPlacement returns over the six clicked faces
+    (support assumed, as _read_rule), or None if unread."""
+    placed = []
+    machine.assume_support = True
+    try:
+        for c in DIRECTIONS:
+            machine.steps = 0
+            try:
+                results = machine.call(obj.cls, "getStateForPlacement", _PLACEMENT_DESC, [obj, _Ctx(c)])
+            except Unreadable:
+                return None
+            got = [s for s in results if s is not None]
+            if not got or any(not isinstance(s, State) for s in got):
+                return None
+            placed += got
+    finally:
+        machine.assume_support = False
+    return placed
+
+
+def _dir_cell(kind: str, key: tuple):
+    return lambda s: _with_key(s, kind, key)
+
+
+def read_directional_states(classes: ClassIndex | None,
+                            specs: dict[str, tuple[str, tuple]]) -> dict[str, DirStateReading]:
+    """A :class:`DirStateReading` per blockstate name in ``specs`` (name ->
+    (kind, the boolean state names its blockstate draws))."""
+    readings = {n: DirStateReading(n, kind=k, bools=tuple(sorted(b))) for n, (k, b) in specs.items()}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.rule_why = r.shape_why = r.collision_why = r.toggle_why = r.light_why = \
+                "the mod ships no class files"
+        return readings
+    machine, registered = _registered(classes, list(specs))
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.rule_why = r.shape_why = r.collision_why = r.toggle_why = r.light_why = why
+            continue
+        obj = objs[0]
+        r.cls = obj.cls.replace("/", ".")
+        base = machine.vanilla_base(obj.cls)
+        if base not in _DIR_STATE_PLAIN:
+            r.vanilla_parent = base.replace("/", ".")
+            continue
+        _read_states(machine, obj, r)
+        r.behaviour = _behaviour(machine, obj.cls)
+        _read_rule(machine, obj, r)
+        placed = _dir_placed_states(machine, obj)
+        where = r.rule_from or _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+        _read_defaults(machine, obj, r, placed, where)
+        _read_dir_state_shapes(machine, obj, r)
+        _read_shape_collision(machine, obj, r)
+        cells = [_dir_cell(r.kind, key) for key in directional_keys(r.kind)]
+        _read_toggle(machine, obj, r, cells)
+        r.changed_by = _changed_by(machine, obj.cls, r.bools)
+        _read_state_light(machine, obj, r, placed, unknown=_PLACED_KEYS)
+        if len(objs) > 1:
+            other = DirStateReading(name, kind=r.kind, bools=r.bools)
+            _read_rule(machine, objs[1], other)
+            _read_defaults(machine, objs[1], other, _dir_placed_states(machine, objs[1]), where)
+            _read_dir_state_shapes(machine, objs[1], other)
+            _read_shape_collision(machine, objs[1], other)
+            if (other.rule, other.shapes_by, other.collision, other.defaults) != \
+                    (r.rule, r.shapes_by, r.collision, r.defaults):
+                r.rule, r.shapes_by, r.collision = None, None, None
+                r.rule_why = r.shape_why = r.collision_why = "registered twice with different settings"
+                r.defaults = {}
+    return readings
+
+
+def _read_dir_state_shapes(machine: Machine, obj: Obj, r: DirStateReading) -> None:
+    machine.steps = 0
+    where = _declaring(machine, obj.cls, "getShape", _GET_SHAPE_DESC)
+    default = obj.fields.get("__default", State())
+    default = default if isinstance(default, State) else State()
+    shapes = {}
+    try:
+        if "__partial" in obj.fields:
+            raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
+        for combo in combinations(r.bools):
+            for key in directional_keys(r.kind):
+                state = _with_key(_with(default, r.bools, combo), r.kind, key)
+                results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
+                label = (f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}") + "".join(
+                    f",{p}={'true' if v else 'false'}" for p, v in zip(r.bools, combo))
+                if not results or any(not isinstance(x, Shape) for x in results):
+                    raise Unreadable(f"the shape at {label} is not built from boxes it can read")
+                if len({x for x in results}) != 1:
+                    raise Unreadable(f"the shape at {label} depends on more than the drawn states")
+                shapes[(key, combo)] = results[0].boxes
     except Unreadable as exc:
         r.shape_why = f"{where}: {exc}"
     else:
