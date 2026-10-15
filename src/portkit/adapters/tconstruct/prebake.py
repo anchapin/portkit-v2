@@ -56,12 +56,16 @@ repairable material in Java, which is decided in code, so repair kits are
 made only for materials whose stats name the repair-kit stat type.
 
 Names come from the mod's own lang files, composed the way Tinkers composes
-them: ``MaterialItem.getName`` for parts, and the tool definition's
-``fixed_material_name`` / ``material_name`` (filter ``all``) modules for
-tools. A tool whose name rule is decided in Java (no name module, so
-``canRepair``; ``unique_material_name``; ``custom_material_name``) keeps the
-tool's own name ("Pickaxe"). A locale missing a key falls back to ``en_us``,
-as Java does. The lines join the lang converter's ``texts/<Locale>.lang``.
+them: ``MaterialItem.getName`` for parts, and for tools every display-name
+module of the tool definition in list order (``material_name``,
+``stat_types_name``, ``fixed_material_name``, ``unique_material_name``,
+``custom_material_name``). A tool with no name module is named by the hook's
+default, which shows the materials whose stat type can repair; which stat
+types those are is read from the jar's stats classes (:mod:`.stat_types`). A
+tool whose rule can't be read that way (no classes, a stat type the bytecode
+doesn't declare, an unknown module) keeps the tool's own name ("Pickaxe"). A
+locale missing a key falls back to ``en_us``, as Java does. The lines join the
+lang converter's ``texts/<Locale>.lang``.
 
 What this does not do, on purpose:
 
@@ -86,6 +90,7 @@ from ... import png
 from ...converters import models
 from ...converters.lang import _LOCALES, _one_line
 from ...model import ConversionResult, SourceMod, Unhandled
+from . import stat_types
 
 _TOOL_LOADER = "tconstruct:tool"
 _PART_LOADER = "tconstruct:material"
@@ -124,6 +129,7 @@ class Bake:
     render_files: set[Path] = field(default_factory=set)  # render info actually read
     parts: dict[str, list[str]] = field(default_factory=dict)  # part item -> materials
     named_by_base: list[str] = field(default_factory=list)  # tools named without material
+    name_unread: dict[str, str] = field(default_factory=dict)  # tool -> why its name rule wasn't read
     unnamed: list[str] = field(default_factory=list)  # item ids with no lang name at all
     repair_kit: bool = False  # a part whose materials Java picks in code
 
@@ -424,11 +430,35 @@ def _material_name(lang: _Lang, locale: str, ns: str, material: str, item_name: 
     return _format(pattern, shown, item_name)
 
 
-def _name_rule(mod: SourceMod, tool: str):
-    """The tool definition's display-name modules, when the name is decided by data.
+# Display-name modules, by the name ``TinkerTools#registerRecipeSerializers``
+# registers each loader under (Tinkers 3.12.1.231 bytecode: ``ldc
+# "<name>"; TConstruct.getResource; <Module>.LOADER; register``).
+_MATERIAL_NAME = "tconstruct:material_name"  # MaterialToolNameModule
+_STAT_TYPES_NAME = "tconstruct:stat_types_name"  # StatTypesToolNameModule
+_FIXED_NAME = "tconstruct:fixed_material_name"  # FixedMaterialToolName
+_UNIQUE_NAME = "tconstruct:unique_material_name"  # UniqueMaterialToolName
+_CUSTOM_NAME = "tconstruct:custom_material_name"  # CustomMaterialName
+_NAME_MODULES = (_MATERIAL_NAME, _STAT_TYPES_NAME, _FIXED_NAME, _UNIQUE_NAME, _CUSTOM_NAME)
 
-    Returns ("fixed", index), ("all", None), or None when Java code decides it:
-    no module (the default filters on ``canRepair``), or one we don't model.
+
+def _index(module) -> int | None:
+    i = module.get("index")
+    return i if isinstance(i, int) and not isinstance(i, bool) and i >= 0 else None
+
+
+def _name_rule(mod: SourceMod, tool: str, slots: list[str], repairable: dict[str, bool]):
+    """The tool's display-name steps, read from its definition, or (None, why).
+
+    Tinkers runs every display-name module of a tool definition in the order
+    the JSON lists them, each given the name the one before made
+    (``ToolNameHook.ComposeMerger`` L86-99 over ``ModuleHookMap`` built in list
+    order by ``createMap`` L32-47 into a ``LinkedHashMultimap``). With none, the
+    hook's default names the materials whose stat type can repair
+    (``ToolHooks`` L134), which :mod:`.stat_types` reads from the bytecode.
+
+    Steps: ``("show", slots)`` shows the materials in those slot indices
+    (``MaterialToolName``), ``("fixed", i)``, ``("unique", i)``,
+    ``("custom", i, suffix)``.
     """
     body = _read_json(mod.data / "tinkering" / "tool_definitions" / f"{tool}.json")
     modules = body.get("modules") if isinstance(body, dict) else None
@@ -436,14 +466,70 @@ def _name_rule(mod: SourceMod, tool: str):
         m for m in modules or ()
         if isinstance(m, dict) and isinstance(m.get("type"), str) and m["type"].endswith("_name")
     ]
-    if len(named) != 1:
+    if not named:
+        unknown = sorted({s for s in slots if s not in repairable})
+        if unknown:
+            return None, "can't tell from the jar whether these stat types repair: " + ", ".join(unknown)
+        return [("show", frozenset(i for i, s in enumerate(slots) if repairable[s]))], None
+    steps = []
+    for m in named:
+        kind = m["type"]
+        if "hooks" in m:
+            return None, f"{kind} sets its own hooks"
+        if kind == _MATERIAL_NAME and m.get("filter") == "all":
+            steps.append(("show", frozenset(range(len(slots)))))
+        elif kind == _MATERIAL_NAME and m.get("filter") == "repairable":
+            unknown = sorted({s for s in slots if s not in repairable})
+            if unknown:
+                return None, "can't tell from the jar whether these stat types repair: " + ", ".join(unknown)
+            steps.append(("show", frozenset(i for i, s in enumerate(slots) if repairable[s])))
+        elif kind == _STAT_TYPES_NAME and isinstance(m.get("stat_types"), list):
+            wanted = {s for s in m["stat_types"] if isinstance(s, str)}
+            steps.append(("show", frozenset(i for i, s in enumerate(slots) if s in wanted)))
+        elif kind in (_FIXED_NAME, _UNIQUE_NAME) and _index(m) is not None and _index(m) < len(slots):
+            steps.append(("fixed" if kind == _FIXED_NAME else "unique", _index(m)))
+        elif kind == _CUSTOM_NAME and _index(m) is not None and _index(m) < len(slots) \
+                and isinstance(m.get("suffix"), str):
+            steps.append(("custom", _index(m), m["suffix"]))
+        else:
+            return None, f"a {kind} module this doesn't read"
+    return steps, None
+
+
+def _apply(step, lang: _Lang, locale: str, ns: str, tool: str, picks, name: str) -> str | None:
+    """One display-name module on ``name``; None when the lang lacks a key it needs."""
+    kind = step[0]
+    if kind == "show":
+        # MaterialToolName#getDisplayName L134-178: the distinct materials of the
+        # shown slots, in slot order; one is named by nameForMaterial, more are
+        # joined by the separator into tool.format.
+        shown = list(dict.fromkeys(picks[i].name for i in sorted(step[1]) if i < len(picks)))
+        if not shown:
+            return name
+        if len(shown) == 1:
+            return _material_name(lang, locale, ns, shown[0], name)
+        labels = [lang.get(locale, f"material.{ns}.{m}") for m in shown]
+        sep = lang.get(locale, f"item.{ns}.tool.material_separator")
+        pattern = lang.get(locale, f"item.{ns}.tool.format")
+        if None in labels or sep is None or pattern is None:
+            return None
+        return _format(pattern, sep.join(labels), name)
+    material = picks[step[1]].name
+    if kind == "fixed":
+        # FixedMaterialToolName#getDisplayName L33-39.
+        return _material_name(lang, locale, ns, material, name)
+    if kind == "unique":
+        # UniqueMaterialToolName#getDisplayName L35-52: the item's own key with
+        # ".material.<ns>.<m>" when that translates, else the item's key. It
+        # ignores the name it is given (it has only the deprecated 3-arg form).
+        key = f"item.{ns}.{tool}"
+        return lang.get(locale, f"{key}.material.{ns}.{material}") or lang.get(locale, key)
+    # CustomMaterialName#getDisplayName L29-36 + getMaterialName L39-54.
+    shown = lang.get(locale, f"material.{ns}.{material}.{step[2]}") or lang.get(locale, f"material.{ns}.{material}")
+    pattern = lang.get(locale, f"item.{ns}.tool.format")
+    if shown is None or pattern is None:
         return None
-    kind = named[0]["type"]
-    if kind == "tconstruct:fixed_material_name" and isinstance(named[0].get("index"), int):
-        return ("fixed", named[0]["index"])
-    if kind == "tconstruct:material_name" and named[0].get("filter") == "all":
-        return ("all", None)
-    return None
+    return _format(pattern, shown, name)
 
 
 def _tool_names(mod, lang, tool, rule, picks) -> dict[str, str]:
@@ -454,19 +540,11 @@ def _tool_names(mod, lang, tool, rule, picks) -> dict[str, str]:
         item_name = lang.get(locale, f"item.{ns}.{tool}")
         if item_name is None:
             continue
-        name = None
-        if rule is not None and rule[0] == "fixed" and 0 <= rule[1] < len(picks):
-            name = _material_name(lang, locale, ns, picks[rule[1]].name, item_name)
-        elif rule is not None and rule[0] == "all":
-            shown = list(dict.fromkeys(m.name for m in picks))
-            if len(shown) == 1:
-                name = _material_name(lang, locale, ns, shown[0], item_name)
-            else:
-                labels = [lang.get(locale, f"material.{ns}.{m}") for m in shown]
-                sep = lang.get(locale, f"item.{ns}.tool.material_separator")
-                pattern = lang.get(locale, f"item.{ns}.tool.format")
-                if None not in labels and sep is not None and pattern is not None:
-                    name = _format(pattern, sep.join(labels), item_name)
+        name = item_name
+        for step in rule or ():
+            name = _apply(step, lang, locale, ns, tool, picks, name)
+            if name is None:
+                break
         out[_LOCALES[locale]] = name if name is not None else item_name
     return out
 
@@ -571,6 +649,7 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
         return result, info
 
     by_texture = _texture_stat_types(mod)
+    repairable = stat_types.repairable(mod.classes)
     materials = _materials(mod, info)
     first_with: dict[str, Material | None] = {}
 
@@ -611,7 +690,7 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
                 "behavior is Java code",
             ))
             continue
-        rule = _name_rule(mod, tool)
+        rule, unnamed_why = _name_rule(mod, tool, slots, repairable)
 
         layers = []
         bad = None
@@ -703,6 +782,7 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
         info.presets[tool] = baked
         if rule is None:
             info.named_by_base.append(tool)
+            info.name_unread[tool] = unnamed_why
         for path, body, by_locale in pending:
             items[path] = body
             add_names(body["minecraft:item"]["description"]["identifier"], by_locale)
@@ -789,8 +869,9 @@ def bake(mod: SourceMod) -> tuple[ConversionResult, Bake]:
         )
         if info.named_by_base:
             result.notes.append(
-                "tinkers: these tools name their material in Java code, so their display-only "
-                "items carry the tool's own name: " + ", ".join(sorted(info.named_by_base))
+                "tinkers: the jar doesn't say how these tools name their material, so their "
+                "display-only items carry the tool's own name: "
+                + "; ".join(f"{t} ({info.name_unread.get(t)})" for t in sorted(info.named_by_base))
             )
         if info.animated:
             result.notes.append(

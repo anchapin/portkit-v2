@@ -5,9 +5,13 @@ handful of materials, and 2x2 sprites whose pixels say which layer and which
 material drew them.
 """
 import json
+from dataclasses import replace
+from pathlib import Path
 
 from portkit import png
 from portkit.adapters.tconstruct import prebake as tinkers
+from portkit.adapters.tconstruct import stat_types
+from portkit.bytecode import ClassIndex
 from portkit.converters import convert_all
 from portkit.model import ConversionResult, SourceMod
 
@@ -332,14 +336,123 @@ def test_names_compose_from_the_mods_lang_like_tinkers_does(tmp_path):
     assert result.files["texts/languages.json"] == ["en_US", "de_DE"]
 
 
-def test_a_tool_whose_name_rule_is_java_keeps_its_own_name(tmp_path):
-    mod = build(tmp_path)  # no name module: Java filters on canRepair, in code
+def test_without_classes_the_default_rule_is_unread_and_the_tool_keeps_its_name(tmp_path):
+    mod = build(tmp_path)  # no name module: Java filters on canRepair, a stats-class fact
     lang(tmp_path, "en_us", {"item.examplemod.pickaxe": "Pickaxe", "material.examplemod.iron": "Iron",
                              "item.examplemod.tool.format": "%s %s"})
     result, info = tinkers.bake(mod)
     assert f"item.{NS}:tinkers_pickaxe_iron.name=Pickaxe" in result.files["texts/en_US.lang"]
     assert info.named_by_base == ["pickaxe"]
-    assert any("tool's own name: pickaxe" in n for n in result.notes)
+    [note] = [n for n in result.notes if "tool's own name" in n]
+    assert "pickaxe (can't tell from the jar whether these stat types repair: " in note
+    assert "tconstruct:binding, tconstruct:handle, tconstruct:head" in note
+
+
+# --- names read from the stats classes (Alex, 2026-10-15) ---------------------
+
+STATS_CLASSES = Path(__file__).resolve().parents[2] / "data" / "tinkers_stats" / "classes"
+NAME_LANG = {
+    "item.examplemod.pickaxe": "Pickaxe", "item.examplemod.tool.format": "%s %s",
+    "item.examplemod.tool.material_separator": "-",
+    "material.examplemod.wood": "Wood", "material.examplemod.wood.format": "Wooden %s",
+    "material.examplemod.string": "String", "material.examplemod.iron": "Iron",
+}
+
+
+def with_classes(mod):
+    return replace(mod, classes=ClassIndex.from_source(STATS_CLASSES))
+
+
+def en_names(result):
+    return dict(line.split("=", 1) for line in result.files["texts/en_US.lang"].splitlines())
+
+
+def name_of(result, material):
+    return en_names(result)[f"item.{NS}:tinkers_pickaxe_{material}.name"]
+
+
+def test_stat_type_repairability_is_read_from_the_stats_classes():
+    """IRepairableMaterialStats through any supertype chain; ids from a namespace
+    helper, (ns, path), "ns:path", a class's own helper and an enum constructor.
+    An id two classes answer differently, a runtime id, and a non-stats class
+    are left out."""
+    assert stat_types.repairable(ClassIndex.from_source(STATS_CLASSES)) == {
+        "tconstruct:binding": False, "tconstruct:bowstring": False, "tconstruct:handle": False,
+        "tconstruct:head": True, "tconstruct:plating_boots": True, "tconstruct:plating_helmet": True,
+    }
+    assert stat_types.repairable(None) == {}
+    assert stat_types.repairable(ClassIndex({})) == {}
+
+
+def test_no_name_module_names_the_repairable_slots_like_the_hook_default(tmp_path):
+    """ToolHooks.DISPLAY_NAME's default shows materials whose stat type can repair:
+    the head here (handle and binding can't), so the string preset, whose head
+    falls back to wood, is a Wooden Pickaxe."""
+    mod = with_classes(build(tmp_path))
+    lang(tmp_path, "en_us", NAME_LANG)
+    result, info = tinkers.bake(mod)
+    assert info.named_by_base == [] and info.name_unread == {}
+    assert [name_of(result, m) for m in ("string", "wood", "iron")] == \
+        ["Wooden Pickaxe", "Wooden Pickaxe", "Iron Pickaxe"]
+    assert not any("tool's own name" in n for n in result.notes)
+
+
+def test_material_name_repairable_and_stat_types_name(tmp_path):
+    mod = with_classes(build(tmp_path))
+    name_module(tmp_path, {"type": "tconstruct:stat_types_name",
+                           "stat_types": ["tconstruct:head", "tconstruct:binding"]})
+    lang(tmp_path, "en_us", NAME_LANG)
+    result, _ = tinkers.bake(mod)
+    assert name_of(result, "string") == "Wood-String Pickaxe"  # head wood, binding string
+    assert name_of(result, "iron") == "Iron Pickaxe"
+    (tmp_path / "x").mkdir()
+    mod = with_classes(build(tmp_path / "x"))
+    name_module(tmp_path / "x", {"type": "tconstruct:material_name", "filter": "repairable"})
+    lang(tmp_path / "x", "en_us", NAME_LANG)
+    assert name_of(tinkers.bake(mod)[0], "string") == "Wooden Pickaxe"
+
+
+def test_name_modules_compose_in_list_order(tmp_path):
+    """unique_material_name takes the item's own per-material key and ignores the
+    name it is given; fixed_material_name then wraps whatever came before."""
+    mod = with_classes(build(tmp_path))
+    name_module(tmp_path, {"type": "tconstruct:unique_material_name", "index": 1})
+    name_module(tmp_path, {"type": "tconstruct:fixed_material_name", "index": 0})
+    lang(tmp_path, "en_us", {**NAME_LANG, "item.examplemod.pickaxe.material.examplemod.iron": "Ironpick"})
+    result, _ = tinkers.bake(mod)
+    assert name_of(result, "iron") == "Iron Ironpick"  # handle iron -> Ironpick, head iron
+    assert name_of(result, "wood") == "Wooden Pickaxe"  # no per-material key for wood
+    (tmp_path / "x").mkdir()
+    mod = with_classes(build(tmp_path / "x"))
+    name_module(tmp_path / "x", {"type": "tconstruct:fixed_material_name", "index": 0})
+    name_module(tmp_path / "x", {"type": "tconstruct:unique_material_name", "index": 1})
+    lang(tmp_path / "x", "en_us", {**NAME_LANG, "item.examplemod.pickaxe.material.examplemod.iron": "Ironpick"})
+    assert name_of(tinkers.bake(mod)[0], "iron") == "Ironpick"  # unique last: it wins
+
+
+def test_custom_material_name_uses_the_suffixed_key_else_the_material(tmp_path):
+    mod = with_classes(build(tmp_path))
+    name_module(tmp_path, {"type": "tconstruct:custom_material_name", "index": 0, "suffix": "skull"})
+    lang(tmp_path, "en_us", {**NAME_LANG, "material.examplemod.iron.skull": "Husk"})
+    lang(tmp_path, "de_de", {"item.examplemod.pickaxe": "Spitzhacke", "material.examplemod.iron.skull": "Wüstenzombie"})
+    result, _ = tinkers.bake(mod)
+    assert name_of(result, "iron") == "Husk Pickaxe"
+    assert name_of(result, "wood") == "Wood Pickaxe"  # no wood.skull: the plain material name
+    de = result.files["texts/de_DE.lang"].splitlines()
+    assert f"item.{NS}:tinkers_pickaxe_iron.name=Wüstenzombie Spitzhacke" in de
+
+
+def test_rules_that_cannot_be_read_keep_the_tools_own_name(tmp_path):
+    mod = with_classes(build(tmp_path))
+    repairable = stat_types.repairable(mod.classes)
+    assert tinkers._name_rule(mod, "pickaxe", ["tconstruct:head", "tconstruct:mystery"], repairable) == \
+        (None, "can't tell from the jar whether these stat types repair: tconstruct:mystery")
+    name_module(tmp_path, {"type": "tconstruct:fancy_name"})
+    rule, why = tinkers._name_rule(mod, "pickaxe", ["tconstruct:head"], repairable)
+    assert rule is None and why == "a tconstruct:fancy_name module this doesn't read"
+    lang(tmp_path, "en_us", NAME_LANG)
+    result, info = tinkers.bake(mod)
+    assert info.named_by_base == ["pickaxe"] and name_of(result, "iron") == "Pickaxe"
 
 
 def test_material_name_all_hyphenates_the_materials_in_slot_order(tmp_path):
