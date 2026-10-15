@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Alloy Forgery forging recipes are `machine_recipe` residue carrying the recipe's rules; forge definitions, tiers, fuels and its recipe tags are `machine_data`
 
-- **Status:** proposed (PR (this)).
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #233.
 - **Decision:** first slice of #171, precise residue only; no pack output
   changes. (1) An `alloy_forgery:forging` recipe is `machine_recipe` residue
   (the kind the residue agent already skips, #172/#173) instead of `recipe`,
