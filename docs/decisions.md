@@ -80,8 +80,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   `y_rotation_offset` 180) is still open, as is the list-ingredient narrowing
   revisit (FD's cabinets are still residue: `minecraft:block/orientable`
   parent).
-- **Status:** proposed.
-- **Links:** #190, #177, #185.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
+- **Links:** #190, #177, #185, PR #223.
 
 ## 2026-10-15: vendored Bedrock schemas are refreshed from the npm package by `portkit schemas`, and 1.26.60 stays on beta.24 until the stable package is out
 
