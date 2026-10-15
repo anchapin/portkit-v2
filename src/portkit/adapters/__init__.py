@@ -33,6 +33,11 @@ Hooks, and the core seam that asks each one:
   reader, in registry order, for its plan once the items have converted, its
   page text for the lang converter, and its files plus the
   ``scripts/portkit/main.js`` entry line that wires the core book viewer.
+- ``station``: a :class:`StationHooks` for a mod whose blocks a scripted
+  station runtime makes work (Waystones', #178). Each seam of
+  :mod:`portkit.converters.stations` (``station_blocks``, ``station_loot``,
+  ``station_textures``, ``station_lang_keys``, ``convert``) asks every
+  adapter's hook in registry order, after the core's own stations.
 
 Hooks for the station adapters (blocks, loot, textures, lang, runtime) are
 added with the moves that need them (audit section 7, steps 5-8).
@@ -66,6 +71,27 @@ class BookReader:
     convert: Callable[["SourceMod", object], tuple["ConversionResult", str]]
 
 
+@dataclass(frozen=True)
+class StationHooks:
+    """The ``station`` hook: one mod's scripted stations, asked for every mod
+    (each answers empty for a jar it does not support).
+
+    ``blocks(mod)``: blockstate name -> :class:`portkit.converters.station_kit.FacingBlock`
+    the runtime makes work; ``loot_names(mod)``: block loot tables (names
+    under ``loot_table/blocks/``) the station reads instead of the loot
+    converter; ``derived_textures(mod)``: textures its overlays wear, made
+    from the jar's own; ``lang_keys(mod)``: Java lang keys the runtime shows
+    itself; ``convert(mod, loot, files, context)``: ``(result, main.js entry
+    line or "")``, given the loot tables it asked for.
+    """
+
+    blocks: Callable[["SourceMod"], dict]
+    loot_names: Callable[["SourceMod"], set]
+    derived_textures: Callable[["SourceMod"], list]
+    lang_keys: Callable[["SourceMod"], set]
+    convert: Callable[..., tuple["ConversionResult", str]]
+
+
 def _empty() -> Mapping:
     return MappingProxyType({})
 
@@ -84,6 +110,7 @@ class Adapter:
     recipe_reasons: Mapping[str, tuple[str, RecipeReason]] = field(default_factory=_empty)
     convert: Callable[["SourceMod"], "ConversionResult"] | None = None
     books: BookReader | None = None
+    station: StationHooks | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -153,9 +180,14 @@ def book_readers() -> list[BookReader]:
     return [a.books for a in ADAPTERS if a.books is not None]
 
 
+def station_hooks() -> list[StationHooks]:
+    """The adapters' ``station`` hooks, in registry order."""
+    return [a.station for a in ADAPTERS if a.station is not None]
+
+
 from . import (  # noqa: E402  (each imports Adapter above)
     alloy_forgery, bclib, betterend, citadel, create, mantle, mekanism, mythicmetals, silentgear, supplementaries,
-    tconstruct,
+    tconstruct, waystones,
 )
 
 ADAPTERS = (
@@ -170,4 +202,5 @@ ADAPTERS = (
     silentgear.ADAPTER,
     supplementaries.ADAPTER,
     tconstruct.ADAPTER,
+    waystones.ADAPTER,
 )

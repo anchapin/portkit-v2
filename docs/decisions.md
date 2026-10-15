@@ -27,6 +27,34 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Waystones move into an adapter behind a `station` hook
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #253.
+- **Decision:** step 7 of the #245 migration. `converters/waystones.py`
+  (#178) moves unchanged to `adapters/waystones/convert.py`, its runtime
+  (`waystone.js`, `waystone_core.js`) to `adapters/waystones/runtime/` and
+  its cited config defaults to `adapters/waystones/data/` (picks 6a, 9a; the
+  runtime still ships at `scripts/portkit/` beside the kit files it imports).
+  A new optional hook, `Adapter.station` (`StationHooks`: `blocks`,
+  `loot_names`, `derived_textures`, `lang_keys`, `convert`), is asked by every
+  seam of `converters/stations.py` in registry order after the core's own
+  Farmer's Delight stations; loot tables an adapter names go to it, the rest
+  to the feasts, as before. Tests move with the code (pick 7a:
+  `tests/adapters/waystones/`, `tests/js/adapters/waystones/`); the node test
+  loader resolves an adapter runtime's missing `./` imports to
+  `src/portkit/runtime/`, as they resolve in a pack. Core namespace allowlist
+  138 -> 97.
+- **Why:** audit section 7 step 7 and picks 1-10 (approved by Alex,
+  2026-10-15). With one station adapter the hook gives the old calls in the
+  old order (Waystones' converter ran last), so pack trees are md5-identical
+  (Waystones, Farmer's Delight fabric and neoforge, Alex's Mobs checked
+  locally; the corpus gate on GitHub).
+- **Rejected:** a re-export shim at `converters/waystones.py` (the core would
+  still import an adapter); shipping the runtime under
+  `scripts/portkit/adapters/waystones/` (pick 6b: every pack's paths change
+  for no player-visible gain).
+- **Links:** #245, #178, PR #252; `docs/adapter-audit-2026-10-15.md` section 7.
+
 ## 2026-10-15: Citadel books move into a library adapter behind a `books` hook
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #252.

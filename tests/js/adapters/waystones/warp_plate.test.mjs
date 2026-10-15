@@ -1,13 +1,13 @@
-// The fixed waystone runtime's warp plates (src/portkit/runtime), offline under node.
-// Run: node --import tests/js/register.mjs --test tests/js/warp_plate.test.mjs
-// (tests/test_waystones.py runs it with PORTKIT_WAYSTONE_TABLE set to a data
+// The fixed waystone runtime's warp plates (src/portkit/adapters/waystones/runtime), offline under node.
+// Run: node --import tests/js/register.mjs --test tests/js/adapters/waystones/warp_plate.test.mjs
+// (tests/adapters/waystones/test_waystones.py runs it with PORTKIT_WAYSTONE_TABLE set to a data
 // table the converter just generated; without it a small table here is used.)
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import * as core from "../../src/portkit/runtime/waystone_core.js";
-import { registerWaystones } from "../../src/portkit/runtime/waystone.js";
+import * as core from "../../../../src/portkit/adapters/waystones/runtime/waystone_core.js";
+import { registerWaystones } from "../../../../src/portkit/adapters/waystones/runtime/waystone.js";
 import { _fire, _permutation, _runIntervals, _startup, world, GameMode, ItemStack } from "@minecraft/server";
 
 const REQUIREMENTS = [

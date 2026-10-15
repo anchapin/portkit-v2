@@ -4,7 +4,7 @@ The converter writes the ten waystone blocks (facing x a custom ``half`` state,
 a box per half, minecraft:loot on the lower half only), their Bedrock loot
 tables, scripts/portkit/data/waystones_waystone.js (the warpRequirements
 default decided for this runtime, the texts, sounds and rules) and ships the
-fixed runtime (portkit/runtime/waystone*.js), with a @minecraft/server-ui
+fixed runtime (portkit/adapters/waystones/runtime/waystone*.js), with a @minecraft/server-ui
 dependency in the behavior pack manifest.
 
 Offline: a Waystones-shaped Fabric mod with two waystones, an orange
@@ -20,12 +20,24 @@ from pathlib import Path
 
 import pytest
 
-from portkit.converters import waystones
-from portkit.converters.waystones import requirements
+from portkit.adapters.waystones import convert as waystones
+from portkit.adapters.waystones.convert import requirements
 from portkit.model import SourceMod
 from portkit.pipeline import convert
 
-from test_stations import PNG, ROOT, _write
+
+ROOT = Path(__file__).resolve().parents[3]
+PNG = next((ROOT / "fixtures" / "simple_block_mod").rglob("*.png"))
+
+
+def _write(root: Path, rel: str, body) -> None:
+    # As tests/test_stations.py's helper (this directory is not on its import path).
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(body, bytes):
+        path.write_bytes(body)
+    else:
+        path.write_text(body if isinstance(body, str) else json.dumps(body))
 
 NS = "waystones"
 DATA = "behavior_pack/scripts/portkit/data/waystones_waystone.js"
@@ -331,7 +343,7 @@ def test_runtime_under_node(converted):
     js = ROOT / "tests" / "js"
     for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
         proc = subprocess.run(
-            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "waystone.test.mjs")],
+            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "waystones" / "waystone.test.mjs")],
             capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -416,7 +428,7 @@ def test_sharestone_conditions_are_decided_for_its_colour():
 def test_lines_left_out_for_every_type_are_listed_once():
     from types import SimpleNamespace
 
-    from portkit.converters.waystones import _plan
+    from portkit.adapters.waystones.convert import _plan
 
     mod = SimpleNamespace(mods={NS: "21.1.46"})
     plan = _plan(mod, ["waystones:orange_sharestone", "waystones:waystone"])
@@ -768,7 +780,7 @@ def test_runtime_under_node_with_waystone_runes(stoned):
     _, tree = stoned
     js = ROOT / "tests" / "js"
     proc = subprocess.run(
-        ["node", "--import", str(js / "register.mjs"), "--test", str(js / "waystone.test.mjs")],
+        ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "waystones" / "waystone.test.mjs")],
         capture_output=True, text=True, timeout=120,
         env={"PATH": os.environ["PATH"], "PORTKIT_WAYSTONE_TABLE": str(tree / DATA)},
     )
@@ -871,7 +883,7 @@ def test_portstone_conditions_have_no_source_waystone():
 def test_a_portstone_only_line_is_listed_per_variant():
     from types import SimpleNamespace
 
-    from portkit.converters.waystones import _plan
+    from portkit.adapters.waystones.convert import _plan
 
     mod = SimpleNamespace(mods={NS: "21.1.46"})
     plan = _plan(mod, ["waystones:waystone"], ["waystones:waystone"])
@@ -1085,7 +1097,7 @@ def test_warp_plate_runtime_under_node(plated):
     for test in ("warp_plate.test.mjs", "waystone.test.mjs"):
         for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
             proc = subprocess.run(
-                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "waystones" / test)],
                 capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
             )
             assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr
@@ -1094,7 +1106,7 @@ def test_warp_plate_runtime_under_node(plated):
 def test_a_line_only_the_warp_plate_keeps_is_listed_once():
     from types import SimpleNamespace
 
-    from portkit.converters.waystones import _plan
+    from portkit.adapters.waystones.convert import _plan
 
     mod = SimpleNamespace(mods={NS: "21.1.46"})
     plan = _plan(mod, ["waystones:orange_sharestone", "waystones:warp_plate", "waystones:waystone"])
@@ -1340,7 +1352,7 @@ def test_warp_portal_runtime_under_node(portaled):
     for test in ("warp_portal.test.mjs", "waystone.test.mjs"):
         for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
             proc = subprocess.run(
-                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "waystones" / test)],
                 capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
             )
             assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr
@@ -1494,7 +1506,7 @@ def test_scroll_runtime_under_node(scrolled):
     for test in ("scrolls.test.mjs", "warp_portal.test.mjs", "waystone.test.mjs"):
         for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
             proc = subprocess.run(
-                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "waystones" / test)],
                 capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
             )
             assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr
@@ -1620,7 +1632,7 @@ def test_warp_stone_runtime_under_node(warp_stoned):
     for test in ("warp_stone.test.mjs", "scrolls.test.mjs", "warp_portal.test.mjs", "waystone.test.mjs"):
         for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
             proc = subprocess.run(
-                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "waystones" / test)],
                 capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
             )
             assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr
@@ -1821,7 +1833,7 @@ def test_memorial_runtime_under_node(memorialed):
                  "waystone.test.mjs"):
         for env in ({}, {"PORTKIT_WAYSTONE_TABLE": str(tree / DATA)}):
             proc = subprocess.run(
-                ["node", "--import", str(js / "register.mjs"), "--test", str(js / test)],
+                ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "waystones" / test)],
                 capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
             )
             assert proc.returncode == 0, test + str(env) + proc.stdout + proc.stderr
