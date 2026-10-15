@@ -1217,18 +1217,37 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
     if not src.is_dir():
         return result
 
-    readings = _read_facing_code(mod, src, stations or {})
-    bool_readings, bool_why = _read_bool_code(mod, src, stations or {})
+    loaded = _load_blockstates(src)
+    # waterlogged draws nothing in Java (see _drop_waterlogged): a blockstate
+    # whose models don't depend on it converts without it, the water left to
+    # Bedrock's liquid_detection (_add_water).
+    water_why: dict[str, str] = {}
+    water_dropped: set[str] = set()
+    for stem in list(loaded):
+        if stem in (stations or {}):
+            continue
+        reduced, why = _drop_waterlogged(loaded[stem])
+        if reduced is not None:
+            loaded[stem] = reduced
+            water_dropped.add(stem)
+        elif why:
+            water_why[stem] = why
+    readings = _read_facing_code(mod, src, stations or {}, loaded)
+    bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded)
     coded: list[dict] = []
     coded_bool: list[dict] = []
     for path in sorted(src.glob("*.json")):
         rel = result.claim(mod, path)
         name = path.stem
         try:
-            blockstate = json.loads(path.read_text())
+            json.loads(path.read_text())
         except json.JSONDecodeError as exc:
             result.unhandled.append(Unhandled(rel, "block", f"invalid JSON: {exc}"))
             continue
+        if name in water_why:
+            result.unhandled.append(Unhandled(rel, "block", water_why[name]))
+            continue
+        blockstate = loaded[name]
 
         if name in bool_readings:
             # A block that doesn't convert leaves the models it looked at
@@ -1237,6 +1256,8 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             claimed = set(result.consumed)
             record = _convert_coded_bool(mod, result, rel, name, *bool_readings[name])
             if record is not None:
+                if name in water_dropped:
+                    record["states"] = [x for x in record["states"] if x != "waterlogged"]
                 coded_bool.append(record)
             else:
                 result.consumed = claimed | {rel}
@@ -1249,6 +1270,8 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             model_ref, turns, uvlock = _coded_facing_variants(blockstate)
             record = _convert_coded_facing(mod, result, rel, name, model_ref, turns, uvlock, readings[name])
             if record is not None:
+                if name in water_dropped:
+                    record["states"] = [x for x in record["states"] if x != "waterlogged"]
                 coded.append(record)
             continue
 
@@ -1326,7 +1349,8 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
     result.notes.extend(_coded_facing_notes(coded))
     result.notes.extend(_coded_bool_notes(coded_bool))
     _toggle_table(mod, result, coded_bool)
-    _add_light(mod, result, src, skip={r["name"] for r in coded_bool})
+    _add_light(mod, result, src, skip={r["name"] for r in coded_bool}, loaded=loaded)
+    _add_water(mod, result, sorted(water_dropped))
     return result
 
 
@@ -1945,18 +1969,25 @@ def _coded_facing_variants(blockstate: dict) -> tuple[str | None, dict | None, b
     return seen.pop(), turns, uvlocks.pop()
 
 
-def _read_facing_code(mod: SourceMod, src, stations: dict) -> dict:
-    """blockcode readings for every facing-only blockstate that is no station."""
-    names = []
+def _load_blockstates(src) -> dict:
+    """name -> parsed blockstate, for every blockstate file that parses."""
+    out = {}
     for path in sorted(src.glob("*.json")):
-        if path.stem in stations:
-            continue
         try:
-            blockstate = json.loads(path.read_text())
+            out[path.stem] = json.loads(path.read_text())
         except json.JSONDecodeError:
             continue
+    return out
+
+
+def _read_facing_code(mod: SourceMod, src, stations: dict, loaded: dict | None = None) -> dict:
+    """blockcode readings for every facing-only blockstate that is no station."""
+    names = []
+    for stem, blockstate in (loaded if loaded is not None else _load_blockstates(src)).items():
+        if stem in stations:
+            continue
         if _coded_facing_variants(blockstate)[0] is not None:
-            names.append(path.stem)
+            names.append(stem)
     if not names:
         return {}
     return blockcode.read_blocks(getattr(mod, "classes", None), names)
@@ -2292,7 +2323,8 @@ def _has_light(definition: dict) -> bool:
                for p in block.get("permutations") or () if isinstance(p, dict))
 
 
-def _add_light(mod: SourceMod, result: ConversionResult, src, skip: set = frozenset()) -> None:
+def _add_light(mod: SourceMod, result: ConversionResult, src, skip: set = frozenset(),
+               loaded: dict | None = None) -> None:
     # ``skip``: blocks whose light was read per state already (facing plus
     # booleans), with notes of their own.
     names = sorted(k[len("blocks/"):-len(".json")] for k, v in result.files.items()
@@ -2302,6 +2334,11 @@ def _add_light(mod: SourceMod, result: ConversionResult, src, skip: set = frozen
         return
     drawn = {}
     for name in names:
+        if loaded is not None:
+            # The blockstate as converted (waterlogged dropped, see
+            # _drop_waterlogged), so the states the Bedrock block carries.
+            drawn[name] = _drawn_states(loaded[name]) if name in loaded else set()
+            continue
         path = src / f"{name}.json"
         try:
             drawn[name] = _drawn_states(json.loads(path.read_text())) if path.is_file() else set()
@@ -2375,8 +2412,9 @@ def _light_notes(readings: list) -> list[str]:
 #
 # A block whose class reaches a vanilla block class with behaviour of its own
 # (FenceGateBlock, LanternBlock...) stays residue: its states are vanilla code.
-# waterlogged is not one of these booleans (a liquid, not a drawn state); a
-# blockstate that draws it is left to the other converters.
+# waterlogged is not one of these booleans (a liquid, not a drawn state): a
+# blockstate that draws it reaches this converter with it dropped
+# (_drop_waterlogged), and Bedrock holds the water (_add_water).
 
 _MAX_BOOLS = 4
 _BOOL_VALUES = {"true", "false"}
@@ -2513,22 +2551,18 @@ def _coded_bool_variants(blockstate: dict) -> tuple[dict | None, str]:
     return {"bools": bools, "cells": cells}, ""
 
 
-def _read_bool_code(mod: SourceMod, src, stations: dict) -> dict:
+def _read_bool_code(mod: SourceMod, src, stations: dict, loaded: dict | None = None) -> dict:
     """(spec, reading) per blockstate that draws facing and booleans and is
     no station; (spec-less) residue reasons go in the second dict."""
     specs, why = {}, {}
-    for path in sorted(src.glob("*.json")):
-        if path.stem in stations:
-            continue
-        try:
-            blockstate = json.loads(path.read_text())
-        except json.JSONDecodeError:
+    for stem, blockstate in (loaded if loaded is not None else _load_blockstates(src)).items():
+        if stem in stations:
             continue
         spec, reason = _coded_bool_variants(blockstate)
         if spec is not None:
-            specs[path.stem] = spec
+            specs[stem] = spec
         elif reason:
-            why[path.stem] = reason
+            why[stem] = reason
     if not specs:
         return {}, why
     readings = blockcode.read_state_blocks(getattr(mod, "classes", None),
@@ -2884,3 +2918,150 @@ def _toggle_table(mod: SourceMod, result: ConversionResult, records: list[dict])
     result.files[toggle_table_path(mod.namespace)] = stations._js_module(
         header, {"component": toggle_component(mod.namespace), "blocks": blocks_})
     result.files[TOGGLE_RUNTIME] = stations.runtime_source("toggle.js")
+
+
+# --------------------------------------------------------------------------
+# Waterlogged blocks.
+#
+# Java's ``waterlogged`` state draws nothing itself: the water is the state's
+# fluid (getFluidState), drawn by the fluid renderer, so a blockstate gives
+# waterlogged=true and =false the same model. Such a blockstate converts with
+# the state dropped (each remaining combination keeps its one model) and
+# rides on whichever converter its other states fit (a plain block, facing,
+# facing plus booleans...). A blockstate whose model does depend on it, that
+# leaves it out of some variants, or a multipart that tests it, stays residue
+# with that reason.
+#
+# Bedrock keeps water in a block position's second layer, next to the block
+# ("A block is waterlogged when it contains either a source or flowing block
+# of water... The secondary block is water", Bedrock-OSS bedrock-wiki
+# docs/blocks/block-colocation.md), and a custom block may hold it through
+# minecraft:liquid_detection (released from the Upcoming Creator Features
+# experiment for block format 1.21.60 and above: Minecraft 1.21.60 Bedrock
+# changelog; MicrosoftDocs/minecraft-creator minecraftBlock_liquid_detection.md
+# "requires a format version of at least 1.21.60"). A converted block gets
+#
+#   {"detection_rules": [{"liquid_type": "water", "can_contain_liquid": true,
+#                         "on_liquid_touches": "blocking"}]}
+#
+# when its code holds water while waterlogged (blockcode.read_water:
+# getFluidState returns Fluids.WATER.getSource(false) at waterlogged=true),
+# and nothing when its code never holds a fluid (vanilla
+# BlockBehaviour#getFluidState: the state is cosmetic in Java). When the code
+# isn't read, the DEFAULT is can_contain_liquid true (the blockstate draws a
+# waterlogged state), labelled as such in the notes.
+#
+# "blocking": Java's flowing water doesn't enter a waterloggable block
+# (FlowingFluid#canHoldFluid L408-411 asks LiquidBlockContainer#canPlaceLiquid,
+# and SimpleWaterloggedBlock#canPlaceLiquid L22 accepts only Fluids.WATER, the
+# source) and doesn't wash it away either, which is Bedrock's "blocking" (the
+# default: "The block stops the liquid from flowing"). Water flows out of a
+# waterlogged block on every side on both (stops_liquid_flowing_from_direction
+# is left out, "liquid can flow out of all directions by default").
+# use_liquid_clipping is left out: it needs block format 1.26.0.
+#
+# A block carrying the component is written at format 1.21.60 at least, and
+# the pack floor follows (pack.engine_floor). Placement in water is the
+# engine's: Java sets waterlogged in getStateForPlacement from the fluid at
+# the clicked position; nothing is emitted for it.
+
+_WATER_FORMAT = "1.21.60"
+_WATER_RULE = {"liquid_type": "water", "can_contain_liquid": True, "on_liquid_touches": "blocking"}
+
+
+def _drop_waterlogged(blockstate: dict) -> tuple[dict | None, str]:
+    """(the blockstate without ``waterlogged``, "") when it draws the state
+    and every other combination has the same model at true and false;
+    (None, why) when it draws it otherwise; (None, "") when it doesn't."""
+    variants = blockstate.get("variants")
+    if isinstance(variants, dict) and variants:
+        groups: dict[str, dict[str, object]] = {}
+        order: list[str] = []
+        named = 0
+        for key, entry in variants.items():
+            pairs = [p.split("=", 1) for p in key.split(",") if p]
+            if any(len(p) != 2 for p in pairs):
+                return None, ""
+            water = [b.strip() for a, b in pairs if a.strip() == "waterlogged"]
+            if not water:
+                continue
+            named += 1
+            rest = ",".join(f"{a.strip()}={b.strip()}" for a, b in pairs if a.strip() != "waterlogged")
+            if water[0] not in ("true", "false"):
+                return None, f"waterlogged: variant {key} gives it a value other than true or false"
+            if rest not in groups:
+                groups[rest] = {}
+                order.append(rest)
+            groups[rest][water[0]] = entry
+        if not named:
+            return None, ""
+        if named != len(variants):
+            return None, "waterlogged: some variants don't name it"
+        for rest in order:
+            got = groups[rest]
+            if set(got) != {"true", "false"}:
+                return None, f"waterlogged: {rest or 'the block'} has no variant at waterlogged={'true' if 'false' in got else 'false'}"
+            if json.dumps(got["true"], sort_keys=True) != json.dumps(got["false"], sort_keys=True):
+                return None, (f"waterlogged: {rest or 'the block'} draws a different model at "
+                              "waterlogged=true and false")
+        out = dict(blockstate)
+        out["variants"] = {rest: groups[rest]["false"] for rest in order}
+        return out, ""
+    if "waterlogged" in _drawn_states(blockstate):
+        return None, "waterlogged: a multipart part depends on it, which isn't read"
+    return None, ""
+
+
+def _add_water(mod: SourceMod, result: ConversionResult, names: list[str]) -> None:
+    """liquid_detection for the converted blocks among ``names`` (their
+    blockstates drew waterlogged), from their getFluidState or the DEFAULT."""
+    names = [n for n in names if isinstance(result.files.get(f"blocks/{n}.json"), dict)]
+    if not names:
+        return
+    readings = blockcode.read_water(getattr(mod, "classes", None), names)
+    for name in names:
+        r = readings[name]
+        if r.holds is False:
+            continue
+        definition = result.files[f"blocks/{name}.json"]
+        components = definition["minecraft:block"].setdefault("components", {})
+        components["minecraft:liquid_detection"] = {"detection_rules": [dict(_WATER_RULE)]}
+        if _version(definition.get("format_version", _BLOCK_FORMAT)) < _version(_WATER_FORMAT):
+            definition["format_version"] = _WATER_FORMAT
+    result.notes.extend(_water_notes([readings[n] for n in names]))
+
+
+def _version(text: str) -> tuple:
+    try:
+        return tuple(int(v) for v in str(text).split("."))
+    except ValueError:
+        return ()
+
+
+def _water_notes(readings: list) -> list[str]:
+    """Per block: whether it holds water read from bytecode (class#method) or
+    the labelled DEFAULT, never one for the other."""
+    notes = [
+        f"{len(readings)} converted block(s) draw a waterlogged state, which draws nothing in Java (the water is "
+        "the state's fluid): it is dropped from the Bedrock block, and where the block holds water the water is "
+        "Bedrock's own (minecraft:liquid_detection, can_contain_liquid, flowing water blocked). Placing it in water, "
+        "filling or emptying it with a bucket and water flowing out of it are the engine's; Java's "
+        "updateShape fluid ticks aren't carried."
+    ]
+    held = [(r.source, r.name) for r in readings if r.holds]
+    if held:
+        notes.append("Holds water when waterlogged, read from bytecode (getFluidState gives Fluids.WATER's "
+                     "source at waterlogged=true) - " + _grouped(held) + ".")
+    dry = [(r.source, r.name) for r in readings if r.holds is False]
+    if dry:
+        notes.append("Never holds water, read from bytecode (getFluidState gives no fluid at either value, so "
+                     "Java's waterlogged state is cosmetic); no liquid_detection - " + _grouped(dry) + ".")
+    default = [(r.why, r.name) for r in readings if r.holds is None]
+    if default:
+        notes.append("Holds water DEFAULT, not read from code (can_contain_liquid true, since the blockstate "
+                     "draws waterlogged) - " + _grouped(default) + ".")
+    no_bucket = [r.name for r in readings if r.holds and r.bucket is False]
+    if no_bucket:
+        notes.append("Not a SimpleWaterloggedBlock in Java (a bucket can't fill or empty it there; on Bedrock "
+                     "it can): " + ", ".join(no_bucket) + ".")
+    return notes

@@ -14,4 +14,5 @@ public abstract class BlockBehaviour { public BlockBehaviour(Properties p) {}
   protected VoxelShape getShape(BlockState s, BlockGetter g, BlockPos p, CollisionContext c) { return null; }
   protected InteractionResult useWithoutItem(BlockState s, Level l, BlockPos p, Player pl, BlockHitResult h) { return null; }
   protected ItemInteractionResult useItemOn(ItemStack i, BlockState s, Level l, BlockPos p, Player pl, InteractionHand h, BlockHitResult r) { return null; }
+  protected net.minecraft.world.level.material.FluidState getFluidState(BlockState s) { return null; }
   protected void neighborChanged(BlockState s, Level l, BlockPos p, Block b, BlockPos f, boolean m) {} }
