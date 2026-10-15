@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Display-only items are allowed when the visual is real and the behavior isn't portable
 
-- **Status:** proposed; PR #129 waits on Alex's review (the item policy itself was approved by Alex in #128 on 2026-10-11).
+- **Status:** approved (Alex, 2026-10-15); item policy approved by Alex in #128 on 2026-10-11.
 - **Decision:** portkit may ship an item that only looks right, when its
   look comes from the mod's own assets and its behavior is Java code with no
   Bedrock mapping. Such an item carries its icon, its name from the mod's lang
