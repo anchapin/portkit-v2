@@ -100,6 +100,17 @@ def _mod_name(tree: Path) -> str:
     return tree.name
 
 
+def _setting_row(s: dict) -> tuple[str, str, str, str]:
+    """One user config setting as a report row: a flag (on/off) or a value option (a number)."""
+    default = s.get("cited_default")
+    if s.get("condition") is None:  # a non-boolean config value (#190)
+        return (f"`{s.get('mod')}.{s.get('flag')}`", f"{s.get('value'):g}",
+                "uncited" if default is None else f"{default:g}", f"`{s.get('as_written')}`")
+    return (f"`{s.get('condition')}`", "on" if s.get("value") else "off",
+            "uncited" if default is None else ("on" if default else "off"),
+            f"`{s.get('as_written')}`")
+
+
 def _config_settings(tree: Path) -> list[dict]:
     """The user config settings the conversion recorded next to the tree, if any."""
     path = tree / "config-overrides.json"
@@ -203,10 +214,7 @@ def render(tree: Path) -> str:
             "",
         ]
         lines += _table(
-            [(f"`{s.get('condition')}`", "on" if s.get("value") else "off",
-              "uncited" if s.get("cited_default") is None else ("on" if s.get("cited_default") else "off"),
-              f"`{s.get('as_written')}`")
-             for s in settings],
+            [_setting_row(s) for s in settings],
             ("Flag", "Set to", "Cited default", "As written"),
         )
         lines.append("")

@@ -205,6 +205,10 @@ CUTTING_BOARD_BLOCKS = {
     ),
 }
 
+# Farmer's Delight's config option for the cutting board's Fortune bonus
+# (Configuration.java L84-85, a double in [0, 1]; #190).
+FORTUNE_OPTION = "cuttingBoardFortuneBonus"
+
 # Versions whose cutting-board code the runtime was checked against. Another
 # version may behave differently, so it stays residue instead of borrowing.
 _FD_VERSIONS = {
@@ -327,8 +331,11 @@ def _cutting_spec(loader: str) -> CuttingBoardSpec:
                           else "block.farmersdelight.cutting_board.invalid_item"),
             "remaining": "block.farmersdelight.cutting_board.remaining_items",
         },
-        # Configuration.cuttingBoardFortuneBonus default (a double, not a
-        # boolean flag, so --config doesn't reach it yet).
+        # Configuration.cuttingBoardFortuneBonus default. The conversion reads
+        # it through LoadContext.config_value (cited in
+        # data/config_flag_defaults.json `values`, where `portkit convert
+        # --config farmersdelight.cuttingBoardFortuneBonus=<0..1>` replaces it,
+        # #190); this copy is the fallback and a test keeps the two equal.
         fortune_bonus=0.1,
         sources=(
             _src(repo, block, "65-L101" if neo else "67-L106"),
@@ -748,11 +755,25 @@ def _convert_cutting(mod: SourceMod, deferred: list[tuple[str, dict]], files: di
         sounds["knife"] = None
         notes.append(f"cutting board: knife sound {knife_sound} did not convert; knife cuts are silent")
     messages = {role: _lang_key(mod, key) for role, key in spec.messages.items()}
+    fortune = context.config_value("farmersdelight", FORTUNE_OPTION)
+    fortune_bonus = fortune.value if fortune is not None else spec.fortune_bonus
+    if fortune is not None and fortune.user:
+        default = "uncited" if fortune.default is None else f"{fortune.default:g}"
+        fortune_note = (f"Fortune adds {fortune_bonus:g} per level to each chance result "
+                        f"(farmersdelight.{FORTUNE_OPTION} set by user config; cited default {default}).")
+    elif fortune is not None:
+        fortune_note = (f"Fortune adds {fortune_bonus:g} per level to each chance result (the cited "
+                        f"default of {FORTUNE_OPTION}; portkit convert --config "
+                        f"farmersdelight.{FORTUNE_OPTION}=<number> changes it).")
+    else:  # not reached for the FD versions the runtime was read against (both cited)
+        fortune_note = (f"Fortune adds {fortune_bonus:g} per level to each chance result "
+                        f"({FORTUNE_OPTION} as read from FD's Configuration.java; no cited entry for "
+                        "this version, so --config can't change it).")
 
     table = {
         "block": identifier,
         "component": _component(mod),
-        "fortune_bonus": spec.fortune_bonus,
+        "fortune_bonus": fortune_bonus,
         "messages": messages,
         "recipes": sorted(kept, key=lambda e: e["id"]),
         "sound_tools": sound_tools,
@@ -794,9 +815,9 @@ def _convert_cutting(mod: SourceMod, deferred: list[tuple[str, dict]], files: di
         "drawn on the board (Bedrock has no block renderer for it), sneak-placing a tool on the board, "
         "cutting particles, the comparator signal, waterlogging, dispensers using the board, the "
         "advancement and item-use statistic, the stored item when the board is destroyed by "
-        "anything but a player (no break event for that in script API 2.0.0), the stored block's own "
-        "break sound as a cut sound (scripts can't read a block's sound type; that cut is silent), and "
-        f"cuttingBoardFortuneBonus overrides (the cited default {spec.fortune_bonus} is used). A stored "
+        "anything but a player (no break event for that in script API 2.0.0), and the stored block's "
+        "own break sound as a cut sound (scripts can't read a block's sound type; that cut is silent). "
+        f"{fortune_note} A stored "
         "stack keeps its id, count, name, lore, durability damage and enchantments only."
     )
     return result, entry

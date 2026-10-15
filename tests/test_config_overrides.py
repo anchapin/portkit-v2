@@ -120,7 +120,7 @@ def test_config_file_json_and_toml_nested_and_flat(tmp_path):
     assert {(r.name, r.value) for r in load_config_file(tm)} == {("on_thing", False), ("enableDusts", True)}
     assert all(r.origin == str(tm) for r in load_config_file(tm))
     bad = tmp_path / "bad.json"
-    for body in ("[1]", '{"examplemod": {"x": 3}}', "{nope", '{"a.b": {"c": true}}', '{"nodot": true}'):
+    for body in ("[1]", '{"examplemod": {"x": [3]}}', '{"examplemod": {"x": "maybe"}}', "{nope", '{"a.b": {"c": true}}', '{"nodot": true}'):
         bad.write_text(body)
         with pytest.raises(ConfigError):
             load_config_file(bad)

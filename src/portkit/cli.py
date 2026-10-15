@@ -972,14 +972,17 @@ def main(argv=None) -> int:
             "set a mod config flag for this conversion, as a Java player would in the "
             "mod's config file (repeatable), e.g. mythicmetals.enableDusts=true. FLAG is "
             "the flag as the mod's load conditions name it or the option's own config "
-            "key; it replaces the default cited from the mod's source, both ways. An "
-            "unknown mod or flag is an error listing the valid ones"
+            "key; it replaces the default cited from the mod's source, both ways. A cited "
+            "number option takes a number in the range the mod accepts, e.g. "
+            "farmersdelight.cuttingBoardFortuneBonus=0.25. An unknown mod or flag, or a "
+            "number out of range, is an error listing the valid ones"
         ),
     )
     p.add_argument(
         "--config-file", metavar="PATH",
         help=(
-            "read mod config flags from a JSON or TOML file ({\"mod\": {\"flag\": true}} "
+            "read mod config flags and number options from a JSON or TOML file "
+            "({\"mod\": {\"flag\": true}} "
             "or {\"mod.flag\": true}); --config settings win over it. Every run with "
             "settings writes OUT/config-overrides.json, which reproduces it"
         ),

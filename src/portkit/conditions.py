@@ -38,6 +38,14 @@ not load. This module decides each file against the conversion context:
   cites one (``mythicmetals.enableDusts``); an unknown mod or flag is a
   :class:`ConfigError` listing the valid ones, never a silent ignore. See
   docs/decisions.md, 2026-10-13 (config overrides).
+- **Config values** (non-boolean options a converter reads, not load
+  conditions, such as Farmer's Delight's ``cuttingBoardFortuneBonus``): the
+  ``values`` list of the same data file cites each option's type, default and
+  the range the mod's config accepts; :meth:`LoadContext.config_value` gives a
+  converter the cited default or the user's ``--config <mod>.<key>=<number>``.
+  A number outside the cited range is a :class:`ConfigError` (Java would clamp
+  or reset it, differently per loader, so the user hears about it instead).
+  docs/decisions.md, 2026-10-15.
 - **Gated registrations**: ids the mod's code registers only while a flag is on
   (``registers`` in the data file, cited), such as Mythic Metals' ``*_dust``
   items under ``enableDusts``; :meth:`LoadContext.gated_item` decides them the
@@ -67,6 +75,10 @@ if TYPE_CHECKING:
     from .model import SourceMod
 
 FLAG_DATA = "config_flag_defaults.json"
+# Key of a config value setting in a LoadContext's overrides: (VALUE_KEY,
+# "<mod>.<option>"). Condition types always carry a namespace colon and this
+# one is portkit's own, so it never meets a load condition's (type, flag).
+VALUE_KEY = "portkit:config_value"
 
 # Top-level keys Java reads as load conditions, per loader. A key the jar's
 # loader doesn't read is left alone; with no known loader every key counts.
@@ -131,6 +143,27 @@ def flag_entries(table: dict | None = None) -> list[dict]:
     return list((table if table is not None else _flag_table()).get("entries") or [])
 
 
+def value_entries(table: dict | None = None) -> list[dict]:
+    """The cited non-boolean config options (``values`` in the data file)."""
+    return list((table if table is not None else _flag_table()).get("values") or [])
+
+
+@dataclass(frozen=True)
+class ConfigValue:
+    """A non-boolean config option as a converter reads it."""
+
+    mod: str
+    option: str
+    value: float  # the cited default, or the user's setting
+    default: float | None  # the cited default for this jar's version
+    url: str
+    user: bool = False  # set by user config rather than the cited default
+
+    @property
+    def label(self) -> str:
+        return f"{self.mod}.{self.option}"
+
+
 @dataclass
 class Verdict:
     """Whether a condition (or a list of them) holds in this conversion.
@@ -187,12 +220,13 @@ class LoadContext:
     """
 
     def __init__(self, mod: "SourceMod", tags: "TagResolver | None" = None,
-                 table: dict | None = None, overrides: dict[tuple[str, str], bool] | None = None):
+                 table: dict | None = None, overrides: dict[tuple[str, str], bool | float] | None = None):
         self.mod = mod
         self._tags = tags
         self._table = table
         # (condition type, flag) -> the user's setting (``--config``), which
-        # replaces the cited default; see :func:`resolve_config`.
+        # replaces the cited default; see :func:`resolve_config`. Config value
+        # settings sit under (VALUE_KEY, "<mod>.<option>").
         self.overrides = dict(overrides or {})
         self.assumed: dict[tuple[str, str], FlagDefault] = {}
 
@@ -274,6 +308,28 @@ class LoadContext:
         if owner_versions:
             return f"defaults are cited for version {', '.join(sorted(set(owner_versions)))} only"
         return "no cited default for this condition type"
+
+    def config_value(self, mod: str, option: str) -> ConfigValue | None:
+        """A non-boolean config option: the user's setting, else the cited default.
+
+        None when neither is there (an uncited mod version and no setting):
+        the caller decides what an unread option means, never a guess here.
+        """
+        version = (self.mod.mods or {}).get(mod)
+        default, url = None, ""
+        for entry in value_entries(self._table):
+            if entry.get("mod") != mod or version is None or str(entry.get("version")) != version:
+                continue
+            found = (entry.get("options") or {}).get(option)
+            if isinstance(found, dict) and _is_number(found.get("default")):
+                default, url = float(found["default"]), str(found.get("url", ""))
+                break
+        key = (VALUE_KEY, f"{mod}.{option}")
+        if key in self.overrides:
+            return ConfigValue(mod, option, float(self.overrides[key]), default, url, user=True)
+        if default is None:
+            return None
+        return ConfigValue(mod, option, default, default, url)
 
     # -- evaluation --------------------------------------------------------
     def evaluate(self, conditions) -> Verdict:
@@ -586,12 +642,26 @@ _FALSE = {"false", "off", "no", "0"}
 
 @dataclass(frozen=True)
 class ConfigRequest:
-    """One setting as the user wrote it: ``<mod>.<name>=<value>``."""
+    """One setting as the user wrote it: ``<mod>.<name>=<value>``.
+
+    ``value`` is the setting read as a flag (a bool) when it spells one, else
+    as a number; ``raw`` keeps what was written, so a value option reads
+    ``=1`` as the number 1 rather than ``true``.
+    """
 
     mod: str
     name: str
-    value: bool
+    value: bool | float
     origin: str  # "--config" or the --config-file path
+    raw: object = field(default=None, compare=False)
+
+    @property
+    def written(self):
+        return self.value if self.raw is None else self.raw
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _bool(value, where: str) -> bool:
@@ -602,6 +672,33 @@ def _bool(value, where: str) -> bool:
     raise ConfigError(f"{where}: value {value!r} is not true or false")
 
 
+def _number(value, where: str) -> float:
+    """A finite number, from a JSON/TOML number or its text (never a bool)."""
+    out = None
+    if _is_number(value):
+        out = float(value)
+    elif isinstance(value, str):
+        try:
+            out = float(value.strip())
+        except ValueError:
+            out = None
+    if out is None or out != out or out in (float("inf"), float("-inf")):
+        raise ConfigError(f"{where}: value {value!r} is not a number")
+    return out
+
+
+def _scalar(value, where: str) -> bool | float:
+    """A setting as written: true/false (or on/off, yes/no, 1/0), else a number."""
+    try:
+        return _bool(value, where)
+    except ConfigError:
+        pass
+    try:
+        return _number(value, where)
+    except ConfigError:
+        raise ConfigError(f"{where}: value {value!r} is not true, false or a number") from None
+
+
 def _split_key(key: str, where: str) -> tuple[str, str]:
     mod, dot, name = key.strip().partition(".")
     if not dot or not mod or not name:
@@ -610,13 +707,13 @@ def _split_key(key: str, where: str) -> tuple[str, str]:
 
 
 def parse_config_arg(text: str) -> ConfigRequest:
-    """``<mod>.<flag>=<true|false>`` from the command line."""
+    """``<mod>.<flag>=<true|false>`` or ``<mod>.<option>=<number>`` from the command line."""
     key, sep, value = text.partition("=")
     where = f"--config {text!r}"
     if not sep:
-        raise ConfigError(f"{where}: expected <mod>.<flag>=<true|false>")
+        raise ConfigError(f"{where}: expected <mod>.<flag>=<true|false> or <mod>.<option>=<number>")
     mod, name = _split_key(key, where)
-    return ConfigRequest(mod, name, _bool(value, where), "--config")
+    return ConfigRequest(mod, name, _scalar(value, where), "--config", raw=value.strip())
 
 
 def load_config_file(path: Path | str) -> list[ConfigRequest]:
@@ -639,7 +736,7 @@ def load_config_file(path: Path | str) -> list[ConfigRequest]:
     except (tomllib.TOMLDecodeError, json.JSONDecodeError) as exc:
         raise ConfigError(f"{where}: not valid {'TOML' if path.suffix.lower() == '.toml' else 'JSON'}: {exc}") from None
     if not isinstance(data, dict):
-        raise ConfigError(f"{where}: expected a mapping of <mod> to {{<flag>: true|false}}")
+        raise ConfigError(f"{where}: expected a mapping of <mod> to {{<flag>: true|false, <option>: number}}")
     out = []
     for key, value in data.items():
         if str(key).startswith("_"):
@@ -648,10 +745,11 @@ def load_config_file(path: Path | str) -> list[ConfigRequest]:
             if "." in key:
                 raise ConfigError(f"{where}: {key!r} holds a table; use a mod id as the table name")
             for name, setting in value.items():
-                out.append(ConfigRequest(key, str(name), _bool(setting, f"{where} {key}.{name}"), str(path)))
+                out.append(ConfigRequest(key, str(name), _scalar(setting, f"{where} {key}.{name}"), str(path),
+                                         raw=setting))
         else:
             mod, name = _split_key(key, where)
-            out.append(ConfigRequest(mod, name, _bool(value, f"{where} {key}"), str(path)))
+            out.append(ConfigRequest(mod, name, _scalar(value, f"{where} {key}"), str(path), raw=value))
     return out
 
 
@@ -761,21 +859,106 @@ def known_flags(root: Path, mods: dict[str, str] | None, namespaces=(),
     return [known[k] for k in sorted(known)]
 
 
-def resolve_config(requests: list[ConfigRequest], known: list[KnownFlag]) -> tuple[dict, list[dict]]:
+@dataclass
+class KnownValue:
+    """A non-boolean config option this conversion can be told about."""
+
+    mod: str
+    option: str
+    kind: str  # "double"
+    minimum: float
+    maximum: float
+    default: float | None = None  # cited default for this jar's version
+    url: str = ""
+
+    @property
+    def mods(self) -> set[str]:
+        return {self.mod}
+
+
+def known_values(mods: dict[str, str] | None, namespaces=(), table: dict | None = None) -> list[KnownValue]:
+    """The value options a ``--config`` setting may name for this jar.
+
+    Every option the data file cites for a mod the jar declares (or ships a
+    namespace for), at any version; its default only where the version matches.
+    """
+    owners = set(mods or ()) | set(namespaces)
+    known: dict[tuple[str, str], KnownValue] = {}
+    for entry in value_entries(table):
+        mod = entry.get("mod")
+        if mod not in owners:
+            continue
+        version_matches = str(entry.get("version")) == (mods or {}).get(mod)
+        for option, found in (entry.get("options") or {}).items():
+            if not isinstance(found, dict) or not (_is_number(found.get("min")) and _is_number(found.get("max"))):
+                continue
+            k = known.setdefault((mod, option), KnownValue(mod, option, str(found.get("type", "double")),
+                                                           float(found["min"]), float(found["max"])))
+            if version_matches and _is_number(found.get("default")):
+                k.default, k.url = float(found["default"]), str(found.get("url", ""))
+                k.minimum, k.maximum = float(found["min"]), float(found["max"])
+    return [known[k] for k in sorted(known)]
+
+
+def _value_match(req: ConfigRequest, values: list[KnownValue]) -> KnownValue | None:
+    mine = [v for v in values if v.mod == req.mod]
+    exact = [v for v in mine if v.option == req.name]
+    folded = [v for v in mine if v.option.lower() == req.name.lower()]
+    found = exact or folded
+    return found[0] if found else None
+
+
+def _range(v: KnownValue) -> str:
+    return f"{v.minimum:g} to {v.maximum:g}"
+
+
+def resolve_config(requests: list[ConfigRequest], known: list[KnownFlag],
+                   values: list[KnownValue] | None = None) -> tuple[dict, list[dict]]:
     """The settings as ``{(condition, flag): bool}``, and one record per flag set.
 
     Later requests win (``--config`` after ``--config-file``). A name matches a
     flag's canonical name or its cited config key (one key can stand for
     several flags, as Tinkers' ``glassRecipeFix`` does); an unknown mod or flag
-    raises :class:`ConfigError` naming the valid ones.
+    raises :class:`ConfigError` naming the valid ones. A name matching a cited
+    value option (``values``) sets that option instead, as
+    ``{(VALUE_KEY, "<mod>.<option>"): number}``; the number must lie in the
+    range the mod's config accepts.
     """
-    overrides: dict[tuple[str, str], bool] = {}
+    values = list(values or [])
+    overrides: dict[tuple[str, str], bool | float] = {}
     records: dict[tuple[str, str], dict] = {}
-    mods_with_flags = sorted({m for k in known for m in k.mods})
+    mods_with_flags = sorted({m for k in [*known, *values] for m in k.mods})
     for req in requests:
         where = f"{req.origin} {req.mod}.{req.name}"
+        option = _value_match(req, values)
+        if option is not None:
+            number = _number(req.written, where)
+            if not option.minimum <= number <= option.maximum:
+                raise ConfigError(f"{where}: {number:g} is outside {_range(option)}, the range "
+                                  f"{option.mod}'s config accepts for {option.option}")
+            key = (VALUE_KEY, f"{option.mod}.{option.option}")
+            overrides[key] = number
+            records[key] = {
+                "mod": req.mod,
+                "flag": option.option,
+                "condition": None,
+                "value": number,
+                "as_written": f"{req.mod}.{req.name}",
+                "config_key": option.option,
+                "cited_default": option.default,
+                "default_source": option.url or None,
+                "origin": req.origin,
+                "range": [option.minimum, option.maximum],
+            }
+            continue
+        if not isinstance(req.value, bool):
+            flagish = [k for k in known if req.mod in k.mods and req.name.lower() in
+                       (k.name.lower(), (k.config_key or "").lower())]
+            if flagish:
+                raise ConfigError(f"{where}: value {req.written!r} is not true or false")
         candidates = [k for k in known if req.mod in k.mods]
-        if not candidates:
+        mine_values = [v for v in values if v.mod == req.mod]
+        if not candidates and not mine_values:
             have = (f"mods with config flags here: {', '.join(mods_with_flags)}" if mods_with_flags
                     else "this jar has no known mod config flags")
             raise ConfigError(f"{where}: no config flags are known for mod {req.mod!r} ({have})")
@@ -785,8 +968,9 @@ def resolve_config(requests: list[ConfigRequest], known: list[KnownFlag]) -> tup
             matches = [k for k in candidates
                        if folded in (k.name.lower(), (k.config_key or "").lower())]
         if not matches:
-            valid = ", ".join(f"{k.name} ({k.config_key})" if k.config_key and k.config_key != k.name
-                              else k.name for k in candidates)
+            valid = ", ".join([f"{k.name} ({k.config_key})" if k.config_key and k.config_key != k.name
+                               else k.name for k in candidates]
+                              + [f"{v.option} (a number, {_range(v)})" for v in mine_values])
             raise ConfigError(f"{where}: unknown config flag for {req.mod}; valid flags: {valid}")
         for k in matches:
             overrides[(k.condition, k.flag)] = req.value
@@ -806,7 +990,7 @@ def resolve_config(requests: list[ConfigRequest], known: list[KnownFlag]) -> tup
 
 def config_record(records: list[dict]) -> dict:
     """The settings as a ``--config-file`` mapping, canonical names: reproduces the run."""
-    out: dict[str, dict[str, bool]] = {}
+    out: dict[str, dict[str, bool | float]] = {}
     for r in records:
         out.setdefault(r["mod"], {})[r["flag"]] = r["value"]
     return out
@@ -818,9 +1002,14 @@ def config_note(records: list[dict]) -> str | None:
         return None
     parts = []
     for r in records:
+        alias = f" via {r['as_written']}" if r["as_written"] != f"{r['mod']}.{r['flag']}" else ""
+        if r.get("condition") is None:  # a config value, not a flag
+            default = ("uncited default" if r["cited_default"] is None
+                       else f"default {r['cited_default']:g}")
+            parts.append(f"{r['mod']}.{r['flag']}={r['value']:g} ({default}{alias})")
+            continue
         default = ("uncited default" if r["cited_default"] is None
                    else f"default {'on' if r['cited_default'] else 'off'}")
-        alias = f" via {r['as_written']}" if r["as_written"] != f"{r['mod']}.{r['flag']}" else ""
         parts.append(f"{r['condition']}={'on' if r['value'] else 'off'} ({default}{alias})")
     return ("converted with mod config set by user config, which replaces the cited defaults "
             "(written to config-overrides.json; pass it back with --config-file to reproduce "

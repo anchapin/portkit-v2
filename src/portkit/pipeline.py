@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .conditions import ConfigRequest, LoadContext, config_note, config_record, known_flags, resolve_config
+from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
+                         resolve_config)
 from .converters import convert_all
 from .icon import resolve as resolve_icon
 from .ingest import ingest
@@ -399,7 +400,7 @@ def convert(
         overrides, records = {}, []
         if config:
             known = known_flags(staged.root, meta.mods, selected)
-            overrides, records = resolve_config(list(config), known)
+            overrides, records = resolve_config(list(config), known, known_values(meta.mods, selected))
             meta.notes.append(config_note(records))
         per_namespace = {
             ns: convert_all(SourceMod.from_metadata(staged.root, ns, meta, classes=staged.classes),

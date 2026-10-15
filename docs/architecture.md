@@ -44,7 +44,10 @@ mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶
    decided are `conditional_recipe` / `conditional_loot_table` residue
    (`conditions.py`, #183); mod config flags are decided at their defaults,
    cited in `data/config_flag_defaults.json`, unless the user sets them
-   (`portkit convert --config`, recorded in `config-overrides.json`). Items the
+   (`portkit convert --config`, recorded in `config-overrides.json`); number
+   options a converter reads (Farmer's Delight's `cuttingBoardFortuneBonus`)
+   are cited in the same file's `values` with their range and read through
+   `LoadContext.config_value` (#190). Items the
    mod's code registers only while a flag is on (a cited `registers` pattern)
    are `conditional_item` residue when it is off. Recipes of a station type
    (Farmer's Delight's `farmersdelight:cutting`) pass the same load-condition

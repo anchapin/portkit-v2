@@ -32,7 +32,7 @@ def emitted_blocks(files: dict) -> set[str]:
     return ids
 
 
-def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool] | None = None) -> ConversionResult:
+def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] | None = None) -> ConversionResult:
     """Every converter on one namespace.
 
     ``overrides`` are the user's mod config settings (``portkit convert
