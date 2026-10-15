@@ -1,14 +1,14 @@
-// The fixed cutting-board runtime (src/portkit/runtime), offline under node.
-// Run: node --import tests/js/register.mjs --test tests/js/cutting_board.test.mjs
-// (tests/test_stations.py runs it with PORTKIT_CUTTING_TABLE set to a data
+// The fixed cutting-board runtime (src/portkit/adapters/farmersdelight/runtime), offline under node.
+// Run: node --import tests/js/register.mjs --test tests/js/adapters/farmersdelight/cutting_board.test.mjs
+// (tests/adapters/farmersdelight/test_stations.py runs it with PORTKIT_CUTTING_TABLE set to a data
 // table the converter just generated; without it a small table here is used.)
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import * as core from "../../src/portkit/runtime/cutting_board_core.js";
-import * as kit from "../../src/portkit/runtime/station_core.js";
-import { registerCuttingBoard } from "../../src/portkit/runtime/cutting_board.js";
+import * as core from "../../../../src/portkit/adapters/farmersdelight/runtime/cutting_board_core.js";
+import * as kit from "../../../../src/portkit/runtime/station_core.js";
+import { registerCuttingBoard } from "../../../../src/portkit/adapters/farmersdelight/runtime/cutting_board.js";
 import { ItemStack, _block, _dimension, _player, _startup, world } from "@minecraft/server";
 
 const SHOVELS = ["minecraft:iron_shovel", "minecraft:wooden_shovel"];

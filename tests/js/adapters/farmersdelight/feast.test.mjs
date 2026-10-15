@@ -1,13 +1,13 @@
-// The fixed feast runtime (src/portkit/runtime), offline under node.
-// Run: node --import tests/js/register.mjs --test tests/js/feast.test.mjs
-// (tests/test_feasts.py runs it with PORTKIT_FEAST_TABLE set to a data table
+// The fixed feast runtime (src/portkit/adapters/farmersdelight/runtime), offline under node.
+// Run: node --import tests/js/register.mjs --test tests/js/adapters/farmersdelight/feast.test.mjs
+// (tests/adapters/farmersdelight/test_feasts.py runs it with PORTKIT_FEAST_TABLE set to a data table
 // the converter just generated; without it a small table here is used.)
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import * as core from "../../src/portkit/runtime/feast_core.js";
-import { registerFeasts } from "../../src/portkit/runtime/feast.js";
+import * as core from "../../../../src/portkit/adapters/farmersdelight/runtime/feast_core.js";
+import { registerFeasts } from "../../../../src/portkit/adapters/farmersdelight/runtime/feast.js";
 import { ItemStack, _dimension, _permutation, _player, _startup } from "@minecraft/server";
 
 const FALLBACK = {

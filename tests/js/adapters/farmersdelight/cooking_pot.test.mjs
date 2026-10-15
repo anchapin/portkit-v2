@@ -1,14 +1,14 @@
-// The fixed cooking-pot runtime (src/portkit/runtime), offline under node.
-// Run: node --import tests/js/register.mjs --test tests/js/cooking_pot.test.mjs
-// (tests/test_cooking_pot.py runs it with PORTKIT_COOKING_TABLE set to a data
+// The fixed cooking-pot runtime (src/portkit/adapters/farmersdelight/runtime), offline under node.
+// Run: node --import tests/js/register.mjs --test tests/js/adapters/farmersdelight/cooking_pot.test.mjs
+// (tests/adapters/farmersdelight/test_cooking_pot.py runs it with PORTKIT_COOKING_TABLE set to a data
 // table the converter just generated; without it a small table here is used.)
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import * as core from "../../src/portkit/runtime/cooking_pot_core.js";
-import * as kit from "../../src/portkit/runtime/station_core.js";
-import { registerCookingPot } from "../../src/portkit/runtime/cooking_pot.js";
+import * as core from "../../../../src/portkit/adapters/farmersdelight/runtime/cooking_pot_core.js";
+import * as kit from "../../../../src/portkit/runtime/station_core.js";
+import { registerCookingPot } from "../../../../src/portkit/adapters/farmersdelight/runtime/cooking_pot.js";
 import { Direction, ItemStack, _dimension, _player, _potBlock, _startup, world } from "@minecraft/server";
 
 const FALLBACK = {

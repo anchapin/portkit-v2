@@ -3,6 +3,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+# The Farmer's Delight test helpers (tests/adapters/farmersdelight/test_stations.py,
+# test_cooking_pot.py) are imported by core tests too (#245 pick 7a moved them).
+sys.path.insert(0, str(ROOT / "tests" / "adapters" / "farmersdelight"))
 
 import pytest
 

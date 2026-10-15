@@ -16,7 +16,7 @@ from portkit import conditions, pipeline, report
 from portkit.conditions import (VALUE_KEY, ConfigError, ConfigRequest, LoadContext, config_note,
                                 known_flags, known_values, load_config_file, parse_config_arg,
                                 resolve_config)
-from portkit.converters import stations
+from portkit.adapters.farmersdelight import cutting_board as stations
 from portkit.model import SourceMod
 
 from test_stations import DATA, _fd_mod, _table, reference  # noqa: F401  (fixture)

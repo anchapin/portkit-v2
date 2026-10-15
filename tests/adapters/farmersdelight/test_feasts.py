@@ -6,9 +6,9 @@ behind is its loot table per serving count. The converter writes the feast
 blocks (facing x an integer servings state, a box per count, minecraft:loot
 per count), one Bedrock loot table per distinct drop set, the block's own item,
 scripts/portkit/data/<ns>_feast.js, and ships the fixed runtime
-(portkit/runtime/feast*.js).
+(portkit/adapters/farmersdelight/runtime/feast*.js).
 
-Offline: the FD-shaped mod of tests/test_stations.py plus two feasts (a
+Offline: the FD-shaped mod of tests/adapters/farmersdelight/test_stations.py plus two feasts (a
 roast chicken that lingers, a stuffed pumpkin that vanishes).
 """
 import json
@@ -19,7 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from portkit.converters import feasts, stations
+from portkit.adapters.farmersdelight import feasts
+from portkit.adapters.farmersdelight import cutting_board as stations
 from portkit.pipeline import convert
 
 from test_stations import PNG, ROOT, _fd_mod, _write, reference  # noqa: F401  (fixture)
@@ -262,7 +263,7 @@ def test_runtime_under_node(converted):
     js = ROOT / "tests" / "js"
     for env in ({}, {"PORTKIT_FEAST_TABLE": str(tree / DATA)}):
         proc = subprocess.run(
-            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "feast.test.mjs")],
+            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "farmersdelight" / "feast.test.mjs")],
             capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr

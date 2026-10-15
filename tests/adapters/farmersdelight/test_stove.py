@@ -6,7 +6,7 @@ exactly (vanilla's, from the fetched reference, and the jar's own, which still
 convert as Bedrock campfire recipes) into
 scripts/portkit/data/<ns>_stove.js, converts the facing x lit block with its
 light and the runtime's component and tick, wires the lit stove into the
-cooking pot's heat rules and ships the fixed runtime (portkit/runtime/stove*.js).
+cooking pot's heat rules and ships the fixed runtime (portkit/adapters/farmersdelight/runtime/stove*.js).
 
 Offline: the tiny FD-shaped mod of tests/test_cooking_pot.py plus a stove, its
 own tag reference and its own vanilla recipe reference (PORTKIT_RECIPE_REFERENCE).
@@ -19,7 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from portkit.converters import stations, stove
+from portkit.adapters.farmersdelight import stove
+from portkit.adapters.farmersdelight import cutting_board as stations
 from portkit.data import recipes as recipe_data
 from portkit.pipeline import convert
 
@@ -260,7 +261,7 @@ def test_runtime_under_node(converted):
     js = ROOT / "tests" / "js"
     for env in ({}, {"PORTKIT_STOVE_TABLE": str(tree / DATA)}):
         proc = subprocess.run(
-            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "stove.test.mjs")],
+            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "farmersdelight" / "stove.test.mjs")],
             capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr

@@ -4,10 +4,10 @@ A Farmer's Delight ``farmersdelight:cooking`` recipe is data FD's cooking pot
 block entity interprets. The converter writes every recipe it can state
 exactly into scripts/portkit/data/<ns>_cooking_pot.js, gives the pot block the
 runtime's custom component and a tick, and ships the fixed runtime
-(portkit/runtime/cooking_pot*.js); anything it can't state stays
+(portkit/adapters/farmersdelight/runtime/cooking_pot*.js); anything it can't state stays
 ``station_recipe`` residue with the reason.
 
-Offline: a tiny FD-shaped mod in tmp_path (tests/test_stations.py's helpers)
+Offline: a tiny FD-shaped mod in tmp_path (tests/adapters/farmersdelight/test_stations.py's helpers)
 with its own tag reference.
 """
 import json
@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from portkit.converters import cooking_pot, stations
+from portkit.adapters.farmersdelight import cooking_pot
+from portkit.adapters.farmersdelight import cutting_board as stations
 from portkit.pipeline import convert
 
 from test_stations import PNG, ROOT, _fd_mod, _write
@@ -240,7 +241,7 @@ def test_runtime_under_node(converted):
     js = ROOT / "tests" / "js"
     for env in ({}, {"PORTKIT_COOKING_TABLE": str(tree / DATA)}):
         proc = subprocess.run(
-            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "cooking_pot.test.mjs")],
+            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "farmersdelight" / "cooking_pot.test.mjs")],
             capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
