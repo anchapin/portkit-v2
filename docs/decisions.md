@@ -27,6 +27,79 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: a mod's own fluids have no Bedrock form: fluid recipes are `fluid_recipe` residue and fluid-container buckets are `custom_fluid` residue; the residue agent skips both
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #228.
+- **Decision:** Bedrock add-ons can't define a fluid. The custom block
+  component list has no fluid component
+  ([Block Components Documentation](https://learn.microsoft.com/en-us/minecraft/creator/reference/content/blockreference/examples/blockcomponents/blockcomponentslist),
+  updated 2026-08-25), and the Script API's only fluid surface is
+  [BlockFluidContainerComponent](https://learn.microsoft.com/en-us/minecraft/creator/scriptapi/minecraft/server/blockfluidcontainercomponent)
+  ("used with blocks like cauldrons"), whose
+  [FluidType](https://learn.microsoft.com/en-us/minecraft/creator/scriptapi/minecraft/server/fluidtype)
+  is fixed to Water, Lava, PowderSnow and Potion. So:
+  (1) in `converters/recipes.py`, a recipe that melts items into a mod's
+  fluid, alloys fluids, burns a fluid as fuel, or casts or fills items from
+  one is `fluid_recipe` residue with a reason naming its station and fields
+  (`_FLUID_RECIPES`, checked before `code_recipe`): the 30 fluid types of the
+  32 smeltery recipe types
+  Tinkers' Construct 3.12.1.231 registers in TinkerSmeltery L408-444
+  (SlimeKnights/TinkersConstruct @a5a03249; melting/ore/damagable/material/
+  entity melting, melting_fuel, alloy, material_fluid, table and basin
+  casting incl. material/composite/tool/part-swap/potion/tipping/duplication/
+  retextured, table/basin filling; fields from each recipe's LOADER), and
+  Create mc1.20.1-6.0.8's `create:filling` (Spout, FillingBySpout) and
+  `create:emptying` (Item Drain, GenericItemEmptying) (AllRecipeTypes
+  L61-62 @1a1a9a28). Tinkers' `molding_table`/`molding_basin` hold no fluid
+  (a pattern pressed into sand on a casting block, CastingBlockEntity
+  L152-181), so they are `code_recipe` with their own reason.
+  (2) In `converters/items.py`, an item model whose `loader` ends in
+  `:fluid_container` and which names a non-`minecraft:` `fluid` is
+  `custom_fluid` residue:
+  Forge's and NeoForge's DynamicFluidContainerModel (Forge 1.20.x
+  ClientForgeMod L32 @243490d7, NeoForge 1.21.x ClientNeoForgeMod L278
+  @0753a6a7) and Tinkers' FluidContainerModel (FluidClientEvents L43-44) draw
+  the icon at runtime from the fluid's client texture and tint masked into a
+  bucket; neither the masks nor the vanilla bucket are in the jar, and the
+  pack must not carry Mojang's art (#24). A flat bucket icon the mod ships
+  (Create's chocolate/honey buckets, Supplementaries' lumisene bucket) still
+  converts as an ordinary item. Both kinds are in the residue agent's
+  `SKIP_KINDS`.
+- **Why:** every one of these recipes takes or makes a millibucket amount of
+  fluid, mostly the mod's own (a few take vanilla lava or water, which
+  Bedrock has but can't store as an amount outside a cauldron), at a station
+  that is block-entity code (multiblock tank, faucet, casting block, spout,
+  drain).
+  An item-only stand-in (ingot in, cast part out) would drop amounts,
+  temperatures and cooling times and invent a step the mod doesn't have
+  (#87); an icon for a bucket would be invented the same way. Naming the
+  station keeps the residue honest and stops the agent spending a session
+  per recipe on a conversion that can only fabricate.
+- **Rejected:** fluid source blocks shipped as solid blocks (wrong-but-valid:
+  you'd walk on molten iron; the issue already calls this wrong); bucket
+  items with a vanilla `bucket_empty` icon (every molten bucket would look
+  empty and do nothing; a choice for when a scripted tank exists); a
+  composited bucket icon (needs Forge's LGPL masks and Mojang's bucket art);
+  a melting/casting data table in the pack with no runtime to read it (dead
+  weight until a scripted smeltery exists, issue's "very large" option);
+  a crafting/furnace stand-in for casting (fabrication, #87, #135).
+- **Measured** (20 corpus + deco trees, develop 725f72b vs this branch):
+  every pack file md5-identical; residue moves only between kinds:
+  Tinkers 874 `recipe` -> 824 `fluid_recipe` + 50 `code_recipe` (molding),
+  70 `item` -> `custom_fluid`; Mekanism 18 `item` -> `custom_fluid`; Create
+  12 `recipe` -> `fluid_recipe`. Agent-workable residue -974 (886 recipe, 88
+  item). Coverage and the baseline are unchanged. Tinkers' 1,016
+  `conditional_recipe` (817 `mantle:tag_filled`, 147 compat `mod_loaded`, 52
+  other) are untouched: load conditions are decided first.
+- **Left (#174):** the 73 Tinkers fluid blocks (`molten_*_fluid`, model
+  `tconstruct:block/fluid` with no elements) and Mekanism/Create fluid
+  blocks still read as model residue; a precise `custom_fluid` reason for
+  them needs the block's LiquidBlock class read from bytecode. The 45
+  smeltery/foundry blocks, a scripted tank (custom component + tick +
+  dynamic properties) and any runtime for these recipes; Supplementaries
+  `moonlight/soft_fluids` (103 files); Tinkers fluid lang lines.
+- **Links:** #174, #87, #135, #24, #180 (code_recipe), #172, #173, #175.
+
 ## 2026-10-15: a recipe whose result or station is Java code is `code_recipe` residue naming the code; the residue agent skips it
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #227.

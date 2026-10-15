@@ -230,6 +230,17 @@ _CODE_RECIPES = {
         "free and that upgrade isn't there yet; a Bedrock smithing_transform would drop the stored "
         "upgrade"
     ),
+    # Tinkers' Construct 3.12.1.231 TinkerSmeltery L433-434 (molding_basin /
+    # molding_table, MoldingRecipe LOADER L23-29: material, pattern,
+    # pattern_consumed, result): the material sits on a casting table or basin
+    # and using the pattern on it presses it into the result
+    # (CastingBlockEntity L152-181: moldingInventory.setPattern(held)).
+    **dict.fromkeys(("tconstruct:molding_table", "tconstruct:molding_basin"), (
+        "a Tinkers' Construct molding recipe: the `material` placed on a casting table or basin is "
+        "pressed into the result by using the `pattern` on it, which may be kept or consumed "
+        "(MoldingRecipe, run by CastingBlockEntity L152-181); Bedrock has no casting block to press "
+        "on, and a crafting stand-in would turn a block interaction into a grid recipe"
+    )),
     # Supplementaries 1.20-3.1.43 SusRecipe#assemble (a CustomRecipe): the other
     # grid stack goes into the result's BlockEntityTag "item".
     "supplementaries:sus_crafting": (
@@ -238,6 +249,119 @@ _CODE_RECIPES = {
         "fixed-result Bedrock recipe would drop the hidden item"
     ),
 }
+
+
+# A recipe that melts items into a mod's fluid, alloys fluids, or casts or
+# fills items from a fluid (mostly the mod's own; a few take vanilla lava or
+# water, still by the millibucket at a mod station) is residue of its own kind
+# (#174). Bedrock add-ons
+# can't define a fluid: the custom block component list has no fluid component
+# (learn.microsoft.com, Block Components Documentation, updated 2026-08-25),
+# and the Script API's only fluid surface is the cauldron-style
+# BlockFluidContainerComponent ("used with blocks like cauldrons") whose
+# FluidType enumeration is fixed to Water, Lava, PowderSnow and Potion
+# (learn.microsoft.com scriptapi/minecraft/server/blockfluidcontainercomponent,
+# .../fluidtype). So the molten metals, slimes and soups these recipes make or
+# take, measured in millibuckets, have no Bedrock form, and the stations that
+# run them (multiblock tanks, faucets, casting blocks, spouts) are block-entity
+# code. An item-only stand-in (say, ingot in, cast part out) would drop the
+# fluid amounts, temperatures and cooling times and invent an item step the mod
+# doesn't have (#87). The residue agent skips the kind (agent/residue.py
+# SKIP_KINDS). docs/decisions.md, 2026-10-15.
+FLUID_RECIPE = "fluid_recipe"
+
+# What Bedrock lacks, said once at the end of every fluid recipe's reason.
+_NO_BEDROCK_FLUID = (
+    "Bedrock add-ons can't define a fluid or store a measured amount of one (no fluid block "
+    "component; the script fluid container holds only water, lava, powder snow or potion, as a "
+    "cauldron does), so a mod's fluid has no Bedrock form and the station that measures fluid in mB "
+    "has nothing to build on; an item-only stand-in would drop the fluid amounts and invent a step"
+)
+
+
+def _tinkers(what: str) -> str:
+    return f"a Tinkers' Construct {what}; {_NO_BEDROCK_FLUID}"
+
+
+_TC_MELTING = _tinkers(
+    "melting recipe: the ingredient melts into `result` (a fluid amount in mB, plus any byproducts) "
+    "once the melter, smeltery or foundry reaches `temperature`, over `time` (MeltingRecipe LOADER "
+    "L32-38, run by the melting block entities)"
+)
+_TC_CASTING = _tinkers(
+    "casting recipe: fluid poured from a faucet into a casting table or basin (optionally over a "
+    "cast) cools into the result over a cooling time (ItemCastingRecipe LOADER L26-31: fluid, "
+    "result, cooling_time; the material, composite, tool, part-swap, potion, tipping and "
+    "duplication variants work the same way; run by CastingBlockEntity)"
+)
+_TC_FILLING = _tinkers(
+    "container filling recipe: poured fluid fills `fluid_amount` mB into the `container` item on a "
+    "casting table or basin (ContainerFillingRecipe LOADER L39-42, run by CastingBlockEntity)"
+)
+
+# Tinkers' Construct 3.12.1.231 (SlimeKnights/TinkersConstruct @a5a03249):
+# every type below is registered in TinkerSmeltery L408-444
+# (RECIPE_SERIALIZERS.register), the smeltery module. Field names from each
+# recipe's LOADER: MeltingRecipe L32-38 (ingredient, result, temperature, time,
+# byproducts), ItemCastingRecipe L26-31 (fluid, result, cooling_time),
+# AlloyRecipe L29-33 (inputs list of >= 2, result, temperature), MeltingFuel
+# L27-32 (fluid, duration, temperature, rate), EntityMeltingRecipe L29-33
+# (entity, result, damage), MaterialFluidRecipe L30-36 (fluid, temperature).
+# Create mc1.20.1-6.0.8 (Creators-of-Create/Create @1a1a9a28): AllRecipeTypes
+# L61-62 FILLING/EMPTYING; FillingRecipe#getRequiredFluid (a FluidIngredient
+# with an amount), run by FillingBySpout (the Spout); EmptyingRecipe
+# #getResultingFluid, run by GenericItemEmptying (the Item Drain,
+# ItemDrainBlockEntity L200-234).
+_FLUID_RECIPES = {
+    **dict.fromkeys((
+        "tconstruct:melting", "tconstruct:ore_melting", "tconstruct:damagable_melting",
+        "tconstruct:material_melting",
+    ), _TC_MELTING),
+    "tconstruct:entity_melting": _tinkers(
+        "entity melting recipe: a living `entity` inside a smeltery or foundry takes `damage` and yields "
+        "`result` fluid (EntityMeltingRecipe LOADER L29-33)"
+    ),
+    "tconstruct:melting_fuel": _tinkers(
+        "melting fuel: the `fluid` burned from a fuel tank for `duration` gives a melter, smeltery or "
+        "foundry its `temperature` and melting `rate` (MeltingFuel LOADER L27-32)"
+    ),
+    "tconstruct:alloy": _tinkers(
+        "alloying recipe: two or more fluids in the smeltery, foundry or alloyer tank combine by "
+        "amount into `result` above `temperature` (AlloyRecipe LOADER L29-33)"
+    ),
+    "tconstruct:material_fluid": _tinkers(
+        "material fluid: which `fluid` (and amount) casts a tool material, at what `temperature`, "
+        "when tool parts are cast (MaterialFluidRecipe LOADER L30-36)"
+    ),
+    **dict.fromkeys((
+        "tconstruct:casting_table", "tconstruct:casting_basin",
+        "tconstruct:table_duplication", "tconstruct:basin_duplication",
+        "tconstruct:casting_table_potion", "tconstruct:casting_basin_potion",
+        "tconstruct:casting_table_tipping", "tconstruct:casting_basin_tipping",
+        "tconstruct:casting_table_tipped_clearing", "tconstruct:casting_basin_tipped_clearing",
+        "tconstruct:retextured_casting_table", "tconstruct:retextured_casting_basin",
+        "tconstruct:table_casting_material", "tconstruct:basin_casting_material",
+        "tconstruct:table_casting_composite", "tconstruct:basin_casting_composite",
+        "tconstruct:table_tool_casting", "tconstruct:basin_tool_casting",
+        "tconstruct:table_casting_part_swapping", "tconstruct:basin_casting_part_swapping",
+    ), _TC_CASTING),
+    **dict.fromkeys(("tconstruct:table_filling", "tconstruct:basin_filling"), _TC_FILLING),
+    "create:filling": (
+        f"a Create filling recipe: the Spout pours the fluid ingredient's amount (mB) onto the item "
+        f"below it to make the result (FillingRecipe#getRequiredFluid, FillingBySpout); {_NO_BEDROCK_FLUID}"
+    ),
+    "create:emptying": (
+        f"a Create emptying recipe: the Item Drain empties the item into its fluid result (mB) and "
+        f"keeps the emptied item (EmptyingRecipe#getResultingFluid, GenericItemEmptying); "
+        f"{_NO_BEDROCK_FLUID}"
+    ),
+}
+
+
+def fluid_recipe_reason(java_type: object) -> str | None:
+    """Why a recipe of this type makes, takes or moves a mod's fluid (#174),
+    or None if it isn't one this module knows: a type in :data:`_FLUID_RECIPES`."""
+    return _FLUID_RECIPES.get(java_type) if isinstance(java_type, str) else None
 
 
 def code_recipe_reason(java_type: object, recipe: dict, loader: str | None = None) -> str | None:
@@ -834,6 +958,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             continue
         mapping = _SUPPORTED.get(java_type)
         if mapping is None:
+            fluid = fluid_recipe_reason(java_type)
+            if fluid is not None:
+                result.unhandled.append(Unhandled(rel, FLUID_RECIPE, fluid))
+                continue
             code = code_recipe_reason(java_type, recipe, mod.loader)
             if code is not None:
                 result.unhandled.append(Unhandled(rel, CODE_RECIPE, code))
