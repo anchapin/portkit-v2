@@ -114,6 +114,9 @@ SKIP_KINDS = {
     "fluid_recipe": ("the recipe melts, alloys, casts or fills with fluid measured in mB at a mod station "
                      "(#174); Bedrock add-ons can't define a fluid or store an amount of one, so there is "
                      "no fluid or station to write it for"),
+    "modular_tool": ("the recipe builds, changes or takes apart a modular tool, part or material whose stats "
+                     "Java computes per stack (#175); a Bedrock item's components are fixed per item type, "
+                     "so a stand-in would invent the numbers"),
     "custom_fluid": ("the item holds a mod's fluid and its icon is drawn from that fluid at runtime (#174); "
                      "Bedrock add-ons can't define the fluid, and drawing the icon would invent it"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "

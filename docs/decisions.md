@@ -27,6 +27,56 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: modular tool recipes (Tinkers' Construct, Silent Gear) are `modular_tool` residue naming the code; the residue agent skips them
+
+- **Status:** proposed, PR #TBD.
+- **Decision:** a recipe that builds, modifies, repairs or takes apart a
+  modular tool, or makes a part or material that stores its material on the
+  stack, is `modular_tool` residue with a reason naming the station and the
+  Java that runs it (`converters/recipes.py` `_MODULAR_TOOL_RECIPES`, checked
+  after `fluid_recipe` and before `code_recipe`; the kind is in the residue
+  agent's `SKIP_KINDS`). Covered: Tinkers' Construct 3.12.1.231's table and
+  modifier serializers (SlimeKnights/TinkersConstruct @a5a03249, TinkerTables
+  L149-165, TinkerModifiers L741-779): tool building and tipped-tool
+  transform, the Tinker Station modifier/overslime/banner/repair/part- and
+  material-swapping/damaging types, the crafting-table overslime and
+  modifier-repair types, the six Modifier Worktable types, modifier salvage,
+  material values, the four Part Builder types, the materials crafting types,
+  and the six severing types; Silent Gear 2.6.36's (Silent-Gear 1.16.x
+  @9188137b, ModRecipes L43-80) gear crafting (shaped and shapeless),
+  compound part, conversion, smithing coating/upgrade, gear and compound-part
+  salvaging, and material pressing. Plain `silentgear:salvaging` (a vanilla
+  item taken apart at the Salvager, SalvagerTileEntity L89-153, losing each
+  result item with a damage-based chance, partLossRate 0.0-0.5) isn't a
+  modular tool recipe, so it joins `code_recipe` with its own reason. Each reason cites the class or LOADER
+  it was read from. The data-free Tinkers types (`tinker_station_repair`,
+  `crafting_table_repair`, armour dyeing and trim) stay `code_recipe`.
+- **Why:** these tools' numbers (durability, mining speed, attack, traits)
+  are computed in Java at craft time from the materials of the parts they
+  were built from, plus modifiers, and stored per stack. A Bedrock item's
+  components are fixed per item type in its JSON, so there is no single
+  Bedrock item to write for "a pickaxe", and per-stack stats would need a
+  scripted station and runtime (#175's large option) that doesn't exist yet.
+  A stand-in with fixed stats is fabrication (#87, #135). Naming the code
+  keeps the residue honest and stops the agent spending a session per recipe.
+- **Rejected:** crafting-table stand-ins producing fixed tools (gameplay
+  change and invented stats, the issue's third option); a material stat table
+  in the pack with no runtime to read it (dead weight until a scripted
+  station exists, and the same call #174 made for smeltery data); folding the
+  plain-result Silent Gear `damage_item` hammer recipes and the Metal Alloyer
+  / Recrystallizer `compounding/*` recipes in here (they aren't modular tool
+  recipes; they stay ordinary `recipe` residue for now).
+- **Not touched:** PR #129's display-only preset and part items (route A of
+  #128) live in `converters/tinkers.py` and `items.py`; this change is
+  recipe residue only and doesn't overlap them.
+- **Measured** (20 corpus + deco trees, develop 2e18398 vs this branch): every
+  pack file md5-identical; Tinkers 837 `recipe` -> 37 `recipe` + 800
+  `modular_tool`; Silent Gear 357 `recipe` + 6 `code_recipe` -> 63 `recipe` +
+  59 `code_recipe` (54 salvaging) + 241 `modular_tool`
+  (`salvaging/compound_part` moves from the special-recipe reason to its
+  own); agent-workable residue -1,094.
+- **Links:** #175, #87, #128, #129, #135, #174, #180.
+
 ## 2026-10-15: a mod's own fluids have no Bedrock form: fluid recipes are `fluid_recipe` residue and fluid-container buckets are `custom_fluid` residue; the residue agent skips both
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #228.

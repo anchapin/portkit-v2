@@ -45,11 +45,15 @@ mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶
    (`conditions.py`, #183). A modded recipe whose JSON holds only its type
    (a "special" recipe built in code), or one of the typed recipes whose
    station or result is code (BetterEnd infusion, BCLib anvil and alloying,
-   Mythic Metals smithing variants, Supplementaries suspicious blocks), is
+   Mythic Metals smithing variants, Supplementaries suspicious blocks, Silent Gear's
+   Salvager), is
    `code_recipe` residue naming the code, and the agent skips it (#180). A recipe that
    melts, alloys, casts or fills with a mod's fluid (Tinkers' smeltery types, Create's
    spout and drain) is `fluid_recipe` residue naming the station, since Bedrock add-ons
-   can't define a fluid; the agent skips it too (#174). Mod config flags are decided at their defaults,
+   can't define a fluid; the agent skips it too (#174). A recipe that builds, modifies, repairs
+   or takes apart a modular tool or its parts (Tinkers' tool station, part builder, worktable,
+   modifiers and severing; Silent Gear gear crafting, smithing, gear salvaging) is `modular_tool`
+   residue, since those tools' stats are computed in Java per stack; the agent skips it (#175). Mod config flags are decided at their defaults,
    cited in `data/config_flag_defaults.json`, unless the user sets them
    (`portkit convert --config`, recorded in `config-overrides.json`); number
    options a converter reads (Farmer's Delight's `cuttingBoardFortuneBonus`)

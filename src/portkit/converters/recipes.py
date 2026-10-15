@@ -241,6 +241,16 @@ _CODE_RECIPES = {
         "(MoldingRecipe, run by CastingBlockEntity L152-181); Bedrock has no casting block to press "
         "on, and a crafting stand-in would turn a block interaction into a grid recipe"
     )),
+    # Silent Gear 2.6.36 (Silent-Gear 1.16.x @9188137b, see _MODULAR_TOOL_RECIPES):
+    # SalvagerTileEntity L89-153: BASE_WORK_TIME 10 s, each result item lost
+    # with a chance between salvagerMinLossRate (0.0) and salvagerMaxLossRate
+    # (0.5) by the input's damage (Config L313-320).
+    "silentgear:salvaging": (
+        "a Silent Gear salvaging recipe: the Salvager block takes the item apart over a work time, "
+        "and each result item is lost with a chance that grows with the input's damage "
+        "(SalvagerTileEntity#tick and #getLossRate, partLossRate config 0.0 to 0.5); a fixed-result "
+        "Bedrock recipe would drop the station, the time and the loss"
+    ),
     # Supplementaries 1.20-3.1.43 SusRecipe#assemble (a CustomRecipe): the other
     # grid stack goes into the result's BlockEntityTag "item".
     "supplementaries:sus_crafting": (
@@ -362,6 +372,177 @@ def fluid_recipe_reason(java_type: object) -> str | None:
     """Why a recipe of this type makes, takes or moves a mod's fluid (#174),
     or None if it isn't one this module knows: a type in :data:`_FLUID_RECIPES`."""
     return _FLUID_RECIPES.get(java_type) if isinstance(java_type, str) else None
+
+
+# A recipe that builds, modifies, repairs or takes apart a modular tool, or
+# makes a part or material whose identity is stored on the stack, is residue
+# of its own kind (#175). In Tinkers' Construct and Silent Gear a tool's
+# numbers (durability, mining speed, attack, traits) are computed in Java at
+# craft time from the materials of the parts it was built from, plus its
+# modifiers, and stored per stack (NBT). A Bedrock item's components are fixed
+# per item type in its JSON, so one Bedrock item can't be an iron-headed pick
+# and a cobalt-headed pick at once; per-stack stats would need a scripted
+# station and runtime (#175's large option), which doesn't exist. A stand-in
+# with fixed stats is fabrication (#87, #135). The residue agent skips the
+# kind (agent/residue.py SKIP_KINDS). docs/decisions.md, 2026-10-15.
+MODULAR_TOOL = "modular_tool"
+
+# What Bedrock lacks, said once at the end of every modular tool reason.
+_NO_PER_STACK_TOOL = (
+    "a Bedrock item's components are fixed per item type, so a tool or part whose materials, stats "
+    "and modifiers are computed in Java and stored on each stack has no single Bedrock item to write, "
+    "and a stand-in with fixed numbers would invent them"
+)
+
+
+def _tc_tool(what: str) -> str:
+    return f"a Tinkers' Construct {what}; {_NO_PER_STACK_TOOL}"
+
+
+def _sg_gear(what: str) -> str:
+    return f"a Silent Gear {what}; {_NO_PER_STACK_TOOL}"
+
+
+_TC_STATION_EDIT = _tc_tool(
+    "Tinker Station recipe that changes a built tool (adds or levels a modifier, fills overslime, "
+    "swaps a part or material, repairs or damages it); the tool's modifiers, slots, materials and "
+    "stats live in its stack data and are recomputed by ToolStack"
+)
+_TC_CRAFTING_EDIT = _tc_tool(
+    "crafting-table recipe that edits a built tool's stack data (overslime or a modifier's repair "
+    "material), run by a CustomRecipe subclass rather than a fixed result"
+)
+_TC_WORKTABLE = _tc_tool(
+    "Modifier Worktable recipe (an AbstractWorktableRecipe: removing, extracting, sorting or "
+    "toggling a tool's modifiers, or converting enchanted books into modifier crystals); the "
+    "worktable is a block-entity screen and its results are written into the tool's stack data"
+)
+_TC_PART_BUILDER = _tc_tool(
+    "Part Builder recipe: a pattern plus enough material value (from `tconstruct:material` "
+    "recipes) makes a tool part carrying that material on the stack, or recycles a tool back into "
+    "parts (PartRecipe/ItemPartRecipe/PartBuilderRecycle/PartBuilderToolRecycle); the Part Builder "
+    "is a block-entity screen"
+)
+_TC_SEVERING = _tc_tool(
+    "severing recipe: when a tool with the severing modifier kills the `entity`, the "
+    "`result` may drop with a chance per modifier level (SeveringRecipe LOADER L32-36, run by "
+    "SeveringModule#processLoot L42-56); the drop belongs to the modifier on the tool, not to a recipe"
+)
+
+# Tinkers' Construct 3.12.1.231 (SlimeKnights/TinkersConstruct @a5a03249):
+# TinkerTables L149-165 and TinkerModifiers L741-779 (RECIPE_SERIALIZERS
+# .register). The data-free CustomRecipe types (tinker_station_repair,
+# crafting_table_repair, armor_dyeing_modifier, armor_trim_modifier) stay
+# special code_recipe residue. ToolBuildingRecipe#requiresAnvil L230-232 (4 or
+# more parts and extra requirements need the Tinker's Anvil); #assemble L200-202
+# (ToolStack.createTool from the parts' MaterialNBT). MaterialRecipe LOADER
+# L35-43 (ingredient, value, needed, material, leftover). ModifierSalvage
+# LOADER L30-38 (tools, modifier, level, slots), read by ModifierRemovalRecipe
+# L122 through ModifierRecipeLookup#getSalvage. ShapedMaterialsRecipe L118-148
+# and ShapelessMaterialsRecipe set the result's MaterialNBT from the grid.
+# Silent Gear 2.6.36 (SilentChaos512/Silent-Gear 1.16.x @9188137b, committed
+# 2021-12-29, the jar's Implementation-Timestamp day): ModRecipes L43-80,
+# names from Const L28-46.
+_MODULAR_TOOL_RECIPES = {
+    "tconstruct:tool_building": _tc_tool(
+        "tool building recipe: the parts placed in the Tinker Station (or the Tinker's Anvil for "
+        "four or more) build the `result` tool, and its stats come from each part's material "
+        "(ToolBuildingRecipe#assemble, ToolStack.createTool with the parts' materials)"
+    ),
+    "tconstruct:tipped_tool_transform": _tc_tool(
+        "tool building recipe that turns tipped arrows into a tipped tool (TippedToolTransformRecipe, "
+        "a ToolBuildingRecipe)"
+    ),
+    **dict.fromkeys((
+        "tconstruct:modifier", "tconstruct:incremental_modifier", "tconstruct:swappable_modifier",
+        "tconstruct:multilevel_modifier", "tconstruct:multilevel_incremental_modifier",
+        "tconstruct:overslime_modifier", "tconstruct:banner_modifier", "tconstruct:modifier_repair",
+        "tconstruct:tinker_station_part_swapping", "tconstruct:tinker_station_damaging",
+        "tconstruct:fixed_material_swapping", "tconstruct:material_value_swapping",
+        "tconstruct:tool_material_swapping", "tconstruct:part_swapping_override",
+    ), _TC_STATION_EDIT),
+    **dict.fromkeys(("tconstruct:crafting_overslime_modifier", "tconstruct:crafting_modifier_repair"),
+                    _TC_CRAFTING_EDIT),
+    **dict.fromkeys((
+        "tconstruct:remove_modifier", "tconstruct:extract_modifier", "tconstruct:modifier_sorting",
+        "tconstruct:modifier_set_worktable", "tconstruct:enchantment_converting",
+        "tconstruct:toggle_interaction",
+    ), _TC_WORKTABLE),
+    "tconstruct:modifier_salvage": _tc_tool(
+        "modifier salvage entry: which modifier slots come back to a tool when `modifier` is removed "
+        "from it at the worktable (ModifierSalvage LOADER L30-38, read by ModifierRemovalRecipe "
+        "through ModifierRecipeLookup#getSalvage); it is data for the tool's slot bookkeeping, not a "
+        "recipe with an output"
+    ),
+    "tconstruct:material": _tc_tool(
+        "material recipe: it says how much of the tool `material` the `ingredient` is worth (`value` "
+        "per `needed`, with any `leftover`) to the Part Builder and the other recipes that count "
+        "material value (MaterialRecipe LOADER L35-43); it makes nothing by itself"
+    ),
+    **dict.fromkeys((
+        "tconstruct:part_builder", "tconstruct:item_part_builder", "tconstruct:part_builder_recycling",
+        "tconstruct:part_builder_tool_recycling",
+    ), _TC_PART_BUILDER),
+    **dict.fromkeys((
+        "tconstruct:crafting_shaped_material", "tconstruct:crafting_shaped_materials",
+        "tconstruct:crafting_shapeless_materials",
+    ), _tc_tool(
+        "crafting-table recipe whose result stores the tool materials of its grid ingredients on "
+        "the stack (ShapedMaterialsRecipe/ShapelessMaterialsRecipe set the result's MaterialNBT; "
+        "traveler's armour, and the Tinker's Anvil and forge whose metal the grid chooses)"
+    )),
+    **dict.fromkeys((
+        "tconstruct:severing", "tconstruct:ageable_severing", "tconstruct:player_beheading",
+        "tconstruct:snow_golem_beheading", "tconstruct:mooshroom_demushrooming",
+        "tconstruct:sheep_shearing",
+    ), _TC_SEVERING),
+    # ShapelessGearRecipe/ShapedGearRecipe#assemble: item.construct(getParts(inv)),
+    # matches only while each part allows crafting that gear type.
+    **dict.fromkeys(("silentgear:gear_crafting", "silentgear:shaped_gear_crafting"), _sg_gear(
+        "gear crafting recipe: the parts in the grid build the gear item, and its stats and traits "
+        "come from the parts' materials (ShapelessGearRecipe/ShapedGearRecipe#assemble, "
+        "ICoreItem#construct)"
+    )),
+    # ShapelessCompoundPartRecipe#assemble: item.create(getMaterials(inv), count).
+    "silentgear:compound_part": _sg_gear(
+        "compound part recipe: the materials in the grid make a part that stores them on the stack "
+        "(ShapelessCompoundPartRecipe#assemble, CompoundPartItem#create)"
+    ),
+    # ConversionRecipe#assemble L95-106: construct from result.materials, copy
+    # damage and enchantments from the input tool; config allowConversionRecipes.
+    "silentgear:conversion": _sg_gear(
+        "conversion recipe: an ordinary tool becomes a gear item built from the `result.materials` "
+        "it lists, keeping the input's damage and enchantments (ConversionRecipe#assemble), when the "
+        "allowConversionRecipes config is on"
+    ),
+    # Coating/UpgradeSmithingRecipe#applyUpgrade: GearData.addOrReplacePart /
+    # addPart, then GearData.recalculateStats.
+    "silentgear:smithing/coating": _sg_gear(
+        "smithing coating recipe: the material in the smithing table becomes the gear's coating "
+        "part and its stats are recalculated (CoatingSmithingRecipe#applyUpgrade)"
+    ),
+    "silentgear:smithing/upgrade": _sg_gear(
+        "smithing upgrade recipe: the upgrade part is added to the gear's parts and its stats are "
+        "recalculated (UpgradeSmithingRecipe#applyUpgrade)"
+    ),
+    **dict.fromkeys(("silentgear:salvaging/gear", "silentgear:salvaging/compound_part"), _sg_gear(
+        "salvaging recipe: the Salvager takes a gear item or compound part back into the parts and "
+        "materials stored on that stack, each lost with a damage-based chance "
+        "(GearSalvagingRecipe#getPossibleResults, SalvagerTileEntity#getLossRate)"
+    )),
+    # MaterialPressingRecipe#assemble: CraftedMaterialItem#create(material of input).
+    "silentgear:pressing/material": _sg_gear(
+        "material pressing recipe: the Metal Press turns a material into a crafted material item "
+        "that carries the input's material on the stack (MaterialPressingRecipe#assemble)"
+    ),
+}
+
+
+def modular_tool_reason(java_type: object) -> str | None:
+    """Why a recipe of this type builds, changes or takes apart a modular tool
+    (#175), or None if it isn't one this module knows: a type in
+    :data:`_MODULAR_TOOL_RECIPES`."""
+    return _MODULAR_TOOL_RECIPES.get(java_type) if isinstance(java_type, str) else None
 
 
 def code_recipe_reason(java_type: object, recipe: dict, loader: str | None = None) -> str | None:
@@ -961,6 +1142,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             fluid = fluid_recipe_reason(java_type)
             if fluid is not None:
                 result.unhandled.append(Unhandled(rel, FLUID_RECIPE, fluid))
+                continue
+            tool = modular_tool_reason(java_type)
+            if tool is not None:
+                result.unhandled.append(Unhandled(rel, MODULAR_TOOL, tool))
                 continue
             code = code_recipe_reason(java_type, recipe, mod.loader)
             if code is not None:
