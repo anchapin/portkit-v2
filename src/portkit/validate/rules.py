@@ -290,8 +290,17 @@ def _check_texture_index(report: ValidationReport, path: Path, rel: str, pack_ro
         if not isinstance(target, str):
             report.add(rel, "texture_index.textures", f"{name}: textures must be a path")
             continue
-        if not (pack_root / f"{target}.png").is_file():
+        if not (pack_root / f"{target}.png").is_file() and target not in _vanilla_files():
             report.add(rel, "texture_index.missing", f"{name}: {target}.png not in pack")
+
+
+def _vanilla_files() -> frozenset[str]:
+    """Texture files the vanilla resource pack below every pack serves (the
+    fetched atlas index, portkit.data.vanilla_textures), or none without it."""
+    from ..data import vanilla_textures
+
+    index = vanilla_textures.index()
+    return index.all_files() if index is not None else frozenset()
 
 
 def _check_flipbook(report: ValidationReport, path: Path, rel: str, pack_root: Path) -> None:

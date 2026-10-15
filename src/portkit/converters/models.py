@@ -473,6 +473,99 @@ def texture_shortname(reference: str, namespace: str) -> tuple[str | None, str]:
     return texture_key(subpath, namespace), ""
 
 
+# Java's texture dirs -> the vanilla Bedrock dir with the same files and the
+# atlas that indexes it. Pre-1.13 mods named the Java dirs blocks/ and items/.
+_VANILLA_DIRS = {
+    "block": ("textures/blocks/", "terrain"), "blocks": ("textures/blocks/", "terrain"),
+    "item": ("textures/items/", "item"), "items": ("textures/items/", "item"),
+}
+
+# Pick 2 (PR #220): a Java name that is a vanilla short name showing a file of
+# another name (oak_planks -> textures/blocks/planks_oak). Off: such a name
+# stays residue, since Bedrock's short names are not always Java's texture
+# (Bedrock's piston_top shows textures/blocks/piston_inner).
+MAP_RENAMED = False
+
+
+def is_vanilla(reference: str, namespace: str) -> bool:
+    """Is this texture reference into vanilla (minecraft:, or bare) from a mod?"""
+    if not isinstance(reference, str) or reference.startswith("#"):
+        return False
+    ref_ns, _, _ = reference.rpartition(":")
+    return (ref_ns or "minecraft") == "minecraft" and namespace != "minecraft"
+
+
+def vanilla_texture(
+    reference: str, namespace: str, atlas: str = "terrain",
+) -> tuple[str | None, str | None, str]:
+    """A vanilla Java texture -> how the Bedrock pack names Bedrock's own copy.
+
+    Returns (key, file, why). ``key`` is what a material instance (atlas
+    "terrain") or an item icon (atlas "item") names. ``file`` is None when the
+    key is a vanilla short name, which the vanilla atlas already defines (the
+    pack's atlas is merged with it); otherwise the pack's atlas needs an entry
+    ``key -> file`` pointing at the vanilla file, which the vanilla pack below
+    serves. No art is copied either way.
+
+    The rule is the file's name (pick 1): Java's ``block/<name>`` is Bedrock's
+    ``textures/blocks/<name>``, the same texture under the same name. A vanilla
+    short name showing just that file is named directly; a file the atlas only
+    lists inside a set of variants gets the pack entry (pick 3), unless vanilla
+    animates it (a flipbook keyed to vanilla's own short name; an entry of ours
+    would show the whole strip). Everything else stays residue with the reason.
+    """
+    from ..data import vanilla_textures
+
+    _, _, path = reference.rpartition(":")
+    lane, _, name = path.partition("/")
+    if lane not in _VANILLA_DIRS or not name:
+        return None, None, f"model points at {reference!r}, a vanilla texture outside block/ and item/"
+    index = vanilla_textures.index()
+    if index is None:
+        return None, None, (
+            f"model points at {reference!r}, a vanilla texture; Bedrock's vanilla texture "
+            f"index isn't cached (run `portkit reference fetch`)"
+        )
+    folder, home = _VANILLA_DIRS[lane]
+    file = folder + name
+    # pipeline.vanilla_entries reads the file back off this key
+    entry_key = f"{namespace}:vanilla/{'block' if home == 'terrain' else 'item'}/{name}"
+    animated = index.animated.get(file)
+    if file in index.files[home]:
+        if atlas == home:
+            names = index.sole[home].get(file) or []
+            if animated:
+                names = [n for n in names if n in animated]
+            if names:
+                return (name if name in names else names[0]), None, ""
+        if animated:
+            return None, None, (
+                f"model points at {reference!r}, a vanilla texture Bedrock animates ({file}) "
+                f"through vanilla's flipbook for {', '.join(animated)}, which a pack entry of "
+                f"its own would lose"
+            )
+        return entry_key, file, ""
+    renamed = (index.atlases[home].get(name) or {}).get("paths") or []
+    if len(renamed) == 1:
+        if (MAP_RENAMED and atlas == home and index.atlases[home][name].get("plain")
+                and not index.animated.get(renamed[0])):
+            return name, None, ""
+        return None, None, (
+            f"model points at {reference!r}, a vanilla texture: Bedrock has no {file}; its "
+            f"short name {name!r} shows {renamed[0]}, a file of another name, so it is not mapped"
+        )
+    if renamed:
+        return None, None, (
+            f"model points at {reference!r}, a vanilla texture: Bedrock has no {file}; its "
+            f"short name {name!r} is a set of {len(renamed)} textures, and which one Java's is "
+            f"isn't named"
+        )
+    return None, None, (
+        f"model points at {reference!r}, a vanilla texture: Bedrock's vanilla pack has no "
+        f"texture of that name ({file})"
+    )
+
+
 # A Java blockstate y turn spins the model clockwise seen from above, in Java's
 # own coordinates, before any Bedrock conversion. Each quarter turn sends a
 # point (x, z) to (16 - z, x) and a north face to east.

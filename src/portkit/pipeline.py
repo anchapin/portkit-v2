@@ -1,6 +1,8 @@
 """Top-level: source mod in, validated tree out, residue listed."""
 from __future__ import annotations
 
+import re
+
 import json
 import tempfile
 from dataclasses import dataclass, field
@@ -129,6 +131,61 @@ def _texture_keys(files: dict, index_path: str) -> dict[str, dict]:
     return dict(index.get("texture_data") or {})
 
 
+_VANILLA_KEY = re.compile(r"^[a-z0-9_]+:vanilla/(block|item)/(.+)$")
+_VANILLA_FILE_DIR = {"block": "textures/blocks/", "item": "textures/items/"}
+
+
+def vanilla_entries(result: ConversionResult, namespace: str) -> None:
+    """Give each ``<ns>:vanilla/<lane>/<name>`` key the atlas entry it needs.
+
+    models.vanilla_texture names a vanilla short name directly where one shows
+    exactly the file; where none does it hands out such a key, which points
+    at the vanilla file (``textures/blocks/<name>``) the vanilla pack below
+    serves, so no art is copied. A mod's own keys flatten "/" (textures.shortname),
+    so these never collide with them. Blocks' keys go in the terrain atlas,
+    items' icons in the item atlas."""
+    wanted: dict[str, dict[str, str]] = {}
+    for path, body in result.files.items():
+        if not isinstance(body, dict):
+            continue
+        keys: list[tuple[str, str]] = []
+        if path.startswith("blocks/"):
+            components = (body.get("minecraft:block") or {}).get("components") or {}
+            for part in [components] + [p.get("components") or {} for p in
+                                        (body.get("minecraft:block") or {}).get("permutations") or []
+                                        if isinstance(p, dict)]:
+                for inst in (part.get("minecraft:material_instances") or {}).values():
+                    if isinstance(inst, dict) and isinstance(inst.get("texture"), str):
+                        keys.append(("textures/terrain_texture.json", inst["texture"]))
+        elif path.startswith("items/"):
+            icon = ((body.get("minecraft:item") or {}).get("components") or {}).get("minecraft:icon")
+            if isinstance(icon, dict):
+                icon = icon.get("texture") or (icon.get("textures") or {}).get("default")
+            if isinstance(icon, str):
+                keys.append(("textures/item_texture.json", icon))
+        for index_path, key in keys:
+            match = _VANILLA_KEY.match(key)
+            if match:
+                wanted.setdefault(index_path, {})[key] = _VANILLA_FILE_DIR[match.group(1)] + match.group(2)
+    for index_path, entries in sorted(wanted.items()):
+        index = dict(result.files.get(index_path) or {
+            "resource_pack_name": namespace,
+            "texture_name": "atlas.terrain" if "terrain" in index_path else "atlas.items",
+        })
+        data = dict(index.get("texture_data") or {})
+        for key, file in sorted(entries.items()):
+            data.setdefault(key, {"textures": file})
+        index["texture_data"] = data
+        result.files[index_path] = index
+
+
+def _vanilla_short_names(lane: str) -> frozenset[str]:
+    from .data import vanilla_textures
+
+    index = vanilla_textures.index()
+    return index.short_names(lane) if index is not None else frozenset()
+
+
 def drop_untextured(result: ConversionResult, namespace: str) -> None:
     """Withdraw blocks and items whose textures never made it into the pack.
 
@@ -144,6 +201,10 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
     """
     terrain = _texture_keys(result.files, "textures/terrain_texture.json")
     atlas = _texture_keys(result.files, "textures/item_texture.json")
+    # Vanilla short names (models.vanilla_texture) are in vanilla's atlases,
+    # which Bedrock merges with the pack's.
+    vanilla_terrain = _vanilla_short_names("terrain")
+    vanilla_items = _vanilla_short_names("item")
     borrowed: dict[str, dict] = {}
 
     for path in sorted(result.files):
@@ -160,14 +221,14 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
             missing = sorted({
                 inst["texture"] for inst in instances.values()
                 if isinstance(inst, dict) and isinstance(inst.get("texture"), str)
-                and inst["texture"] not in terrain
+                and inst["texture"] not in terrain and inst["texture"] not in vanilla_terrain
             })
             kind, source = "block", f"assets/{ns}/blockstates/{Path(path).name}"
         elif path.startswith("items/"):
             icon = ((body.get("minecraft:item") or {}).get("components") or {}).get("minecraft:icon")
             if isinstance(icon, dict):
                 icon = icon.get("texture")
-            if not isinstance(icon, str) or icon in atlas:
+            if not isinstance(icon, str) or icon in atlas or icon in vanilla_items:
                 continue
             if icon in terrain:
                 borrowed[icon] = terrain[icon]
@@ -346,6 +407,7 @@ def convert(
             for ns in selected
         }
         result = merge_namespaces(per_namespace)
+        vanilla_entries(result, namespace)
         drop_untextured(result, namespace)
         shorten_paths(result)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}

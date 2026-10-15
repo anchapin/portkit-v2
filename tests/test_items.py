@@ -204,10 +204,19 @@ def test_a_block_item_is_left_to_the_block_but_still_claimed(tmp_path):
 
 def test_an_icon_from_another_namespace_is_refused(tmp_path):
     model = {"parent": "minecraft:item/generated",
-             "textures": {"layer0": "minecraft:item/iron_ingot"}}
+             "textures": {"layer0": "othermod:item/iron_ingot"}}
     result = items.convert(build(tmp_path, {"steel_ingot": model}))
     assert result.files == {}
     assert "another namespace" in result.unhandled[0].reason
+
+
+def test_a_vanilla_icon_is_refused_without_the_vanilla_index(tmp_path):
+    """With the fetched index it maps (tests/test_vanilla_textures.py)."""
+    model = {"parent": "minecraft:item/generated",
+             "textures": {"layer0": "minecraft:item/iron_ingot"}}
+    result = items.convert(build(tmp_path, {"steel_ingot": model}))
+    assert result.files == {}
+    assert "a vanilla texture" in result.unhandled[0].reason
 
 
 def test_an_unknown_parent_says_it_is_not_a_flat_icon(tmp_path):
