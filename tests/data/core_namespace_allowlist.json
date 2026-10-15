@@ -3,7 +3,7 @@
     "#245 ratchet: mod namespace literals in core modules (src/portkit, py + runtime js), per file and namespace, as of develop 6e1fc1d (2026-10-15).",
     "Counts may only go down. Detection rule: tests/test_core_namespace_free.py. Audit: docs/adapter-audit-2026-10-15.md."
   ],
-  "total": 307,
+  "total": 143,
   "files": {
     "converters/books.py": {
       "citadel": 5
@@ -15,15 +15,7 @@
       "farmersdelight": 1
     },
     "converters/recipes.py": {
-      "bclib": 2,
-      "betterend": 2,
-      "create": 27,
-      "farmersdelight": 2,
-      "mekanism": 47,
-      "mythicmetals": 3,
-      "silentgear": 10,
-      "supplementaries": 1,
-      "tconstruct": 72
+      "farmersdelight": 2
     },
     "converters/skillet.py": {
       "farmersdelight": 1

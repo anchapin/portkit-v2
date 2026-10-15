@@ -1,4 +1,7 @@
-"""Mekanism (#245): its load-condition type.
+"""Mekanism (#245): its load-condition type and its recipe types.
+
+Its machine recipes and ``mek_data`` crafting stay residue for the reasons in
+:mod:`.recipes`. Its load-condition type:
 
 ``mekanism:mod_version_loaded`` (Mekanism's ModVersionLoadedCondition: the
 mod ``modid`` is loaded at ``version`` or newer). An absent mod decides it
@@ -10,6 +13,7 @@ from __future__ import annotations
 
 from ...conditions import LoadContext, Verdict
 from .. import Adapter
+from .recipes import RECIPE_REASONS
 
 
 def mod_version_loaded(context: LoadContext, kind: str, cond: dict) -> Verdict:
@@ -26,4 +30,5 @@ ADAPTER = Adapter(
     name="mekanism",
     namespaces=frozenset({"mekanism"}),
     conditions={"mekanism:mod_version_loaded": mod_version_loaded},
+    recipe_reasons=RECIPE_REASONS,
 )

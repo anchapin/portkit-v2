@@ -15,6 +15,7 @@ import json
 
 import pytest
 
+from portkit import adapters
 from portkit.converters import recipes
 from portkit.model import SourceMod
 
@@ -134,14 +135,14 @@ def test_every_registered_create_processing_type_has_a_kind():
     # AllRecipeTypes L49-66 at @1a1a9a28. conversion (a JEI display type) and
     # basin (BasinRecipe, the generic basin type) ship no recipe files in the
     # jar; they get no reason here rather than an invented one.
-    machine = {t for t in recipes._MACHINE_RECIPES if t.startswith("create:")}
+    machine = {t for t in adapters.recipe_reasons("machine_recipe") if t.startswith("create:")}
     assert machine == {
         "create:crushing", "create:milling", "create:cutting", "create:pressing", "create:compacting",
         "create:mixing", "create:splashing", "create:haunting", "create:deploying",
         "create:mechanical_crafting", "create:sequenced_assembly",
     }
-    assert {"create:filling", "create:emptying"} <= set(recipes._FLUID_RECIPES)
-    assert {"create:item_application", "create:sandpaper_polishing"} <= set(recipes._CODE_RECIPES)
+    assert {"create:filling", "create:emptying"} <= set(adapters.recipe_reasons("fluid_recipe"))
+    assert {"create:item_application", "create:sandpaper_polishing"} <= set(adapters.recipe_reasons("code_recipe"))
 
 
 def test_hand_used_create_recipes_are_code_recipes(tmp_path):
