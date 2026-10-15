@@ -118,11 +118,15 @@ SKIP_KINDS = {
                      "Java computes per stack (#175); a Bedrock item's components are fixed per item type, "
                      "so a stand-in would invent the numbers"),
     "machine_recipe": ("the recipe runs in a mod machine that works over ticks, a Mekanism machine holding "
-                       "energy, chemicals or fluid (#172) or a Create machine turned by its rotational network "
-                       "(#173); Bedrock blocks have no ticking inventory, energy or rotation, so there is no "
+                       "energy, chemicals or fluid (#172), a Create machine turned by its rotational network "
+                       "(#173) or an Alloy Forgery forge burning fuel at a tier (#171); Bedrock blocks have no "
+                       "ticking inventory, energy, fuel store or rotation, so there is no "
                        "station to write it for, and the reason names the machine"),
     "custom_fluid": ("the item holds a mod's fluid and its icon is drawn from that fluid at runtime (#174); "
                      "Bedrock add-ons can't define the fluid, and drawing the icon would invent it"),
+    "machine_data": ("data a Java machine reads at runtime (Alloy Forgery forge definitions, tiers, fuels and "
+                     "its recipe tags, #171); there is no Bedrock machine to read it until a scripted forge "
+                     "exists, and the reason says what the data sets"),
     "entity": ("the file only works with a Java entity (its spawn egg or loot table), and entities don't "
                "convert: a mob's geometry, animations and AI are Java code, so a Bedrock entity would invent "
                "them (#176); the reason says what the bytecode read"),
