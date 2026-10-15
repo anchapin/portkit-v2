@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Create's rotation-powered processing recipes are `machine_recipe` residue naming the machine; hand-used item application and sandpaper polishing are `code_recipe`
 
-- **Status:** proposed, PR #TBD.
+- **Status:** proposed, PR #231.
 - **Decision:** a recipe of one of Create's 11 rotation-powered processing
   types (crushing, milling, cutting, pressing, compacting, mixing, splashing,
   haunting, deploying, mechanical_crafting, sequenced_assembly) is
@@ -77,7 +77,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   blocks: a machine shell that does nothing is a wrong-but-valid block
   (#172, #56). Treating item application as a crafting recipe: its first
   ingredient is a block placed in the world, not an item in a grid.
-- **Links:** #173, PR #TBD, #172, #174, #180, #183, #171, #87, #135.
+- **Links:** #173, PR #231, #172, #174, #180, #183, #171, #87, #135.
 
 ## 2026-10-15: Mekanism machine recipes are `machine_recipe` residue naming the machine; `mek_data` crafting is `code_recipe`; the residue agent skips both
 
