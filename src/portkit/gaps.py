@@ -16,8 +16,8 @@ ranks the residue reasons across them:
    covers, with a trend against the previous leaderboard when one is given.
 3. ``render_markdown`` turns that into the page a person reads.
 
-Nothing here changes a conversion; it only reads what ``convert`` leaves in
-``unhandled.json``.
+Nothing here changes a conversion; it only reads the residue ``convert``
+returns (the same entries it writes to ``unhandled.json``).
 """
 from __future__ import annotations
 
@@ -47,7 +47,16 @@ _SOURCE_KEYED = {"unowned"}
 _RULES: list[tuple[re.Pattern, str]] = [
     # "(e.g. a, b, c" lists, sometimes cut short without the closing paren
     (re.compile(r"\(e\.g\.[^)]*\)?"), "(e.g. …)"),
-    (re.compile(r"'[^']*'|\"[^\"]*\"|`[^`]*`"), "'…'"),
+    # quoted names; an apostrophe inside a word (isn't, vanilla's) is not a quote
+    (re.compile(r"(?<!\w)'[^']*'(?!\w)|\"[^\"]*\"|`[^`]*`"), "'…'"),
+    # Java classes: vectorwing.farmersdelight.common.block.RopeFenceGateBlock
+    (re.compile(r"\b(?:[a-z_]\w*\.){2,}[A-Z]\w*(?:\$\w+)*"), "<class>"),
+    # blockstate lists: (age=0, age=1, age=2) or (facing=east,part=foot, ...)
+    (re.compile(r"\((?:\w+=[\w.-]+[ ,]*)+\)"), "(<states>)"),
+    # content hashes: tags-1.21.4-summary@7cffbcdad5fa
+    (re.compile(r"@[0-9a-f]{7,}\b"), "@<hash>"),
+    # lang: "N key(s) present in de_de but not in en_us went untranslated"
+    (re.compile(r"\bpresent in \w+ but not in \w+"), "present in <locale> but not in <locale>"),
     # load conditions: "compat for create: loads only when create is installed"
     (re.compile(r"\bcompat for [\w.-]+:"), "compat for <mod>:"),
     (re.compile(r"\bwhen [\w.-]+ is installed\b"), "when <mod> is installed"),
@@ -152,10 +161,8 @@ def convert_one(jar: Path, workdir: Path, timeout: float = DEFAULT_TIMEOUT, runn
 def _child(jar: str, out: str, result: str) -> int:
     """The child process: one conversion, numbers written to ``result``."""
     from .pipeline import convert
-    from .report import Residue
 
     res = convert(Path(jar), Path(out), emit_addon=False)
-    residue = Residue.load(Path(out))
     data = {
         "namespace": res.namespace,
         "files": res.file_count,
@@ -163,7 +170,7 @@ def _child(jar: str, out: str, result: str) -> int:
         "coverage": round(res.coverage, 2),
         "valid": res.report.ok,
         "errors": len(res.report.errors),
-        "reasons": group_residue(residue),
+        "reasons": group_residue(res.unhandled),
     }
     Path(result).write_text(json.dumps(data))
     return 0
