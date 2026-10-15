@@ -75,13 +75,6 @@ from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
 from .tags import MultiMembers, TagResolver
 
-# Recipe types a station runtime writes into a data table (stations.RECIPE_TYPES;
-# kept here as a literal so this module doesn't import the station converter).
-STATION_TYPES = frozenset({"farmersdelight:cutting", "farmersdelight:cooking"})
-# Recipe types a station also reads while they convert as usual (stations.SHARED_TYPES):
-# the Farmer's Delight stove cooks campfire recipes, which still become
-# Bedrock campfire recipes of their own.
-STATION_SHARED_TYPES = frozenset({"minecraft:campfire_cooking"})
 
 # Most members a single-slot tag ingredient is expanded into, one recipe each.
 # 16 covers a full dye-colour set; a bigger tag is a family (every drawer, every
@@ -772,13 +765,17 @@ def convert(mod: SourceMod, emitted: dict | None = None,
     ``context`` is shared with the other converters of the namespace; without
     one the recipes get their own, and the config-flag note with it.
 
-    With a ``deferred`` list, a recipe of a station type
-    (:data:`portkit.converters.stations.RECIPE_TYPES`) whose load conditions
-    pass is appended to it as (source path, recipe) instead of being refused:
-    the station converter writes it into its data table (#177). A recipe of a
-    :data:`STATION_SHARED_TYPES` type is appended too, and still converts.
+    With a ``deferred`` list, a recipe of a station type (one an adapter's
+    ``station`` hook declares, :func:`portkit.converters.stations.station_recipe_types`)
+    whose load conditions pass is appended to it as (source path, recipe)
+    instead of being refused: the station converter writes it into its data
+    table (#177). A recipe of a shared station type (the Farmer's Delight
+    stove's campfire recipes) is appended too, and still converts.
     """
     result = ConversionResult()
+    from .stations import station_recipe_types
+
+    station_types, station_shared_types = station_recipe_types()
     for lane in ("recipes", "recipe"):
         src = mod.data / lane
         if src.is_dir():
@@ -845,10 +842,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             recipe = chosen
 
         java_type = recipe.get("type")
-        if deferred is not None and java_type in STATION_TYPES:
+        if deferred is not None and java_type in station_types:
             deferred.append((rel, recipe))
             continue
-        if deferred is not None and java_type in STATION_SHARED_TYPES:
+        if deferred is not None and java_type in station_shared_types:
             deferred.append((rel, recipe))  # and convert it below as well
         if java_type == "minecraft:smithing_transform":
             converted = _smithing(recipe, f"{mod.namespace}:{name}", rel, result, tag_resolver)

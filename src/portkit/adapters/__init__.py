@@ -34,13 +34,11 @@ Hooks, and the core seam that asks each one:
   page text for the lang converter, and its files plus the
   ``scripts/portkit/main.js`` entry line that wires the core book viewer.
 - ``station``: a :class:`StationHooks` for a mod whose blocks a scripted
-  station runtime makes work (Waystones', #178). Each seam of
+  station runtime makes work (Farmer's Delight's, #177; Waystones', #178). Each seam of
   :mod:`portkit.converters.stations` (``station_blocks``, ``station_loot``,
   ``station_textures``, ``station_lang_keys``, ``convert``) asks every
-  adapter's hook in registry order, after the core's own stations.
+  adapter's hook in registry order.
 
-Hooks for the station adapters (blocks, loot, textures, lang, runtime) are
-added with the moves that need them (audit section 7, steps 5-8).
 """
 from __future__ import annotations
 
@@ -81,8 +79,11 @@ class StationHooks:
     under ``loot_table/blocks/``) the station reads instead of the loot
     converter; ``derived_textures(mod)``: textures its overlays wear, made
     from the jar's own; ``lang_keys(mod)``: Java lang keys the runtime shows
-    itself; ``convert(mod, loot, files, context)``: ``(result, main.js entry
-    line or "")``, given the loot tables it asked for.
+    itself; ``convert(mod, deferred, loot, files, context)``: ``(result,
+    main.js entry lines or "")``, given the recipes of its own types and the
+    loot tables it asked for. ``recipe_types``: recipe types the recipe
+    converter leaves to this station (its data table); ``shared_types``:
+    recipe types it also reads while they convert as usual (#177 stove).
     """
 
     blocks: Callable[["SourceMod"], dict]
@@ -90,6 +91,8 @@ class StationHooks:
     derived_textures: Callable[["SourceMod"], list]
     lang_keys: Callable[["SourceMod"], set]
     convert: Callable[..., tuple["ConversionResult", str]]
+    recipe_types: frozenset = frozenset()
+    shared_types: frozenset = frozenset()
 
 
 def _empty() -> Mapping:
@@ -186,8 +189,8 @@ def station_hooks() -> list[StationHooks]:
 
 
 from . import (  # noqa: E402  (each imports Adapter above)
-    alloy_forgery, bclib, betterend, citadel, create, mantle, mekanism, mythicmetals, silentgear, supplementaries,
-    tconstruct, waystones,
+    alloy_forgery, bclib, betterend, citadel, create, farmersdelight, mantle, mekanism, mythicmetals, silentgear,
+    supplementaries, tconstruct, waystones,
 )
 
 ADAPTERS = (
@@ -196,6 +199,7 @@ ADAPTERS = (
     betterend.ADAPTER,
     citadel.ADAPTER,
     create.ADAPTER,
+    farmersdelight.ADAPTER,
     mantle.ADAPTER,
     mekanism.ADAPTER,
     mythicmetals.ADAPTER,

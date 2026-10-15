@@ -14,6 +14,12 @@ from __future__ import annotations
 from .. import Adapter, StationHooks
 from . import convert
 
+
+def _convert(mod, deferred, loot, files, context):
+    """The ``station`` hook's convert: Waystones' stations read no recipes."""
+    return convert.convert(mod, loot, files, context)
+
+
 ADAPTER = Adapter(
     name="waystones",
     namespaces=frozenset({"waystones"}),
@@ -22,6 +28,6 @@ ADAPTER = Adapter(
         loot_names=convert.loot_names,
         derived_textures=convert.derived_textures,
         lang_keys=convert.lang_keys,
-        convert=convert.convert,
+        convert=_convert,
     ),
 )

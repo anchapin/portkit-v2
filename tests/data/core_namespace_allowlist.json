@@ -3,25 +3,6 @@
     "#245 ratchet: mod namespace literals in core modules (src/portkit, py + runtime js), per file and namespace, as of develop 6e1fc1d (2026-10-15).",
     "Counts may only go down. Detection rule: tests/test_core_namespace_free.py. Audit: docs/adapter-audit-2026-10-15.md."
   ],
-  "total": 97,
-  "files": {
-    "converters/cooking_pot.py": {
-      "farmersdelight": 76
-    },
-    "converters/feasts.py": {
-      "farmersdelight": 1
-    },
-    "converters/recipes.py": {
-      "farmersdelight": 2
-    },
-    "converters/skillet.py": {
-      "farmersdelight": 1
-    },
-    "converters/stations.py": {
-      "farmersdelight": 13
-    },
-    "converters/stove.py": {
-      "farmersdelight": 4
-    }
-  }
+  "total": 0,
+  "files": {}
 }

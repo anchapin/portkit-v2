@@ -3,7 +3,7 @@
 A Farmer's Delight cutting recipe is data the Java block's code interprets.
 The converter writes every recipe it can state exactly into one data module
 (scripts/portkit/data/<ns>_cutting_board.js) and ships a fixed runtime
-(portkit/runtime/cutting_board*.js) that does what FD's code does; a recipe
+(portkit/adapters/farmersdelight/runtime/cutting_board*.js) that does what FD's code does; a recipe
 naming anything it can't state exactly stays ``station_recipe`` residue.
 
 Runs offline: a tiny FD-shaped mod in tmp_path, with its own tag reference
@@ -16,12 +16,14 @@ from pathlib import Path
 
 import pytest
 
-from portkit.converters import recipes, stations
+from portkit.adapters.farmersdelight import cutting_board as stations
+from portkit.converters import recipes
+from portkit.converters import stations as core_stations
 from portkit.model import SourceMod
 from portkit.pipeline import convert
 from portkit.validate import validate_tree
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 DATA = "behavior_pack/scripts/portkit/data/farmersdelight_cutting_board.js"
 SHOVELS = ["minecraft:wooden_shovel", "minecraft:iron_shovel"]
 AXES = ["minecraft:wooden_axe", "minecraft:iron_axe"]
@@ -266,7 +268,7 @@ def test_recipe_converter_alone_still_refuses_cutting(tmp_path):
 
 
 def test_station_type_lists_agree():
-    assert recipes.STATION_TYPES == stations.RECIPE_TYPES
+    assert core_stations.station_recipe_types() == (stations.RECIPE_TYPES, stations.SHARED_TYPES)
 
 
 # -- validator rules for scripts ------------------------------------------------
@@ -330,7 +332,7 @@ def test_runtime_under_node(converted):
     _, tree = converted
     js = ROOT / "tests" / "js"
     proc = subprocess.run(
-        ["node", "--import", str(js / "register.mjs"), "--test", str(js / "cutting_board.test.mjs")],
+        ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "farmersdelight" / "cutting_board.test.mjs")],
         capture_output=True, text=True, timeout=120,
         env={"PATH": __import__("os").environ["PATH"], "PORTKIT_CUTTING_TABLE": str(tree / DATA)},
     )

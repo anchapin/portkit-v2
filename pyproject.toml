@@ -25,6 +25,7 @@ build-backend = "setuptools.build_meta"
 # Fixed station runtimes copied verbatim into behavior packs (#177).
 "portkit.runtime" = ["*.js", "*.md"]
 # Adapter runtimes and cited data (#245 picks 6a, 9a).
+"portkit.adapters.farmersdelight" = ["runtime/*.js"]
 "portkit.adapters.waystones" = ["runtime/*.js", "data/*.json"]
 
 [tool.pytest.ini_options]

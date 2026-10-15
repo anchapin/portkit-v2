@@ -15,7 +15,8 @@ from test_cooking_pot import _pot_mod, reference  # noqa: F401  (fixture)
 RUNTIME = resources.files("portkit.runtime")
 # Adapter runtimes (adapters/<name>/runtime/, #245 pick 6a) ship in the same
 # scripts/portkit/ directory as the core runtime, so one name space for both.
-ADAPTER_RUNTIMES = [resources.files("portkit.adapters.waystones").joinpath("runtime")]
+ADAPTER_RUNTIMES = [resources.files(f"portkit.adapters.{name}").joinpath("runtime")
+                    for name in ("farmersdelight", "waystones")]
 _IMPORT = re.compile(r'from\s+"\./([^"]+)"')
 
 

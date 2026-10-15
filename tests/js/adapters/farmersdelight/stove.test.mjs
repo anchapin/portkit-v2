@@ -1,14 +1,14 @@
-// The fixed stove runtime (src/portkit/runtime), offline under node.
-// Run: node --import tests/js/register.mjs --test tests/js/stove.test.mjs
-// (tests/test_stove.py runs it with PORTKIT_STOVE_TABLE set to a data table
+// The fixed stove runtime (src/portkit/adapters/farmersdelight/runtime), offline under node.
+// Run: node --import tests/js/register.mjs --test tests/js/adapters/farmersdelight/stove.test.mjs
+// (tests/adapters/farmersdelight/test_stove.py runs it with PORTKIT_STOVE_TABLE set to a data table
 // the converter just generated; without it a small table here is used.)
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import * as core from "../../src/portkit/runtime/stove_core.js";
-import * as kit from "../../src/portkit/runtime/station_core.js";
-import { registerStove } from "../../src/portkit/runtime/stove.js";
+import * as core from "../../../../src/portkit/adapters/farmersdelight/runtime/stove_core.js";
+import * as kit from "../../../../src/portkit/runtime/station_core.js";
+import { registerStove } from "../../../../src/portkit/adapters/farmersdelight/runtime/stove.js";
 import { GameMode, ItemStack, _dimension, _entity, _player, _startup, _stoveBlock, world } from "@minecraft/server";
 
 const FALLBACK = {

@@ -6,7 +6,7 @@ near a heat source), and is an iron-tier weapon. The converter writes
 scripts/portkit/data/<ns>_skillet.js, the facing x support block with the
 runtime's component and tick, the skillet item (the block's own item, a
 weapon allowed in the off-hand) and ships the fixed runtime
-(portkit/runtime/skillet*.js plus the cooking pot's heat helpers).
+(portkit/adapters/farmersdelight/runtime/skillet*.js plus the cooking pot's heat helpers).
 
 Offline: the FD-shaped mod of tests/test_stove.py plus a skillet.
 """
@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from portkit.converters import skillet, stations
+from portkit.adapters.farmersdelight import skillet
+from portkit.adapters.farmersdelight import cutting_board as stations
 from portkit.pipeline import convert
 
 from test_stations import PNG, ROOT, _write
@@ -191,7 +192,7 @@ def test_runtime_under_node(converted):
     js = ROOT / "tests" / "js"
     for env in ({}, {"PORTKIT_SKILLET_TABLE": str(tree / DATA)}):
         proc = subprocess.run(
-            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "skillet.test.mjs")],
+            ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "farmersdelight" / "skillet.test.mjs")],
             capture_output=True, text=True, timeout=120, env={"PATH": os.environ["PATH"], **env},
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr

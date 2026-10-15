@@ -1,13 +1,13 @@
-// The fixed skillet runtime (src/portkit/runtime), offline under node.
-// Run: node --import tests/js/register.mjs --test tests/js/skillet.test.mjs
-// (tests/test_skillet.py runs it with PORTKIT_SKILLET_TABLE set to a data
+// The fixed skillet runtime (src/portkit/adapters/farmersdelight/runtime), offline under node.
+// Run: node --import tests/js/register.mjs --test tests/js/adapters/farmersdelight/skillet.test.mjs
+// (tests/adapters/farmersdelight/test_skillet.py runs it with PORTKIT_SKILLET_TABLE set to a data
 // table the converter just generated; without it a small table here is used.)
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import * as core from "../../src/portkit/runtime/skillet_core.js";
-import { registerSkillet } from "../../src/portkit/runtime/skillet.js";
+import * as core from "../../../../src/portkit/adapters/farmersdelight/runtime/skillet_core.js";
+import { registerSkillet } from "../../../../src/portkit/adapters/farmersdelight/runtime/skillet.js";
 import {
   GameMode, ItemStack, _dimension, _fire, _flush, _permutation, _player, _runIntervals, _startup, world,
 } from "@minecraft/server";
