@@ -65,9 +65,11 @@ class Adapter:
     convert: Callable[["SourceMod"], "ConversionResult"] | None = None
 
 
-# The registry: explicit and ordered. Hooks are asked in this order, and
+# The registry: explicit and ordered (alphabetical by name unless an order
+# matters, which a comment then says). Hooks are asked in this order, and
 # check() refuses two adapters claiming the same name, condition type or
-# recipe type, so the order never decides between them.
+# recipe type, so the order never decides between them. Filled at the
+# bottom of this module: each adapter module imports Adapter from here.
 ADAPTERS: tuple[Adapter, ...] = ()
 
 
@@ -123,3 +125,11 @@ def recipe_reasons(kind: str) -> dict[str, str]:
 def converters() -> list[Callable[["SourceMod"], "ConversionResult"]]:
     """The adapters' ``convert`` hooks, in registry order."""
     return [a.convert for a in ADAPTERS if a.convert is not None]
+
+
+from . import mantle, mekanism  # noqa: E402  (each imports Adapter above)
+
+ADAPTERS = (
+    mantle.ADAPTER,
+    mekanism.ADAPTER,
+)

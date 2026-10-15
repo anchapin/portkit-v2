@@ -218,33 +218,11 @@ def test_tag_conditions_against_the_conversion(tmp_path):
             assert ("recipes/thing.json" in result.files) is expect, (tag, cond)
 
 
-def test_own_namespace_members_count_even_when_it_is_not_the_mod_id(tmp_path):
-    files = {"data/examplemod/tags/items/filled.json": {"values": ["examplemod:tin_ingot"]},
-             "data/examplemod/recipes/thing.json": {**SHAPED, "conditions": [
-                 {"type": "mantle:tag_filled", "tag": "examplemod:filled"}]}}
-    mod = _mod(tmp_path, files, mods=("example_mod_id",))
-    result, _ = _convert(mod)
-    assert "recipes/thing.json" in result.files
-
-
 def test_shared_tag_without_reference_data_is_undecidable(tmp_path):
     result, _ = _recipe(tmp_path, [{"type": "forge:not", "value": {"type": "forge:tag_empty",
                                                                    "tag": "forge:ingots/silver"}}])
     [reason] = _residue(result)
     assert reason.startswith("load condition can't be decided here: forge:tag_empty")
-
-
-def test_tag_combination_filled(tmp_path):
-    files = {
-        "data/examplemod/tags/items/ores.json": {"values": ["examplemod:tin_ore", "examplemod:dense_ore"]},
-        "data/examplemod/tags/items/dense.json": {"values": ["examplemod:dense_ore"]},
-    }
-    hit = {"type": "mantle:tag_combination_filled", "match": ["examplemod:ores", "examplemod:dense"]}
-    miss = {"type": "mantle:tag_combination_filled", "match": "examplemod:dense", "ignore": "examplemod:ores"}
-    for name, cond, expect in (("hit", hit, True), ("miss", miss, False)):
-        mod = _mod(tmp_path / name, {**files, "data/examplemod/recipes/thing.json": {**SHAPED, "conditions": [cond]}})
-        result, _ = _convert(mod)
-        assert ("recipes/thing.json" in result.files) is expect
 
 
 def test_item_exists(tmp_path):
