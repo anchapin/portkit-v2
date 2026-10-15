@@ -29,6 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: a block that holds items behind a vanilla grid menu ships as a Bedrock container, slot count read from bytecode, only under `--experiment upcoming_creator_features`
 
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #226.
 - **Decision:** A converted block is read as storage
   (`portkit.blockcode.read_containers`) when its compiled code says all of:
   `newBlockEntity` builds one block entity of the mod's (directly, or through
@@ -69,7 +70,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   containers: Refurbished Furniture 54 (drawers 10 x 9 slots, kitchen
   drawers 26 x 9, coolers 16 x 9, fridges 2 x 27), Cluttered 74 (21 x 9 slots,
   e.g. side and end tables; 25 x 18, e.g. kitchen cabinets and the filing
-  box; 27 x 27, e.g. counters and briefcases; the safe, 36). Read but left
+  box; 27 x 27, e.g. counters and briefcases; the safe, 36; all 74 hold
+  water, so their liquid_detection keeps `use_liquid_clipping: true`). Read but left
   decoration: Refurbished cutting boards, storage jars, plate, toasters, post
   box (no menu), microwaves, electricity generators, recycle bin (mod menus or
   ticking). Without the experiment all 20 corpus and deco trees are
@@ -94,7 +96,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **Unverified in game:** the container screen for each slot count, opening
   from every face, drops on break, and a toggle/state block also being a
   container.
-- **Links:** #179, #87.
+- **Links:** #179, PR #226, #87.
 
 ## 2026-10-15: a Citadel guide book ships as a form viewer: page text verbatim in .lang, pages from the jar, opened by the item read from bytecode
 
