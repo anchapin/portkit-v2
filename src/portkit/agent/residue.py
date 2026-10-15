@@ -117,8 +117,9 @@ SKIP_KINDS = {
     "modular_tool": ("the recipe builds, changes or takes apart a modular tool, part or material whose stats "
                      "Java computes per stack (#175); a Bedrock item's components are fixed per item type, "
                      "so a stand-in would invent the numbers"),
-    "machine_recipe": ("the recipe runs in a Mekanism machine (#172) that holds energy, chemicals or fluid and "
-                       "works over ticks; Bedrock blocks have no ticking inventory or energy, so there is no "
+    "machine_recipe": ("the recipe runs in a mod machine that works over ticks, a Mekanism machine holding "
+                       "energy, chemicals or fluid (#172) or a Create machine turned by its rotational network "
+                       "(#173); Bedrock blocks have no ticking inventory, energy or rotation, so there is no "
                        "station to write it for, and the reason names the machine"),
     "custom_fluid": ("the item holds a mod's fluid and its icon is drawn from that fluid at runtime (#174); "
                      "Bedrock add-ons can't define the fluid, and drawing the icon would invent it"),

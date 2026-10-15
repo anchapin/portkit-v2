@@ -27,6 +27,58 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Create's rotation-powered processing recipes are `machine_recipe` residue naming the machine; hand-used item application and sandpaper polishing are `code_recipe`
+
+- **Status:** proposed, PR #TBD.
+- **Decision:** a recipe of one of Create's 11 rotation-powered processing
+  types (crushing, milling, cutting, pressing, compacting, mixing, splashing,
+  haunting, deploying, mechanical_crafting, sequenced_assembly) is
+  `machine_recipe` residue (the kind #172 added; agent `SKIP_KINDS`) with a
+  reason naming the Create machine and the Java it was read from
+  (`converters/recipes.py` `_CREATE_MACHINE_RECIPES`, merged into
+  `_MACHINE_RECIPES`). Source: Create mc1.20.1-6.0.8 for Forge 1.20.1
+  (Creators-of-Create/Create @1a1a9a28; jar Implementation-Version 6.0.8),
+  types in `AllRecipeTypes` L49-66; the machine is where Java looks each type
+  up (`CrushingWheelControllerBlockEntity` L321-323, which also falls back to
+  milling; `MillstoneBlockEntity` L103; `SawBlockEntity` L380-386;
+  `MechanicalPressBlockEntity` L185-204 for pressing and compacting over a
+  basin; `MechanicalMixerBlockEntity` L259-260 with `BasinRecipe#apply`
+  L75-77 testing blaze-burner heat; `AllFanProcessingTypes` L232/L423 with
+  the jar's `fan_processing_catalysts` tags; `DeployerBlockEntity` L571-572;
+  `RecipeGridHandler` L152; `SequencedAssemblyRecipe#advance`/`#rollResult`
+  L107-150). Each reason adds what Bedrock can't hold: a result `chance`
+  below 1 (`ProcessingOutput` L85) for the processing types, a fluid amount
+  in mB for basin recipes (#174), heat via `heatRequirement`, patterns up to
+  9x9 for mechanical crafting, steps/loops/weighted pick for sequenced
+  assembly, and always the rotational network. `create:item_application`
+  (`ManualApplicationRecipe#manualApplicationRecipesApplyInWorld` L40-80, a
+  right-click-block handler that replaces the placed block) and
+  `create:sandpaper_polishing` (`SandPaperItem#use`/`#finishUsingItem`, a
+  32-tick item use that wears the sandpaper) join `code_recipe`: they are
+  used by hand, not in a machine (a deployer can also run them). Filling and
+  emptying stay `fluid_recipe` (#174), `toolbox_dyeing`/`item_copying` stay
+  special `code_recipe` (#180), and compat recipes gated on an absent mod
+  (Create's own 442, plus Farmer's Delight and Supplementaries' `create:*`
+  files) stay `conditional_recipe` (#183), which already covered #173's
+  "separate reason for the compat recipes". `create:basin` and
+  `create:conversion` ship no recipe files and get no reason.
+- **Why:** each machine is block-entity code that idles at speed 0 (for
+  example `MillstoneBlockEntity` L64, `SawBlockEntity` L137,
+  `DeployerBlockEntity` L161) and works faster with more speed; speed and
+  stress come from Create's kinetic network (shafts, cogwheels, a power
+  source). A Bedrock custom block has no rotational network and no ticking
+  inventory, so there is no Bedrock station to tag these recipes for. Naming
+  the machine makes the residue say where the work is and stops the agent
+  spending sessions on files no tool can convert.
+- **Rejected:** shapeless crafting stand-ins for milling/crushing (#173's own
+  "gameplay change, needs a decision": drops rotation, stress, time and
+  chance outputs); not made here, as #171/#172 did not. A scripted kinetic
+  runtime (months, #173). Converting Create's machine blocks to display
+  blocks: a machine shell that does nothing is a wrong-but-valid block
+  (#172, #56). Treating item application as a crafting recipe: its first
+  ingredient is a block placed in the world, not an item in a grid.
+- **Links:** #173, PR #TBD, #172, #174, #180, #183, #171, #87, #135.
+
 ## 2026-10-15: Mekanism machine recipes are `machine_recipe` residue naming the machine; `mek_data` crafting is `code_recipe`; the residue agent skips both
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #230.
