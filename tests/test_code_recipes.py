@@ -66,6 +66,16 @@ def test_vanilla_special_type_is_not_claimed(tmp_path):
     assert residue(result) == {"r": ("recipe", "unsupported recipe type 'minecraft:crafting_special_armordye'")}
 
 
+def test_condition_keys_follow_the_loader():
+    # On Fabric only fabric:load_conditions is a load condition; a top-level
+    # "conditions" there would be the serializer's own data.
+    assert recipes.code_recipe_reason("m:x", {"type": "m:x", "conditions": []}, "fabric") is None
+    assert recipes.code_recipe_reason("m:x", {"type": "m:x", "fabric:load_conditions": []}, "fabric")
+    assert recipes.code_recipe_reason("m:x", {"type": "m:x", "conditions": []}, "forge")
+    # Unknown loader: every loader's keys, as conditions.condition_keys does.
+    assert recipes.code_recipe_reason("m:x", {"type": "m:x", "neoforge:conditions": []})
+
+
 def test_type_only_reason_needs_a_string_type():
     assert recipes.code_recipe_reason(None, {}) is None
     assert recipes.code_recipe_reason(3, {"type": 3}) is None

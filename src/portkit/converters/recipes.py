@@ -70,7 +70,7 @@ import json
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from ..conditions import CONDITIONAL_TYPES, LoadContext
+from ..conditions import CONDITIONAL_TYPES, LoadContext, condition_keys
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
 from .tags import MultiMembers, TagResolver
@@ -148,17 +148,15 @@ CODE_RECIPE = "code_recipe"
 
 # Keys any recipe may carry that say nothing about what it takes or makes:
 # vanilla's recipe-book fields (group, category, show_notification) and the
-# loaders' load conditions (decided before this point, conditions.py). A
+# mod's loader's load-condition keys (conditions.condition_keys; decided
+# before this point). A
 # modded recipe type whose JSON holds nothing else is a "special" recipe: its
 # serializer reads no ingredients and no result, so what it matches and what
 # it builds are the mod's Java code (vanilla's SimpleCraftingRecipeSerializer
 # reads "category" only; Supplementaries 1.20-3.1.43 ModRecipes registers its
 # 13 such types through it, Alex's Mobs 1.22.9 AMRecipeRegistry its 2, both
 # CustomRecipe subclasses, bytecode).
-_NO_DATA_KEYS = frozenset({
-    "type", "group", "category", "show_notification",
-    "conditions", "forge:conditions", "neoforge:conditions", "fabric:load_conditions",
-})
+_NO_DATA_KEYS = frozenset({"type", "group", "category", "show_notification"})
 
 # Modded types that do carry data, but whose station or result is code. Each
 # reason is read from the mod's own code at the corpus pin (sources in the
@@ -242,16 +240,18 @@ _CODE_RECIPES = {
 }
 
 
-def code_recipe_reason(java_type: object, recipe: dict) -> str | None:
+def code_recipe_reason(java_type: object, recipe: dict, loader: str | None = None) -> str | None:
     """Why a recipe of this modded type is code (#180), or None if it isn't
     one this module knows to be: a type in :data:`_CODE_RECIPES`, or a
     non-vanilla type whose JSON carries nothing but recipe-book fields and
-    load conditions (a "special" recipe)."""
+    ``loader``'s load conditions (a "special" recipe)."""
     if not isinstance(java_type, str):
         return None
     if java_type in _CODE_RECIPES:
         return _CODE_RECIPES[java_type]
-    if java_type.startswith("minecraft:") or set(recipe) - _NO_DATA_KEYS:
+    if java_type.startswith("minecraft:"):
+        return None
+    if set(recipe) - _NO_DATA_KEYS - set(condition_keys(loader)):
         return None
     return (
         f"a special recipe ({java_type!r}): its JSON holds no ingredient and no result, only its type, "
@@ -834,7 +834,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             continue
         mapping = _SUPPORTED.get(java_type)
         if mapping is None:
-            code = code_recipe_reason(java_type, recipe)
+            code = code_recipe_reason(java_type, recipe, mod.loader)
             if code is not None:
                 result.unhandled.append(Unhandled(rel, CODE_RECIPE, code))
                 continue
