@@ -1234,6 +1234,8 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             water_why[stem] = why
     readings = _read_facing_code(mod, src, stations or {}, loaded)
     bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded)
+    dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded)
+    directional: list[dict] = []
     coded: list[dict] = []
     coded_bool: list[dict] = []
     for path in sorted(src.glob("*.json")):
@@ -1264,6 +1266,20 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
             continue
         if name in bool_why and name not in (stations or {}):
             result.unhandled.append(Unhandled(rel, "block", bool_why[name]))
+            continue
+
+        if name in dir_readings:
+            claimed = set(result.consumed)
+            record = _convert_directional(mod, result, rel, name, *dir_readings[name])
+            if record is not None:
+                if name in water_dropped:
+                    record["states"] = [x for x in record["states"] if x != "waterlogged"]
+                directional.append(record)
+            else:
+                result.consumed = claimed | {rel}
+            continue
+        if name in dir_why:
+            result.unhandled.append(Unhandled(rel, "block", dir_why[name]))
             continue
 
         if name in readings:
@@ -1348,6 +1364,7 @@ def convert(mod: SourceMod, stations: dict | None = None) -> ConversionResult:
         )
     result.notes.extend(_coded_facing_notes(coded))
     result.notes.extend(_coded_bool_notes(coded_bool))
+    result.notes.extend(_directional_notes(directional))
     _toggle_table(mod, result, coded_bool)
     _add_light(mod, result, src, skip={r["name"] for r in coded_bool}, loaded=loaded)
     _add_water(mod, result, sorted(water_dropped))
@@ -3064,4 +3081,420 @@ def _water_notes(readings: list) -> list[str]:
     if no_bucket:
         notes.append("Not a SimpleWaterloggedBlock in Java (a bucket can't fill or empty it there; on Bedrock "
                      "it can): " + ", ".join(no_bucket) + ".")
+    return notes
+
+
+# --------------------------------------------------------------------------
+# Six-way facing and attach-face blocks.
+#
+# A blockstate whose only state is ``facing`` over all six directions (Java
+# DirectionalBlock / BlockStateProperties.FACING: rods, clusters, wall-or-
+# ceiling lamps, pillar bases), or ``face`` (floor / wall / ceiling) with a
+# horizontal ``facing`` (FaceAttachedHorizontalDirectionalBlock: flags,
+# lanterns, switches), one model per variant turned by quarter x/y turns.
+#
+# Bedrock gets the player's choices from two traits (MicrosoftDocs
+# minecraft-creator, Block Traits: placement_position / placement_direction,
+# both shown at block format 1.20.20): ``minecraft:block_face`` is "the face
+# of another block on which this block was placed" (Java's clicked face),
+# ``minecraft:cardinal_direction`` the player's horizontal facing and
+# ``minecraft:facing_direction`` the player's facing over six values. The
+# rule read from getStateForPlacement (blockcode.read_directional, else the
+# labelled DEFAULT, blockcode.default_rule) says which Java (face, facing)
+# each combination of those gives; each Java variant becomes a permutation
+# whose condition is exactly the combinations that place it. No
+# y_rotation_offset: the mapping itself turns.
+#
+# Geometry: the x turn is baked into the model (models.turn_rigid with the
+# element rotations carried, exactly Java's rigid turn), one bone per (model,
+# x); the y turn stays minecraft:transformation, as #212. A uvlocked variant is
+# turned whole here (models.turn_locked) in its own bone. So no transformation
+# ever turns about x, whose sign and order against y Bedrock's docs don't give.
+#
+# Boxes per variant from getShape (read) or the turned model's element bounds
+# (DEFAULT), in the frame the geometry is drawn in. canSurvive (support) is not
+# emulated: Bedrock places on any face clicked.
+
+_ATTACH_FACES = ("floor", "wall", "ceiling")
+_SIX = ("down", "up", "north", "south", "west", "east")
+_OPPOSITE = {"down": "up", "up": "down", "north": "south", "south": "north", "west": "east", "east": "west"}
+_DIR_LABEL = {"facing6": "6-way facing", "attach": "attach face"}
+
+
+def _key_label(key: tuple) -> str:
+    return f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}"
+
+
+def _directional_variants(blockstate: dict) -> tuple[str | None, dict | None, str]:
+    """(kind, {(face, facing): (model, x, y, uvlock)}, "") for a 6-way facing
+    or attach-face variants blockstate; (None, None, why) when it is one but
+    not in a form read here; (None, None, "") when it isn't."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or not variants:
+        return None, None, ""
+    parsed, props = {}, {}
+    for key in variants:
+        pairs = [p.split("=", 1) for p in key.split(",") if p]
+        if not pairs or any(len(p) != 2 for p in pairs):
+            return None, None, ""
+        cell = {a.strip(): b.strip() for a, b in pairs}
+        for a, b in cell.items():
+            props.setdefault(a, set()).add(b)
+        parsed[key] = cell
+    if set(props) == {"facing"} and props["facing"] == set(_SIX):
+        kind = "facing6"
+    elif set(props) == {"face", "facing"} and props["face"] == set(_ATTACH_FACES) \
+            and props["facing"] == set(_CARDINALS):
+        kind = "attach"
+    else:
+        return None, None, ""
+    label = _DIR_LABEL[kind]
+    cells = {}
+    for key, cell in parsed.items():
+        entry = variants[key]
+        if isinstance(entry, list):
+            return None, None, f"{label}: {key} picks a model at random"
+        if not isinstance(entry, dict) or not isinstance(entry.get("model"), str):
+            return None, None, f"{label}: {key} has no model"
+        x, y = entry.get("x") or 0, entry.get("y") or 0
+        if any(not isinstance(v, int) or isinstance(v, bool) or v % 90 for v in (x, y)):
+            return None, None, f"{label}: {key} turns a model by other than a quarter turn"
+        cells[(cell.get("face", ""), cell["facing"])] = (entry["model"], x % 360, y % 360, bool(entry.get("uvlock")))
+    if len(cells) != len(blockcode.directional_keys(kind)):
+        return None, None, f"{label}: not every combination has a variant"
+    return kind, cells, ""
+
+
+def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, dict]:
+    specs, why = {}, {}
+    for stem, blockstate in loaded.items():
+        if stem in stations:
+            continue
+        kind, cells, reason = _directional_variants(blockstate)
+        if kind is not None:
+            specs[stem] = (kind, cells)
+        elif reason:
+            why[stem] = reason
+    if not specs:
+        return {}, why
+    readings = blockcode.read_directional(getattr(mod, "classes", None), {n: k for n, (k, _) in specs.items()})
+    return {n: (specs[n][0], specs[n][1], readings[n]) for n in specs}, why
+
+
+def _bedrock_cells(rule: dict) -> list[tuple[tuple, tuple]]:
+    """(conditions, Java key) for every combination of Bedrock trait states
+    the rule tells apart; conditions are (state, value) pairs."""
+    same = len({json.dumps(v) for v in rule.values()}) == 1
+    cells = []
+    for c in _SIX:
+        face, (kind, arg) = rule[c]
+        base = () if same else (("minecraft:block_face", c),)
+        if kind == "dir":
+            cells.append((base, (face, arg)))
+        elif kind == "player":
+            for h in _CARDINALS:
+                turned = _CARDINALS[(_CARDINALS.index(h) + arg) % 4]
+                cells.append((base + (("minecraft:cardinal_direction", h),), (face, turned)))
+        else:
+            for look in _SIX:
+                cells.append((base + (("minecraft:facing_direction", look),),
+                              (face, _OPPOSITE[look] if arg else look)))
+        if same:
+            break
+    return cells
+
+
+def _molang(conds_list: list[tuple]) -> str:
+    """One Molang condition for any of ``conds_list`` (each a conjunction);
+    a block_face whose every second-state value is listed collapses to it."""
+    by_face: dict = {}
+    singles = []
+    for conds in conds_list:
+        if len(conds) == 2 and conds[0][0] == "minecraft:block_face":
+            by_face.setdefault(conds[0], set()).add(conds[1])
+        else:
+            singles.append(conds)
+    for face, seconds in by_face.items():
+        states = {s for s, _ in seconds}
+        full = 4 if states == {"minecraft:cardinal_direction"} else 6 if states == {"minecraft:facing_direction"} else 0
+        if len(states) == 1 and len(seconds) == full:
+            singles.append((face,))
+        else:
+            singles += [(face, s) for s in sorted(seconds)]
+    terms = [" && ".join(f"q.block_state('{s}') == '{v}'" for s, v in conds) for conds in singles]
+    terms = [t for t in terms if t]
+    if not terms:
+        return ""
+    return terms[0] if len(terms) == 1 else " || ".join(f"({t})" for t in terms)
+
+
+def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                         kind: str, cells: dict, reading) -> dict | None:
+    ns = mod.namespace
+    label = _DIR_LABEL[kind]
+    if reading.rule_conflict:
+        result.unhandled.append(Unhandled(rel, "block", f"{label}: {reading.rule_conflict}"))
+        return None
+    rule = reading.rule if reading.rule is not None else blockcode.default_rule(kind)
+    bedrock = _bedrock_cells(rule)
+    conds_of: dict[tuple, list] = {}
+    for conds, key in bedrock:
+        conds_of.setdefault(key, []).append(conds)
+    reachable = [k for k in blockcode.directional_keys(kind) if k in conds_of]
+    unreachable = [k for k in blockcode.directional_keys(kind) if k not in conds_of]
+
+    flats: dict[str, dict] = {}
+    for key in reachable:
+        model_ref = cells[key][0]
+        if model_ref not in flats:
+            flat, why = _model_elements(mod, result, model_ref)
+            if flat is None:
+                result.unhandled.append(Unhandled(rel, "block", f"{label} model: {why}"))
+                return None
+            flats[model_ref] = flat
+    textures: dict = {}
+    model_elements: dict[str, list] = {}
+    for k, (model_ref, flat) in enumerate(flats.items()):
+        kept = list(flat.get("elements") or [])
+        used = _face_keys(kept)
+        for tkey, ref in (flat.get("textures") or {}).items():
+            if textures.setdefault(tkey, ref) == ref or tkey not in used:
+                continue
+            own = next((x for x, r in textures.items() if r == ref and x.startswith(f"{tkey}_m")), f"{tkey}_m{k}")
+            if textures.setdefault(own, ref) != ref:
+                result.unhandled.append(Unhandled(rel, "block", f"models disagree about their {tkey!r} texture"))
+                return None
+            kept = [_rekey(e, tkey, own) for e in kept]
+        model_elements[model_ref] = kept
+
+    # One bone per (model, x), or per (model, x, y) when uvlocked.
+    bone_of: dict = {}
+    parts: list = []
+    bone_elements: dict = {}
+    for key in reachable:
+        model_ref, x, y, lock = cells[key]
+        bkey = (model_ref, x, y if lock else 0, lock)
+        if bkey in bone_of:
+            continue
+        bone = f"m{list(flats).index(model_ref)}_x{x}" + (f"_y{y}" if lock else "")
+        turned = []
+        for element in model_elements[model_ref]:
+            if lock:
+                moved, why = models.turn_locked(element, x, y)
+            else:
+                moved, why = models.turn_rigid(element, x, 0, carry_rotation=True)
+            if moved is None:
+                result.unhandled.append(Unhandled(rel, "block", f"{label}: {model_ref} at x={x}"
+                                                  + (f" y={y}" if lock else "") + f": {why}"))
+                return None
+            turned.append(moved)
+        bone_of[bkey] = bone
+        bone_elements[bone] = turned
+        parts.append((bone, turned))
+
+    combined = {"textures": textures, "elements": [e for _, els in parts for e in els]}
+    by_face, why = models.element_materials(combined)
+    tag_faces = by_face is None and "disagree" in why
+    if tag_faces:
+        by_face, why = models.tagged_materials(combined)
+    if by_face is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return None
+    instances, why = _instances(mod, by_face, textures, tag_faces)
+    if instances is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return None
+    identifier = f"geometry.{ns}.{name}"
+    geo, why = models.geometry_bones(parts, identifier, tag_faces=tag_faces)
+    if geo is None:
+        result.unhandled.append(Unhandled(rel, "block", why))
+        return None
+
+    def bone_key(key):
+        model_ref, x, y, lock = cells[key]
+        return bone_of[(model_ref, x, y if lock else 0, lock)]
+
+    visibility = {}
+    for bone in bone_elements:
+        keys = [k for k in reachable if bone_key(k) == bone]
+        if len(keys) == len(reachable):
+            visibility[bone] = "1.0"
+        else:
+            visibility[bone] = _molang([c for k in keys for c in conds_of[k]])
+
+    clamped = outside = False
+
+    def frame(box, turn):
+        nonlocal clamped, outside
+        out, cut = _clamped(_java_turn(box, turn))
+        clamped = clamped or cut
+        outside = outside or any(out[i + 3] <= out[i] for i in range(3))
+        return out
+
+    boxes = {}
+    for key in reachable:
+        model_ref, x, y, lock = cells[key]
+        if reading.shapes_by is not None:
+            world = _bbox(reading.shapes_by[key])
+            boxes[key] = None if world is None else frame(world, 0 if lock else 360 - y)
+        else:
+            bounds = _element_bounds(bone_elements[bone_key(key)])
+            boxes[key] = None if bounds is None else frame(bounds, 0)
+    if outside:
+        result.unhandled.append(Unhandled(rel, "block", f"{label}: Java's shape lies outside the block at "
+                                          "some state, and a Bedrock box can't"))
+        return None
+    collides = reading.collision if reading.collision is not None else True
+
+    def box_components(box) -> dict:
+        selection = _bedrock_box(box) if box is not None else False
+        return {"minecraft:collision_box": selection if collides else False,
+                "minecraft:selection_box": selection}
+
+    components = {"minecraft:geometry": {"identifier": identifier, "bone_visibility": visibility},
+                  "minecraft:material_instances": instances}
+    same_box = len({json.dumps(boxes[k]) for k in reachable}) == 1
+    if same_box:
+        components.update(box_components(boxes[reachable[0]]))
+    permutations = []
+    for key in reachable:
+        model_ref, x, y, lock = cells[key]
+        extra = {}
+        if not lock and _bedrock_turn(y):
+            extra["minecraft:transformation"] = {"rotation": [0, _bedrock_turn(y), 0]}
+        if not same_box:
+            extra.update(box_components(boxes[key]))
+        if not extra:
+            continue
+        condition = _molang(conds_of[key])
+        if not condition:
+            components.update(extra)
+            continue
+        permutations.append({"condition": condition, "components": extra})
+
+    used = {s for conds, _ in bedrock for s, _v in conds}
+    traits = {}
+    if "minecraft:block_face" in used:
+        traits["minecraft:placement_position"] = {"enabled_states": ["minecraft:block_face"]}
+    direction = [s for s in ("minecraft:cardinal_direction", "minecraft:facing_direction") if s in used]
+    if direction:
+        traits["minecraft:placement_direction"] = {"enabled_states": direction}
+    description = {"identifier": f"{ns}:{name}", "menu_category": {"category": _MENU_CATEGORY}}
+    if traits:
+        description["traits"] = traits
+    block = {"description": description, "components": components}
+    if permutations:
+        block["permutations"] = permutations
+    result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = {"format_version": _BLOCK_FORMAT, "minecraft:block": block}
+    drawn = {"facing"} if kind == "facing6" else {"face", "facing"}
+    return {
+        "name": name,
+        "kind": kind,
+        "rule": reading.rule_from if reading.rule is not None else None,
+        "rule_why": reading.rule_why,
+        "rule_text": _rule_text(rule),
+        "support": reading.support_assumed or reading.rule is None and kind == "attach",
+        "box": reading.shape_from if reading.shapes_by is not None else None,
+        "box_why": reading.shape_why,
+        "collision": reading.collision,
+        "collision_why": reading.collision_why,
+        "states": sorted(set(reading.states or ()) - drawn - {"facing6"}),
+        "behaviour": list(reading.behaviour),
+        "clamped": clamped,
+        "uvlock": any(cells[k][3] for k in reachable),
+        "unreachable": [_key_label(k) for k in unreachable],
+    }
+
+
+def _rule_text(rule: dict) -> str:
+    """The placement rule in words, e.g. 'facing = the clicked face'."""
+    def facing(c, token):
+        kind, arg = token
+        if kind == "dir":
+            if arg == c:
+                return "the clicked face"
+            if arg == _OPPOSITE[c]:
+                return "the clicked face's opposite"
+            return arg
+        if kind == "player":
+            return {0: "the player's facing", 1: "the player's facing turned clockwise",
+                    2: "the player's facing turned round", 3: "the player's facing turned anticlockwise"}[arg % 4]
+        return "the player's looking direction turned round" if arg else "the player's looking direction"
+
+    parts = []
+    for c in _SIX:
+        face, token = rule[c]
+        text = (f"face {face}, " if face else "") + f"facing {facing(c, token)}"
+        parts.append((text, c))
+    grouped: dict = {}
+    for text, c in parts:
+        grouped.setdefault(text, []).append(c)
+    if len(grouped) == 1:
+        return next(iter(grouped))
+    return "; ".join(f"clicked {'/'.join(cs)}: {text}" for text, cs in grouped.items())
+
+
+_DIR_RULE_DEFAULT = {
+    "facing6": "facing = the clicked face (Bedrock block_face), as vanilla rods and amethyst clusters place",
+    "attach": ("vanilla FaceAttachedHorizontalDirectionalBlock#getStateForPlacement L39-52: clicked top -> "
+               "floor, clicked bottom -> ceiling (facing = the player's facing), clicked side -> wall facing "
+               "away from it"),
+}
+
+
+def _directional_notes(records: list[dict]) -> list[str]:
+    if not records:
+        return []
+    notes = [
+        f"{len(records)} 6-way facing / attach-face block(s) convert: Java's x turn baked into the geometry, its "
+        "y turn by minecraft:transformation; each Java variant is a permutation on the Bedrock placement states "
+        "(minecraft:block_face = the clicked face, minecraft:cardinal_direction / minecraft:facing_direction = "
+        "the player's facing) that place it. Placement rule and box read from the jar's bytecode where it can "
+        "be read deterministically, otherwise a documented DEFAULT, named per block below (a DEFAULT is not a "
+        "citation)."
+    ]
+    read = [(f"{r['rule']} ({r['rule_text']})", r["name"]) for r in records if r["rule"]]
+    if read:
+        notes.append("Placement rule read from bytecode - " + _grouped(read) + ".")
+    for kind in ("facing6", "attach"):
+        default = [(r["rule_why"], r["name"]) for r in records if not r["rule"] and r["kind"] == kind]
+        if default:
+            notes.append(f"{_DIR_LABEL[kind].capitalize()} placement DEFAULT, not read from code "
+                         f"({_DIR_RULE_DEFAULT[kind]}) - " + _grouped(default) + ".")
+    support = [r["name"] for r in records if r["support"]]
+    if support:
+        notes.append("Support is not emulated: Java's placement asks canSurvive and would try another face or "
+                     "refuse; Bedrock places on whatever face is clicked, and nothing breaks the block when its "
+                     "support goes (canSurvive / updateShape) - " + ", ".join(support) + ".")
+    read_b = [(r["box"], r["name"]) for r in records if r["box"]]
+    if read_b:
+        notes.append("Box read from bytecode (the bounding box of getShape at each variant) - "
+                     + _grouped(read_b) + ".")
+    default_b = [(r["box_why"], r["name"]) for r in records if not r["box"]]
+    if default_b:
+        notes.append("Box DEFAULT, not read from code (the turned model's element bounds) - "
+                     + _grouped(default_b) + ".")
+    no_coll = [r["name"] for r in records if r["collision"] is False]
+    if no_coll:
+        notes.append("No collision, read from bytecode (Properties#noCollission): " + ", ".join(no_coll) + ".")
+    default_c = [(r["collision_why"], r["name"]) for r in records if r["collision"] is None]
+    if default_c:
+        notes.append(f"Collision DEFAULT, not read from code ({_COLLISION_DEFAULT}) - " + _grouped(default_c) + ".")
+    clamped = [r["name"] for r in records if r["clamped"]]
+    if clamped:
+        notes.append("Java's shape reaches outside the block, and Bedrock's boxes stop at its edges: "
+                     + ", ".join(clamped) + ".")
+    never = [(", ".join(r["unreachable"]), r["name"]) for r in records if r["unreachable"]]
+    if never:
+        notes.append("Variants the placement rule never gives (no permutation; Java reaches them only by "
+                     "commands or rotate/mirror) - " + _grouped(never) + ".")
+    states = [(", ".join(r["states"]), r["name"]) for r in records if r["states"]]
+    if states:
+        notes.append("The block's code declares states its blockstate doesn't draw; Bedrock doesn't carry them - "
+                     + _grouped(states) + ".")
+    acts = [(", ".join(r["behaviour"]), r["name"]) for r in records if r["behaviour"]]
+    if acts:
+        notes.append("The block's own classes override behaviour methods a converted block doesn't carry - "
+                     + _grouped(acts) + ".")
     return notes

@@ -27,6 +27,69 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: 6-way facing and attach-face blocks convert, placement read per clicked face onto block_face / cardinal_direction / facing_direction
+
+- **Status:** proposed (PR #N); Alex decides the picks.
+- **Decision:** a `variants` blockstate whose only state is `facing` over all
+  six directions (Java `DirectionalBlock` / `BlockStateProperties.FACING`), or
+  `face` (floor/wall/ceiling) with a horizontal `facing`
+  (`FaceAttachedHorizontalDirectionalBlock` / `ATTACH_FACE`), one model per
+  variant in quarter x/y turns, converts outside stations (waterlogged dropped
+  first, #217). The placement rule is read by `blockcode.read_directional`:
+  `getStateForPlacement` runs once per face the player can click, the clicked
+  face known (`getClickedFace`; `getNearestLookingDirections` gives its
+  opposite first, BlockPlaceContext L76-96), the player's horizontal facing and
+  nearest looking direction as symbols; vanilla
+  `FaceAttachedHorizontalDirectionalBlock#getStateForPlacement` (L39-52) and
+  `#getConnectedDirection` (L64-70) are supplied from the MC 1.21.1 client jar
+  (Mojang mappings), `Direction#equals` is identity and `Direction#getAxis` and
+  `AttachFace` values/ordinals are known. Each clicked face must give one state:
+  the rule is then, per clicked face, the `face` value and `facing` as a fixed
+  direction, the player's facing turned by quarters, or the player's looking
+  direction (or its opposite). Bedrock maps it with no y_rotation_offset:
+  `minecraft:block_face` (placement_position, "the face of another block on
+  which this block was placed") for the clicked face,
+  `minecraft:cardinal_direction` / `minecraft:facing_direction`
+  (placement_direction) for the player's facing; each reachable Java variant is
+  one permutation whose condition is exactly the trait states that place it
+  (traits only when used; block format 1.20.20, as the docs' examples).
+  `canSurvive` is not emulated: where placement asks it, it reads true (the
+  clicked face holds the block up), and the notes say so per block. Unread
+  rule -> labelled DEFAULT: 6-way = facing is the clicked face (vanilla rods,
+  amethyst clusters); attach = vanilla's FaceAttached rule. Read-but-conflicting
+  (the player never sets facing; an attach facing from a vertical direction)
+  stays residue. Geometry: Java's x turn baked into the model with
+  `models.turn_rigid(carry_rotation=True)` (an element rotation goes with the
+  turn: axis turned, angle sign flipped when it lands reversed, origin moved),
+  one bone per (model, x); Java's y turn by `minecraft:transformation` as #212;
+  uvlocked variants turned whole by `turn_locked`, own bone, no transformation.
+  So no transformation ever turns about x. Box per Java variant from
+  `getShape` (bounding box, in the frame the geometry is drawn in, x flipped as
+  `models.X_AXIS_IS_FLIPPED` like #212), else DEFAULT the turned model's
+  element bounds; collision as #212. Variants the rule never reaches get no
+  permutation and are named. Light from #213's whole-block reading. Booleans
+  with 6-way / attach (Refurbished ceiling fans and lights, light switches,
+  buttons) stay residue; a later PR.
+- **Why:** both Java patterns were residue (#212 and #215 read 4-way facing
+  only). Bedrock's traits give exactly the inputs Java's placement reads
+  (MicrosoftDocs minecraft-creator `traits/placement_position.md`,
+  `traits/placement_direction.md`, `Documents/intro-block-traits.md`, all
+  shown at format 1.20.20); running the code per clicked face turns any
+  deterministic rule into a table of trait states, so nothing is guessed.
+  `minecraft:transformation` documents rotation only as "in increments of 90
+  degrees" (`minecraftBlock_transformation.md`), not its x sign or order with
+  y, and the repo's turn conventions are already pinned for Java's rigid turn
+  (`models._turn_vector`, tested against rotated-element corners), so x stays
+  out of transformation. Deco (not banked): Cluttered 635 -> 674 blocks
+  (54.2 -> 55.3%), Fairy Lights port 0 -> 1; all 40 read from bytecode
+  (placement and box); mct 0 errors. Standard corpus rebanked.
+- **Rejected:** transformation [x, y, 0] for every variant (x sign and order
+  unverified); y_rotation_offset to express "faces the player" (doesn't turn
+  up/down, and the mapping does it anyway); a clicked-face-only reading without
+  emulating vanilla FaceAttached (inherited placement is the common case);
+  emulating canSurvive (needs the world); booleans in this PR (scope).
+- **Links:** PR #N; #212, #213, #215, #217; deco-mods spike gap 8.
+
 ## 2026-10-14: a blockstate that draws waterlogged converts without it, and Bedrock holds the water through liquid_detection where getFluidState says the block holds water
 
 - **Status:** approved (Alex, 2026-10-14)

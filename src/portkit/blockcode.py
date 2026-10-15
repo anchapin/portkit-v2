@@ -58,6 +58,8 @@ _BLOCK = "net/minecraft/world/level/block/Block"
 _PLAIN_VANILLA = {
     _BLOCK,
     "net/minecraft/world/level/block/HorizontalDirectionalBlock",
+    # DirectionalBlock declares only FACING and codec (client.txt 1.21.1).
+    "net/minecraft/world/level/block/DirectionalBlock",
     "net/minecraft/world/level/block/TransparentBlock",
     "net/minecraft/world/level/block/HalfTransparentBlock",
     "net/minecraft/world/level/block/BaseEntityBlock",
@@ -78,6 +80,15 @@ _VANILLA_PROPS = {
     ("net/minecraft/world/level/block/HorizontalDirectionalBlock", "FACING"): "facing",
     (_STATE_PROPS, "HORIZONTAL_FACING"): "facing",
     (_STATE_PROPS, "FACING"): "facing6",
+    # DirectionalBlock.FACING = BlockStateProperties.FACING (DirectionalBlock
+    # <clinit> L8); FaceAttachedHorizontalDirectionalBlock.FACE =
+    # BlockStateProperties.ATTACH_FACE, an EnumProperty named "face" of
+    # AttachFace (L17); its FACING is HorizontalDirectionalBlock's (client.txt
+    # 1.21.1: the class declares only FACE).
+    ("net/minecraft/world/level/block/DirectionalBlock", "FACING"): "facing6",
+    (_STATE_PROPS, "ATTACH_FACE"): "face",
+    ("net/minecraft/world/level/block/FaceAttachedHorizontalDirectionalBlock", "FACE"): "face",
+    ("net/minecraft/world/level/block/FaceAttachedHorizontalDirectionalBlock", "FACING"): "facing",
     # Every BooleanProperty field of BlockStateProperties, by the name its
     # <clinit> creates it with (BooleanProperty.create("...") into the field;
     # MC 1.21.1 client jar class dts + Mojang mappings client.txt).
@@ -130,6 +141,21 @@ _VANILLA_PROPS = {
     (_STATE_PROPS, "CRAFTING"): "crafting",
     (_STATE_PROPS, "OMINOUS"): "ominous",
 }
+
+# Vanilla subclasses of FaceAttachedHorizontalDirectionalBlock that declare no
+# getStateForPlacement of their own, and inherit FACE/FACING (client.txt
+# 1.21.1: ButtonBlock, LeverBlock, GrindstoneBlock).
+_FACE_ATTACHED = "net/minecraft/world/level/block/FaceAttachedHorizontalDirectionalBlock"
+_FACE_ATTACHED_KIN = {
+    _FACE_ATTACHED,
+    "net/minecraft/world/level/block/ButtonBlock",
+    "net/minecraft/world/level/block/LeverBlock",
+    "net/minecraft/world/level/block/GrindstoneBlock",
+}
+_ATTACH_FACE = "net/minecraft/world/level/block/state/properties/AttachFace"
+_CAN_SURVIVE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/LevelReader;"
+                     "Lnet/minecraft/core/BlockPos;)Z")
+_ATTACH_ORDER = ("FLOOR", "WALL", "CEILING")  # AttachFace declaration order (dtn a, b, c)
 
 # Level methods that put a state in the world (MC 1.21.1 Level#setBlock
 # (pos, state, flags) and LevelWriter#setBlockAndUpdate (pos, state)).
@@ -185,6 +211,14 @@ class PlayerDir:
     """The player's horizontal facing, turned clockwise by ``quarters``."""
 
     quarters: int = 0
+
+
+@dataclass(frozen=True)
+class LookDir:
+    """The direction the player looks along, nearest of all six
+    (BlockPlaceContext#getNearestLookingDirection L68), or its opposite."""
+
+    opposite: bool = False
 
 
 @dataclass(frozen=True)
@@ -318,8 +352,15 @@ class RL:
 
 
 class _Ctx:
+    """A BlockPlaceContext. ``clicked`` is the face the player clicked
+    (UseOnContext#getClickedFace), fixed per run by read_directional;
+    None everywhere else, where only the player's horizontal facing is known."""
+
+    def __init__(self, clicked: str | None = None):
+        self.clicked = clicked
+
     def __repr__(self):
-        return "ctx"
+        return "ctx" if self.clicked is None else f"ctx({self.clicked})"
 
 
 PLACE_CTX = _Ctx()
@@ -409,6 +450,10 @@ class Machine:
         self.effects_depth = 0
         # Set when a method that method calls sets a block itself.
         self.deep_effect = False
+        # While reading a 6-way / attach-face placement (read_directional):
+        # BlockState#canSurvive answers true, and support_assumed records it.
+        self.assume_support = False
+        self.support_assumed = False
 
     # -- classes ------------------------------------------------------------
 
@@ -502,6 +547,8 @@ class Machine:
             self.init_class(owner)
             return self.statics.get((owner, ref.name), UNKNOWN)
         prop = _VANILLA_PROPS.get((owner, ref.name))
+        if prop is None and owner in _FACE_ATTACHED_KIN:
+            prop = _VANILLA_PROPS.get((_FACE_ATTACHED, ref.name))
         if prop is not None:
             return Prop(prop)
         if owner == _DIRECTION and ref.name.lower() in DIRECTIONS:
@@ -517,6 +564,11 @@ class Machine:
         recv = None if static or not args else args[0]
         if isinstance(recv, Lam) and name not in ("equals", "hashCode", "toString"):
             return self.call_lambda(recv, args[1:])
+        if self.assume_support and name == "canSurvive" and desc == _CAN_SURVIVE_DESC:
+            # The block's own canSurvive(state, level, pos), called directly
+            # while a placement is read: assumed true (see read_directional).
+            self.support_assumed = True
+            return [1]
         start = recv.cls if isinstance(recv, Obj) and not special and not static else owner
         if self.is_mod(start):
             if static:
@@ -1019,12 +1071,46 @@ class Machine:
             return [recv]
         if isinstance(recv, Shape) and name == "isEmpty":
             return [int(not recv.boxes)]
-        if owner == _DIRECTION or isinstance(recv, (Dir, PlayerDir)):
+        if static and name == "getConnectedDirection" and owner in _FACE_ATTACHED_KIN and len(rest) == 1 \
+                and isinstance(rest[0], State):
+            # FaceAttachedHorizontalDirectionalBlock#getConnectedDirection
+            # L64-70: CEILING -> DOWN, FLOOR -> UP, otherwise facing.
+            face = rest[0].get("face")
+            if face == Const(_ATTACH_FACE, "CEILING"):
+                return [Dir("down")]
+            if face == Const(_ATTACH_FACE, "FLOOR"):
+                return [Dir("up")]
+            if face == Const(_ATTACH_FACE, "WALL"):
+                return [rest[0].get("facing")]
+            return [UNKNOWN]
+        if owner == _ATTACH_FACE and static and name == "values":
+            # AttachFace: FLOOR, WALL, CEILING in declaration order.
+            return [Arr([Const(_ATTACH_FACE, n) for n in _ATTACH_ORDER])]
+        if isinstance(recv, Const) and recv.owner == _ATTACH_FACE and name == "ordinal" \
+                and recv.name in _ATTACH_ORDER:
+            return [_ATTACH_ORDER.index(recv.name)]
+        if owner == _DIRECTION or isinstance(recv, (Dir, PlayerDir, LookDir)):
             return self._direction(name, recv, rest, static)
-        if recv is PLACE_CTX:
+        if isinstance(recv, _Ctx):
             if name == "getHorizontalDirection":
                 return [PlayerDir(0)]
+            if recv.clicked is not None:
+                if name == "getClickedFace":
+                    return [Dir(recv.clicked)]
+                if name == "getNearestLookingDirection":
+                    return [LookDir(False)]
+                if name == "getNearestLookingDirections":
+                    # BlockPlaceContext#getNearestLookingDirections L76-96:
+                    # Direction.orderedByNearest(player), then (unless
+                    # replaceClicked) the clicked face's opposite moved to
+                    # the front. Only the front one is known here.
+                    return [Arr([Dir(recv.clicked).opposite()] + [UNKNOWN] * 5)]
             return [UNKNOWN]
+        if isinstance(recv, State) and name == "canSurvive" and self.assume_support:
+            # Not emulated (no world): placement is read as if the clicked
+            # face holds the block up (see read_directional).
+            self.support_assumed = True
+            return [1]
         if isinstance(recv, Obj) and recv.cls == _LEVEL and name == "isClientSide":
             return [0]
         if isinstance(recv, State):
@@ -1070,6 +1156,27 @@ class Machine:
                 return [None]
             if name in ("getStateDefinition",):
                 return [Obj("__statedef")]
+            if base in _FACE_ATTACHED_KIN and name == "getStateForPlacement" and desc == _PLACEMENT_DESC \
+                    and rest and isinstance(rest[0], _Ctx) and rest[0].clicked is not None:
+                # FaceAttachedHorizontalDirectionalBlock#getStateForPlacement
+                # L39-52 (MC 1.21.1 client jar, Mojang mappings): for each of
+                # getNearestLookingDirections() (the clicked face's opposite
+                # first), vertical -> face CEILING (UP) / FLOOR (DOWN) and
+                # facing = getHorizontalDirection(); horizontal -> face WALL
+                # and facing = its opposite; the first state that canSurvive
+                # is placed. Support is not emulated: the first is taken.
+                first = Dir(rest[0].clicked).opposite()
+                state = recv.fields.get("__default", State())
+                if first.name in ("up", "down"):
+                    state = state.set("face", Const(_ATTACH_FACE, "CEILING" if first.name == "up" else "FLOOR"))
+                    state = state.set("facing", PlayerDir(0))
+                else:
+                    state = state.set("face", Const(_ATTACH_FACE, "WALL")).set("facing", first.opposite())
+                self.support_assumed = True
+                return [state]
+            if base == _FACE_ATTACHED and name == "getShape" and desc == _GET_SHAPE_DESC:
+                # It declares no getShape (client.txt 1.21.1): BlockBehaviour's.
+                return [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),))]
             if base in _PLAIN_VANILLA:
                 if name == "getStateForPlacement" and desc == _PLACEMENT_DESC:
                     return [recv.fields.get("__default", State())]
@@ -1211,6 +1318,17 @@ class Machine:
                 return [recv.turned(3)]
             if name == "get2DDataValue":
                 return [{"south": 0, "west": 1, "north": 2, "east": 3}.get(recv.name, -1)]
+            if name == "equals" and len(rest) == 1:
+                # Direction is an enum: equals is identity.
+                other = rest[0]
+                return [int(other == recv)] if isinstance(other, Dir) else [UNKNOWN]
+            if name == "getAxis":
+                axis = "Y" if recv.name in ("up", "down") else "Z" if recv.name in ("north", "south") else "X"
+                return [Const(_DIRECTION + "$Axis", axis)]
+        if isinstance(recv, LookDir):
+            if name == "getOpposite":
+                return [LookDir(not recv.opposite)]
+            return [UNKNOWN]
         if isinstance(recv, PlayerDir):
             if name == "getOpposite":
                 return [PlayerDir((recv.quarters + 2) % 4)]
@@ -1258,7 +1376,7 @@ def _same(a, b):
         return None
     if isinstance(a, (Obj, Arr, MapV, Builder)) or isinstance(b, (Obj, Arr, MapV, Builder)):
         return a is b
-    if isinstance(a, PlayerDir) or isinstance(b, PlayerDir):
+    if isinstance(a, (PlayerDir, LookDir)) or isinstance(b, (PlayerDir, LookDir)):
         return None
     return a == b
 
@@ -2270,3 +2388,203 @@ def _read_water(machine: Machine, obj: Obj, r: WaterReading) -> None:
     else:
         r.why = (f"{where}: gives {out[1].kind} at waterlogged=true and {out[0].kind} at false, "
                  "which isn't water only when waterlogged")
+
+
+# --- Six-way facing and attach-face blocks ------------------------------------
+#
+# A block whose blockstate draws ``facing`` with all six directions
+# (DirectionalBlock / BlockStateProperties.FACING) or ``face`` (floor, wall,
+# ceiling) with a horizontal ``facing`` (FaceAttachedHorizontalDirectionalBlock
+# / ATTACH_FACE). Its placement rule is read by running getStateForPlacement
+# once per face the player can click, with that face known
+# (UseOnContext#getClickedFace) and the player's horizontal facing
+# (getHorizontalDirection) and nearest looking direction
+# (getNearestLookingDirection) as symbols. Each run must give one state; the
+# rule is then, per clicked face, the ``face`` value and what ``facing`` is:
+# a fixed direction, the player's horizontal facing turned by quarters, or the
+# player's looking direction (or its opposite).
+#
+# canSurvive is not emulated (there is no world): wherever placement asks
+# BlockState#canSurvive, the answer is true, as if the clicked face held the
+# block up; Java would try the next looking direction or refuse to place. The
+# reading says when it leaned on this (support_assumed).
+
+DIRECTIONAL_KINDS = ("facing6", "attach")
+
+
+@dataclass
+class DirReading(Reading):
+    """A 6-way facing or attach-face block as its code gives it.
+
+    ``rule`` maps each clicked face (DIRECTIONS) to (face, token): ``face``
+    is the AttachFace value ("floor"/"wall"/"ceiling", "" for facing6) and
+    ``token`` is ("dir", direction), ("player", quarters clockwise) or
+    ("look", opposite); None with ``rule_why`` when unread.
+    ``shapes_by`` maps each Java key (face, facing) to the shape boxes.
+    """
+
+    kind: str = ""
+    rule: dict | None = None
+    rule_from: str = ""
+    rule_why: str = ""
+    rule_conflict: str = ""
+    support_assumed: bool = False
+    shapes_by: dict | None = None
+
+
+def directional_keys(kind: str) -> list[tuple[str, str]]:
+    """The Java (face, facing) keys a kind of blockstate draws."""
+    if kind == "facing6":
+        return [("", d) for d in DIRECTIONS]
+    return [(f, d) for f in ("floor", "wall", "ceiling") for d in HORIZONTAL]
+
+
+def default_rule(kind: str) -> dict:
+    """The labelled DEFAULT placement rule: facing6 faces away from the
+    clicked face (facing = the clicked face, as vanilla's rods and amethyst
+    clusters do); attach-face follows vanilla
+    FaceAttachedHorizontalDirectionalBlock#getStateForPlacement L39-52 with the
+    clicked face holding the block up."""
+    out = {}
+    for c in DIRECTIONS:
+        if kind == "facing6":
+            out[c] = ("", ("dir", c))
+        elif c == "up":
+            out[c] = ("floor", ("player", 0))
+        elif c == "down":
+            out[c] = ("ceiling", ("player", 0))
+        else:
+            out[c] = ("wall", ("dir", c))
+    return out
+
+
+def _token(value):
+    if isinstance(value, Dir):
+        return ("dir", value.name)
+    if isinstance(value, PlayerDir):
+        return ("player", value.quarters)
+    if isinstance(value, LookDir):
+        return ("look", value.opposite)
+    return None
+
+
+def _face_value(value):
+    if isinstance(value, Const) and value.owner == _ATTACH_FACE and value.name in ("FLOOR", "WALL", "CEILING"):
+        return value.name.lower()
+    return None
+
+
+def _with_key(state: State, kind: str, key: tuple) -> State:
+    face, facing = key
+    state = state.set("facing", Dir(facing))
+    if kind == "facing6":
+        return state.set("facing6", Dir(facing))
+    return state.set("face", Const(_ATTACH_FACE, face.upper()))
+
+
+def read_directional(classes: ClassIndex | None, kinds: dict[str, str]) -> dict[str, DirReading]:
+    """A :class:`DirReading` per blockstate name in ``kinds`` (name -> kind)."""
+    readings = {n: DirReading(n, kind=k) for n, k in kinds.items()}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.rule_why = r.shape_why = r.collision_why = "the mod ships no class files"
+        return readings
+    machine, registered = _registered(classes, list(kinds))
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.rule_why = r.shape_why = r.collision_why = why
+            continue
+        obj = objs[0]
+        r.cls = obj.cls.replace("/", ".")
+        _read_states(machine, obj, r)
+        r.behaviour = _behaviour(machine, obj.cls)
+        _read_rule(machine, obj, r)
+        _read_dir_shapes(machine, obj, r)
+        _read_shape_collision(machine, obj, r)
+        if len(objs) > 1:
+            other = DirReading(name, kind=r.kind)
+            _read_rule(machine, objs[1], other)
+            _read_dir_shapes(machine, objs[1], other)
+            if (other.rule, other.shapes_by) != (r.rule, r.shapes_by):
+                r.rule, r.shapes_by = None, None
+                r.rule_why = r.shape_why = "registered twice with different settings"
+    return readings
+
+
+def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
+    where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+    if machine.vanilla_base(obj.cls) in _FACE_ATTACHED_KIN and not machine.find_method(
+            obj.cls, "getStateForPlacement", _PLACEMENT_DESC):
+        where = f"{_FACE_ATTACHED.replace('/', '.')}#getStateForPlacement L39-52 (vanilla, inherited)"
+    rule = {}
+    machine.assume_support, machine.support_assumed = True, False
+    try:
+        for c in DIRECTIONS:
+            machine.steps = 0
+            results = machine.call(obj.cls, "getStateForPlacement", _PLACEMENT_DESC, [obj, _Ctx(c)])
+            outs = set()
+            for res in results:
+                if not isinstance(res, State):
+                    outs.add(None)
+                    continue
+                values = dict(res.values)
+                if "facing6" in values or "facing" in values:
+                    facing = res.get("facing6") if "facing6" in values else res.get("facing")
+                else:
+                    r.rule_conflict = (f"{where}: the player doesn't set facing (the block keeps its "
+                                       "default facing), which Bedrock's placement traits can't give")
+                    raise Unreadable(r.rule_conflict)
+                if r.kind == "attach" and "face" not in values:
+                    r.rule_conflict = (f"{where}: the player doesn't set face (the block keeps its "
+                                       "default face), which Bedrock's placement traits can't give")
+                    raise Unreadable(r.rule_conflict)
+                face = "" if r.kind == "facing6" else _face_value(res.get("face"))
+                token = _token(facing)
+                if face is None or token is None:
+                    outs.add(None)
+                    continue
+                if r.kind == "attach" and (token[0] == "look" or (token[0] == "dir" and token[1] in ("up", "down"))):
+                    r.rule_conflict = (f"{where}: facing is set from a direction that can be vertical, which "
+                                       "a horizontal facing can't hold")
+                    raise Unreadable(r.rule_conflict)
+                outs.add((face, token))
+            if len(outs) != 1 or None in outs:
+                raise Unreadable(f"clicking the {c} face, the placed state isn't one the reader can follow "
+                                 "(paths disagree, or face/facing aren't set from the clicked face or the player)")
+            rule[c] = outs.pop()
+    except Unreadable as exc:
+        if not r.rule_conflict:
+            r.rule_why = f"{where}: {exc}"
+        else:
+            r.rule_why = r.rule_conflict
+        return
+    finally:
+        machine.assume_support = False
+    r.rule = rule
+    r.rule_from = where
+    r.support_assumed = machine.support_assumed
+
+
+def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
+    machine.steps = 0
+    where = _declaring(machine, obj.cls, "getShape", _GET_SHAPE_DESC)
+    default = obj.fields.get("__default", State())
+    shapes = {}
+    try:
+        if "__partial" in obj.fields:
+            raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
+        for key in directional_keys(r.kind):
+            state = _with_key(default if isinstance(default, State) else State(), r.kind, key)
+            results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
+            label = f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}"
+            if not results or any(not isinstance(x, Shape) for x in results):
+                raise Unreadable(f"the shape at {label} is not built from boxes it can read")
+            if len({x for x in results}) != 1:
+                raise Unreadable(f"the shape at {label} depends on more than the drawn states")
+            shapes[key] = results[0].boxes
+    except Unreadable as exc:
+        r.shape_why = f"{where}: {exc}"
+    else:
+        r.shapes_by = shapes
+        r.shape_from = where
