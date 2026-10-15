@@ -22,6 +22,8 @@ from datetime import date
 API = "https://api.modrinth.com/v2"
 _USER_AGENT = "anchapin/portkit-v2 sample build (github.com/anchapin/portkit-v2)"
 LOADERS = ("fabric", "forge", "neoforge", "quilt")
+# The search facet project_type=mod (Modrinth writes facets as "key:value").
+_MODS_ONLY = ("project_type", "mod")
 
 # Modrinth categories that say a mod adds things to the game. A mod tagged
 # only with loaders, "library", "optimization", "utility", "management",
@@ -79,7 +81,7 @@ def top_projects(count: int, policy: str = "all", opener=urllib.request.urlopen,
     out, offset = [], 0
     while len(out) < count and offset < max_scan:
         data = _get("/search", {"index": "downloads", "limit": page, "offset": offset,
-                                "facets": json.dumps([["project_type:mod"]])}, opener)
+                                "facets": json.dumps([[":".join(_MODS_ONLY)]])}, opener)
         hits = data.get("hits") or []
         if not hits:
             break

@@ -97,7 +97,7 @@ def test_build_pins_releases_from_api_data_and_skips_non_jars():
     assert entries[2]["version_id"] == "b2"  # beta-only project: its newest beta
     assert "download rank 3 on Modrinth (700 downloads, 2026-10-15)" in fd["notes"]
     assert skipped == ["datapack-only: no version with a Java-loader .jar"]
-    assert all("User-Agent" for _ in calls)
+    assert "project_type%3Amod" in calls[0] and "index=downloads" in calls[0]
 
 
 def test_open_policy_drops_licenceref():
