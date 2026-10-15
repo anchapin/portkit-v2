@@ -28,7 +28,12 @@ its reason says so):
   primary, secondary, properties)`` (Forge), ``DeferredSpawnEggItem``
   (NeoForge) or vanilla ``SpawnEggItem`` under Mojang names, where ENTITY is
   a static field a registration above stored and both colours are integer
-  constants. Fabric (intermediary) names are not matched.
+  constants.
+
+Forge SRG and Fabric intermediary jars are read in Mojang's names once
+:mod:`portkit.data.mappings` has remapped their classes (#235); the two SRG
+names above stay so a Forge 1.20.1 jar still reads when that table isn't
+cached.
 
 Java's default entity loot table is ``<namespace>:entities/<path>`` of the
 entity's id (``EntityType#getDefaultLootTable``), so a table at

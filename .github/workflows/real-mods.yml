@@ -52,7 +52,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .reference-cache
-          key: reference-${{ hashFiles('src/portkit/data/__init__.py', 'src/portkit/data/tags.py') }}
+          key: reference-${{ hashFiles('src/portkit/data/__init__.py', 'src/portkit/data/tags.py', 'src/portkit/data/mappings.py') }}
 
       - name: Fetch reference data (vanilla sound list, loader and vanilla item tags; sha256-checked)
         run: portkit reference fetch
