@@ -27,6 +27,69 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: a `separate_transforms` item converts by its gui view, and a one-texture held 3D model ships as an attachable with a DEFAULT pose
+
+- **Decision:** An item model with `"loader": "forge:separate_transforms"` or
+  `"neoforge:separate_transforms"` is read the way Java reads it: `base` for
+  every render context, `perspectives[<context>]` where given, keyed by
+  `ItemDisplayContext.getSerializedName()` (other keys ignored, as Java does),
+  and the outer model's own `overrides` as the item's (a sub-model's are not
+  consulted). Sources: `SeparateTransformsModel.Loader.read` and
+  `Baked.applyTransform`, Forge 1.20.1 @d13dd32 L147-189 (registered as
+  `separate_transforms` in `ClientForgeMod` L35) and NeoForge 1.21.1 @00c6a3f
+  L135-169. The **gui** view is the item: it goes through the ordinary icon
+  rules (flat parent, one layer, overrides with a resting look), and its
+  model files are claimed rather than noted as unregistered variants. Bedrock
+  draws the icon for a dropped item and in an item frame, so ground/fixed
+  views equal to the gui view are exact. The **held** view (the four
+  first/third-person hand contexts) is: the icon, when Java holds the gui view
+  too; an **attachable** when all four show one model that draws elements in
+  a single texture of the mod's item/block textures:
+  `resource_pack/attachables/<item>.json` (format 1.10.0, `entity_alphatest`
+  / `entity_alphatest_glint`, texture by path + `textures/misc/enchanted_item_glint`,
+  `controller.render.item_default`) and
+  `resource_pack/models/entity/<item>.held.geo.json` (the block geometry
+  transform; root bone `binding: q.item_slot_to_bone_name(c.item_slot)`), the
+  shape of vanilla's trident (bedrock-samples v1.26.50.4
+  `attachables/trident.entity.json`, `models/entity/trident.geo.json`).
+  **DEFAULT pose:** no animation is written, so Java's held display transforms
+  (rotation/translation/scale per hand context) are not carried and the
+  elements sit where the block geometry puts them; a note says so per item.
+  A held model that can't be carried (two textures, a differing model per hand,
+  a non-element model) leaves the item holding its icon, and the held model's
+  file is residue naming the item. Ground/fixed/head views that differ from the
+  gui view are noted, and their model files are residue naming the view. A gui
+  view built by another loader (Mekanism's `meka_tool`: `neoforge:obj`) is
+  residue saying so. The attachable is withdrawn with its item, or when its
+  texture did not convert (`drop_untextured`); `shorten_paths` renames its
+  texture paths; a `models/entity/` geometry counts toward the engine floor.
+  Separately, override predicate `dyed` joins the stored-data kind:
+  Supplementaries 1.20-3.1.43 registers it on the quiver as
+  `DyeableLeatherItem.hasCustomColor(stack) ? 1 : 0` (`ClientRegistry.setup`,
+  `lambda$setup$14`, read from the jar's bytecode), so the base is the undyed quiver.
+- **Measured** (develop 5973a65 vs this branch, 13 corpus mods + 7 deco mods):
+  only Supplementaries changes, +5 files: items `flute` (icon + attachable),
+  `quiver` (icon; held model has 2 textures, residue naming the quiver),
+  `confetti_popper` (icon; head party-hat view noted); item residue 26 -> 22,
+  coverage 28.1 -> 28.2%. The other 19 trees are md5-identical. Mekanism's
+  `meka_tool` stays residue (OBJ). Side finding: its `first_person_left_hand` /
+  `third_person_left_hand` perspective keys are not `ItemDisplayContext` names,
+  so Java ignores them too.
+- **Why:** #181's element-drawn in-hand models are source data; this loader is
+  the case where the JSON itself says which model shows where, so both the
+  inventory icon and the held model are deterministic. Shipping the held model
+  keeps the source asset in use instead of dropping it to residue.
+- **Rejected:** mapping Java's display transforms onto Bedrock animations now
+  (the mapping between Java's held-item origin and Bedrock's item bones is
+  unverified in game, and a wrong guess would be stated as fact; DEFAULT until
+  checked); stitching two textures into one for the attachable (new art);
+  generating icons for 3D-only items such as Create's potato cannon (rendered
+  art, not source data); converting the code-selected `*_hand` models of
+  Alex's Mobs (Java picks them in code, #176) or the bow/crossbow use states
+  (behavior parents, a separate policy).
+- **Status:** pending review.
+- **Links:** #181, #87, #167, #169.
+
 ## 2026-10-15: non-boolean mod config values are cited with their range and set with `--config <mod>.<option>=<number>`; out of range is an error
 
 - **Decision:** A mod config option that a converter reads as a number (not a

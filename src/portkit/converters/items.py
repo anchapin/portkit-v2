@@ -27,6 +27,17 @@ predicate this module does not know stay residue: a frozen frame of a reading
 would state a false one, and an unknown predicate may not have a resting
 state at all.
 
+A Forge or NeoForge ``separate_transforms`` model (one look per render
+context) converts by its gui view, the inventory icon, which Bedrock also
+draws for a dropped item and in an item frame. When every held context shows
+one other model that draws elements in a single texture, that model ships as
+an attachable (``attachables/<name>.json`` + ``models/entity/<name>.held.geo.json``)
+bound to the holder's item slot, in vanilla's trident shape. Its pose is a
+DEFAULT: Java's held display transforms are not carried. A held model that
+can't be carried is residue saying whose held look it is, and Bedrock holds
+the icon; ground, fixed and head views that differ from the gui view are
+noted (#181).
+
 The parent chain is followed through the mod's own intermediate models
 (``mymod:item/tool_base`` -> ``minecraft:item/handheld``) the way the block
 converter follows block models; the leaf's textures win over a parent's.
@@ -108,13 +119,17 @@ _OVERRIDE_KINDS = {
     )),
     "wear": ("the damaged or broken look", ("broken", "damage", "damaged")),
     "state": ("looks picked by the item's stored data (trim, dye, mode, contents, count)", (
-        "custom_model_data", "trim_type", "filled", "dye", "encoded", "invalid",
+        "custom_model_data", "trim_type", "filled", "dye", "dyed", "encoded", "invalid",
         "mode", "clipboard_type", "midas_gold_count", "is_primed",
     )),
     "context": ("the look in another render context (left hand, placed in the world)", (
         "lefthanded", "in_world",
     )),
 }
+# ``dyed``: Supplementaries 1.20-3.1.43 registers it on the quiver as 1 when
+# DyeableLeatherItem.hasCustomColor(stack), else 0 (ClientRegistry.setup,
+# lambda$setup$14, read from the jar's bytecode), so the base model is the
+# undyed quiver (2026-10-15, docs/decisions.md).
 _OVERRIDE_KIND = {name: kind for kind, (_, names) in _OVERRIDE_KINDS.items() for name in names}
 
 # Predicates whose look is a live reading: the base icon is one frame of a
@@ -123,6 +138,37 @@ _READOUT_PREDICATES = {
     "time": "a clock face", "angle": "a compass needle", "radiation": "a radiation gauge",
     "speed": "a speed gauge", "in_chunk": "a locator that lights up near its target",
 }
+
+# Forge's and NeoForge's ``separate_transforms`` loader: one item model whose
+# look is picked per render context. Java bakes ``base`` for every context and
+# ``perspectives[<context>]`` where one is given, keyed by
+# ItemDisplayContext.getSerializedName(); any other key is ignored, and the
+# outer model's own overrides are the item's (SeparateTransformsModel.Loader.read
+# and Baked.applyTransform: Forge 1.20.1 @d13dd32 L147-189, NeoForge 1.21.1
+# @00c6a3f L135-169). The loader is registered as forge:separate_transforms /
+# neoforge:separate_transforms (ClientForgeMod L35).
+_SEPARATE_LOADERS = ("forge:separate_transforms", "neoforge:separate_transforms")
+_DISPLAY_CONTEXTS = (
+    "none", "thirdperson_lefthand", "thirdperson_righthand", "firstperson_lefthand",
+    "firstperson_righthand", "head", "gui", "ground", "fixed",
+)
+# The contexts a Bedrock attachable draws (both hands, first and third person).
+_HELD_CONTEXTS = (
+    "firstperson_righthand", "firstperson_lefthand", "thirdperson_righthand", "thirdperson_lefthand",
+)
+# Bedrock draws a dropped item and an item frame with the item's icon.
+_ICON_CONTEXTS = ("ground", "fixed")
+
+# A held 3D model ships as an attachable, in the shape of vanilla's own
+# trident (bedrock-samples v1.26.50.4 resource_pack/attachables/trident.entity.json
+# and models/entity/trident.geo.json): entity_alphatest materials with the
+# enchantment glint, controller.render.item_default, and the geometry's root
+# bone bound to the holder's item slot. DEFAULT pose: Java's held display
+# transforms (rotation, translation, scale per context) are not carried, since
+# how they map onto Bedrock's item bones is unverified; the elements sit where
+# the block geometry puts them (2026-10-15, docs/decisions.md).
+_ATTACHABLE_FORMAT = "1.10.0"
+_ITEM_SLOT_BINDING = "q.item_slot_to_bone_name(c.item_slot)"
 
 _MENU_CATEGORY = "items"
 _DEFAULT_STACK_SIZE = 64
@@ -202,6 +248,113 @@ def _chain(mod: SourceMod, model: dict) -> tuple[dict | None, list, str]:
         if not isinstance(current, dict):
             return None, seen, f"parent model {parent!r} is not a JSON object"
     return None, seen, "item model parent chain is deeper than we follow"
+
+
+def _separate_views(model: dict) -> tuple[dict | None, str]:
+    """Split a ``separate_transforms`` item model into what each context shows.
+
+    Returns ``({"icon": model, "held": model, "others": {context: model}},
+    "")`` or ``(None, reason)``. ``icon`` is the gui view carrying the outer
+    model's overrides (Java resolves overrides on the outer model; a
+    sub-model's own are not consulted); ``held`` is the one view every held
+    context shows, or ``None`` when they differ; ``others`` the views of
+    ground, fixed and head that differ from the icon."""
+    base = model.get("base")
+    if not isinstance(base, dict):
+        return None, "separate_transforms item model has no base model object"
+    perspectives = model.get("perspectives")
+    if not isinstance(perspectives, dict):
+        # GsonHelper.getAsJsonObject throws: Java fails to load the model.
+        return None, "separate_transforms item model has no perspectives object"
+    views = {}
+    for context in _DISPLAY_CONTEXTS:
+        view = perspectives.get(context, base)
+        if not isinstance(view, dict):
+            return None, f"separate_transforms perspective {context!r} is not a model object"
+        views[context] = view
+    gui = {k: v for k, v in views["gui"].items() if k != "overrides"}
+    if model.get("overrides"):
+        gui["overrides"] = model["overrides"]
+    held = [views[c] for c in _HELD_CONTEXTS]
+    others = {c: views[c] for c in (*_ICON_CONTEXTS, "head") if views[c] != views["gui"]}
+    return {"icon": gui, "held": held[0] if all(v == held[0] for v in held) else None,
+            "others": others}, ""
+
+
+def _held_shape(mod: SourceMod, view: dict) -> tuple[dict | None, list, str]:
+    """The elements and textures a held view draws, through its parent chain.
+
+    Returns ``({"elements", "textures", "parent"}, files read, refusal)``:
+    ``elements`` from the nearest model that has any (Java's rule),
+    ``textures`` merged child-first, ``parent`` the vanilla parent the chain
+    ends in (``None`` when it ends in the mod)."""
+    textures: dict = {}
+    elements: list = []
+    seen: list = []
+    current = view
+    for _ in range(models._MAX_PARENT_DEPTH):
+        if isinstance(current.get("textures"), dict):
+            textures = {**current["textures"], **textures}
+        if not elements and isinstance(current.get("elements"), list):
+            elements = current["elements"]
+        parent = current.get("parent")
+        if not isinstance(parent, str):
+            return {"elements": elements, "textures": textures, "parent": None}, seen, ""
+        parent = models.normalize(parent)
+        if parent.startswith("minecraft:"):
+            return {"elements": elements, "textures": textures, "parent": parent}, seen, ""
+        path = models.model_path(mod, parent)
+        if path is None:
+            return None, seen, f"held model extends {parent!r}, a model from another namespace"
+        if not path.resolve().is_relative_to(mod.root.resolve()) or not path.is_file():
+            return None, seen, f"held model extends {parent!r}, which is not in this mod"
+        seen.append(path)
+        try:
+            current = json.loads(path.read_text())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return None, seen, f"held model {parent!r} could not be read as JSON: {exc}"
+        if not isinstance(current, dict):
+            return None, seen, f"held model {parent!r} is not a JSON object"
+    return None, seen, "held model parent chain is deeper than we follow"
+
+
+def _attachable(mod: SourceMod, name: str, shape: dict) -> tuple[dict | None, str]:
+    """``{path: body}`` for a held 3D model's attachable and geometry, or why not.
+
+    Bedrock's attachable maps one texture over its geometry, so every element
+    face must wear the same texture, a png of this mod's item or block
+    textures."""
+    key, why = models.element_texture({"elements": shape["elements"]})
+    if key is None:
+        return None, why.replace("per-face geometry materials are not mapped yet",
+                                 "an attachable maps one texture")
+    reference = _resolve_alias(shape["textures"], f"#{key}")
+    if not isinstance(reference, str) or reference.startswith("#"):
+        return None, f"held model leaves texture {('#' + key)!r} unfilled"
+    texture, why = models.texture_file(reference, mod.namespace)
+    if texture is None:
+        return None, why
+    identifier = f"geometry.{mod.namespace}.{name}.held"
+    geo, why = models.geometry_bones([("root", shape["elements"])], identifier)
+    if geo is None:
+        return None, f"held model: {why}"
+    for bone in geo["minecraft:geometry"][0]["bones"]:
+        bone["binding"] = _ITEM_SLOT_BINDING
+    return {
+        f"attachables/{name}.json": {
+            "format_version": _ATTACHABLE_FORMAT,
+            "minecraft:attachable": {
+                "description": {
+                    "identifier": bedrock_identifier(mod.namespace, name),
+                    "materials": {"default": "entity_alphatest", "enchanted": "entity_alphatest_glint"},
+                    "textures": {"default": texture, "enchanted": "textures/misc/enchanted_item_glint"},
+                    "geometry": {"default": identifier},
+                    "render_controllers": ["controller.render.item_default"],
+                },
+            },
+        },
+        f"models/entity/{name}.held.geo.json": geo,
+    }, ""
 
 
 def _resolve_alias(textures: dict, reference):
@@ -376,6 +529,77 @@ def _placer_note(namespace: str, names: list[str]) -> str:
     )
 
 
+def _held_look(mod: SourceMod, name: str, views: dict, result: ConversionResult,
+               held_parts: dict[str, str]) -> dict:
+    """Write the held view of an emitted separate_transforms item.
+
+    Returns ``{"held": "attachable" | "icon" | None, "why": str, "others": [...]}``:
+    ``attachable`` when its elements shipped as one, ``icon`` when Java holds
+    the gui view itself (Bedrock does the same), ``None`` with the reason when
+    a different held look could not be carried."""
+    look = {"held": None, "why": "", "others": sorted(views["others"])}
+    for context, view in sorted(views["others"].items()):
+        # A ground, fixed or head view's own model file is residue naming whose look it is.
+        _, files, _ = _held_shape(mod, view)
+        where = ("Bedrock draws an item on the head only when it is wearable there, which "
+                 "nothing in the source says" if context == "head"
+                 else "Bedrock draws the item's icon there")
+        for path in files:
+            held_parts.setdefault(str(path.relative_to(mod.root)), (
+                f"the {context} view of {mod.namespace}:{name}, not carried: {where}; "
+                "the item converts with its gui view as its icon"))
+    held = views["held"]
+    gui = {k: v for k, v in views["icon"].items() if k != "overrides"}
+    if held is None:
+        look["why"] = "Java shows a different model per hand or per first/third person"
+        return look
+    if held == gui:
+        look["held"] = "icon"
+        return look
+    shape, files, why = _held_shape(mod, held)
+    if shape is not None and not shape["elements"]:
+        why = "the held view is another model without elements, not the inventory icon"
+        shape = None
+    built = None
+    if shape is not None:
+        built, why = _attachable(mod, name, shape)
+    for path in files:
+        held_parts[str(path.relative_to(mod.root))] = "" if built else (
+            f"held 3D model of {mod.namespace}:{name}, not converted: {why}; the item "
+            "converts with its inventory icon, which Bedrock also draws in the hand")
+    if built is None:
+        look["why"] = why
+        return look
+    for path in files:
+        result.claim(mod, path)
+    result.files.update(built)
+    look["held"] = "attachable"
+    return look
+
+
+def _separate_note(namespace: str, items: list[tuple[str, dict]]) -> str:
+    """One note per mod for items whose model picks a look per render context."""
+    parts = []
+    for name, look in items:
+        if look["held"] == "attachable":
+            held = "held 3D model as an attachable (DEFAULT pose: Java's held display transforms not carried)"
+        elif look["held"] == "icon":
+            held = "held as the icon, as in Java"
+        else:
+            held = f"held as the icon, not Java's held model ({look['why']})"
+        dropped = f"; not carried: the {', '.join(look['others'])} look" if look["others"] else ""
+        parts.append(f"{name} ({held}{dropped})")
+    many = len(items) > 1
+    return (
+        f"{namespace}: {len(items)} item{'s' if many else ''} with a separate_transforms model "
+        f"{'convert' if many else 'converts'} with the gui view as {'their' if many else 'its'} "
+        f"icon, which Bedrock also draws dropped and in item frames: {'; '.join(parts)}. "
+        "Java's ground, fixed and head views are not carried when they differ from the gui view "
+        "(Bedrock draws the icon on the ground and in frames, and an item on the head only "
+        "when it is wearable)."
+    )
+
+
 def convert(mod: SourceMod, context: LoadContext | None = None,
             emitted_blocks: set[str] | None = None) -> ConversionResult:
     """Convert the mod's flat item models.
@@ -410,6 +634,9 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
     items_known: set[str] | None = None  # ids evidenced as items, read on first need
     lang_keys: set[str] | None = None  # en_us keys, read on first need
     placers: list[str] = []  # emitted plain items whose same-id block did not convert
+    separate: list[tuple[str, dict]] = []  # emitted separate_transforms items and their held look
+    icon_parts: set[str] = set()  # item model names an emitted item's gui view is built from
+    held_parts: dict[str, str] = {}  # source of another view's model -> its residue reason ("" converted)
     for path in sorted(src.glob("*.json")):
         name = path.stem
         unplaced = False
@@ -449,6 +676,20 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
         if not isinstance(model, dict):
             result.unhandled.append(Unhandled(rel, "item", "item model is not a JSON object"))
             continue
+        views = None
+        if model.get("loader") in _SEPARATE_LOADERS:
+            # The inventory look is the gui view; the rest of this loop reads
+            # that, and the held view is handled once the item converts.
+            views, why = _separate_views(model)
+            if views is None:
+                result.unhandled.append(Unhandled(rel, "item", why))
+                continue
+            model = views["icon"]
+            if isinstance(model.get("loader"), str):
+                result.unhandled.append(Unhandled(rel, "item", (
+                    f"separate_transforms gui view is built by model loader {model['loader']!r} "
+                    "(code, not JSON elements or layers), so it is not a flat icon")))
+                continue
         # Intermediate parents are claimed only when the item converts: a
         # refused leaf's residue already names the chain it went through.
         flat, parents, why = _chain(mod, model)
@@ -564,6 +805,10 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
             override_items.append((name, looks))
         for parent_file in parents:
             result.claim(mod, parent_file)
+            if views is not None and parent_file.parent == src:
+                icon_parts.add(parent_file.stem)
+        if views is not None:
+            separate.append((name, _held_look(mod, name, views, result, held_parts)))
         if unplaced:
             placers.append(name)
             if lang_keys is None:
@@ -584,6 +829,21 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
                 "components": components,
             },
         }
+    if held_parts:
+        # A held view's own model file converted with its item (as an
+        # attachable) or is residue saying whose held look it is.
+        kept = []
+        for entry in result.unhandled:
+            reason = held_parts.get(entry.source)
+            if reason is None:
+                kept.append(entry)
+            elif reason:
+                kept.append(Unhandled(entry.source, entry.kind, reason))
+        result.unhandled[:] = kept
+    if icon_parts:
+        variants = [(n, ref) for n, ref in variants if n not in icon_parts]
+    if separate:
+        result.notes.append(_separate_note(mod.namespace, separate))
     if held_names:
         result.notes.append(_held_note(mod.namespace, held_names))
     if override_items:

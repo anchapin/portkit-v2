@@ -473,6 +473,24 @@ def texture_shortname(reference: str, namespace: str) -> tuple[str | None, str]:
     return texture_key(subpath, namespace), ""
 
 
+def texture_file(reference: str, namespace: str) -> tuple[str | None, str]:
+    """Java texture reference -> the pack path (no extension) the textures
+    converter writes it to, for files that name a texture by path (an
+    attachable) rather than by atlas key. Only this mod's block and item
+    textures, the lanes the textures converter places."""
+    if reference.startswith("#"):
+        return None, f"model leaves {reference!r} for a child model to fill in"
+    ref_ns, _, path = reference.rpartition(":")
+    if (ref_ns or "minecraft") != namespace:
+        return None, f"model points at {reference!r}, a texture from another namespace"
+    lane, _, subpath = path.partition("/")
+    bedrock = {"block": "textures/blocks", "blocks": "textures/blocks",
+               "item": "textures/items", "items": "textures/items"}.get(lane)
+    if bedrock is None or not subpath:
+        return None, f"model points at {reference!r}, outside the block and item textures"
+    return f"{bedrock}/{subpath}", ""
+
+
 # Java's texture dirs -> the vanilla Bedrock dir with the same files and the
 # atlas that indexes it. Pre-1.13 mods named the Java dirs blocks/ and items/.
 _VANILLA_DIRS = {
