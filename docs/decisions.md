@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: 6-way facing and attach-face blocks with booleans convert, combining the #218 placement with the #215 booleans
 
-- **Status:** proposed (PR #219); Alex decides the picks. Everything but item 7 combines rules Alex approved in #215 and #218.
+- **Status:** approved (Alex, 2026-10-14)
 - **Decision:** a blockstate drawing 6-way `facing` or `face` + `facing` and
   one to four booleans (variants naming every combination, or a multipart
   with exactly one part per combination; waterlogged dropped first, #217)
