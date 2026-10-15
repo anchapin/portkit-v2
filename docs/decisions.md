@@ -27,6 +27,31 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Citadel books move into a library adapter behind a `books` hook
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #252.
+- **Decision:** step 6 of the #245 migration. `converters/books.py` (the
+  Citadel guide-book reader, #182) moves unchanged to
+  `adapters/citadel/books.py`; `adapters/citadel` registers it as a library
+  adapter (`library=True`, namespace `citadel`) through a new optional hook,
+  `Adapter.books` (a `BookReader` of `plan`, `lang_text`, `convert`).
+  `convert_all` asks every reader in registry order (plans once the items
+  have converted, page text merged into the lang converter's `book_text`,
+  files merged and each non-empty entry line passed to `stations.convert`).
+  The viewer JS (`book.js`, `book_core.js`, `forms.js`) stays core. Tests move
+  with the code (`tests/adapters/citadel/`, pick 7a); new tests pin the
+  registration and the hook's order. Core namespace allowlist 143 -> 138.
+- **Why:** audit section 7 step 6 and picks 1-4 (approved by Alex,
+  2026-10-15). With one reader the hook gives exactly the old calls in the
+  old order, so pack trees are md5-identical (Alex's Mobs, Waystones,
+  Farmer's Delight fabric, Storage Drawers 1.19.2 and Night Lights checked
+  locally; the corpus gate on GitHub).
+- **Rejected:** keeping a re-export shim at `converters/books.py` (the core
+  would still import an adapter directly); folding books into the generic
+  `convert` hook (books need the converted items first and return a main.js
+  entry, which that hook can't carry).
+- **Links:** #245, PR #251; `docs/adapter-audit-2026-10-15.md` section 7.
+
 ## 2026-10-15: the generic station kit; shipped runtime bytes may change when behaviour is identical
 
 - **Status:** pick 8 (sub-question) **approved (Alex, 2026-10-15)**: "Yes, as long as behaviour is identical that's all that matters. Basically as long as the user in bedrock gets the same or similar enough experience, that's all we care about." The kit itself: approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #251.

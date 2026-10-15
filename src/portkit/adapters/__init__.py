@@ -28,6 +28,11 @@ Hooks, and the core seam that asks each one:
   code reads (claimed as residue, or converted), run by
   :func:`portkit.converters.convert_all` after the entity converter, in
   registry order.
+- ``books``: a :class:`BookReader` for guide books whose pages are data in
+  the jar (Citadel's, #182). :func:`portkit.converters.convert_all` asks each
+  reader, in registry order, for its plan once the items have converted, its
+  page text for the lang converter, and its files plus the
+  ``scripts/portkit/main.js`` entry line that wires the core book viewer.
 
 Hooks for the station adapters (blocks, loot, textures, lang, runtime) are
 added with the moves that need them (audit section 7, steps 5-8).
@@ -44,6 +49,21 @@ if TYPE_CHECKING:  # annotations only: the core imports this package lazily
 
 ConditionHandler = Callable[["LoadContext", str, dict], "Verdict"]
 RecipeReason = Union[str, Callable[["SourceMod", dict], str]]
+
+
+@dataclass(frozen=True)
+class BookReader:
+    """The ``books`` hook: one guide-book format.
+
+    ``plan(mod, files)`` reads the mod's books against what the namespace's
+    converters wrote so far (None when it has none); ``lang_text(mod, plan)``
+    is Java locale -> {.lang key: text}; ``convert(mod, plan)`` is
+    ``(result, main.js entry line or "")``.
+    """
+
+    plan: Callable[["SourceMod", dict], object]
+    lang_text: Callable[["SourceMod", object], dict]
+    convert: Callable[["SourceMod", object], tuple["ConversionResult", str]]
 
 
 def _empty() -> Mapping:
@@ -63,6 +83,7 @@ class Adapter:
     conditions: Mapping[str, ConditionHandler] = field(default_factory=_empty)
     recipe_reasons: Mapping[str, tuple[str, RecipeReason]] = field(default_factory=_empty)
     convert: Callable[["SourceMod"], "ConversionResult"] | None = None
+    books: BookReader | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -127,14 +148,21 @@ def converters() -> list[Callable[["SourceMod"], "ConversionResult"]]:
     return [a.convert for a in ADAPTERS if a.convert is not None]
 
 
+def book_readers() -> list[BookReader]:
+    """The adapters' ``books`` hooks, in registry order."""
+    return [a.books for a in ADAPTERS if a.books is not None]
+
+
 from . import (  # noqa: E402  (each imports Adapter above)
-    alloy_forgery, bclib, betterend, create, mantle, mekanism, mythicmetals, silentgear, supplementaries, tconstruct,
+    alloy_forgery, bclib, betterend, citadel, create, mantle, mekanism, mythicmetals, silentgear, supplementaries,
+    tconstruct,
 )
 
 ADAPTERS = (
     alloy_forgery.ADAPTER,
     bclib.ADAPTER,
     betterend.ADAPTER,
+    citadel.ADAPTER,
     create.ADAPTER,
     mantle.ADAPTER,
     mekanism.ADAPTER,

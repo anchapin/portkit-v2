@@ -507,7 +507,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
     tables the loot converter left to a station (the feasts',
     :func:`portkit.converters.feasts.loot_names`). The entry :data:`ENTRY`
     imports every station that shipped, then ``extra_entries`` (the guide
-    book viewer's wiring, :func:`portkit.converters.books.convert`).
+    book viewer's wiring, :func:`portkit.adapters.citadel.books.convert`).
     """
     from . import cooking_pot, feasts, skillet, stove, waystones
 

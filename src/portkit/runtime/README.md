@@ -79,7 +79,7 @@ entry `scripts/portkit/main.js` that wires the two.
   `ActionFormData`, shown through `forms.js`). The converter writes the page table
   (`scripts/portkit/data/<namespace>_books.js`) from a Citadel book's page
   JSON, and the page text into the resource pack's `texts/*.lang`
-  (`portkit.converters.books`).
+  (`portkit.adapters.citadel.books`, the Citadel library adapter).
 
 The station kit (#245): namespace-free files any station runtime builds on.
 They name no mod; `portkit.converters.station_kit` ships them

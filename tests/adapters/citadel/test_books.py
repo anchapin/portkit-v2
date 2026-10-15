@@ -17,11 +17,12 @@ from pathlib import Path
 import pytest
 
 from portkit.bytecode import ClassIndex
-from portkit.converters import books, convert_all, lang
+from portkit.adapters.citadel import books
+from portkit.converters import convert_all, lang
 from portkit.model import SourceMod
 
-ROOT = Path(__file__).resolve().parents[1]
-CLASSES = Path(__file__).parent / "data" / "citadel_book" / "classes"
+ROOT = Path(__file__).resolve().parents[3]
+CLASSES = ROOT / "tests" / "data" / "citadel_book" / "classes"
 NS = "examplemod"
 LB = "~LINEBREAK~"
 
