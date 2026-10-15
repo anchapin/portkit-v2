@@ -514,7 +514,7 @@ def lang_text(mod: SourceMod, book_plan: Plan | None) -> dict[str, dict[str, str
 def convert(mod: SourceMod, book_plan: Plan | None) -> tuple[ConversionResult, str]:
     """Each Citadel book's page table and the fixed viewer, plus the entry line
     that wires them (stations.convert writes it into scripts/portkit/main.js)."""
-    from .stations import runtime_source
+    from .station_kit import FORMS, runtime_source
 
     result = ConversionResult()
     if book_plan is None:
@@ -582,6 +582,7 @@ def convert(mod: SourceMod, book_plan: Plan | None) -> tuple[ConversionResult, s
     result.files[data_path(ns)] = f"{header}\nexport default {body};\n"
     result.files[f"{RUNTIME_DIR}/book.js"] = runtime_source("book.js")
     result.files[f"{RUNTIME_DIR}/book_core.js"] = runtime_source("book_core.js")
+    result.files[f"{RUNTIME_DIR}/{FORMS}"] = runtime_source(FORMS)
     entry = (
         'import { registerBooks } from "./book.js";\n'
         f'import booksTable from "./data/{ns}_books.js";\n'

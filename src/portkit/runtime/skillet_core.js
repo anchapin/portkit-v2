@@ -199,8 +199,3 @@ export function heldStatus(session) {
   const pct = Math.min(100, Math.floor((100 * session.elapsed) / session.total));
   return `skillet: ${session.ingredient.id} | cooking ${pct}%`;
 }
-
-/** The dynamic-property key holding the skillet at this position. */
-export function storageKey(component, dimensionId, location) {
-  return `${component}|${dimensionId}|${location.x},${location.y},${location.z}`;
-}

@@ -27,6 +27,42 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: the generic station kit; shipped runtime bytes may change when behaviour is identical
+
+- **Status:** pick 8 (sub-question) **approved (Alex, 2026-10-15)**: "Yes, as long as behaviour is identical that's all that matters. Basically as long as the user in bedrock gets the same or similar enough experience, that's all we care about." The kit itself: approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #251.
+- **Decision:** step 5 of the #245 migration. The parts of the scripted
+  station pattern that name no mod move into a kit any adapter can build on
+  (#239's templates start here). Python: `converters/station_kit.py` holds the
+  Script API pins and entry path, `FacingBlock`/`Overlay`/`DerivedTexture`,
+  `BEDROCK_TOOL_TAGS`, `VANILLA_SOUNDS`, `runtime_source`, `js_module`, moved
+  unchanged (still importable from `stations`). Runtime JS: helpers that were
+  copied between mods' runtimes are now one copy each: new
+  `station_core.js` (pure: `storageKey` from four `*_core.js` copies,
+  `storagePrefix`, the counter-clockwise side step from the cooking pot and
+  cutting board, the heat rule from `cooking_pot_core.js`, `destroyCommand`
+  from feasts and Waystones, `HoldTimer` from Waystones' scroll timer), new
+  `forms.js` (`show` with the UserBusy retry, from `waystone.js` and
+  `book.js`), and `station_storage.js` gains `loadAll`, `enchantLevel`,
+  `blockView`, `blockBelow`, `facingOf`, `heldAt`. `KIT_FILES`
+  (`station_core.js`, `station_storage.js`) ship beside every station
+  runtime and `forms.js` with Waystones and the book viewer. Conversion now
+  fails (RuntimeError) if a shipped script imports a `./` file the pack does
+  not ship (`station_kit.unresolved_imports`).
+- **Why:** pick 8a (the station kit) with Alex's answer above: shipped bytes
+  may change; player-facing behaviour may not. Every moved function is the
+  same code (same arguments, same strings, same order of checks); only where
+  it lives and how it is imported changed. The md5 diff over the 13 corpus and
+  7 deco trees lists every changed file in the PR; node runtime tests pass
+  with the old tests kept (calls to moved helpers ported to `station_core.js`)
+  and new `tests/js/station_core.test.mjs`.
+- **Rejected:** keeping every runtime's text identical (the kit would then be
+  a Python-only move and the copies would stay); changing any helper's
+  behaviour while moving it (a player could notice; any such change is a
+  separate pick for Alex); shipping the kit in every pack with scripts
+  (toggle-only packs need none of it, and their bytes stay identical).
+- **Links:** #245, PR #246, PR #250; `docs/adapter-audit-2026-10-15.md`
+  (section 5, promote to #239).
+
 ## 2026-10-15: the per-mod recipe residue tables live in their mods' adapters
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #250.
@@ -144,7 +180,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: the core may not gain mod namespace literals (ratchet lint, allowlist mode); the adapter interface stays open
 
-- **Status:** lint and audit approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #246; adapter interface picks 1-10 in `docs/adapter-audit-2026-10-15.md` section 6 **approved (Alex, 2026-10-15)**, each as recommended (1a, 2a, 3a, 4a, 5a, 6a, 7a, 8a, 9a, 10a). Still **open**: pick 8's sub-question, whether the station-kit extraction PR (migration step 5) may change shipped runtime JS bytes (a reviewed, behaviour-identical diff) or must keep every runtime's text identical.
+- **Status:** lint and audit approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #246; adapter interface picks 1-10 in `docs/adapter-audit-2026-10-15.md` section 6 **approved (Alex, 2026-10-15)**, each as recommended (1a, 2a, 3a, 4a, 5a, 6a, 7a, 8a, 9a, 10a). Pick 8's sub-question (may the station-kit extraction change shipped runtime JS bytes?) **approved (Alex, 2026-10-15)**: yes, when player-facing behaviour is identical; see the 2026-10-15 station kit entry above.
 - **Decision:** first slice of #245 (step 1 + step 4 in allowlist mode), no
   code moves and no behaviour change. (1) `docs/adapter-audit-2026-10-15.md`
   lists the single-mod code in `src/portkit`: about 10,300 of 37,132 lines

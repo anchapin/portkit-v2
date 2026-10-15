@@ -186,8 +186,3 @@ export function status(stove, lit, covered) {
   if (covered) parts.push("top covered");
   return parts.join(" | ");
 }
-
-/** The dynamic-property key holding the stove at this position. */
-export function storageKey(component, dimensionId, location) {
-  return `${component}|${dimensionId}|${location.x},${location.y},${location.z}`;
-}

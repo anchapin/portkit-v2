@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import * as core from "../../src/portkit/runtime/stove_core.js";
+import * as kit from "../../src/portkit/runtime/station_core.js";
 import { registerStove } from "../../src/portkit/runtime/stove.js";
 import { GameMode, ItemStack, _dimension, _entity, _player, _startup, _stoveBlock, world } from "@minecraft/server";
 
@@ -54,7 +55,7 @@ function withRandom(value, fn) {
 }
 
 function stored(block) {
-  const raw = world.getDynamicProperty(core.storageKey(table.component, block.dimension.id, block.location));
+  const raw = world.getDynamicProperty(kit.storageKey(table.component, block.dimension.id, block.location));
   return raw === undefined ? undefined : JSON.parse(raw);
 }
 

@@ -50,8 +50,3 @@ export function containerMessage(key, feast) {
   const name = feast.container_name ? { rawtext: [{ translate: feast.container_name }] } : [feast.container];
   return { rawtext: [{ translate: key, with: name }] };
 }
-
-/** The command that clears a block as destroyBlock(pos, true) does: drops by its loot table. */
-export function destroyCommand(location) {
-  return `setblock ${location.x} ${location.y} ${location.z} air destroy`;
-}

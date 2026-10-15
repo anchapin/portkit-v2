@@ -17,22 +17,10 @@
 // system.run) and @minecraft/server-ui 2.0.0 (ActionFormData; a form shown
 // while the player is busy is cancelled with UserBusy and shown again).
 
-import { system, world } from "@minecraft/server";
-import { ActionFormData, FormCancelationReason } from "@minecraft/server-ui";
+import { world } from "@minecraft/server";
+import { ActionFormData } from "@minecraft/server-ui";
 import { bookFor, pageView } from "./book_core.js";
-
-// A form shown while the player is still busy (the use that opened it) is
-// cancelled with UserBusy; it is shown again on the next tick, this often.
-const BUSY_RETRIES = 20;
-
-function show(form, player, retries = BUSY_RETRIES) {
-  return form.show(player).then((response) => {
-    if (response.canceled && response.cancelationReason === FormCancelationReason.UserBusy && retries > 0) {
-      return new Promise((resolve) => system.run(() => resolve(show(form, player, retries - 1))));
-    }
-    return response;
-  });
-}
+import { show } from "./forms.js";
 
 /** Show one page to a player; a chosen button opens its page. */
 export function openPage(table, player, bookId, pageId) {

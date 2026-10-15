@@ -27,10 +27,10 @@ import {
   processingSound,
   rollResults,
   spawnOffset,
-  storageKey,
   takesDamage,
 } from "./cutting_board_core.js";
-import { centre, describe, give, loadStored, play, rebuild, saveStored } from "./station_storage.js";
+import { storageKey } from "./station_core.js";
+import { centre, describe, enchantLevel, give, loadStored, play, rebuild, saveStored } from "./station_storage.js";
 
 function keyOf(table, block) {
   return storageKey(table.component, block.dimension.id, block.location);
@@ -42,12 +42,6 @@ function load(table, block) {
 
 function save(table, block, stored) {
   saveStored(keyOf(table, block), stored && stored.amount > 0 ? stored : undefined);
-}
-
-function enchantLevel(stack, id) {
-  const enchantable = stack.getComponent("minecraft:enchantable");
-  const found = enchantable ? enchantable.getEnchantment(id) : undefined;
-  return found ? found.level : 0;
 }
 
 function say(table, player, role, count) {

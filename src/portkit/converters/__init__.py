@@ -9,6 +9,7 @@ from __future__ import annotations
 from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod
 from . import blocks, books, entities, items, lang, loot, recipes, sounds, stations, textures
+from .station_kit import unresolved_imports
 
 
 def adapter_data(mod: SourceMod) -> ConversionResult:
@@ -103,6 +104,12 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
     result = result.merge(book_result)
     result = result.merge(stations.convert(mod, deferred, result.files, context, loot=deferred_loot,
                                            extra_entries=[book_entry] if book_entry else None))
+    # Every relative import a shipped script makes must be shipped too (the
+    # station kit's shared files, #245): a missing one is a converter bug, and
+    # Bedrock would refuse the whole script pack, so fail loudly instead.
+    missing = unresolved_imports(result.files)
+    if missing:
+        raise RuntimeError("shipped scripts import files the pack does not ship: " + "; ".join(missing))
     for note in (context.note(), context.user_note()):
         if note:
             result.notes.append(note)

@@ -31,16 +31,27 @@ import {
   findRecipe,
   insert,
   isContainerValid,
-  isHeated,
   isIdle,
   serve,
   status,
   step,
-  storageKey,
   takeOut,
-  trayState,
 } from "./cooking_pot_core.js";
-import { centre, describe, dropStored, give, loadStored, maxAmountOf, play, rebuild, saveStored } from "./station_storage.js";
+import { isHeated, storageKey, trayState } from "./station_core.js";
+import {
+  blockBelow as below,
+  blockView as view,
+  centre,
+  describe,
+  dropStored,
+  facingOf,
+  give,
+  loadStored,
+  maxAmountOf,
+  play,
+  rebuild,
+  saveStored,
+} from "./station_storage.js";
 
 function keyOf(table, block) {
   return storageKey(table.component, block.dimension.id, block.location);
@@ -54,21 +65,6 @@ function save(table, block, pot) {
   saveStored(keyOf(table, block), pot && !isIdle(pot) ? pot : undefined);
 }
 
-/** A block as the heat rules read it: { id, state(name) }, or undefined. */
-function view(block) {
-  if (!block) return undefined;
-  const permutation = block.permutation;
-  return { id: block.typeId, state: (name) => permutation.getState(name) };
-}
-
-function below(block, steps) {
-  try {
-    return block.below(steps);
-  } catch {
-    return undefined; // outside the world or an unloaded chunk
-  }
-}
-
 function heated(table, block) {
   return isHeated(table.heat, view(below(block, 1)), view(below(block, 2)));
 }
@@ -77,11 +73,6 @@ function setSupport(table, block, value) {
   const permutation = block.permutation;
   if (permutation.getState(table.support_state) === value) return;
   block.setPermutation(permutation.withState(table.support_state, value));
-}
-
-function facingOf(block) {
-  const facing = block.permutation.getState("minecraft:cardinal_direction");
-  return typeof facing === "string" ? facing : "north";
 }
 
 function setHeld(equippable, held, amount) {

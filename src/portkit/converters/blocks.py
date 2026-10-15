@@ -309,7 +309,7 @@ def _convert_facing_block(
 ) -> None:
     """One bone per facing, shown by the placement_direction state.
 
-    ``station`` (a :class:`portkit.converters.stations.FacingBlock`) is a block
+    ``station`` (a :class:`portkit.converters.station_kit.FacingBlock`) is a block
     whose placement rule and shape the mod's code sets, read and cited there:
     its trait offset and collision/selection box go into the definition.
     """
@@ -617,7 +617,7 @@ _SLICE_KEY = "portkit_slice"
 def _slice(elements: list, textures: dict, sliced: tuple) -> tuple[list | None, str]:
     """``elements`` with every face that draws ``sliced``'s Java texture over
     its uv drawing the derived texture over the new uv instead
-    (:attr:`portkit.converters.stations.FacingBlock.slices`); None and why when
+    (:attr:`portkit.converters.station_kit.FacingBlock.slices`); None and why when
     a face draws that texture over any other part (it can't be redrawn)."""
     java_ref, _, uv_from, uv_to = sliced
     out = []
@@ -854,7 +854,7 @@ def _overlay_pieces(element: dict, values: tuple, offsets: dict) -> tuple[list |
 
 def _overlay_parts(mod: SourceMod, result: ConversionResult, overlay, values: tuple, uvlock: bool,
                    textures: dict) -> tuple[list | None, str]:
-    """The bones of a station's overlay (:class:`portkit.converters.stations.Overlay`),
+    """The bones of a station's overlay (:class:`portkit.converters.station_kit.Overlay`),
     as (bone, value, facings, turn, elements), or None and why.
 
     Each element goes to the value whose block it lies in (``overlay.offsets``,
@@ -1461,7 +1461,7 @@ def convert(mod: SourceMod, stations: dict | None = None, experiments: frozenset
     (``portkit convert --experiment``); only :data:`UPCOMING_CREATOR_FEATURES`
     changes anything here (block containers, #179).
 
-    ``stations`` maps blockstate name -> :class:`portkit.converters.stations.FacingBlock`
+    ``stations`` maps blockstate name -> :class:`portkit.converters.station_kit.FacingBlock`
     for blocks a station runtime makes work (#177). Such a block's facing-only
     variants convert with the placement rule and shape cited there; any other
     block with facing-only variants stays residue, since which way its facing
@@ -3085,9 +3085,9 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
     if reading.toggle:
         # The fixed toggle runtime flips it on use (toggle_table); the block
         # carries its custom component, read from format 1.21.90.
-        from . import stations
+        from .station_kit import SCRIPT_FORMAT
         components[toggle_component(ns)] = {}
-        fmt = stations.SCRIPT_FORMAT
+        fmt = SCRIPT_FORMAT
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = {"format_version": fmt, "minecraft:block": block}
     extra_states = sorted(set(reading.states or ()) - {"facing", *bools})
@@ -3212,7 +3212,7 @@ def _toggle_table(mod: SourceMod, result: ConversionResult, records: list[dict])
     """The toggle runtime's data table (block id -> the state using it flips)
     and the runtime itself, when any converted block's use toggle was read;
     stations.convert wires the table into scripts/portkit/main.js."""
-    from . import stations
+    from .station_kit import js_module, runtime_source
 
     blocks_ = {f"{mod.namespace}:{r['name']}": _state_name(mod.namespace, r["toggle"])
                for r in records if r["toggle"]}
@@ -3220,9 +3220,9 @@ def _toggle_table(mod: SourceMod, result: ConversionResult, records: list[dict])
         return
     header = ("// Read by the fixed runtime scripts/portkit/toggle.js (portkit/runtime). Each block's "
               "use flips the state named here, read from its useWithoutItem bytecode (see the notes).")
-    result.files[toggle_table_path(mod.namespace)] = stations._js_module(
+    result.files[toggle_table_path(mod.namespace)] = js_module(
         header, {"component": toggle_component(mod.namespace), "blocks": blocks_})
-    result.files[TOGGLE_RUNTIME] = stations.runtime_source("toggle.js")
+    result.files[TOGGLE_RUNTIME] = runtime_source("toggle.js")
 
 
 # --------------------------------------------------------------------------
@@ -3891,9 +3891,9 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
     fmt = _BLOCK_FORMAT
     toggle = getattr(reading, "toggle", None) if bools else None
     if toggle:
-        from . import stations
+        from .station_kit import SCRIPT_FORMAT
         components[toggle_component(ns)] = {}
-        fmt = stations.SCRIPT_FORMAT
+        fmt = SCRIPT_FORMAT
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = {"format_version": fmt, "minecraft:block": block}
     drawn = {"facing"} if kind == "facing6" else {"face", "facing"}
