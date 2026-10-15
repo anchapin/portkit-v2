@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: 6-way facing and attach-face blocks convert, placement read per clicked face onto block_face / cardinal_direction / facing_direction
 
-- **Status:** proposed (PR #N); Alex decides the picks.
+- **Status:** proposed (PR #218); Alex decides the picks.
 - **Decision:** a `variants` blockstate whose only state is `facing` over all
   six directions (Java `DirectionalBlock` / `BlockStateProperties.FACING`), or
   `face` (floor/wall/ceiling) with a horizontal `facing`
@@ -88,7 +88,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   up/down, and the mapping does it anyway); a clicked-face-only reading without
   emulating vanilla FaceAttached (inherited placement is the common case);
   emulating canSurvive (needs the world); booleans in this PR (scope).
-- **Links:** PR #N; #212, #213, #215, #217; deco-mods spike gap 8.
+- **Links:** PR #218; #212, #213, #215, #217; deco-mods spike gap 8.
 
 ## 2026-10-14: a blockstate that draws waterlogged converts without it, and Bedrock holds the water through liquid_detection where getFluidState says the block holds water
 
