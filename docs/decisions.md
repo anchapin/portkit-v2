@@ -111,7 +111,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   used on it (needs #176 entities).
 - **Unverified in game:** `~LINEBREAK~` inside a form body, long `.lang`
   values, the form opening from `itemUse` on every platform.
-- **Links:** #182, #87, #122, #176.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
+- **Links:** #182, #87, #122, #176, PR #225.
 
 ## 2026-10-15: a `separate_transforms` item converts by its gui view, and a one-texture held 3D model ships as an attachable with a DEFAULT pose
 
