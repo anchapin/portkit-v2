@@ -115,6 +115,19 @@ option portkit has no cited default for can still be set when the jar's files
 use it, since your choice decides it. A misspelt option or an unknown mod is an
 error that lists the valid options; nothing is silently ignored.
 
+A few options are numbers a converted behaviour reads rather than switches.
+These are cited with their default and the range the mod's config accepts, and
+take a number in that range:
+
+```bash
+portkit convert farmersdelight.jar out/ --config farmersdelight.cuttingBoardFortuneBonus=0.25
+```
+
+(on Farmer's Delight 1.3.4 or Refabricated 3.6.28, each Fortune level on the
+cutting board's tool adds 0.25 to every chance result instead of the default
+0.1). A number outside the range is an error; Java would quietly clamp it or
+put the default back, depending on the loader.
+
 Several options can go in a file, JSON or TOML, passed with
 `--config-file` (settings given with `--config` win over it):
 

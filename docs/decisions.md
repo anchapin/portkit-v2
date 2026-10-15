@@ -27,6 +27,62 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: non-boolean mod config values are cited with their range and set with `--config <mod>.<option>=<number>`; out of range is an error
+
+- **Decision:** A mod config option that a converter reads as a number (not a
+  load condition) is cited in the `values` list of
+  `src/portkit/data/config_flag_defaults.json`, per mod and exact version:
+  type, default, the range the mod's config accepts, file/line/commit URL, what
+  Java does with an out-of-range entry, and what reads it. First and only
+  entry: Farmer's Delight `cuttingBoardFortuneBonus`, a double, default 0.1,
+  range 0.0-1.0, for NeoForge 1.3.4 (`Configuration.java` L84-85 at dd8b9b0,
+  `defineInRange`) and Refabricated 26.1-3.6.28 (L84-85 at a8cb49e, mlconfigs
+  `define(name, double, min, max)`). `portkit convert --config
+  farmersdelight.cuttingBoardFortuneBonus=0.25` (or the same in
+  `--config-file`) replaces the default; converters read it through
+  `LoadContext.config_value(mod, option)` (the setting, else the cited default
+  for the jar's version, else None), and the cutting board's data table
+  carries it as `fortune_bonus` (the runtime already multiplied it by the
+  tool's Fortune level, as `ChanceResult.rollOutput` does). The setting is
+  recorded like a flag (summary `config`, a note, `config-overrides.json` with
+  `condition: null` and the range, a `portkit report` row) and reads back with
+  `--config-file`. A number outside the cited range, a non-number for a value
+  option, or a number for a flag is a `ConfigError` (exit 2, nothing written);
+  an unknown name lists the value options with their ranges. A value written
+  `1`/`0` is the number for a value option (the written text is kept), still
+  true/false for a flag. The default conversion is unchanged byte for byte
+  (both FD corpus trees md5-identical; only the conversion note now states the
+  bonus and how to change it).
+- **Why:** #190 (from the cutting board pilot, 2026-10-13 entry below): the
+  bonus is a real gameplay number a Java server sets, and `--config` took
+  booleans only, so the conversion could only ship 0.1. Citing the range keeps
+  the same rule as flags: the value comes from the mod's source, never a guess.
+  Java's own handling of a bad entry differs by loader (NeoForge 1.21.1
+  `Range.correct` clamps to the nearer bound, ModConfigSpec.java L1045-1052 at
+  00c6a3f; Refabricated's `DoubleConfigValue.loadFromJson` puts the default
+  back, L22-40), so neither is "what Java does"; a user typing 1.5 has made a
+  mistake, and typos already fail loudly (2026-10-13 config overrides entry).
+- **Rejected:** clamping or resetting like one of the loaders (silently gives
+  output the user didn't ask for, and the two loaders disagree); a separate
+  `--config-value` option (one `--config` namespace, one record file, one
+  report table is simpler, and names can't collide: a value option is matched
+  before flags and a mismatched type is an error); uncited numeric options
+  (nothing would bound or document them); reading a user's real FD
+  `farmersdelight-common.toml` (same reason as for flags).
+- **Not done from #190:** moving the station runtimes to `@minecraft/server`
+  2.4.0 for `BlockCustomComponent.onBreak` (stored items dropped however the
+  block is destroyed). 2.4.0 is the first stable package with it (npm
+  @minecraft/server 2.4.0, published 2025-12-09: `onBreak?:
+  (BlockComponentBlockBreakEvent, ...)` in index.d.ts; 2.3.0 has neither), but
+  the 2026-10-13 entry gates the move on the in-game check of the 2.0.0 board,
+  which can't be run here. The in-game check itself (interact vs. placement,
+  sneak, spawn impulse, `%s` in messages, durability, geometry rotation,
+  `y_rotation_offset` 180) is still open, as is the list-ingredient narrowing
+  revisit (FD's cabinets are still residue: `minecraft:block/orientable`
+  parent).
+- **Status:** proposed.
+- **Links:** #190, #177, #185.
+
 ## 2026-10-15: vendored Bedrock schemas are refreshed from the npm package by `portkit schemas`, and 1.26.60 stays on beta.24 until the stable package is out
 
 - **Decision:** `portkit schemas check` compares each row of
@@ -2147,7 +2203,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   2.4.0), the block break sound for a stored block item with no recipe sound
   (scripts can't read a block's sound type), and `cuttingBoardFortuneBonus`
   overrides (a double; `--config` takes boolean flags only, so the cited
-  default 0.1 is used). Stored stacks keep id, count, name, lore, durability
+  default 0.1 is used). *(Superseded in part by the 2026-10-15
+  config values entry above: `--config
+  farmersdelight.cuttingBoardFortuneBonus=<0..1>` now sets it.)* Stored stacks keep id, count, name, lore, durability
   damage and enchantments; other item data is not kept while on the board.
 - **Scope:** runs only for the FD versions whose code was read (NeoForge 1.3.4
   @dd8b9b0, Refabricated 26.1-3.6.28 @a8cb49e); another version's cutting
