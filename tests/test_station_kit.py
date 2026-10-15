@@ -13,11 +13,21 @@ from portkit.pipeline import convert
 from test_cooking_pot import _pot_mod, reference  # noqa: F401  (fixture)
 
 RUNTIME = resources.files("portkit.runtime")
+# Adapter runtimes (adapters/<name>/runtime/, #245 pick 6a) ship in the same
+# scripts/portkit/ directory as the core runtime, so one name space for both.
+ADAPTER_RUNTIMES = [resources.files("portkit.adapters.waystones").joinpath("runtime")]
 _IMPORT = re.compile(r'from\s+"\./([^"]+)"')
 
 
+def _runtime_file(name: str):
+    for root in (RUNTIME, *ADAPTER_RUNTIMES):
+        if root.joinpath(name).is_file():
+            return root.joinpath(name)
+    raise FileNotFoundError(name)
+
+
 def _imports(name: str) -> set[str]:
-    return set(_IMPORT.findall(RUNTIME.joinpath(name).read_text(encoding="utf-8")))
+    return set(_IMPORT.findall(_runtime_file(name).read_text(encoding="utf-8")))
 
 
 def _closure(names) -> set[str]:

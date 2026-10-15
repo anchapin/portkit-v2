@@ -282,11 +282,15 @@ def test_agent_skips_every_runtime_residue_kind():
     import portkit.converters as converters
     from portkit.agent.residue import SKIP_KINDS
 
+    import portkit.adapters as adapters
+
     kinds = {}
-    for mod in pkgutil.iter_modules(converters.__path__):
-        module = importlib.import_module(f"portkit.converters.{mod.name}")
-        kind = getattr(module, "RESIDUE_KIND", None)
-        if isinstance(kind, str):
-            kinds[mod.name] = kind
+    # The core converters and every adapter module (Waystones' moved, #245).
+    for package in (converters, adapters):
+        for mod in pkgutil.walk_packages(package.__path__, f"{package.__name__}."):
+            module = importlib.import_module(mod.name)
+            kind = getattr(module, "RESIDUE_KIND", None)
+            if isinstance(kind, str):
+                kinds[mod.name] = kind
     assert {"station_recipe", "feast", "waystone"} <= set(kinds.values())
     assert {name: kind for name, kind in kinds.items() if kind not in SKIP_KINDS} == {}
