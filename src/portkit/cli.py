@@ -832,6 +832,96 @@ def cmd_corpus(args) -> int:
     return 1 if failed else 0
 
 
+SAMPLE_MANIFEST = Path(__file__).resolve().parents[2] / "fixtures" / "sample" / "mods.toml"
+
+
+def cmd_sample(args) -> int:
+    """``portkit sample build``: the random-sample manifest from Modrinth (#234)."""
+    from datetime import date
+
+    from . import sample
+
+    try:
+        entries, skipped = sample.build(args.count, args.licences)
+    except sample.SampleError as exc:
+        print(f"cannot build the sample: {exc}", file=sys.stderr)
+        return 1
+    today = date.today().isoformat()
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(sample.render(entries, args.count, args.licences, today))
+    for note in skipped:
+        print(f"skipped {note}")
+    print(f"sample written: {out} ({len(entries)} mods)")
+    return 0
+
+
+def cmd_gaps(args) -> int:
+    """``portkit gaps run|board``: the gap leaderboard over the sample (#234)."""
+    from . import corpus, gaps
+
+    if args.action == "run":
+        manifest = Path(args.manifest) if args.manifest else SAMPLE_MANIFEST
+        try:
+            mods = corpus.select(corpus.load(manifest), args.fixture or (), include_optional=True)
+            gaps.parse_shard(args.shard)
+        except (OSError, ValueError, corpus.CorpusError) as exc:
+            print(f"cannot read the sample: {exc}", file=sys.stderr)
+            return 2
+        mct_exe = None
+        if args.mct:
+            from .validate import mct
+
+            mct_exe = mct.find_mct()
+            if mct_exe is None:
+                print("note: --mct asked for, but `mct` is not on PATH; skipping it")
+        where = manifest.resolve()
+        label = str(where.relative_to(gaps_root())) if where.is_relative_to(gaps_root()) else str(manifest)
+        doc = gaps.run_shard(
+            mods, shard=args.shard, manifest=label,
+            fetch=lambda mod: corpus.fetch(mod)[0], timeout=args.timeout, mct_exe=mct_exe,
+        )
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(doc, indent=1) + "\n")
+        print(f"shard written: {out} ({len(doc['mods'])} mods)")
+        return 0
+
+    shards = []
+    for path in args.shards:
+        try:
+            shards.append(json.loads(Path(path).read_text()))
+        except (OSError, ValueError) as exc:
+            print(f"cannot read shard {path}: {exc}", file=sys.stderr)
+            return 2
+    previous = None
+    if args.previous:
+        prev_path = Path(args.previous)
+        if prev_path.is_file():
+            try:
+                previous = json.loads(prev_path.read_text())
+            except ValueError as exc:
+                print(f"note: previous leaderboard unreadable, no trend: {exc}")
+        else:
+            print(f"note: no previous leaderboard at {prev_path}; no trend this run")
+    try:
+        board = gaps.leaderboard(shards, previous)
+    except ValueError as exc:
+        print(f"cannot build the leaderboard: {exc}", file=sys.stderr)
+        return 2
+    Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.json).write_text(json.dumps(board, indent=1) + "\n")
+    md = gaps.render_markdown(board, top=args.top)
+    if args.md:
+        Path(args.md).write_text(md)
+    print(md if not args.md else f"leaderboard written: {args.json}, {args.md}")
+    return 0
+
+
+def gaps_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
 def _reference_sets(args):
     """The tag sets ``reference fetch|list`` works on: every pinned one, or the
     ones a given mod's loader and game version select (#160)."""
@@ -1151,6 +1241,32 @@ def main(argv=None) -> int:
     p.add_argument("--fixture", action="append", metavar="NAME",
                    help="only these mods, optional or not (repeatable)")
     p.set_defaults(func=cmd_corpus)
+
+    p = sub.add_parser("sample", help="build the random-sample manifest from Modrinth's most-downloaded mods (#234)")
+    p.add_argument("action", choices=["build"])
+    p.add_argument("--count", type=int, default=50, help="how many content mods to pin (default 50)")
+    p.add_argument("--licences", choices=["all", "open"], default="all",
+                   help="all: every licence (default, as the corpus); open: SPDX ids only, "
+                        "no LicenseRef-* (All Rights Reserved, custom)")
+    p.add_argument("--out", default=str(SAMPLE_MANIFEST), metavar="PATH",
+                   help="manifest to write (default fixtures/sample/mods.toml)")
+    p.set_defaults(func=cmd_sample)
+
+    p = sub.add_parser("gaps", help="convert the sample and rank residue reasons across it (#234)")
+    p.add_argument("action", choices=["run", "board"])
+    p.add_argument("shards", nargs="*", metavar="SHARD_JSON", help="board: the shard files to merge")
+    p.add_argument("--manifest", metavar="PATH", help="run: sample manifest (default fixtures/sample/mods.toml)")
+    p.add_argument("--shard", metavar="I/N", help="run: only every N-th mod starting at I (default 1/1)")
+    p.add_argument("--fixture", action="append", metavar="NAME", help="run: only these mods (repeatable)")
+    p.add_argument("--timeout", type=float, default=900.0, metavar="S",
+                   help="run: seconds per mod conversion before it counts as timed out (default 900)")
+    p.add_argument("--mct", action="store_true", help="run: also count mct findings per mod (report-only)")
+    p.add_argument("--out", default="gap-shard.json", metavar="PATH", help="run: shard file to write")
+    p.add_argument("--previous", metavar="PATH", help="board: the previous leaderboard JSON, for the trend")
+    p.add_argument("--json", default="gap-leaderboard.json", metavar="PATH", help="board: leaderboard JSON")
+    p.add_argument("--md", metavar="PATH", help="board: leaderboard markdown (default: print it)")
+    p.add_argument("--top", type=int, default=50, help="board: reasons shown in the markdown (default 50)")
+    p.set_defaults(func=cmd_gaps)
 
     p = sub.add_parser(
         "reference",
