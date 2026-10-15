@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: entities don't convert; spawn eggs and entity loot tables are `entity` residue carrying what the bytecode reads
 
-- **Status:** proposed, PR #TBD.
+- **Status:** proposed, PR #232.
 - **Decision:** a mod's entities still don't convert (#176). The two kinds of
   file that only work with an entity become `entity` residue (a new kind in
   the residue agent's `SKIP_KINDS`) instead of misleading item residue or
@@ -71,7 +71,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   to spawn); matching entity textures to entities by file name (a guess;
   textures/entity/ also holds block-entity art), left for a renderer-bytecode
   read.
-- **Links:** #176, #181, #87, #135, #56.
+- **Links:** #176, PR #232, #181, #87, #135, #56.
 
 ## 2026-10-15: Create's rotation-powered processing recipes are `machine_recipe` residue naming the machine; hand-used item application and sandpaper polishing are `code_recipe`
 
