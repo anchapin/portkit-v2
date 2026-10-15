@@ -36,7 +36,7 @@ jobs:
       SHARDS: 4
       PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.sample-cache
       PORTKIT_REFERENCE_CACHE: ${{ github.workspace }}/.reference-cache
-      MCT_FLAG: ${{ (github.event_name == 'schedule' || inputs.mct) && '--mct' || '' }}
+      MCT_FLAG: ${{ (github.event_name != 'workflow_dispatch' || inputs.mct) && '--mct' || '' }}
     steps:
       - uses: actions/checkout@v4
 
