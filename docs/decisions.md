@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: 6-way facing and attach-face blocks convert, placement read per clicked face onto block_face / cardinal_direction / facing_direction
 
-- **Status:** proposed (PR #218); Alex decides the picks.
+- **Status:** approved (Alex, 2026-10-14)
 - **Decision:** a `variants` blockstate whose only state is `facing` over all
   six directions (Java `DirectionalBlock` / `BlockStateProperties.FACING`), or
   `face` (floor/wall/ceiling) with a horizontal `facing`
