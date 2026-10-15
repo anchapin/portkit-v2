@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Alloy Forgery's forge recipes and forge data live in its adapter
 
-- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #NNN.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #249.
 - **Decision:** step 3 of the #245 migration. `converters/alloy_forge.py`
   moves unchanged to `src/portkit/adapters/alloy_forgery/forge.py`, and
   `adapters/alloy_forgery/__init__.py` registers it: `recipe_reasons` maps
