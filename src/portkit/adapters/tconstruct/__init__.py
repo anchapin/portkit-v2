@@ -7,6 +7,10 @@ tool recipes (tool building, modifiers, part builder, severing;
 from ``converters/recipes.py`` (#245 migration step 4); each reason is read
 from Tinkers' own code at the corpus pin, cited beside it. Its load-condition
 types are Mantle's (:mod:`portkit.adapters.mantle`).
+
+Its tools' pre-baked icons, display-only preset items and part items
+(:mod:`.prebake`, #122/#128) come through the ``convert`` and ``item_models``
+hooks.
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ from ...converters.recipes import (
     CODE_RECIPE, FLUID_RECIPE, MODULAR_TOOL, NO_BEDROCK_FLUID, NO_PER_STACK_TOOL,
 )
 from .. import Adapter
+from . import prebake
 
 
 def _tinkers(what: str) -> str:
@@ -199,6 +204,10 @@ CODE_RECIPES = {
 ADAPTER = Adapter(
     name="tconstruct",
     namespaces=frozenset({"tconstruct"}),
+    # Pre-baked creative-tab tool icons, display-only preset items and inert
+    # part items (#122, #128, PR #129): :mod:`.prebake`.
+    convert=prebake.convert,
+    item_models=prebake.item_models,
     recipe_reasons={
         **{t: (FLUID_RECIPE, r) for t, r in FLUID_RECIPES.items()},
         **{t: (MODULAR_TOOL, r) for t, r in MODULAR_TOOL_RECIPES.items()},

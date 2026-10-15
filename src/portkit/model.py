@@ -6,6 +6,16 @@ from pathlib import Path
 from typing import Any
 
 
+# Files several converters of one namespace may each contribute to; merge adds
+# them up instead of treating the second write as a collision (#129).
+_TEXTURE_INDEXES = ("textures/item_texture.json", "textures/terrain_texture.json")
+_LANGUAGES = "texts/languages.json"
+
+
+def _is_lang(path: str) -> bool:
+    return path.startswith("texts/") and path.endswith(".lang")
+
+
 @dataclass
 class SourceMod:
     """A parsed Java mod on disk."""
@@ -112,6 +122,34 @@ class ConversionResult:
         merged = ConversionResult(dict(self.files), list(self.unhandled), set(self.consumed))
         for path, value in other.files.items():
             first = merged.files.get(path)
+            if path in _TEXTURE_INDEXES and isinstance(first, dict) and isinstance(value, dict):
+                # Two converters adding keys to one texture index (the textures
+                # converter and an adapter's pre-baked icons, #129) add up. A key
+                # both define keeps the first: nothing re-points a texture.
+                combined = dict(first)
+                combined["texture_data"] = {
+                    **(value.get("texture_data") or {}),
+                    **(first.get("texture_data") or {}),
+                }
+                merged.files[path] = combined
+                continue
+            if _is_lang(path) and isinstance(first, str) and isinstance(value, str):
+                # Two converters naming things in one locale (the lang converter
+                # and an adapter's item names, #129): one file, every line,
+                # sorted as the lang converter sorts. A key both define keeps
+                # the first converter's line.
+                lines = {}
+                for text in (value, first):
+                    for line in text.splitlines():
+                        key, sep, _ = line.partition("=")
+                        if sep:
+                            lines[key] = line
+                merged.files[path] = "".join(f"{line}\n" for line in sorted(lines.values()))
+                continue
+            if path == _LANGUAGES and isinstance(first, list) and isinstance(value, list):
+                both = set(first) | set(value)
+                merged.files[path] = (["en_US"] if "en_US" in both else []) + sorted(both - {"en_US"})
+                continue
             if path in merged.files and first != value:
                 was, now = _declared(first), _declared(value)
                 if was is None or was != now:

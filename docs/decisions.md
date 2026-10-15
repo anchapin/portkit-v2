@@ -27,6 +27,47 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Display-only items are allowed when the visual is real and the behavior isn't portable
+
+- **Status:** approved (Alex, 2026-10-15); item policy approved by Alex in #128 on 2026-10-11.
+- **Decision:** portkit may ship an item that only looks right, when its
+  look comes from the mod's own assets and its behavior is Java code with no
+  Bedrock mapping. Such an item carries its icon, its name from the mod's lang
+  and an honest stack size, and nothing else (no mining speed, damage,
+  durability or enchantability), and the report says it is display-only and
+  that the behavior stays in Java. First use: the 1,160 baked Tinkers preset
+  tools; Tinkers' part items ship as plain inert items, like ingots.
+- **Why:** The visual is real data, and leaving it out loses coverage
+  without making anything more correct. Inventing stats would break the
+  no-fabrication rule (2026-10-09); saying "display-only" doesn't.
+- **Rejected:** Icons only, with no item (the first prototype): the art
+  ships but nothing in the game shows it. Functional tools: would need
+  Tinkers' stat formula, i.e. fabrication.
+- **Names (Alex, 2026-10-15):** every preset tool is named the way Tinkers
+  names that stack, read from source rather than kept plain. The tool
+  definition's display-name modules run in JSON list order, each given the
+  previous name (`ToolNameHook.ComposeMerger` L86-99; `ModuleHookMap.createMap`
+  L32-47, a `LinkedHashMultimap`): `material_name` (filter `all` /
+  `repairable`), `stat_types_name`, `fixed_material_name`,
+  `unique_material_name` (the item's own `.material.<ns>.<m>` key, ignoring
+  the incoming name) and `custom_material_name` (`material.<ns>.<m>.<suffix>`,
+  else the material name, in `item.<ns>.tool.format`), module names as
+  `TinkerTools#registerRecipeSerializers` registers them. A tool with no name
+  module gets the hook default (`ToolHooks` L134): the materials whose slot
+  stat type `canRepair`, which is `defaultStats instanceof
+  IRepairableMaterialStats` (`MaterialStatType` L35/L45), read per stat id
+  from the jar's stats classes (`adapters/tconstruct/stat_types.py`; Tinkers
+  3.12.1.231 @a5a03249). No hardcoded table. The 16 tools that had kept the
+  plain name (battlesign, broad_axe, cleaver, javelin, longbow, mattock,
+  melting_pan, minotaur_axe, pickadze, sledge_hammer, slime_boots,
+  slime_helmet, slime_leggings, slime_wings, vein_hammer, war_pick) now read
+  e.g. "Iron Broad Axe", "Cobalt Longbow", "Skeleton Slimeskull", "Magma
+  Elytra"; 435 of their 438 presets change, the other 3 are Slimelytra in
+  Java too. A rule the jar doesn't answer (no classes, an undeclared stat
+  type, an unknown module) still keeps the plain name and says why in the
+  report; none in Tinkers 3.12.1.231.
+- **Links:** #128 (Alex approved, 2026-10-11), PR #129.
+
 ## 2026-10-15: Farmer's Delight stations move into an adapter; the core names no mod
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #254.
