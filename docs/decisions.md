@@ -43,6 +43,29 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **Rejected:** Icons only, with no item (the first prototype): the art
   ships but nothing in the game shows it. Functional tools: would need
   Tinkers' stat formula, i.e. fabrication.
+- **Names (Alex, 2026-10-15):** every preset tool is named the way Tinkers
+  names that stack, read from source rather than kept plain. The tool
+  definition's display-name modules run in JSON list order, each given the
+  previous name (`ToolNameHook.ComposeMerger` L86-99; `ModuleHookMap.createMap`
+  L32-47, a `LinkedHashMultimap`): `material_name` (filter `all` /
+  `repairable`), `stat_types_name`, `fixed_material_name`,
+  `unique_material_name` (the item's own `.material.<ns>.<m>` key, ignoring
+  the incoming name) and `custom_material_name` (`material.<ns>.<m>.<suffix>`,
+  else the material name, in `item.<ns>.tool.format`), module names as
+  `TinkerTools#registerRecipeSerializers` registers them. A tool with no name
+  module gets the hook default (`ToolHooks` L134): the materials whose slot
+  stat type `canRepair`, which is `defaultStats instanceof
+  IRepairableMaterialStats` (`MaterialStatType` L35/L45), read per stat id
+  from the jar's stats classes (`adapters/tconstruct/stat_types.py`; Tinkers
+  3.12.1.231 @a5a03249). No hardcoded table. The 16 tools that had kept the
+  plain name (battlesign, broad_axe, cleaver, javelin, longbow, mattock,
+  melting_pan, minotaur_axe, pickadze, sledge_hammer, slime_boots,
+  slime_helmet, slime_leggings, slime_wings, vein_hammer, war_pick) now read
+  e.g. "Iron Broad Axe", "Cobalt Longbow", "Skeleton Slimeskull", "Magma
+  Elytra"; 435 of their 438 presets change, the other 3 are Slimelytra in
+  Java too. A rule the jar doesn't answer (no classes, an undeclared stat
+  type, an unknown module) still keeps the plain name and says why in the
+  report; none in Tinkers 3.12.1.231.
 - **Links:** #128 (Alex approved, 2026-10-11), PR #129.
 
 ## 2026-10-15: Farmer's Delight stations move into an adapter; the core names no mod
