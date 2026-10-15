@@ -1,9 +1,9 @@
 {
   "fixtures": {
     "alexs_mobs": {
-      "coverage": 20.3,
-      "files": 1102,
-      "residue": 4329,
+      "coverage": 26.4,
+      "files": 1107,
+      "residue": 3085,
       "errors": 0
     },
     "betterend": {

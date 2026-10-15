@@ -70,6 +70,15 @@ entry `scripts/portkit/main.js` that wires the two.
   `useWithoutItem` was read from bytecode to flip that boolean on every way
   through it (`portkit.blockcode.read_state_blocks`); the converter writes the
   table (`scripts/portkit/data/<namespace>_toggle.js`).
+- `book_core.js`: not a station: what one page of a guide book shows (#182):
+  title, text and the page's buttons as translation keys, back to its parent;
+  no imports.
+- `book.js`: its Bedrock binding (`world.afterEvents.itemUse` opens the book a
+  used item names at its root page; each page is a `@minecraft/server-ui`
+  `ActionFormData`). The converter writes the page table
+  (`scripts/portkit/data/<namespace>_books.js`) from a Citadel book's page
+  JSON, and the page text into the resource pack's `texts/*.lang`
+  (`portkit.converters.books`).
 - `station_storage.js`: helpers the bindings share (world dynamic property
   storage, stored stacks, giving and dropping items, sounds).
 

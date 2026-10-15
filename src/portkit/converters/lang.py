@@ -158,20 +158,42 @@ def _lines(entries: dict, namespace: str,
     return lines, code_strings, unknown
 
 
-def convert(mod: SourceMod, runtime_keys: set[str] | frozenset | None = None) -> ConversionResult:
+def _book_lines(bedrock: str, book_text: dict[str, dict[str, str]]) -> list[str]:
+    """The book page entries for one Bedrock locale: each page's text from the
+    Java locale folder that maps to it, else en_us (Citadel's fallback when the
+    game language has no file of its own, #182)."""
+    own = [java for java, mapped in sorted(_LOCALES.items()) if mapped == bedrock and java in book_text]
+    primary = book_text.get(_PRIMARY, {})
+    keys = set(primary)
+    for java in own:
+        keys |= set(book_text[java])
+    lines = []
+    for key in sorted(keys):
+        value = next((book_text[java][key] for java in own if key in book_text[java]), primary.get(key))
+        if value:
+            lines.append(f"{key}={_one_line(value)}")
+    return lines
+
+
+def convert(mod: SourceMod, runtime_keys: set[str] | frozenset | None = None,
+            book_text: dict[str, dict[str, str]] | None = None) -> ConversionResult:
     """``runtime_keys``: Java keys a station runtime of this namespace shows
     (:func:`portkit.converters.stations.station_lang_keys`); they ship under
-    their own name instead of counting as code strings."""
+    their own name instead of counting as code strings. ``book_text``: Java
+    locale -> {key: text} of the guide book pages the book viewer shows
+    (:func:`portkit.converters.books.lang_text`); every Bedrock locale the
+    pack ships, and every one a book folder maps to, gets them."""
     result = ConversionResult()
     runtime_keys = frozenset(runtime_keys or ())
+    book_text = book_text or {}
     src = mod.assets / "lang"
-    if not src.is_dir():
+    if not src.is_dir() and not book_text:
         return result
 
     converted: dict[str, str] = {}
     primary_untranslated: set[str] = set()
 
-    for path in sorted(src.glob("*.json")):
+    for path in sorted(src.glob("*.json")) if src.is_dir() else []:
         locale = path.stem.lower()
         rel = result.claim(mod, path)
         bedrock = _LOCALES.get(locale)
@@ -228,6 +250,14 @@ def convert(mod: SourceMod, runtime_keys: set[str] | frozenset | None = None) ->
 
         if lines:
             converted[bedrock] = "\n".join(sorted(lines)) + "\n"
+
+    if book_text:
+        locales = set(converted) | {_LOCALES[j] for j in book_text if j in _LOCALES}
+        for bedrock in sorted(locales):
+            lines = _book_lines(bedrock, book_text)
+            if lines:
+                old = converted.get(bedrock, "").splitlines()
+                converted[bedrock] = "\n".join(sorted(set(old) | set(lines))) + "\n"
 
     for bedrock, text in converted.items():
         result.files[f"texts/{bedrock}.lang"] = text

@@ -27,6 +27,93 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: a Citadel guide book ships as a form viewer: page text verbatim in .lang, pages from the jar, opened by the item read from bytecode
+
+- **Decision:** A directory `assets/<ns>/book/<book>/` whose `root.json` is a
+  Citadel `BookPage` (keys `parent`/`text`/`title`/`linked_page_buttons`/
+  `entity_buttons`) converts to (`portkit.converters.books`):
+  **text** — each reachable page's text file, per Java locale folder, read as
+  Citadel's `GuiBasicBook.readInPageText` does (every line split on `" "` into
+  one run of words, so a line break in the file is a space; the word
+  `<NEWLINE>` exactly ends the line and leaves a blank one; a glued
+  `word<NEWLINE>` is printed as written, as in Java), written as one `.lang`
+  entry `portkit.book.<ns>.<book>.<page>` with `~LINEBREAK~` line breaks. The
+  words are untouched; the layout is the form's: a run of `<NEWLINE>`
+  (Citadel's room around pictures) is one blank line, empty words (double
+  spaces) are dropped, and the text is trimmed. Every Bedrock locale the pack
+  ships, plus every one a book folder maps to (`lang._LOCALES`), gets every
+  page: its own folder's text, else `en_us` (Citadel's `refreshSpacing`
+  fallback when the game language has no file);
+  **pages** — `scripts/portkit/data/<ns>_books.js`: every page reachable from
+  `root.json` through its buttons and parents, with its title key, text key,
+  parent and buttons in the order Java creates them (`linked_page_buttons`,
+  then `entity_buttons`, file order), labels by their own keys (`text` /
+  `hover_text`); a Java key goes through the lang converter's mapping when
+  the jar's `en_us` defines it, else stays the Java key (what Java's I18n
+  shows for a missing key);
+  **viewer** — fixed `portkit/runtime/book.js` + `book_core.js`
+  (`@minecraft/server` 2.0.0 `world.afterEvents.itemUse`,
+  `@minecraft/server-ui` 2.0.0 `ActionFormData`, UserBusy retried): using the
+  book's item opens the root page; a page shows title, text as body, one
+  button per link and, except on the root, a back button to the page's parent
+  (Citadel's previous-page arrow on a page's first sheet,
+  `onSwitchPage`), labelled with vanilla Bedrock's `gui.back` ("Back",
+  bedrock-samples v1.26.50.4 `texts/en_US.lang`), not invented text;
+  **item** — read from bytecode: a class extending
+  `com/github/alexthe666/citadel/client/gui/GuiBasicBook` names its book in
+  `getRootPage` (one string, or a static field set from one string in
+  `<clinit>`); an item class whose `use(Level, Player, InteractionHand)`
+  builds that screen with its `(ItemStack)` constructor (the root page),
+  directly or by invoking a method whose override in a subclass of the
+  invoked owner does (Alex's Mobs: `ItemAnimalDictionary#m_7203_ ->
+  ClientProxy#openBookGUI`), bound to its registered name through
+  `blockcode`'s registration reader. Without an answer from the classes, the
+  item named like the book directory, labelled **DEFAULT** in the note; with
+  neither, the whole book directory is `book` residue and no text ships.
+  Sources: Citadel 1.20 @8c09dce GuiBasicBook.java (refreshSpacing
+  L311-331, readInPageText L605-690, onSwitchPage L262-280) and BookPage.java
+  (Deserializer L101-136).
+- **Residue / reductions:** a locale folder Bedrock has no locale for
+  (Alex's Mobs `es_ar`, `vi_vn`) is `book` residue counting its files; a page
+  no button or parent reaches (Alex's Mobs `sea_bear.json`) is residue with
+  its text files; any other file in the book directory (pictures, a stray
+  text file) is residue. Noted per book, not carried: pictures (images, item,
+  entity and Tabula renders, recipe grids), entity pictures and hover
+  tooltips on index buttons, the two-page spread and pagination (a form
+  scrolls), and the rest of the item's Java use (statistics, the
+  ConsumeItem advancement trigger, opening a mob's page when used on it); a
+  button naming a page that isn't in the jar is left out and named in the
+  note.
+- **Measured (Alex's Mobs 1.22.9):** bound from bytecode to
+  `alexsmobs:animal_dictionary`; 90 pages, 15 locale folders; `book/`
+  unowned 1,439 files -> converted (1,244 files) + `book` residue 195 (es_ar 90,
+  vi_vn 88, sea_bear 16, a stray `pl_pl/devil's_hole_pupfish.txt`); pack +5
+  files (main.js, book.js, book_core.js, data table, sv_SE.lang, which the
+  mod's own strings didn't produce); behaviour pack engine floor 1.21.90 (the
+  script module). Every other corpus mod unchanged.
+- **Why:** the content is data and can be carried exactly; only the screen is
+  Java, so the same split as the station runtimes (generated table, fixed
+  script) applies. `.lang` text keeps the pack's file count flat (no file per
+  page; #122) and lets Bedrock show the player's own language. Reading the
+  item from bytecode follows Alex's rule (bytecode first, labelled DEFAULT
+  fallback).
+- **Rejected:** a JS module holding every locale's text (one large script
+  file, and the player's language would have to be guessed by script);
+  item custom components (`onUse`) — they need the item rewritten at format
+  1.21.90 for a viewer that `world.afterEvents.itemUse` gives without
+  touching the item; mapping `es_ar` to `es_MX` (a different locale, not
+  Citadel's fallback); rendering pictures as text placeholders (invented
+  content, #87).
+- **Not done (rest of #182):** Tinkers' Mantle books (`assets/tconstruct/book/**`,
+  5,494 files, many page types); Create Ponder (won't fix: animated scenes);
+  BetterEnd / Silent Gear book assets; pictures in the viewer (item icons as
+  button icons are possible later); opening a mob's page when the book is
+  used on it (needs #176 entities).
+- **Unverified in game:** `~LINEBREAK~` inside a form body, long `.lang`
+  values, the form opening from `itemUse` on every platform.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
+- **Links:** #182, #87, #122, #176, PR #225.
+
 ## 2026-10-15: a `separate_transforms` item converts by its gui view, and a one-texture held 3D model ships as an attachable with a DEFAULT pose
 
 - **Decision:** An item model with `"loader": "forge:separate_transforms"` or
