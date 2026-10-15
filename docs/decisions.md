@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-14: 6-way facing and attach-face blocks with booleans convert, combining the #218 placement with the #215 booleans
 
-- **Status:** proposed (PR #N); Alex decides the picks. Everything but item 7 combines rules Alex approved in #215 and #218.
+- **Status:** proposed (PR #219); Alex decides the picks. Everything but item 7 combines rules Alex approved in #215 and #218.
 - **Decision:** a blockstate drawing 6-way `facing` or `face` + `facing` and
   one to four booleans (variants naming every combination, or a multipart
   with exactly one part per combination; waterlogged dropped first, #217)
@@ -97,7 +97,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   unpresses it on a scheduled tick; inventing that is #87); one Bedrock
   permutation per cell for every component (correct but bigger); for item 7,
   keeping the file name and accepting mct's false positive.
-- **Links:** #215, #218, #213, #217, #87.
+- **Links:** PR #219; #215, #218, #213, #217, #87.
 
 ## 2026-10-14: 6-way facing and attach-face blocks convert, placement read per clicked face onto block_face / cardinal_direction / facing_direction
 
