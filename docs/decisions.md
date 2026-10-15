@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Mekanism machine recipes are `machine_recipe` residue naming the machine; `mek_data` crafting is `code_recipe`; the residue agent skips both
 
-- **Status:** proposed, PR #230.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #230.
 - **Decision:** a recipe of one of Mekanism's 26 machine types is
   `machine_recipe` residue with a reason naming the machine block that runs it
   and the Java it was read from (`converters/recipes.py` `_MACHINE_RECIPES`,
