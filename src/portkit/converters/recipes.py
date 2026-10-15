@@ -139,6 +139,126 @@ _KNOWN_UNSUPPORTED = {
     ),
 }
 
+# A recipe whose result Java computes in code, or that runs only at a station
+# that is Java code, is residue of its own kind (#180): nothing in its JSON
+# can become a fixed-result Bedrock recipe without inventing or dropping part
+# of what it does (#87), so the residue agent skips it (agent/residue.py
+# SKIP_KINDS) instead of writing a stand-in. docs/decisions.md, 2026-10-15.
+CODE_RECIPE = "code_recipe"
+
+# Keys any recipe may carry that say nothing about what it takes or makes:
+# vanilla's recipe-book fields (group, category, show_notification) and the
+# loaders' load conditions (decided before this point, conditions.py). A
+# modded recipe type whose JSON holds nothing else is a "special" recipe: its
+# serializer reads no ingredients and no result, so what it matches and what
+# it builds are the mod's Java code (vanilla's SimpleCraftingRecipeSerializer
+# reads "category" only; Supplementaries 1.20-3.1.43 ModRecipes registers its
+# 13 such types through it, Alex's Mobs 1.22.9 AMRecipeRegistry its 2, both
+# CustomRecipe subclasses, bytecode).
+_NO_DATA_KEYS = frozenset({
+    "type", "group", "category", "show_notification",
+    "conditions", "forge:conditions", "neoforge:conditions", "fabric:load_conditions",
+})
+
+# Modded types that do carry data, but whose station or result is code. Each
+# reason is read from the mod's own code at the corpus pin (sources in the
+# comments; docs/decisions.md, 2026-10-15). Bedrock side: its recipe types
+# are shaped, shapeless, furnace (one input), brewing and smithing (agent
+# reference topics, MicrosoftDocs/minecraft-creator @4186dc4), and the only
+# block components that open a screen are minecraft:crafting_table and the
+# experimental minecraft:block_entity container (vendored
+# @minecraft/bedrock-schemas 1.26.60 bp/blocks), so a GUI station has no
+# Bedrock screen to land in.
+_CODE_RECIPES = {
+    # BetterEnd 21.800.2 (quiqueck/BetterEnd @9c449fb7): InfusionRecipe codec
+    # L351-357 (input, result, catalysts, time default 1, group); InfusionRitual PEDESTALS_MAP
+    # L42-51 (eight pedestals 3 out), tick L128-172 (time ticks, then the
+    # result replaces the input); PedestalBlock#useItemOn L116-148 (one stack
+    # per pedestal), getStateForPlacement/updateShape L180-275 (shape follows
+    # the blocks above and below).
+    "betterend:infusion": (
+        "a BetterEnd infusion ritual: the input sits on betterend:infusion_pedestal, the eight "
+        "catalysts on pedestals three blocks out, and after `time` ticks the result replaces the "
+        "input (InfusionRitual#tick); the pedestals' item storage, neighbour-driven shapes and the "
+        "ritual are block-entity code, so there is no station on Bedrock to run it yet, and a "
+        "crafting stand-in would drop the pedestal layout and the time"
+    ),
+    # BCLib 21.800.2 (quiqueck/BCLib @80a081d4): AnvilMenuMixin#bcl_updateOutput
+    # L138-158 (vanilla anvil screen, anvil crafting level >= anvilLevel),
+    # AnvilRecipe#matches L182-195 (hammer in allowedTools), #craft L160-170
+    # (the hammer takes `damage`).
+    "bclib:smithing": (
+        "a BCLib anvil recipe: worked in the vanilla anvil screen with a hammer from "
+        "`allowedTools`, on an anvil whose crafting level is at least `anvilLevel`, the hammer "
+        "taking `damage` (AnvilMenuMixin#bcl_updateOutput, AnvilRecipe#craft); Bedrock has no anvil "
+        "recipe type and no block component that opens an anvil screen, so a Bedrock station "
+        "would be a new interaction (a decision, #180), and a crafting stand-in would drop the "
+        "hammer, level and damage"
+    ),
+    # BCLib AlloyingRecipe codec L228-238 (two ingredients, result, experience
+    # default 0, smelttime default 350); BetterEnd EndStoneSmelter#useWithoutItem L55-72 opens
+    # EndStoneSmelterBlockEntity's menu (two ingredient slots and fuel,
+    # createMenu L399).
+    "bclib:alloying": (
+        "a BCLib alloying recipe: two ingredients smelted with fuel in BetterEnd's End Stone "
+        "Smelter screen (EndStoneSmelter#useWithoutItem, EndStoneSmelterBlockEntity), with its "
+        "experience and smelt time; Bedrock's furnace recipes take one input and no block "
+        "component opens a furnace screen, so a Bedrock station would be a new interaction (a decision, "
+        "#180), and a furnace or crafting stand-in would drop the second input, fuel and time"
+    ),
+    # Mythic Metals 0.24.6+1.21 (jar bytecode, intermediary names):
+    # TidesingerCoralRecipe#craft copies the base onto the result item and sets
+    # MythicDataComponents.TIDESINGER from TidesingerPatternComponent.fromStack
+    # (the addition).
+    "mythicmetals:tidesinger_smithing_transform": (
+        "a Mythic Metals Tidesinger smithing recipe: the result keeps the base armour's data and "
+        "takes a coral pattern read from the coral addition (TidesingerCoralRecipe#craft, "
+        "MythicDataComponents.TIDESINGER); a Bedrock smithing_transform has no pattern to carry, "
+        "so the armour would lose what the coral decides"
+    ),
+    # MidasFoldingRecipe#matches/#craft: GOLD_FOLDED (GoldFoldedComponent)
+    # count on the sword, item switched to GILDED/ROYAL_MIDAS_GOLD_SWORD by it.
+    "mythicmetals:fold_midas_sword": (
+        "a Mythic Metals Midas folding recipe: each fold adds to a folded-gold count kept on the "
+        "sword (MythicDataComponents.GOLD_FOLDED), and that count decides whether it matches and "
+        "which sword comes out (MidasFoldingRecipe#matches/#craft); the JSON result is only the "
+        "item, the count is code"
+    ),
+    # UpgradeSmithingRecipe#matches (UpgradeComponent.hasUpgrade/hasFreeSlots),
+    # #craft (UpgradeComponent.addItem onto a copy of the base).
+    "mythicmetals:upgrading": (
+        "a Mythic Metals upgrade recipe: the addition is stored in the base item's upgrade slots "
+        "(UpgradeSmithingRecipe#craft, UpgradeComponent.addItem) and matches only while a slot is "
+        "free and that upgrade isn't there yet; a Bedrock smithing_transform would drop the stored "
+        "upgrade"
+    ),
+    # Supplementaries 1.20-3.1.43 SusRecipe#assemble (a CustomRecipe): the other
+    # grid stack goes into the result's BlockEntityTag "item".
+    "supplementaries:sus_crafting": (
+        "a Supplementaries suspicious-block recipe: the other item in the grid is stored in the "
+        "result's block data as its hidden loot (SusRecipe#assemble, BlockEntityTag.item); a "
+        "fixed-result Bedrock recipe would drop the hidden item"
+    ),
+}
+
+
+def code_recipe_reason(java_type: object, recipe: dict) -> str | None:
+    """Why a recipe of this modded type is code (#180), or None if it isn't
+    one this module knows to be: a type in :data:`_CODE_RECIPES`, or a
+    non-vanilla type whose JSON carries nothing but recipe-book fields and
+    load conditions (a "special" recipe)."""
+    if not isinstance(java_type, str):
+        return None
+    if java_type in _CODE_RECIPES:
+        return _CODE_RECIPES[java_type]
+    if java_type.startswith("minecraft:") or set(recipe) - _NO_DATA_KEYS:
+        return None
+    return (
+        f"a special recipe ({java_type!r}): its JSON holds no ingredient and no result, only its type, "
+        "so what it takes and what it makes are the mod's Java code; a Bedrock recipe would have to "
+        "invent both"
+    )
+
 # Convention tags that name exactly one vanilla item. Both loaders ship these
 # (Forge under forge:, Fabric and NeoForge under c:) and a mod using one means
 # the single vanilla item in practice. Anything not here stays residue: a tag
@@ -714,6 +834,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             continue
         mapping = _SUPPORTED.get(java_type)
         if mapping is None:
+            code = code_recipe_reason(java_type, recipe)
+            if code is not None:
+                result.unhandled.append(Unhandled(rel, CODE_RECIPE, code))
+                continue
             why = _KNOWN_UNSUPPORTED.get(
                 java_type, f"unsupported recipe type {java_type!r}"
             )

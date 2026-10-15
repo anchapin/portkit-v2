@@ -109,6 +109,8 @@ SKIP_KINDS = {
               "agent's tools don't write; the reason says what the converter could not state exactly"),
     "waystone": ("a waystone's loot table is wired by the waystone runtime (#178), which the agent's tools "
                  "don't write; the reason says what the converter could not state exactly"),
+    "code_recipe": ("the recipe's result or station is the mod's Java code (#180); a Bedrock recipe "
+                    "would have to invent or drop part of it, and the reason says which"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }

@@ -42,7 +42,11 @@ mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶
    loot tables whose load conditions don't hold with only this mod loaded
    (another mod's compat content, a config flag off by default) or can't be
    decided are `conditional_recipe` / `conditional_loot_table` residue
-   (`conditions.py`, #183); mod config flags are decided at their defaults,
+   (`conditions.py`, #183). A modded recipe whose JSON holds only its type
+   (a "special" recipe built in code), or one of the typed recipes whose
+   station or result is code (BetterEnd infusion, BCLib anvil and alloying,
+   Mythic Metals smithing variants, Supplementaries suspicious blocks), is
+   `code_recipe` residue naming the code, and the agent skips it (#180); mod config flags are decided at their defaults,
    cited in `data/config_flag_defaults.json`, unless the user sets them
    (`portkit convert --config`, recorded in `config-overrides.json`); number
    options a converter reads (Farmer's Delight's `cuttingBoardFortuneBonus`)
