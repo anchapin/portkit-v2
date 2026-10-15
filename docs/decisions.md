@@ -27,6 +27,70 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Alloy Forgery forging recipes are `machine_recipe` residue carrying the recipe's rules; forge definitions, tiers, fuels and its recipe tags are `machine_data`
+
+- **Status:** proposed (PR (this)).
+- **Decision:** first slice of #171, precise residue only; no pack output
+  changes. (1) An `alloy_forgery:forging` recipe is `machine_recipe` residue
+  (the kind the residue agent already skips, #172/#173) instead of `recipe`,
+  and its reason is built from the recipe file by `converters/alloy_forge.py`
+  `forging_reason`: the counted inputs (`N x item` / `N x #tag`, count
+  default 1 as `CountedIngredient`; "N different inputs" past five), the
+  output, `min_forge_tier` (`ForgeControllerBlockEntity#canSmelt` L317),
+  `fuel_per_tick` times the tier's speed multiplier (`#tick` L279-288), and
+  each tier override read as `AlloyForgeRecipe$OverrideRange#fromString` does
+  (`"3+"` tier 3 and up, `"1 to 3"`, `"2"`; `#getResult`). The forge is
+  described from `ForgeRegistry#registerDefinition` L40-50 (controller
+  `alloy_forgery:<material path>_forge_controller`, block and item) and
+  `ForgeControllerBlockEntity#verifyMultiblock` L420-430 (a multiblock of
+  the material), and the forges the recipe's own namespace defines are
+  named. A field not in the shape
+  Alloy Forgery reads is left out of the reason, never guessed. (2) The forge
+  data Alloy Forgery reads from other mods is claimed as a new skipped kind,
+  `machine_data`, with what each file sets: forge definitions in
+  `alloy_forges/` (the pre-2.5 format) and `alloy_forge/forge/`, forge tiers
+  (`alloy_forge/tier/`), tier bindings (`alloy_forge/tier_binding/`), fuels
+  (`alloy_forge_fuels/`, each item with its fuel and return item), and, in
+  the `alloy_forgery` namespace, its two recipe tags
+  `blacklisted_blasting_recipes` / `blacklisted_increased_blasting_outputs`
+  (under `tags/recipe/`, where `RecipeTagLoader` L29 reads them).
+  A forge definition outside the jar's declared mod ids says Java never loads
+  it (owo-lib `ModDataLoader#load` reads `data/<mod id>/<subdir>` under each
+  mod's own id only).
+- **Why:** the 62 forging recipes were agent-workable `recipe` residue,
+  inviting the crafting stand-in 2026-10-12 rejected, and their reason said
+  nothing about the recipe. Mythic Metals' forge data was unowned with "no
+  converter claims yet". Correction to 2026-10-12: Mythic Metals 0.24.6 does
+  define a forge, `mythicmetals:adamantite_forge` (material
+  `mythicmetals:adamantite_block`, `tier` 3, `speed_multiplier` 3.0,
+  `fuel_capacity` 192000, the pre-2.5 format) and fuels (morkite 750,
+  morkite block 8000), plus the controller's blockstate, models, textures
+  and loot table under `alloy_forgery`. Which tier that forge runs at depends
+  on the Alloy Forgery version, so the reason states both: 2.4.1 (tag
+  `2.4.1+1.21` @ed938ab, the minimum Mythic Metals' fabric.mod.json requires)
+  reads tier/speed/capacity from the file (`ForgeDefinition#loadAndEnqueue`
+  L68-88, folder from `ForgeRegistry$Loader` L87); 2.5.0 (branch `1.21.1`
+  @48e309f) still loads `alloy_forges/` but builds the `ForgeTier` and drops
+  it (`ForgeDefinition#loadAndEnqueue` L44-58), so an unbound forge runs at
+  `ForgeTier.DEFAULT` (tier 1, speed 1, capacity 48000;
+  `ForgeControllerBlockEntity#forgeTier` L88-94, `ForgeTier` L10). The two
+  recipe tags only steer Alloy Forgery's copying of blasting recipes into its
+  forges (`BlastFurnaceRecipeAdapter#addRecipes` L50, L66-71); vanilla blast
+  furnaces still run those recipes, so on Bedrock they change nothing.
+- **Measured:** Mythic Metals `recipe` 69 -> 7, `machine_recipe` 0 -> 62,
+  `unowned` 977 -> 974 files, `machine_data` 0 -> 3; agent-workable residue
+  -65. Pack trees md5-identical on all 13 corpus mods and the 7 deco mods;
+  coverage, residue totals and the baseline unchanged; mct 0 errors on the 13.
+- **Rejected / left for Alex (#171):** converting the controller block
+  (`alloy_forgery:adamantite_block_forge_controller`, facing x lit, still
+  `block` residue for its `block/orientable` parent) as a decorative shell
+  (a forge that can't forge; #172's display-shell precedent); multi-jar
+  conversion of Alloy Forgery's own jar (its 6 forges, 4 tiers, fuels and its
+  own forge recipes); a scripted forge runtime (fuel, tier, multiblock check,
+  overrides); a crafting-table or furnace stand-in (2026-10-12). Each needs
+  Alex's call.
+- **Links:** #171, #87, #170, #172, #173.
+
 ## 2026-10-15: entities don't convert; spawn eggs and entity loot tables are `entity` residue carrying what the bytecode reads
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #232.
@@ -2902,6 +2966,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-12: item-list ingredients convert one recipe per item; Alloy Forgery forging recipes stay residue
 
+- **Corrected 2026-10-15** (Alloy Forgery forge data entry): Mythic Metals does
+  ship a forge definition (`data/mythicmetals/alloy_forges/adamantite_forge.json`)
+  and forge fuels; forging recipes are now `machine_recipe` residue.
 - **Decision:** an ingredient written as a JSON list of items (Java's "any of
   these", e.g. Mythic Metals' `[{"item": "mythicmetals:deepslate_adamantite_ore"},
   {"item": "mythicmetals:adamantite_ore"}]`, or bare id strings) is a membership
