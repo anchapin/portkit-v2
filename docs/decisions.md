@@ -27,6 +27,30 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Alloy Forgery's forge recipes and forge data live in its adapter
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #249.
+- **Decision:** step 3 of the #245 migration. `converters/alloy_forge.py`
+  moves unchanged to `src/portkit/adapters/alloy_forgery/forge.py`, and
+  `adapters/alloy_forgery/__init__.py` registers it: `recipe_reasons` maps
+  `alloy_forgery:forging` to `machine_recipe` with a computed reason
+  (`forging_reason(recipe, forge_names(mod))`, the reason the 2026-10-15
+  #171 entry describes), and `convert` claims the forge data as
+  `machine_data`. `recipes.py` no longer imports Alloy Forgery and drops its
+  `FORGING` branch; `alloy_forge.convert` leaves `CONVERTERS`, and
+  `adapter_data` runs the adapter's `convert` in the same place (right after
+  the entity converter). `forge_names` is now read per forging recipe instead
+  of once per namespace (same value; Mythic Metals has 62 such recipes and
+  one forge file). `ADAPTERS` is `(alloy_forgery, mantle, mekanism)`. The
+  allowlist drops by the 2 literals that moved (309 -> 307). The tests move
+  to `tests/adapters/alloy_forgery/`. All 13 corpus and 7 deco conversions are
+  md5-identical to develop.
+- **Why:** Alloy Forgery is a separate mod only Mythic Metals' data uses in
+  the corpus; it was the last converter module importing into `recipes.py`.
+- **Rejected:** caching `forge_names` per mod inside the adapter (state in a
+  pure converter for no measurable gain).
+- **Links:** #245, #171, `docs/adapter-audit-2026-10-15.md` section 7 step 3.
+
 ## 2026-10-15: Mantle's and Mekanism's load-condition types live in their adapters
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #248.
