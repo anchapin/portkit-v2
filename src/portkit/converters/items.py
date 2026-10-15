@@ -529,13 +529,20 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
             result.unhandled.append(Unhandled(rel, "item", f"{layers[0]} is not a texture reference"))
             continue
         ref_ns, _, rel_path = reference.rpartition(":")
-        if ref_ns and ref_ns != mod.namespace:
+        if models.is_vanilla(reference, mod.namespace):
+            # Bedrock's own copy of the vanilla icon (models.vanilla_texture);
+            # the pipeline adds the atlas entry a <ns>:vanilla/... key needs.
+            icon, _, why = models.vanilla_texture(reference, mod.namespace, "item")
+            if icon is None:
+                result.unhandled.append(Unhandled(rel, "item", why.replace("model points at", "icon")))
+                continue
+        elif ref_ns and ref_ns != mod.namespace:
             result.unhandled.append(
                 Unhandled(rel, "item", f"icon {reference!r} is a texture from another namespace")
             )
             continue
-
-        icon, why = models.texture_shortname(reference, mod.namespace)
+        else:
+            icon, why = models.texture_shortname(reference, mod.namespace)
         if icon is None:
             result.unhandled.append(Unhandled(rel, "item", why))
             continue

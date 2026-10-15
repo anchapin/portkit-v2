@@ -1078,6 +1078,16 @@ def _palisade_definition(namespace: str, name: str, geometry: str, instances: di
     }
 
 
+def _texture(mod: SourceMod, reference: str) -> tuple[str | None, str]:
+    """The terrain key a face wearing this Java texture names: the mod's own,
+    or Bedrock's copy of a vanilla one (models.vanilla_texture; the pipeline
+    adds the atlas entry a ``<ns>:vanilla/...`` key needs)."""
+    if models.is_vanilla(reference, mod.namespace):
+        key, _, why = models.vanilla_texture(reference, mod.namespace, "terrain")
+        return key, why
+    return models.texture_shortname(reference, mod.namespace)
+
+
 def _instances(
     mod: SourceMod, by_face: dict[str, str], textures: dict, tag_faces: bool,
     extra: dict[str, dict] | None = None,
@@ -1095,7 +1105,7 @@ def _instances(
         reference = textures.get(texture_key)
         if not isinstance(reference, str):
             return None, f"model has no {texture_key!r} texture"
-        shortname, why = models.texture_shortname(reference, mod.namespace)
+        shortname, why = _texture(mod, reference)
         if shortname is None:
             return None, why
         instances[face] = {"texture": shortname}
@@ -1196,7 +1206,7 @@ def _model_block(
         reference = textures.get(texture_key)
         if not isinstance(reference, str):
             return None, None, None, f"model has no {texture_key!r} texture"
-        key, why = models.texture_shortname(reference, mod.namespace)
+        key, why = _texture(mod, reference)
         if key is None:
             return None, None, None, why
         instances[face] = {"texture": key}
@@ -1450,6 +1460,9 @@ def _axis_block_definition(
 def _see_through(mod, reference: str) -> bool:
     """Does this Java texture have holes? Unreadable counts as yes: alpha_test
     on an opaque texture looks the same, opaque on a cutout one shows black."""
+    if models.is_vanilla(reference, mod.namespace):
+        # Bedrock's own copy, whose pixels the jar doesn't hold: unread.
+        return True
     ns, _, path = reference.partition(":") if ":" in reference else (mod.namespace, "", reference)
     png = mod.root / "assets" / ns / "textures" / f"{path}.png"
     if not png.is_file():

@@ -27,6 +27,70 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-14: a vanilla texture reference names Bedrock's own vanilla texture of the same file name; no art is copied
+
+- **Status:** proposed (PR #220); Alex decides the picks.
+- **Decision:** a mod model or item icon that borrows a vanilla texture
+  (`minecraft:block/iron_block`, bare `block/stone`, pre-1.13
+  `blocks/planks_oak`, `minecraft:item/stick`) points at the texture the
+  vanilla Bedrock resource pack already ships, through an index of
+  bedrock-samples' vanilla `terrain_texture.json` / `item_texture.json` /
+  `flipbook_textures.json` (short names and file paths only) that
+  `portkit reference fetch` derives and caches (sha256-pinned, never vendored,
+  #24). The pack never carries Mojang art.
+  1. **Same file name** (pick 1): Java's `block/<name>` (`item/<name>`) is
+     Bedrock's `textures/blocks/<name>` (`textures/items/<name>`). Where a
+     plain one-file vanilla short name shows exactly that file, the material
+     instance / icon names it (the same-named one if there is one, else the
+     flipbook's own tile for an animated file, else the first alphabetically;
+     they all show the same file). Bedrock merges a pack's atlases with
+     vanilla's, so the name resolves without an entry of ours.
+  2. **Renamed textures stay residue** (pick 2): a Java name that is a
+     vanilla short name showing a file of another name (`oak_planks` ->
+     `textures/blocks/planks_oak`) is not mapped; the residue says which file
+     the short name shows. (`models.MAP_RENAMED` flips it.)
+  3. **A file only inside a variant set** (pick 3): where no one-file short
+     name shows the file (`barrel_top`, `diamond_sword`), the pack's atlas gets
+     an entry `<ns>:vanilla/<block|item>/<name>` -> the vanilla file path,
+     which the vanilla pack below serves. A mod's own keys flatten `/`, so
+     these keys never collide with them. Entries that dress their file (an
+     overlay or tint colour) are not named directly; the file gets our entry.
+  4. **Animated files** only through vanilla's own flipbook tile; a
+     vanilla-animated file with no such short name stays residue (an entry of
+     ours would show the whole strip).
+  5. **Render method** (pick 4): a vanilla texture on a custom shape gets
+     `alpha_test`, the existing "unreadable counts as having holes" rule, since
+     the jar holds none of vanilla's pixels. Full cubes keep no render method,
+     as for mod textures.
+  6. **Version** (pick 5): names are judged against the pinned Bedrock index
+     alone, whatever game version the mod targets.
+  7. **Tint** (pick 6): a face with `tintindex` keeps today's rule for mod
+     textures (no tint applied); vanilla's grayscale textures (leaves, grass)
+     will show grey there.
+  8. Anything else stays residue, labelled "a vanilla texture: ...": no Bedrock
+     file of that name, a short name that is a set of variants, a texture
+     outside `block/` and `item/`, or no index cached (run the fetch). Nothing
+     is substituted.
+  Vanilla parent models (`block/cross`, `block/button`, `block/orientable`,
+  ...) are a separate gap and unchanged here.
+- **Why:** the file name is the one identity Java and Bedrock share that a
+  converter can check; Mojang named Bedrock's files after the same textures.
+  Of 564 Java 1.21.1 textures with a same-named one-file Bedrock short name,
+  510 are pixel-identical to bedrock-samples' file (the rest are edition art
+  differences: cactus, fern, water, grindstone, piston side); checked locally
+  against the 1.21.1 client jar, nothing kept. Short names are Bedrock's own
+  labels and do not always mean Java's texture: Bedrock's `piston_top` shows
+  `piston_inner`, the `command_block_*` short names show `*_mipmap` files of
+  another size. Referencing vanilla by short name or path is how packs layer
+  on vanilla (bedrock-wiki concepts/overwriting-assets; Mojang's own
+  `minecraft:red_shrub` block names the vanilla short name `red_shrub`;
+  minecraft:material_instances `texture` and minecraft:icon `textures` name
+  atlas keys, MicrosoftDocs minecraft-creator).
+- **Rejected:** copying vanilla art (Mojang's, EULA); a hand-written
+  Java->Bedrock name table (fabrication, #87); nearest-name or nearest-look
+  matching (substitution).
+- **Links:** PR #220; #24, #87, #124.
+
 ## 2026-10-14: 6-way facing and attach-face blocks with booleans convert, combining the #218 placement with the #215 booleans
 
 - **Status:** approved (Alex, 2026-10-14)

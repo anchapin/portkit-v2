@@ -850,8 +850,9 @@ def _reference_sets(args):
 def cmd_reference(args) -> int:
     """``portkit reference fetch|list``: reference data fetched on demand: Mojang's
     vanilla sound list (#124), the loaders' and vanilla's item tags (#160),
-    the vanilla block model templates stairs, slabs and walls are built from and
-    vanilla's campfire recipes the Farmer's Delight stove cooks (#177)."""
+    the vanilla block model templates stairs, slabs and walls are built from,
+    vanilla's campfire recipes the Farmer's Delight stove cooks (#177) and
+    Bedrock's vanilla texture atlases (short names and file paths only)."""
     from . import data
     from .data import tags
 
@@ -862,12 +863,15 @@ def cmd_reference(args) -> int:
         print(f"{args.mod}: loader {meta.loader or '?'}, minecraft {meta.minecraft or '?'} -> tag data: {chosen}")
     from .data import models as model_data
     from .data import recipes as recipe_data
+    from .data import vanilla_textures
 
     if args.action == "list":
         state = "cached" if data.cached_sounds(cache) else "missing"
         print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
         state = "cached" if model_data.cached(cache) else "missing"
         print(f"{model_data.SET_ID:28} {model_data.LABEL} {state}")
+        state = "cached" if vanilla_textures.cached(cache) else "missing"
+        print(f"{vanilla_textures.SET_ID:28} {vanilla_textures.LABEL} {state}")
         for recipe_set in recipe_data.SETS:
             state = "cached" if recipe_data.cached(recipe_set, cache) else "missing"
             print(f"{recipe_set.id:28} {recipe_set.label} {state}")
@@ -885,6 +889,12 @@ def cmd_reference(args) -> int:
     try:
         path, downloaded = model_data.fetch(cache)
         print(f"{'fetched' if downloaded else 'cached ':7} {model_data.SET_ID} -> {path}")
+    except data.ReferenceDataError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        failed += 1
+    try:
+        path, downloaded = vanilla_textures.fetch(cache)
+        print(f"{'fetched' if downloaded else 'cached ':7} {vanilla_textures.SET_ID} -> {path}")
     except data.ReferenceDataError as exc:
         print(f"FAILED {exc}", file=sys.stderr)
         failed += 1

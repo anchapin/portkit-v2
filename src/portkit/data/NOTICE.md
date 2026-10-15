@@ -20,6 +20,23 @@ saying to run the fetch. `python scripts/build_vanilla_sounds.py` prints the
 sha256 to pin after bumping the commit (`--check` says whether the pin is
 current).
 
+## Bedrock vanilla texture atlases
+
+Nothing from these is stored here or shipped in the package either, and no
+texture art is fetched at all. `portkit reference fetch` downloads Bedrock's
+vanilla `resource_pack/textures/terrain_texture.json`, `item_texture.json` and
+`flipbook_textures.json` from
+[Mojang/bedrock-samples](https://github.com/Mojang/bedrock-samples) at the same
+pinned commit as the sound list, keeps only each short name and the file paths it
+points at (plus which files vanilla animates), checks the result against the
+sha256 pinned in `portkit/data/vanilla_textures.py` and caches it. That data is
+(c) Mojang AB, all rights reserved; use is subject to the
+[Minecraft EULA](https://www.minecraft.net/en-us/eula) (#24). The converter uses
+it to point a mod's vanilla texture references at the textures the vanilla
+resource pack already ships (`python -m portkit.data.vanilla_textures --pin`
+prints the sha256 to pin after bumping the commit). Without it, vanilla texture
+references stay residue with a note saying to run the fetch.
+
 ## Loader and vanilla item tags (#160)
 
 Nothing from these is stored here or shipped in the package either.

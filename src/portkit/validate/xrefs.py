@@ -69,6 +69,15 @@ class Index:
         if resource is not None:
             self.terrain = _texture_keys(resource, "terrain_texture.json")
             self.items_atlas = _texture_keys(resource, "item_texture.json")
+        # Bedrock merges the pack's atlases with vanilla's, so a vanilla short
+        # name (converters.models.vanilla_texture) is defined too, when the
+        # fetched index says so.
+        from ..data import vanilla_textures
+
+        vanilla = vanilla_textures.index()
+        if vanilla is not None:
+            self.terrain |= vanilla.short_names("terrain")
+            self.items_atlas |= vanilla.short_names("item")
 
         if behavior is None:
             return

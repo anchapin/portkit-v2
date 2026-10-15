@@ -92,11 +92,13 @@ def test_a_model_that_is_not_a_cube_is_refused(tmp_path, parent):
     assert "not a full cube" in result.unhandled[0].reason
 
 
-def test_a_vanilla_texture_reference_is_refused(tmp_path):
+def test_a_vanilla_texture_reference_is_refused_without_the_vanilla_index(tmp_path):
+    """With the fetched index it maps (tests/test_vanilla_textures.py)."""
     model = {"parent": "minecraft:block/cube_all", "textures": {"all": "minecraft:block/iron_block"}}
     result = blocks.convert(build(tmp_path, CUBE, model))
     assert result.files == {}
-    assert "another namespace" in result.unhandled[0].reason
+    assert "a vanilla texture" in result.unhandled[0].reason
+    assert "portkit reference fetch" in result.unhandled[0].reason
 
 
 def test_a_missing_model_is_refused_not_guessed(tmp_path):
@@ -123,7 +125,7 @@ def test_the_fixture_converts_the_cubes_and_refuses_the_rest(tmp_path, fixtures_
     reasons = " ".join(u.reason for u in out.unhandled)
     assert "blockstate variant" in reasons
     assert "not a full cube" in reasons
-    assert "another namespace" in reasons
+    assert "a vanilla texture" in reasons
 
 
 AXIS = {
