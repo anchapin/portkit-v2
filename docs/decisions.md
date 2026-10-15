@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: entities don't convert; spawn eggs and entity loot tables are `entity` residue carrying what the bytecode reads
 
-- **Status:** proposed, PR #232.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #232.
 - **Decision:** a mod's entities still don't convert (#176). The two kinds of
   file that only work with an entity become `entity` residue (a new kind in
   the residue agent's `SKIP_KINDS`) instead of misleading item residue or
