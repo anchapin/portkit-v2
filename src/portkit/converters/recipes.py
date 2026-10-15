@@ -252,7 +252,9 @@ _CODE_RECIPES = {
 
 
 # A recipe that melts items into a mod's fluid, alloys fluids, or casts or
-# fills items from a fluid is residue of its own kind (#174). Bedrock add-ons
+# fills items from a fluid (mostly the mod's own; a few take vanilla lava or
+# water, still by the millibucket at a mod station) is residue of its own kind
+# (#174). Bedrock add-ons
 # can't define a fluid: the custom block component list has no fluid component
 # (learn.microsoft.com, Block Components Documentation, updated 2026-08-25),
 # and the Script API's only fluid surface is the cauldron-style
@@ -270,9 +272,10 @@ FLUID_RECIPE = "fluid_recipe"
 
 # What Bedrock lacks, said once at the end of every fluid recipe's reason.
 _NO_BEDROCK_FLUID = (
-    "Bedrock add-ons can't define a fluid (no fluid block component; the script fluid container "
-    "holds only water, lava, powder snow or potion), so there is no Bedrock form for the fluid or "
-    "the station, and an item-only stand-in would drop the fluid amounts and invent a step"
+    "Bedrock add-ons can't define a fluid or store a measured amount of one (no fluid block "
+    "component; the script fluid container holds only water, lava, powder snow or potion, as a "
+    "cauldron does), so a mod's fluid has no Bedrock form and the station that measures fluid in mB "
+    "has nothing to build on; an item-only stand-in would drop the fluid amounts and invent a step"
 )
 
 

@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: a mod's own fluids have no Bedrock form: fluid recipes are `fluid_recipe` residue and fluid-container buckets are `custom_fluid` residue; the residue agent skips both
 
-- **Status:** proposed, PR pending.
+- **Status:** proposed, PR #228.
 - **Decision:** Bedrock add-ons can't define a fluid. The custom block
   component list has no fluid component
   ([Block Components Documentation](https://learn.microsoft.com/en-us/minecraft/creator/reference/content/blockreference/examples/blockcomponents/blockcomponentslist),
@@ -65,9 +65,11 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   (Create's chocolate/honey buckets, Supplementaries' lumisene bucket) still
   converts as an ordinary item. Both kinds are in the residue agent's
   `SKIP_KINDS`.
-- **Why:** with no Bedrock fluid, every one of these recipes takes or makes
-  a millibucket amount of something Bedrock can't hold, at a station that is
-  block-entity code (multiblock tank, faucet, casting block, spout, drain).
+- **Why:** every one of these recipes takes or makes a millibucket amount of
+  fluid, mostly the mod's own (a few take vanilla lava or water, which
+  Bedrock has but can't store as an amount outside a cauldron), at a station
+  that is block-entity code (multiblock tank, faucet, casting block, spout,
+  drain).
   An item-only stand-in (ingot in, cast part out) would drop amounts,
   temperatures and cooling times and invent a step the mod doesn't have
   (#87); an icon for a bucket would be invented the same way. Naming the
