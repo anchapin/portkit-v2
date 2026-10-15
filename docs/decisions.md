@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Mantle's and Mekanism's load-condition types live in their adapters
 
-- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #NNN.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #248.
 - **Decision:** step 2 of the #245 migration. `mantle:tag_filled` and
   `mantle:tag_combination_filled` move from `conditions.py` to
   `src/portkit/adapters/mantle` (a library adapter, `library=True`: Mantle is
