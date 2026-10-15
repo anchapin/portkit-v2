@@ -109,11 +109,19 @@ tuple of `portkit/adapters/__init__.py`. An `Adapter` is a frozen dataclass of
 optional hooks, and the core asks the registry at a few seams: a load-condition
 type it doesn't evaluate itself (`conditions.LoadContext`), a recipe type with
 no Bedrock mapping (`recipes.convert`: residue kind and reason), and per-mod
-data (`converters.adapter_data`, run after the entity converter). The moves
-into adapters follow `docs/adapter-audit-2026-10-15.md` section 7 (#245), each
-with md5-identical packs.
+data (`converters.adapter_data`, run after the entity converter), guide books
+(`books`), and scripted stations (`station`: the blocks, loot tables, derived
+textures, lang keys and recipe types a station runtime takes over, asked by
+`converters/stations.py`). The moves into adapters followed
+`docs/adapter-audit-2026-10-15.md` section 7 (#245), each with md5-identical
+packs; the allowlist is empty.
 
-## Station runtimes (`converters/stations.py`, `portkit/runtime/`)
+## Station runtimes (`converters/stations.py`, `adapters/<mod>/runtime/`)
+
+The seams and the shared kit are core (`converters/stations.py`,
+`converters/station_kit.py`, `portkit/runtime/station_*.js`, `forms.js`); each
+station is an adapter's (`adapters/farmersdelight/`, `adapters/waystones/`),
+with its runtime in `adapters/<mod>/runtime/`, shipped at `scripts/portkit/`.
 
 Some recipes are data that a block's Java code interprets: Farmer's Delight's
 cutting board takes an item, is hit with the right tool, and drops results by

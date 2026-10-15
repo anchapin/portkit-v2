@@ -27,6 +27,33 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Farmer's Delight stations move into an adapter; the core names no mod
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR to be linked.
+- **Decision:** step 8 of the #245 migration, the last. The cutting board
+  (the Farmer's Delight part of `converters/stations.py`, now
+  `adapters/farmersdelight/cutting_board.py`: pinned sources, versions,
+  tool-ability tags, the recipe resolver, `_convert_cutting` as `convert`),
+  `cooking_pot.py`, `stove.py`, `skillet.py` and `feasts.py` move unchanged to
+  `adapters/farmersdelight/`, their runtimes to
+  `adapters/farmersdelight/runtime/` (pick 6a: still shipped at
+  `scripts/portkit/`). `StationHooks` gains `recipe_types` and
+  `shared_types`, and its `convert` takes the deferred recipes of those
+  types; `recipes.convert` asks `stations.station_recipe_types()` instead of
+  its two `farmersdelight:` literals. `converters/stations.py` keeps only the
+  seams (each asks every hook in registry order), `_loot_name`, `_lang_key`,
+  `_shipped_sounds`, the kit re-exports and the `main.js` entry. Tests move
+  with the code (pick 7a). Core namespace allowlist 97 -> 0.
+- **Why:** audit section 7 step 8 and picks 1-10 (approved by Alex,
+  2026-10-15). Farmer's Delight registers before Waystones (alphabetical), and
+  its hook runs its five stations in the old order and joins their entry
+  lines, so pack trees are md5-identical (all 13 corpus jars but Tinkers and
+  Mekanism checked locally; those on GitHub).
+- **Rejected:** keeping the cutting board in the core as the "reference"
+  station (it names `farmersdelight` 13 times); a re-export shim at the old
+  module paths (the core would still import an adapter).
+- **Links:** #245, #177, PR #253; `docs/adapter-audit-2026-10-15.md` section 7.
+
 ## 2026-10-15: Waystones move into an adapter behind a `station` hook
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #253.
