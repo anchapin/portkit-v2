@@ -92,3 +92,31 @@ same reference cache. Generated from Minecraft: (c) Mojang AB, subject to the
 [Minecraft EULA](https://www.minecraft.net/en-us/eula). Without it, the stove's
 table holds only the jar's own campfire recipes, with a note saying to run the
 fetch.
+
+## Forge SRG / Fabric intermediary -> Mojang name tables (#235)
+
+Nothing from these is stored here or shipped in the package. The bytecode
+readers match Minecraft's code by Mojang's names; Forge 1.17-1.20.x jars use
+SRG member names and Fabric/Quilt jars intermediary names. `portkit reference
+fetch` downloads, per pinned game version (`portkit/data/mappings.py`):
+
+- Mojang's `client.txt` from piston-data.mojang.com, checked against the sha1
+  in Mojang's version manifest. Its header: "(c) 2020 Microsoft Corporation.
+  These mappings are provided "as-is" and you bear the risk of using them. You
+  may copy and use the mappings for development purposes, but you may not
+  redistribute the mappings complete and unmodified." Use of Minecraft is
+  subject to the [Minecraft EULA](https://www.minecraft.net/en-us/eula).
+- for Forge, MCPConfig's `config/joined.tsrg` from the
+  [Forge maven](https://maven.minecraftforge.net/de/oceanlabs/mcp/mcp_config/)
+  zip, (c) 2018 Forge Development LLC under a zlib-style licence
+  ([MinecraftForge/MCPConfig LICENSE](https://github.com/MinecraftForge/MCPConfig/blob/master/LICENSE));
+  for Fabric, `mappings/<version>.tiny` from
+  [FabricMC/intermediary](https://github.com/FabricMC/intermediary) at a pinned
+  commit, CC0 1.0. Both are checked against a pinned sha256.
+
+It joins them on the obfuscated names into one table (SRG or intermediary name
+-> Mojang name), checks the table's sha256 and caches it. The table carries
+Mojang's names, so it is handled like Mojang's file: fetched, never vendored,
+although the MCPConfig and intermediary inputs alone would allow it. Without it
+a renamed jar's code reads as before, with a note saying to run the fetch.
+`python -m portkit.data.mappings --pin` prints the sha256 to pin.

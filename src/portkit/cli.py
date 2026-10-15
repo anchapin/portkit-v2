@@ -943,8 +943,9 @@ def cmd_reference(args) -> int:
     """``portkit reference fetch|list``: reference data fetched on demand: Mojang's
     vanilla sound list (#124), the loaders' and vanilla's item tags (#160),
     the vanilla block model templates stairs, slabs and walls are built from,
-    vanilla's campfire recipes the Farmer's Delight stove cooks (#177) and
-    Bedrock's vanilla texture atlases (short names and file paths only)."""
+    vanilla's campfire recipes the Farmer's Delight stove cooks (#177),
+    Bedrock's vanilla texture atlases (short names and file paths only) and the
+    SRG / intermediary -> Mojang name tables the bytecode readers use (#235)."""
     from . import data
     from .data import tags
 
@@ -957,7 +958,20 @@ def cmd_reference(args) -> int:
     from .data import recipes as recipe_data
     from .data import vanilla_textures
 
+    from .data import mappings as mapping_data
+
+    # Name mappings (#235): every pinned set, or the one this mod's loader and
+    # game version need (none for a Mojang-named jar).
+    if meta is None:
+        mapping_sets = list(mapping_data.SETS)
+    else:
+        chosen_map = mapping_data.select(meta.loader, meta.minecraft)
+        mapping_sets = [chosen_map] if chosen_map else []
+        print(f"{args.mod}: name mappings: {chosen_map.id if chosen_map else 'none needed'}")
     if args.action == "list":
+        for mapping in mapping_sets:
+            state = "cached" if mapping_data.cached(mapping, cache) else "missing"
+            print(f"{mapping.id:28} {mapping.label} {state}")
         state = "cached" if data.cached_sounds(cache) else "missing"
         print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
         state = "cached" if model_data.cached(cache) else "missing"
@@ -998,6 +1012,14 @@ def cmd_reference(args) -> int:
             failed += 1
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} {recipe_set.id} -> {path}")
+    for mapping in mapping_sets:
+        try:
+            path, downloaded = mapping_data.fetch(mapping, cache)
+        except data.ReferenceDataError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} {mapping.id} -> {path}")
     for tag_set in sets:
         try:
             path, downloaded = tags.fetch(tag_set, cache)
@@ -1272,7 +1294,8 @@ def main(argv=None) -> int:
         "reference",
         help="fetch or list reference data: the Bedrock vanilla sound list (#124), "
              "loader/vanilla item tag membership (#160) and the vanilla block model "
-             "templates stairs, slabs and walls are built from",
+             "templates stairs, slabs and walls are built from, and the Forge SRG / "
+             "Fabric intermediary -> Mojang name tables (#235)",
     )
     p.add_argument("action", choices=["fetch", "list"])
     p.add_argument("--mod", metavar="JAR",

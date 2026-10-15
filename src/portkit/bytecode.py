@@ -11,7 +11,11 @@ must say so.
 Names are read as compiled. NeoForge 1.20.5+ ships Mojang's official names at
 runtime, so ``getStateForPlacement`` and ``HorizontalDirectionalBlock`` are
 spelled as in the source; Forge (SRG) and Fabric (intermediary) jars use other
-names, which these patterns simply don't match.
+names. A :class:`ClassIndex` given a remapper (:mod:`portkit.data.mappings`,
+#235) puts those back into Mojang's names as each class is parsed: class
+names, member names and descriptors in the constant pool and the class's own
+declarations. Strings are never touched, and a jar without renamed names
+parses byte-for-byte as before.
 """
 from __future__ import annotations
 
@@ -128,15 +132,48 @@ def _modified_utf8(raw: bytes) -> str:
     return raw.replace(b"\xc0\x80", b"\x00").decode("utf-8", "surrogatepass")
 
 
-def parse(data: bytes) -> ClassFile:
-    """Parse one class file, or raise :class:`ClassFormatError`."""
+def parse(data: bytes, remapper=None) -> ClassFile:
+    """Parse one class file, or raise :class:`ClassFormatError`. With a
+    ``remapper`` (``cls``/``member``/``desc`` methods, see
+    :class:`portkit.data.mappings.Remapper`) renamed Minecraft names come
+    back as Mojang's."""
     try:
-        return _parse(data)
+        return _parse(data, remapper)
     except (struct.error, IndexError, UnicodeDecodeError, TypeError) as exc:
         raise ClassFormatError(str(exc)) from exc
 
 
-def _parse(data: bytes) -> ClassFile:
+def _remap_pool(pool: list, remapper) -> None:
+    """Point the pool's class, member-name and descriptor entries at Mojang's
+    names. A changed name gets a new UTF8 entry appended (the old one may be
+    shared with a String constant, which must keep its text); everything that
+    refers to the pool by index stays valid."""
+    added: dict[str, int] = {}
+
+    def utf_index(old: int, fn) -> int:
+        text = pool[old][1]
+        new = fn(text)
+        if new == text:
+            return old
+        if new not in added:
+            added[new] = len(pool)
+            pool.append((_UTF8, new))
+        return added[new]
+
+    for i in range(len(pool)):
+        entry = pool[i]
+        if entry is None:
+            continue
+        tag = entry[0]
+        if tag == _CLASS:
+            pool[i] = (tag, utf_index(entry[1], remapper.cls))
+        elif tag == _NAME_AND_TYPE:
+            pool[i] = (tag, utf_index(entry[1], remapper.member), utf_index(entry[2], remapper.desc))
+        elif tag == _METHOD_TYPE:
+            pool[i] = (tag, utf_index(entry[1], remapper.desc))
+
+
+def _parse(data: bytes, remapper=None) -> ClassFile:
     if len(data) < 10 or struct.unpack_from(">I", data, 0)[0] != _MAGIC:
         raise ClassFormatError("not a class file")
     pos = 8
@@ -177,6 +214,10 @@ def _parse(data: bytes) -> ClassFile:
         else:
             raise ClassFormatError(f"unknown constant pool tag {tag}")
         i += 1
+    if remapper is not None:
+        _remap_pool(pool, remapper)
+    member = remapper.member if remapper is not None else (lambda n: n)
+    desc_of = remapper.desc if remapper is not None else (lambda d: d)
 
     def utf(idx: int) -> str:
         return pool[idx][1]
@@ -208,7 +249,7 @@ def _parse(data: bytes) -> ClassFile:
     for _ in range(n):
         _a, name, desc = struct.unpack_from(">HHH", data, pos)
         pos, _attrs = attributes(pos + 6)
-        fields[utf(name)] = utf(desc)
+        fields[member(utf(name))] = desc_of(utf(desc))
 
     methods: list[Method] = []
     (n,) = struct.unpack_from(">H", data, pos)
@@ -221,7 +262,7 @@ def _parse(data: bytes) -> ClassFile:
             if aname == "Code":
                 (length,) = struct.unpack_from(">I", body, 4)
                 code = body[8:8 + length]
-        methods.append(Method(utf(name), utf(desc), access, code))
+        methods.append(Method(member(utf(name)), desc_of(utf(desc)), access, code))
 
     pos, attrs = attributes(pos)
     bootstrap = []
@@ -361,6 +402,14 @@ class ClassIndex:
     def __init__(self, entries: dict[str, bytes]):
         self._raw = entries
         self._parsed: dict[str, ClassFile | None] = {}
+        self.remapper = None
+
+    def set_remapper(self, remapper) -> None:
+        """Read every class through ``remapper`` from now on (#235): a Forge SRG
+        or Fabric intermediary jar's Minecraft names come back as Mojang's.
+        ``None`` reads names as compiled again."""
+        self.remapper = remapper
+        self._parsed.clear()
 
     @classmethod
     def from_source(cls, source: Path | None) -> "ClassIndex":
@@ -388,11 +437,19 @@ class ClassIndex:
     def names(self) -> list[str]:
         return sorted(self._raw)
 
-    def get(self, name: str) -> ClassFile | None:
+    def get(self, name: str, remap: bool = True) -> ClassFile | None:
+        """The parsed class, through the remapper unless ``remap`` is False
+        (names as compiled, not cached)."""
+        if not remap and self.remapper is not None:
+            raw = self._raw.get(name)
+            try:
+                return parse(raw) if raw is not None else None
+            except ClassFormatError:
+                return None
         if name not in self._parsed:
             raw = self._raw.get(name)
             try:
-                self._parsed[name] = parse(raw) if raw is not None else None
+                self._parsed[name] = parse(raw, self.remapper) if raw is not None else None
             except ClassFormatError:
                 self._parsed[name] = None
         return self._parsed[name]

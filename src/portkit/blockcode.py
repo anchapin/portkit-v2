@@ -1311,7 +1311,11 @@ class Machine:
         if static:
             if name == "of":
                 return [Props(True, DARK, self.epoch)]
-            if name in ("ofFullCopy", "ofLegacyCopy") and rest:
+            # ``copy`` is ofFullCopy's name up to 1.20.4: in 1.20.1 it copies
+            # lightEmission too (BlockBehaviour$Properties#copy L508-535,
+            # client jar dca$d.a(dca) bytecode 57-60 + client.txt), so it reads
+            # the same once an SRG / intermediary jar is remapped (#235).
+            if name in ("ofFullCopy", "ofLegacyCopy", "copy") and rest:
                 src = rest[0]
                 if isinstance(src, Obj) and isinstance(src.fields.get("__props"), Props):
                     light = src.fields["__props"].light  # a mod block's own Properties

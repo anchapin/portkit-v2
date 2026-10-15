@@ -13,6 +13,7 @@ from .conditions import (ConfigRequest, LoadContext, config_note, config_record,
                          resolve_config)
 from .converters import convert_all
 from .converters.blocks import EXPERIMENTS
+from .data.mappings import attach as attach_mappings
 from .icon import resolve as resolve_icon
 from .ingest import ingest
 from .meta import ModMetadata, parse as parse_metadata
@@ -433,6 +434,12 @@ def convert(
             selected.remove(meta.mod_id)
             selected.insert(0, meta.mod_id)
             namespace = meta.mod_id
+
+        # Forge SRG / Fabric intermediary jars: read their code in Mojang's
+        # names (#235), or say why the readers can't.
+        mapping_note = attach_mappings(staged.classes, meta.loader, meta.minecraft)
+        if mapping_note:
+            meta.notes.append(mapping_note)
 
         overrides, records = {}, []
         if config:
