@@ -86,8 +86,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   (Registrate, Balm, owo, BCLib, Moonlight's RegHelper), 1.20.1 vocabulary
   the readers still lack beyond `Properties.copy`, Forge 1.21+ / MCP-era
   (1.16.5) names, versions not pinned yet.
-- **Status:** proposed (PR pending).
-- **Links:** #235, #212, #213, #215, #219, #226, #232.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #256.
+- **Links:** #235, PR #256, #212, #213, #215, #219, #226, #232.
 
 ## 2026-10-15: A random sample of popular Modrinth mods, ranked by residue reason (gap leaderboard)
 
