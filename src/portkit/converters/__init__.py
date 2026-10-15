@@ -10,6 +10,18 @@ from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod
 from . import alloy_forge, blocks, books, entities, items, lang, loot, recipes, sounds, stations, textures
 
+
+def adapter_data(mod: SourceMod) -> ConversionResult:
+    """Every adapter's ``convert`` hook on one namespace, in registry order
+    (#245): data only one mod's code reads."""
+    from ..adapters import converters
+
+    result = ConversionResult()
+    for fn in converters():
+        result = result.merge(fn(mod))
+    return result
+
+
 CONVERTERS = [
     textures.convert,
     blocks.convert,
@@ -18,6 +30,7 @@ CONVERTERS = [
     loot.convert,
     entities.convert,
     alloy_forge.convert,
+    adapter_data,
     sounds.convert,
     lang.convert,
 ]

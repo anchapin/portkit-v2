@@ -3,7 +3,8 @@
 portkit's goal is a converter that works on any Java mod, so the shared code
 under ``src/portkit`` (Python and the fixed runtime JavaScript) should never
 need to know one mod's namespace. Code that serves a single mod belongs in a
-per-mod adapter (``src/portkit/adapters/<mod>/``, not built yet; the audit is
+per-mod adapter (``src/portkit/adapters/<mod>/``, registered in
+``src/portkit/adapters/__init__.py``; the audit is
 ``docs/adapter-audit-2026-10-15.md``). Until the move happens, today's
 offenders are frozen in ``tests/data/core_namespace_allowlist.json`` with a
 count per (file, namespace), and this test is a ratchet:
@@ -51,7 +52,7 @@ Add a mod's namespaces here when it joins either set; rule B covers the gap
 for resource locations meanwhile.
 
 Scope: every ``*.py`` and ``*.js`` file under ``src/portkit`` except
-``src/portkit/adapters/`` (the future home of single-mod code). JSON data
+``src/portkit/adapters/`` (the home of single-mod code). JSON data
 files (``src/portkit/data/*.json``) are per-mod data by design and are not
 scanned.
 """

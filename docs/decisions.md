@@ -27,9 +27,40 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: single-mod code reaches the core only through an explicit, ordered adapter registry
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #247; built to Alex's approved picks 1-4 (2026-10-15).
+- **Decision:** step 1 of the #245 migration (`docs/adapter-audit-2026-10-15.md`
+  section 7). `src/portkit/adapters/__init__.py` defines `Adapter`, a frozen
+  dataclass of optional hooks (`name`, `namespaces`, `library`, and the hooks
+  `conditions` (load-condition type -> handler), `recipe_reasons` (Java recipe
+  type -> residue kind and a fixed or computed reason) and `convert` (a
+  per-mod data converter)), and `ADAPTERS`, an explicit ordered tuple, empty
+  in this PR. `check()` refuses two adapters with one name, a condition or
+  recipe type claimed twice, and a claim outside the adapter's namespaces, so
+  registry order never decides between adapters. The core asks the registry
+  at three seams: `LoadContext._one` for a non-builtin condition type, before
+  the config-flag fallback; `recipes.convert` for a recipe type with no
+  Bedrock mapping, before the per-kind tables and the "special recipe" rule;
+  `convert_all` through `converters.adapter_data`, placed right after the
+  entity converter (where `alloy_forge.convert` runs). The core imports the
+  registry lazily inside those functions, so an adapter may import core
+  modules. Station hooks (blocks, loot, textures, lang, runtime) come with the
+  station moves (steps 5-8). With no adapter registered the output is
+  unchanged: all 13 corpus and 7 deco conversions are md5-identical to
+  develop.
+- **Why:** the moves that follow (load conditions, Alloy Forgery, recipe
+  tables) each need one of these seams; landing the seams first, empty, keeps
+  each move a cut-and-paste with an md5 gate.
+- **Rejected:** entry points or package scanning (pick 3: order would follow
+  installation or import order, and byte-identical output needs a fixed
+  order); an abstract base class (pick 4); adding every station hook now
+  (unused hooks would be guesses about the station moves' shape).
+- **Links:** #245, PR #246, PR #247; `docs/adapter-audit-2026-10-15.md`.
+
 ## 2026-10-15: the core may not gain mod namespace literals (ratchet lint, allowlist mode); the adapter interface stays open
 
-- **Status:** lint and audit approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #246; adapter interface picks 1-10 in `docs/adapter-audit-2026-10-15.md` section 6 **proposed, open for Alex**.
+- **Status:** lint and audit approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #246; adapter interface picks 1-10 in `docs/adapter-audit-2026-10-15.md` section 6 **approved (Alex, 2026-10-15)**, each as recommended (1a, 2a, 3a, 4a, 5a, 6a, 7a, 8a, 9a, 10a). Still **open**: pick 8's sub-question, whether the station-kit extraction PR (migration step 5) may change shipped runtime JS bytes (a reviewed, behaviour-identical diff) or must keep every runtime's text identical.
 - **Decision:** first slice of #245 (step 1 + step 4 in allowlist mode), no
   code moves and no behaviour change. (1) `docs/adapter-audit-2026-10-15.md`
   lists the single-mod code in `src/portkit`: about 10,300 of 37,132 lines
