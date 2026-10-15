@@ -27,6 +27,68 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Forge SRG and Fabric intermediary jars are read in Mojang's names (fetched, pinned name tables)
+
+- **Decision:** the bytecode readers (facing/boxes #212, booleans #215/#219,
+  light #213, containers #226, entities #232) keep matching Minecraft by its
+  Mojang names, and a renamed jar is put into those names before they run.
+  `portkit reference fetch` downloads, per pinned game version, Mojang's
+  `client.txt` (sha1 from Mojang's version manifest) and MCPConfig's
+  `joined.tsrg` (Forge, sha256) or FabricMC/intermediary's `<version>.tiny`
+  at commit 91686875 (Fabric/Quilt, sha256), joins them on the obfuscated
+  names into one SRG/intermediary -> Mojang table, checks the table's sha256
+  and caches it (`src/portkit/data/mappings.py`). Pinned: SRG 1.19.2, 1.20,
+  1.20.1; intermediary 1.19.2, 1.20, 1.20.1, 1.21, 1.21.1, 1.21.8. The table
+  is chosen by the loader and the exact Minecraft version the mod declares
+  (the lower bound of a range): Forge and NeoForge 1.20.1 -> SRG,
+  Fabric/Quilt -> intermediary; NeoForge 1.20.5+ and 26.1+ jars hold Mojang
+  names and get none. `ClassIndex.set_remapper` rewrites class names, member
+  names and descriptors in each class's constant pool and declarations as it
+  is parsed; String constants are never touched, and only names shaped like
+  `m_N_`/`f_N_`/`method_N`/`field_N`/`comp_N`/`net/minecraft/class_N` change,
+  so a Mojang-named jar parses exactly as before. An id that maps to two
+  Mojang names (none in SRG; 8-10 per intermediary version) stays unmapped.
+  Without the table a renamed jar reads as before and the conversion notes say
+  to run the fetch. 1.20.1's `Properties.copy` (ofFullCopy's earlier name; it
+  copies lightEmission, client jar `dca$d.a(dca)` bytecode 57-60) is read like
+  ofFullCopy.
+- **Why:** most of the standard corpus (Forge 1.20.1, Fabric) got nothing
+  from the readers (#235). Same facts on every build of one mod: Handcrafted
+  4.0.3 Fabric 1.21.1 (intermediary) vs NeoForge 1.21.1 (Mojang), and 3.0.6
+  Forge 1.20.1 (SRG) vs Fabric 1.20.1 (intermediary): every reading of all
+  267 blockstates (placement, boxes, collision, light, booleans, containers)
+  and both entities identical, and the converted packs byte-identical apart
+  from the class-file count.
+- **Licences:** Mojang's mappings may be used "for development purposes" but
+  not redistributed "complete and unmodified"; MCPConfig is zlib-style (Forge
+  Development LLC), intermediary CC0. The joined table carries Mojang's names,
+  so it is handled like Mojang's file: fetched at runtime, never vendored
+  (data/NOTICE.md). Nothing is vendored, so no redistribution choice is made.
+- **Rejected:** vendoring the tables (Mojang's notice); matching SRG names
+  one by one in each reader (#232 did two; unbounded); one table for every
+  version (Mojang names move between versions; ids don't, so the declared
+  version's table is exact); guessing a version for a jar that declares none
+  (Alex's Mobs) or that no table is pinned for (Forge 1.16.5's MCP names).
+- **Measured (reader counts, all blockstates, off -> on):** Create
+  registered 23 -> 201, placement 0 -> 5, shape 17 -> 88, boolean starts
+  0 -> 38; Supplementaries registered 0 -> 7, shape 0 -> 6; Storage Drawers
+  1.19.2 registered 9 -> 69, placement 0 -> 56, shape 9 -> 38, collision 0 ->
+  69, light 0 -> 69; Fairy Lights 1.20.1 (deco) registered 0 -> 21, collision
+  0 -> 21, light 0 -> 1; Handcrafted Fabric 1.21.1 0 -> 267 registered, 166
+  placement, 192 shape, 77 containers. Unchanged: Waystones (Balm),
+  Mythic Metals (owo field names), BetterEnd (BCLib), Tinkers (Mantle),
+  Alex's Mobs (no declared version): their registrations, not their names,
+  are what the reader can't follow. Converted output: Create 6 blocks and
+  Supplementaries 3 blocks change (read placement/boxes replace DEFAULTs);
+  coverage, file and residue counts unchanged everywhere, so no rebank; all
+  Mojang-named corpus jars and the 7 deco fixtures md5-identical.
+- **Left:** registration patterns the reader can't follow on these jars
+  (Registrate, Balm, owo, BCLib, Moonlight's RegHelper), 1.20.1 vocabulary
+  the readers still lack beyond `Properties.copy`, Forge 1.21+ / MCP-era
+  (1.16.5) names, versions not pinned yet.
+- **Status:** proposed (PR pending).
+- **Links:** #235, #212, #213, #215, #219, #226, #232.
+
 ## 2026-10-15: A random sample of popular Modrinth mods, ranked by residue reason (gap leaderboard)
 
 - **Status:** approved (Alex, 2026-10-15). All six DEFAULT picks chosen on
