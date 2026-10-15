@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: a mod's own fluids have no Bedrock form: fluid recipes are `fluid_recipe` residue and fluid-container buckets are `custom_fluid` residue; the residue agent skips both
 
-- **Status:** proposed, PR #228.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #228.
 - **Decision:** Bedrock add-ons can't define a fluid. The custom block
   component list has no fluid component
   ([Block Components Documentation](https://learn.microsoft.com/en-us/minecraft/creator/reference/content/blockreference/examples/blockcomponents/blockcomponentslist),
