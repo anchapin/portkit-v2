@@ -12,6 +12,7 @@ import json
 import pytest
 
 from portkit.agent.residue import SKIP_KINDS
+from portkit import adapters
 from portkit.converters import recipes
 from portkit.model import SourceMod
 
@@ -187,5 +188,5 @@ def test_modular_tool_reason_ignores_non_strings():
 
 
 def test_fluid_types_are_checked_before_modular_tool():
-    assert not set(recipes._MODULAR_TOOL_RECIPES) & set(recipes._FLUID_RECIPES)
-    assert not set(recipes._MODULAR_TOOL_RECIPES) & set(recipes._CODE_RECIPES)
+    assert not set(adapters.recipe_reasons("modular_tool")) & set(adapters.recipe_reasons("fluid_recipe"))
+    assert not set(adapters.recipe_reasons("modular_tool")) & set(adapters.recipe_reasons("code_recipe"))

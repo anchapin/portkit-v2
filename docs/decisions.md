@@ -27,6 +27,41 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: the per-mod recipe residue tables live in their mods' adapters
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #250.
+- **Decision:** step 4 of the #245 migration (pick 5: Python first). The
+  tables in `converters/recipes.py` that give a mod's recipe types their
+  residue kind and reason move unchanged into one adapter per mod, as
+  `recipe_reasons`: `tconstruct` (30 `fluid_recipe`, 39 `modular_tool`, 2
+  `code_recipe`), `silentgear` (9 `modular_tool`, 1 `code_recipe`), `create`
+  (2 `fluid_recipe`, 11 `machine_recipe`, 2 `code_recipe`), `mekanism` (26
+  `machine_recipe`, 1 `code_recipe`; in `adapters/mekanism/recipes.py`),
+  `betterend` (1), `bclib` (2, a library adapter: BetterEnd's recipes use
+  BCLib's types), `mythicmetals` (3) and `supplementaries` (1), each with the
+  source citations that were beside it. Phrases only one mod uses (Create's
+  kinetics/basin/chance, Mekanism's chemicals) move with it; the generic
+  "Bedrock lacks X" phrases stay in core under public names
+  (`NO_BEDROCK_FLUID`, `NO_PER_STACK_TOOL`, `NO_BEDROCK_MACHINE`,
+  `NO_BEDROCK_MB`). `fluid_recipe_reason`, `modular_tool_reason`,
+  `machine_recipe_reason` and `code_recipe_reason` keep their signatures and
+  answer from the registry; `recipes.convert` asks the registry seam once
+  and drops its three per-kind lookups (the tables are disjoint, which
+  `check()` enforces, so precedence is unchanged). Every reason string is
+  identical (all 130 types compared before and after). The allowlist drops
+  by 164 (307 -> 143; `recipes.py` keeps only Farmer's Delight's 2 station
+  types, which move with the FD adapter). The Mekanism and Create machine
+  tests move to `tests/adapters/<mod>/`; the fluid, modular-tool and
+  code-recipe tests cover several mods and stay in `tests/`. All 13 corpus
+  and 7 deco conversions are md5-identical to develop.
+- **Why:** the tables were the bulk of the core's mod namespace literals
+  (164 of 313); each is per-mod data with per-mod citations.
+- **Rejected:** JSON tables now (pick 5b: the reasons are built from shared
+  phrases, so JSON needs phrase keys; later, where a #239 template wants to
+  read them); one "recipe tables" adapter for all mods (pick 2a is per mod).
+- **Links:** #245, #172, #173, #174, #175, #180,
+  `docs/adapter-audit-2026-10-15.md` section 7 step 4.
+
 ## 2026-10-15: Alloy Forgery's forge recipes and forge data live in its adapter
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #249.

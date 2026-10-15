@@ -14,6 +14,7 @@ import json
 import pytest
 
 from portkit.agent.residue import SKIP_KINDS
+from portkit import adapters
 from portkit.converters import recipes
 from portkit.model import SourceMod
 
@@ -121,7 +122,7 @@ def test_every_registered_mekanism_machine_type_has_a_reason():
         "oxidizing", "pigment_extracting", "pigment_mixing", "metallurgic_infusing", "painting", "reaction",
         "rotary", "sawing",
     }
-    mekanism = {t: r for t, r in recipes._MACHINE_RECIPES.items() if t.startswith("mekanism:")}
+    mekanism = {t: r for t, r in adapters.recipe_reasons("machine_recipe").items() if t.startswith("mekanism:")}
     assert set(mekanism) == {f"mekanism:{name}" for name in registered}
     for java_type, reason in mekanism.items():
         assert reason.startswith("a Mekanism "), java_type
@@ -178,7 +179,7 @@ def test_machine_recipe_reason_ignores_non_strings():
 
 
 def test_machine_types_do_not_overlap_the_other_recipe_kinds():
-    machine = set(recipes._MACHINE_RECIPES)
-    assert not machine & set(recipes._FLUID_RECIPES)
-    assert not machine & set(recipes._MODULAR_TOOL_RECIPES)
-    assert not machine & set(recipes._CODE_RECIPES)
+    machine = set(adapters.recipe_reasons("machine_recipe"))
+    assert not machine & set(adapters.recipe_reasons("fluid_recipe"))
+    assert not machine & set(adapters.recipe_reasons("modular_tool"))
+    assert not machine & set(adapters.recipe_reasons("code_recipe"))

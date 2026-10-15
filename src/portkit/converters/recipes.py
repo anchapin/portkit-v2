@@ -157,136 +157,8 @@ _NO_DATA_KEYS = frozenset({"type", "group", "category", "show_notification"})
 # experimental minecraft:block_entity container (vendored
 # @minecraft/bedrock-schemas 1.26.60 bp/blocks), so a GUI station has no
 # Bedrock screen to land in.
-_CODE_RECIPES = {
-    # BetterEnd 21.800.2 (quiqueck/BetterEnd @9c449fb7): InfusionRecipe codec
-    # L351-357 (input, result, catalysts, time default 1, group); InfusionRitual PEDESTALS_MAP
-    # L42-51 (eight pedestals 3 out), tick L128-172 (time ticks, then the
-    # result replaces the input); PedestalBlock#useItemOn L116-148 (one stack
-    # per pedestal), getStateForPlacement/updateShape L180-275 (shape follows
-    # the blocks above and below).
-    "betterend:infusion": (
-        "a BetterEnd infusion ritual: the input sits on betterend:infusion_pedestal, the eight "
-        "catalysts on pedestals three blocks out, and after `time` ticks the result replaces the "
-        "input (InfusionRitual#tick); the pedestals' item storage, neighbour-driven shapes and the "
-        "ritual are block-entity code, so there is no station on Bedrock to run it yet, and a "
-        "crafting stand-in would drop the pedestal layout and the time"
-    ),
-    # BCLib 21.800.2 (quiqueck/BCLib @80a081d4): AnvilMenuMixin#bcl_updateOutput
-    # L138-158 (vanilla anvil screen, anvil crafting level >= anvilLevel),
-    # AnvilRecipe#matches L182-195 (hammer in allowedTools), #craft L160-170
-    # (the hammer takes `damage`).
-    "bclib:smithing": (
-        "a BCLib anvil recipe: worked in the vanilla anvil screen with a hammer from "
-        "`allowedTools`, on an anvil whose crafting level is at least `anvilLevel`, the hammer "
-        "taking `damage` (AnvilMenuMixin#bcl_updateOutput, AnvilRecipe#craft); Bedrock has no anvil "
-        "recipe type and no block component that opens an anvil screen, so a Bedrock station "
-        "would be a new interaction (a decision, #180), and a crafting stand-in would drop the "
-        "hammer, level and damage"
-    ),
-    # BCLib AlloyingRecipe codec L228-238 (two ingredients, result, experience
-    # default 0, smelttime default 350); BetterEnd EndStoneSmelter#useWithoutItem L55-72 opens
-    # EndStoneSmelterBlockEntity's menu (two ingredient slots and fuel,
-    # createMenu L399).
-    "bclib:alloying": (
-        "a BCLib alloying recipe: two ingredients smelted with fuel in BetterEnd's End Stone "
-        "Smelter screen (EndStoneSmelter#useWithoutItem, EndStoneSmelterBlockEntity), with its "
-        "experience and smelt time; Bedrock's furnace recipes take one input and no block "
-        "component opens a furnace screen, so a Bedrock station would be a new interaction (a decision, "
-        "#180), and a furnace or crafting stand-in would drop the second input, fuel and time"
-    ),
-    # Mythic Metals 0.24.6+1.21 (jar bytecode, intermediary names):
-    # TidesingerCoralRecipe#craft copies the base onto the result item and sets
-    # MythicDataComponents.TIDESINGER from TidesingerPatternComponent.fromStack
-    # (the addition).
-    "mythicmetals:tidesinger_smithing_transform": (
-        "a Mythic Metals Tidesinger smithing recipe: the result keeps the base armour's data and "
-        "takes a coral pattern read from the coral addition (TidesingerCoralRecipe#craft, "
-        "MythicDataComponents.TIDESINGER); a Bedrock smithing_transform has no pattern to carry, "
-        "so the armour would lose what the coral decides"
-    ),
-    # MidasFoldingRecipe#matches/#craft: GOLD_FOLDED (GoldFoldedComponent)
-    # count on the sword, item switched to GILDED/ROYAL_MIDAS_GOLD_SWORD by it.
-    "mythicmetals:fold_midas_sword": (
-        "a Mythic Metals Midas folding recipe: each fold adds to a folded-gold count kept on the "
-        "sword (MythicDataComponents.GOLD_FOLDED), and that count decides whether it matches and "
-        "which sword comes out (MidasFoldingRecipe#matches/#craft); the JSON result is only the "
-        "item, the count is code"
-    ),
-    # UpgradeSmithingRecipe#matches (UpgradeComponent.hasUpgrade/hasFreeSlots),
-    # #craft (UpgradeComponent.addItem onto a copy of the base).
-    "mythicmetals:upgrading": (
-        "a Mythic Metals upgrade recipe: the addition is stored in the base item's upgrade slots "
-        "(UpgradeSmithingRecipe#craft, UpgradeComponent.addItem) and matches only while a slot is "
-        "free and that upgrade isn't there yet; a Bedrock smithing_transform would drop the stored "
-        "upgrade"
-    ),
-    # Tinkers' Construct 3.12.1.231 TinkerSmeltery L433-434 (molding_basin /
-    # molding_table, MoldingRecipe LOADER L23-29: material, pattern,
-    # pattern_consumed, result): the material sits on a casting table or basin
-    # and using the pattern on it presses it into the result
-    # (CastingBlockEntity L152-181: moldingInventory.setPattern(held)).
-    **dict.fromkeys(("tconstruct:molding_table", "tconstruct:molding_basin"), (
-        "a Tinkers' Construct molding recipe: the `material` placed on a casting table or basin is "
-        "pressed into the result by using the `pattern` on it, which may be kept or consumed "
-        "(MoldingRecipe, run by CastingBlockEntity L152-181); Bedrock has no casting block to press "
-        "on, and a crafting stand-in would turn a block interaction into a grid recipe"
-    )),
-    # Silent Gear 2.6.36 (Silent-Gear 1.16.x @9188137b, see _MODULAR_TOOL_RECIPES):
-    # SalvagerTileEntity L89-153: BASE_WORK_TIME 10 s, each result item lost
-    # with a chance between salvagerMinLossRate (0.0) and salvagerMaxLossRate
-    # (0.5) by the input's damage (Config L313-320).
-    "silentgear:salvaging": (
-        "a Silent Gear salvaging recipe: the Salvager block takes the item apart over a work time, "
-        "and each result item is lost with a chance that grows with the input's damage "
-        "(SalvagerTileEntity#tick and #getLossRate, partLossRate config 0.0 to 0.5); a fixed-result "
-        "Bedrock recipe would drop the station, the time and the loss"
-    ),
-    # Mekanism 10.7.19.85 (see _MACHINE_RECIPES): MekanismRecipeSerializersInternal
-    # L102 registers mek_data as MekanismRecipeSerializer.wrapped(MekanismShapedRecipe::new);
-    # MekanismShapedRecipe#assemble L31-79 merges each ingredient's
-    # RecipeUpgradeData (energy, stored items, fluids, chemicals, upgrades,
-    # security, sorting, QIO and lock data) into the result.
-    "mekanism:mek_data": (
-        "a Mekanism data-keeping shaped recipe: the grid's ingredients pass what they store (energy, "
-        "items, fluids, chemicals, installed upgrades, owner and security, and other machine data) on "
-        "to the result, as when an energy cube is upgraded a tier (MekanismShapedRecipe#assemble, "
-        "RecipeUpgradeData); a Bedrock shaped recipe makes a fresh item, so the stored contents would "
-        "be lost"
-    ),
-    # Create mc1.20.1-6.0.8 (@1a1a9a28, see _CREATE_MACHINE_RECIPES):
-    # ManualApplicationRecipe#manualApplicationRecipesApplyInWorld L40-80 (a
-    # RightClickBlock handler: the block matching ingredient 0 is replaced by
-    # the result block, the held ingredient 1 used up unless keepHeldItem,
-    # ItemApplicationRecipe L57); a create:deployer runs the same recipes
-    # (DeployerBlockEntity L573).
-    "create:item_application": (
-        "a Create item application recipe: using the second ingredient on a placed block that matches "
-        "the first turns that block into the result block in the world, the held item used up unless "
-        "`keepHeldItem` is true (ManualApplicationRecipe#manualApplicationRecipesApplyInWorld, a "
-        "right-click-block handler; a create:deployer can do it too); the ingredients are a block in "
-        "the world and an item in hand, not a crafting grid, so a Bedrock recipe would turn a block "
-        "interaction into a grid recipe, and a Bedrock version needs a script on item use (#173)"
-    ),
-    # SandPaperItem#use L55-75 (the item in the other hand goes into the
-    # sandpaper's "Polishing" tag), getUseDuration L241-242 (32 ticks),
-    # #finishUsingItem L118-145 (SandPaperPolishingRecipe#applyPolish, the
-    # sandpaper takes 1 damage); a deployer holding sandpaper polishes too
-    # (DeployerBlockEntity L559).
-    "create:sandpaper_polishing": (
-        "a Create sandpaper polishing recipe: holding sandpaper and using it for 32 ticks polishes the "
-        "item in the other hand into the result, the sandpaper taking 1 damage (SandPaperItem#use, "
-        "#finishUsingItem, SandPaperPolishingRecipe#applyPolish; a create:deployer holding sandpaper "
-        "does it too); it is an item use, not a crafting grid, so a Bedrock recipe would drop the "
-        "sandpaper's wear and the hold-to-use step"
-    ),
-    # Supplementaries 1.20-3.1.43 SusRecipe#assemble (a CustomRecipe): the other
-    # grid stack goes into the result's BlockEntityTag "item".
-    "supplementaries:sus_crafting": (
-        "a Supplementaries suspicious-block recipe: the other item in the grid is stored in the "
-        "result's block data as its hidden loot (SusRecipe#assemble, BlockEntityTag.item); a "
-        "fixed-result Bedrock recipe would drop the hidden item"
-    ),
-}
+# The per-mod entries (type -> reason, each read from the mod's own code)
+# live in each mod's adapter (portkit.adapters, #245) as CODE_RECIPES.
 
 
 # A recipe that melts items into a mod's fluid, alloys fluids, or casts or
@@ -309,7 +181,7 @@ _CODE_RECIPES = {
 FLUID_RECIPE = "fluid_recipe"
 
 # What Bedrock lacks, said once at the end of every fluid recipe's reason.
-_NO_BEDROCK_FLUID = (
+NO_BEDROCK_FLUID = (
     "Bedrock add-ons can't define a fluid or store a measured amount of one (no fluid block "
     "component; the script fluid container holds only water, lava, powder snow or potion, as a "
     "cauldron does), so a mod's fluid has no Bedrock form and the station that measures fluid in mB "
@@ -317,89 +189,19 @@ _NO_BEDROCK_FLUID = (
 )
 
 
-def _tinkers(what: str) -> str:
-    return f"a Tinkers' Construct {what}; {_NO_BEDROCK_FLUID}"
+def _adapter_reason(kind: str, java_type: object) -> str | None:
+    """The fixed reason an adapter gives recipe type ``java_type`` under
+    residue ``kind`` (#245), or None."""
+    from ..adapters import recipe_reasons
 
-
-_TC_MELTING = _tinkers(
-    "melting recipe: the ingredient melts into `result` (a fluid amount in mB, plus any byproducts) "
-    "once the melter, smeltery or foundry reaches `temperature`, over `time` (MeltingRecipe LOADER "
-    "L32-38, run by the melting block entities)"
-)
-_TC_CASTING = _tinkers(
-    "casting recipe: fluid poured from a faucet into a casting table or basin (optionally over a "
-    "cast) cools into the result over a cooling time (ItemCastingRecipe LOADER L26-31: fluid, "
-    "result, cooling_time; the material, composite, tool, part-swap, potion, tipping and "
-    "duplication variants work the same way; run by CastingBlockEntity)"
-)
-_TC_FILLING = _tinkers(
-    "container filling recipe: poured fluid fills `fluid_amount` mB into the `container` item on a "
-    "casting table or basin (ContainerFillingRecipe LOADER L39-42, run by CastingBlockEntity)"
-)
-
-# Tinkers' Construct 3.12.1.231 (SlimeKnights/TinkersConstruct @a5a03249):
-# every type below is registered in TinkerSmeltery L408-444
-# (RECIPE_SERIALIZERS.register), the smeltery module. Field names from each
-# recipe's LOADER: MeltingRecipe L32-38 (ingredient, result, temperature, time,
-# byproducts), ItemCastingRecipe L26-31 (fluid, result, cooling_time),
-# AlloyRecipe L29-33 (inputs list of >= 2, result, temperature), MeltingFuel
-# L27-32 (fluid, duration, temperature, rate), EntityMeltingRecipe L29-33
-# (entity, result, damage), MaterialFluidRecipe L30-36 (fluid, temperature).
-# Create mc1.20.1-6.0.8 (Creators-of-Create/Create @1a1a9a28): AllRecipeTypes
-# L61-62 FILLING/EMPTYING; FillingRecipe#getRequiredFluid (a FluidIngredient
-# with an amount), run by FillingBySpout (the Spout); EmptyingRecipe
-# #getResultingFluid, run by GenericItemEmptying (the Item Drain,
-# ItemDrainBlockEntity L200-234).
-_FLUID_RECIPES = {
-    **dict.fromkeys((
-        "tconstruct:melting", "tconstruct:ore_melting", "tconstruct:damagable_melting",
-        "tconstruct:material_melting",
-    ), _TC_MELTING),
-    "tconstruct:entity_melting": _tinkers(
-        "entity melting recipe: a living `entity` inside a smeltery or foundry takes `damage` and yields "
-        "`result` fluid (EntityMeltingRecipe LOADER L29-33)"
-    ),
-    "tconstruct:melting_fuel": _tinkers(
-        "melting fuel: the `fluid` burned from a fuel tank for `duration` gives a melter, smeltery or "
-        "foundry its `temperature` and melting `rate` (MeltingFuel LOADER L27-32)"
-    ),
-    "tconstruct:alloy": _tinkers(
-        "alloying recipe: two or more fluids in the smeltery, foundry or alloyer tank combine by "
-        "amount into `result` above `temperature` (AlloyRecipe LOADER L29-33)"
-    ),
-    "tconstruct:material_fluid": _tinkers(
-        "material fluid: which `fluid` (and amount) casts a tool material, at what `temperature`, "
-        "when tool parts are cast (MaterialFluidRecipe LOADER L30-36)"
-    ),
-    **dict.fromkeys((
-        "tconstruct:casting_table", "tconstruct:casting_basin",
-        "tconstruct:table_duplication", "tconstruct:basin_duplication",
-        "tconstruct:casting_table_potion", "tconstruct:casting_basin_potion",
-        "tconstruct:casting_table_tipping", "tconstruct:casting_basin_tipping",
-        "tconstruct:casting_table_tipped_clearing", "tconstruct:casting_basin_tipped_clearing",
-        "tconstruct:retextured_casting_table", "tconstruct:retextured_casting_basin",
-        "tconstruct:table_casting_material", "tconstruct:basin_casting_material",
-        "tconstruct:table_casting_composite", "tconstruct:basin_casting_composite",
-        "tconstruct:table_tool_casting", "tconstruct:basin_tool_casting",
-        "tconstruct:table_casting_part_swapping", "tconstruct:basin_casting_part_swapping",
-    ), _TC_CASTING),
-    **dict.fromkeys(("tconstruct:table_filling", "tconstruct:basin_filling"), _TC_FILLING),
-    "create:filling": (
-        f"a Create filling recipe: the Spout pours the fluid ingredient's amount (mB) onto the item "
-        f"below it to make the result (FillingRecipe#getRequiredFluid, FillingBySpout); {_NO_BEDROCK_FLUID}"
-    ),
-    "create:emptying": (
-        f"a Create emptying recipe: the Item Drain empties the item into its fluid result (mB) and "
-        f"keeps the emptied item (EmptyingRecipe#getResultingFluid, GenericItemEmptying); "
-        f"{_NO_BEDROCK_FLUID}"
-    ),
-}
+    return recipe_reasons(kind).get(java_type) if isinstance(java_type, str) else None
 
 
 def fluid_recipe_reason(java_type: object) -> str | None:
     """Why a recipe of this type makes, takes or moves a mod's fluid (#174),
-    or None if it isn't one this module knows: a type in :data:`_FLUID_RECIPES`."""
-    return _FLUID_RECIPES.get(java_type) if isinstance(java_type, str) else None
+    or None if it isn't one an adapter knows: a type an adapter registers as
+    ``fluid_recipe`` (Tinkers' Construct's and Create's tables)."""
+    return _adapter_reason(FLUID_RECIPE, java_type)
 
 
 # A recipe that builds, modifies, repairs or takes apart a modular tool, or
@@ -416,162 +218,18 @@ def fluid_recipe_reason(java_type: object) -> str | None:
 MODULAR_TOOL = "modular_tool"
 
 # What Bedrock lacks, said once at the end of every modular tool reason.
-_NO_PER_STACK_TOOL = (
+NO_PER_STACK_TOOL = (
     "a Bedrock item's components are fixed per item type, so a tool or part whose materials, stats "
     "and modifiers are computed in Java and stored on each stack has no single Bedrock item to write, "
     "and a stand-in with fixed numbers would invent them"
 )
 
 
-def _tc_tool(what: str) -> str:
-    return f"a Tinkers' Construct {what}; {_NO_PER_STACK_TOOL}"
-
-
-def _sg_gear(what: str) -> str:
-    return f"a Silent Gear {what}; {_NO_PER_STACK_TOOL}"
-
-
-_TC_STATION_EDIT = _tc_tool(
-    "Tinker Station recipe that changes a built tool (adds or levels a modifier, fills overslime, "
-    "swaps a part or material, repairs or damages it); the tool's modifiers, slots, materials and "
-    "stats live in its stack data and are recomputed by ToolStack"
-)
-_TC_CRAFTING_EDIT = _tc_tool(
-    "crafting-table recipe that edits a built tool's stack data (overslime or a modifier's repair "
-    "material), run by a CustomRecipe subclass rather than a fixed result"
-)
-_TC_WORKTABLE = _tc_tool(
-    "Modifier Worktable recipe (an AbstractWorktableRecipe: removing, extracting, sorting or "
-    "toggling a tool's modifiers, or converting enchanted books into modifier crystals); the "
-    "worktable is a block-entity screen and its results are written into the tool's stack data"
-)
-_TC_PART_BUILDER = _tc_tool(
-    "Part Builder recipe: a pattern plus enough material value (from `tconstruct:material` "
-    "recipes) makes a tool part carrying that material on the stack, or recycles a tool back into "
-    "parts (PartRecipe/ItemPartRecipe/PartBuilderRecycle/PartBuilderToolRecycle); the Part Builder "
-    "is a block-entity screen"
-)
-_TC_SEVERING = _tc_tool(
-    "severing recipe: when a tool with the severing modifier kills the `entity`, the "
-    "`result` may drop with a chance per modifier level (SeveringRecipe LOADER L32-36, run by "
-    "SeveringModule#processLoot L42-56); the drop belongs to the modifier on the tool, not to a recipe"
-)
-
-# Tinkers' Construct 3.12.1.231 (SlimeKnights/TinkersConstruct @a5a03249):
-# TinkerTables L149-165 and TinkerModifiers L741-779 (RECIPE_SERIALIZERS
-# .register). The data-free CustomRecipe types (tinker_station_repair,
-# crafting_table_repair, armor_dyeing_modifier, armor_trim_modifier) stay
-# special code_recipe residue. ToolBuildingRecipe#requiresAnvil L230-232 (4 or
-# more parts and extra requirements need the Tinker's Anvil); #assemble L200-202
-# (ToolStack.createTool from the parts' MaterialNBT). MaterialRecipe LOADER
-# L35-43 (ingredient, value, needed, material, leftover). ModifierSalvage
-# LOADER L30-38 (tools, modifier, level, slots), read by ModifierRemovalRecipe
-# L122 through ModifierRecipeLookup#getSalvage. ShapedMaterialsRecipe L118-148
-# and ShapelessMaterialsRecipe set the result's MaterialNBT from the grid.
-# Silent Gear 2.6.36 (SilentChaos512/Silent-Gear 1.16.x @9188137b, committed
-# 2021-12-29, the jar's Implementation-Timestamp day): ModRecipes L43-80,
-# names from Const L28-46.
-_MODULAR_TOOL_RECIPES = {
-    "tconstruct:tool_building": _tc_tool(
-        "tool building recipe: the parts placed in the Tinker Station (or the Tinker's Anvil when "
-        "parts and extra requirements number four or more) build the `result` tool, and its stats "
-        "come from each part's material (ToolBuildingRecipe#assemble, ToolStack.createTool with "
-        "the parts' materials)"
-    ),
-    "tconstruct:tipped_tool_transform": _tc_tool(
-        "tool building recipe that turns tipped arrows into a tipped tool (TippedToolTransformRecipe, "
-        "a ToolBuildingRecipe)"
-    ),
-    **dict.fromkeys((
-        "tconstruct:modifier", "tconstruct:incremental_modifier", "tconstruct:swappable_modifier",
-        "tconstruct:multilevel_modifier", "tconstruct:multilevel_incremental_modifier",
-        "tconstruct:overslime_modifier", "tconstruct:banner_modifier", "tconstruct:modifier_repair",
-        "tconstruct:tinker_station_part_swapping", "tconstruct:tinker_station_damaging",
-        "tconstruct:fixed_material_swapping", "tconstruct:material_value_swapping",
-        "tconstruct:tool_material_swapping", "tconstruct:part_swapping_override",
-    ), _TC_STATION_EDIT),
-    **dict.fromkeys(("tconstruct:crafting_overslime_modifier", "tconstruct:crafting_modifier_repair"),
-                    _TC_CRAFTING_EDIT),
-    **dict.fromkeys((
-        "tconstruct:remove_modifier", "tconstruct:extract_modifier", "tconstruct:modifier_sorting",
-        "tconstruct:modifier_set_worktable", "tconstruct:enchantment_converting",
-        "tconstruct:toggle_interaction",
-    ), _TC_WORKTABLE),
-    "tconstruct:modifier_salvage": _tc_tool(
-        "modifier salvage entry: which modifier slots come back to a tool when `modifier` is removed "
-        "from it at the worktable (ModifierSalvage LOADER L30-38, read by ModifierRemovalRecipe "
-        "through ModifierRecipeLookup#getSalvage); it is data for the tool's slot bookkeeping, not a "
-        "recipe with an output"
-    ),
-    "tconstruct:material": _tc_tool(
-        "material recipe: it says how much of the tool `material` the `ingredient` is worth (`value` "
-        "per `needed`, with any `leftover`) to the Part Builder and the other recipes that count "
-        "material value (MaterialRecipe LOADER L35-43); it makes nothing by itself"
-    ),
-    **dict.fromkeys((
-        "tconstruct:part_builder", "tconstruct:item_part_builder", "tconstruct:part_builder_recycling",
-        "tconstruct:part_builder_tool_recycling",
-    ), _TC_PART_BUILDER),
-    **dict.fromkeys((
-        "tconstruct:crafting_shaped_material", "tconstruct:crafting_shaped_materials",
-        "tconstruct:crafting_shapeless_materials",
-    ), _tc_tool(
-        "crafting-table recipe whose result stores the tool materials of its grid ingredients on "
-        "the stack (ShapedMaterialsRecipe/ShapelessMaterialsRecipe set the result's MaterialNBT; "
-        "such as traveler's armour, or the Tinker's Anvil and forge whose metal the grid chooses)"
-    )),
-    **dict.fromkeys((
-        "tconstruct:severing", "tconstruct:ageable_severing", "tconstruct:player_beheading",
-        "tconstruct:snow_golem_beheading", "tconstruct:mooshroom_demushrooming",
-        "tconstruct:sheep_shearing",
-    ), _TC_SEVERING),
-    # ShapelessGearRecipe/ShapedGearRecipe#assemble: item.construct(getParts(inv)),
-    # matches only while each part allows crafting that gear type.
-    **dict.fromkeys(("silentgear:gear_crafting", "silentgear:shaped_gear_crafting"), _sg_gear(
-        "gear crafting recipe: the parts in the grid build the gear item, and its stats and traits "
-        "come from the parts' materials (ShapelessGearRecipe/ShapedGearRecipe#assemble, "
-        "ICoreItem#construct)"
-    )),
-    # ShapelessCompoundPartRecipe#assemble: item.create(getMaterials(inv), count).
-    "silentgear:compound_part": _sg_gear(
-        "compound part recipe: the materials in the grid make a part that stores them on the stack "
-        "(ShapelessCompoundPartRecipe#assemble, CompoundPartItem#create)"
-    ),
-    # ConversionRecipe#assemble L95-106: construct from result.materials, copy
-    # damage and enchantments from the input tool; config allowConversionRecipes.
-    "silentgear:conversion": _sg_gear(
-        "conversion recipe: an ordinary tool becomes a gear item built from the `result.materials` "
-        "it lists, keeping the input's damage and enchantments (ConversionRecipe#assemble), when the "
-        "allowConversionRecipes config is on"
-    ),
-    # Coating/UpgradeSmithingRecipe#applyUpgrade: GearData.addOrReplacePart /
-    # addPart, then GearData.recalculateStats.
-    "silentgear:smithing/coating": _sg_gear(
-        "smithing coating recipe: the material in the smithing table becomes the gear's coating "
-        "part and its stats are recalculated (CoatingSmithingRecipe#applyUpgrade)"
-    ),
-    "silentgear:smithing/upgrade": _sg_gear(
-        "smithing upgrade recipe: the upgrade part is added to the gear's parts and its stats are "
-        "recalculated (UpgradeSmithingRecipe#applyUpgrade)"
-    ),
-    **dict.fromkeys(("silentgear:salvaging/gear", "silentgear:salvaging/compound_part"), _sg_gear(
-        "salvaging recipe: the Salvager takes a gear item or compound part back into the parts and "
-        "materials stored on that stack, each lost with a damage-based chance "
-        "(GearSalvagingRecipe#getPossibleResults, SalvagerTileEntity#getLossRate)"
-    )),
-    # MaterialPressingRecipe#assemble: CraftedMaterialItem#create(material of input).
-    "silentgear:pressing/material": _sg_gear(
-        "material pressing recipe: the Metal Press turns a material into a crafted material item "
-        "that carries the input's material on the stack (MaterialPressingRecipe#assemble)"
-    ),
-}
-
-
 def modular_tool_reason(java_type: object) -> str | None:
     """Why a recipe of this type builds, changes or takes apart a modular tool
-    (#175), or None if it isn't one this module knows: a type in
-    :data:`_MODULAR_TOOL_RECIPES`."""
-    return _MODULAR_TOOL_RECIPES.get(java_type) if isinstance(java_type, str) else None
+    (#175), or None if it isn't one an adapter knows: a type an adapter
+    registers as ``modular_tool`` (Tinkers' Construct's and Silent Gear's)."""
+    return _adapter_reason(MODULAR_TOOL, java_type)
 
 
 # A recipe that runs in one of Mekanism's machines (#172) or Create's
@@ -589,326 +247,37 @@ def modular_tool_reason(java_type: object) -> str | None:
 # residue agent skips the kind (agent/residue.py SKIP_KINDS).
 # docs/decisions.md, 2026-10-15. Create's machines turn only while a
 # rotational network (shafts and cogwheels from a power source) gives them
-# speed, and work faster with more of it; see _CREATE_MACHINE_RECIPES.
+# speed, and work faster with more of it. The per-mod tables live in the
+# adapters (portkit.adapters.mekanism.recipes, portkit.adapters.create, #245).
 MACHINE_RECIPE = "machine_recipe"
 
 # What Bedrock lacks, said once at the end of every machine recipe's reason.
-_NO_BEDROCK_MACHINE = (
+NO_BEDROCK_MACHINE = (
     "a Bedrock custom block has no ticking inventory, tank or energy store, so there is no Bedrock "
     "station to run it (that needs a scripted machine runtime, #172), and an instant crafting "
     "stand-in at the machine block would drop the processing time and what the machine consumes"
 )
-_NO_BEDROCK_CHEMICAL = (
-    "Mekanism's chemicals (gases, infuse types, pigments, slurries) have no Bedrock form"
-)
-_NO_BEDROCK_MB = "Bedrock can't store a measured amount of fluid (#174)"
-
-
-def _mek(what: str, *lacks: str) -> str:
-    return "; ".join((f"a Mekanism {what}", *lacks, _NO_BEDROCK_MACHINE))
-
-
-# What Bedrock lacks for a Create machine, said once at the end of each reason.
-_NO_BEDROCK_KINETICS = (
-    "the machine works only while Create's rotational network (shafts and cogwheels carrying speed "
-    "and stress from a source such as a water wheel, windmill or steam engine) turns it, faster at "
-    "higher speed, and a Bedrock custom block has no rotational network and no ticking inventory, "
-    "so there is no Bedrock station to run it (that needs a scripted kinetic runtime, #173), and an instant "
-    "crafting stand-in would drop the rotation and the processing time"
-)
-_NO_BEDROCK_BASIN_FLUID = (
-    "a fluid ingredient or result (an `amount` in mB) can't be carried, since Bedrock can't store a "
-    "measured amount of fluid (#174)"
-)
-_NO_BEDROCK_CHANCE = (
-    "a Bedrock recipe result has no chance field, so `results` entries with a `chance` below 1 "
-    "can't be carried"
-)
-
-
-def _create(what: str, *lacks: str) -> str:
-    return "; ".join((f"a Create {what}", *lacks, _NO_BEDROCK_KINETICS))
-
-
-# Create mc1.20.1-6.0.8 for Forge 1.20.1 (Creators-of-Create/Create
-# @1a1a9a28; the jar's Implementation-Version 6.0.8): types registered in
-# AllRecipeTypes L49-66; processing recipe fields from
-# ProcessingRecipeSerializer L41-85 (ingredients, results, processingTime,
-# heatRequirement) and ProcessingOutput L85 (a result's `chance`, default 1).
-# The machine that runs each type is where Java looks the type up:
-# CRUSHING in CrushingWheelControllerBlockEntity L321 (which falls back to
-# MILLING at L323), MILLING in MillstoneBlockEntity L103, CUTTING in
-# SawBlockEntity L380-386, PRESSING and COMPACTING in
-# MechanicalPressBlockEntity L185-204 (compacting over a basin), MIXING in
-# MechanicalMixerBlockEntity L259-260 over a basin whose heat
-# BasinRecipe#apply L75-77 tests, SPLASHING and HAUNTING in
-# AllFanProcessingTypes L423 / L232 (the encased fan's air through the
-# fan_processing_catalysts tags: water for splashing; lit blaze burner, soul
-# fire and soul campfire for haunting, jar data/create/tags), DEPLOYING in
-# DeployerBlockEntity L571-572, MECHANICAL_CRAFTING in RecipeGridHandler
-# L152 (a grid of mechanical crafters; ShapedRecipe.setCraftingSize(9, 9) in
-# AllRecipeTypes#register, acceptMirrored at MechanicalCraftingRecipe L91),
-# SEQUENCED_ASSEMBLY in SequencedAssemblyRecipe#getRecipe/#advance L61-120
-# (a transitional item stepped through the sequence `loops` times by the
-# machines whose recipes implement IAssemblyRecipe: deploying, pressing,
-# filling, cutting; the final result rolled by weight, #rollResult L143-150).
-# Each machine idles at speed 0 (for example MillstoneBlockEntity L64,
-# SawBlockEntity L137, DeployerBlockEntity L161). FILLING and EMPTYING are
-# fluid_recipe (#174); ITEM_APPLICATION and SANDPAPER_POLISHING are
-# code_recipe (used by hand, see _CODE_RECIPES); TOOLBOX_DYEING and
-# ITEM_COPYING are data-free special recipes (code_recipe, #180).
-_CREATE_MACHINE_RECIPES = {
-    "create:crushing": _create(
-        "crushing recipe: the `ingredients` dropped between two spinning create:crushing_wheel blocks "
-        "are crushed into the `results` over `processingTime` "
-        "(CrushingRecipe, CrushingWheelControllerBlockEntity)",
-        _NO_BEDROCK_CHANCE,
-    ),
-    "create:milling": _create(
-        "milling recipe: the `ingredients` put in a create:millstone (or dropped between crushing wheels "
-        "when no crushing recipe matches) are ground into the `results` over `processingTime` "
-        "(MillingRecipe, MillstoneBlockEntity, CrushingWheelControllerBlockEntity)",
-        _NO_BEDROCK_CHANCE,
-    ),
-    "create:cutting": _create(
-        "cutting recipe: the create:mechanical_saw cuts the item fed to it (on a belt or dropped onto "
-        "it) into the `results` over `processingTime` (CuttingRecipe, SawBlockEntity)",
-        _NO_BEDROCK_CHANCE,
-    ),
-    "create:pressing": _create(
-        "pressing recipe: the create:mechanical_press stamps the item below it (on a belt, depot or "
-        "the ground) into the `results` (PressingRecipe, MechanicalPressBlockEntity)",
-        _NO_BEDROCK_CHANCE,
-    ),
-    "create:compacting": _create(
-        "compacting recipe: the create:mechanical_press packs the `ingredients` held in a create:basin "
-        "below it into the `results`, heated by a blaze burner when `heatRequirement` says so "
-        "(CompactingRecipe, MechanicalPressBlockEntity, BasinRecipe)",
-        _NO_BEDROCK_CHANCE, _NO_BEDROCK_BASIN_FLUID,
-    ),
-    "create:mixing": _create(
-        "mixing recipe: the create:mechanical_mixer stirs the `ingredients` held in a create:basin "
-        "below it into the `results`, heated by a blaze burner when `heatRequirement` says so "
-        "(MixingRecipe, MechanicalMixerBlockEntity, BasinRecipe)",
-        _NO_BEDROCK_CHANCE, _NO_BEDROCK_BASIN_FLUID,
-    ),
-    "create:splashing": _create(
-        "splashing (bulk washing) recipe: items caught in a create:encased_fan's air stream after it "
-        "passes through water become the `results` (SplashingRecipe, AllFanProcessingTypes "
-        "SplashingType)",
-        _NO_BEDROCK_CHANCE,
-    ),
-    "create:haunting": _create(
-        "haunting recipe: items caught in a create:encased_fan's air stream after it passes through "
-        "soul fire, a lit soul campfire or a soul-flame blaze burner become the `results` "
-        "(HauntingRecipe, AllFanProcessingTypes HauntingType)",
-        _NO_BEDROCK_CHANCE,
-    ),
-    "create:deploying": _create(
-        "deploying recipe: a create:deployer holding the second ingredient uses it on the first (an "
-        "item on a belt or depot in front of it) to make the `results`, using the held item up "
-        "unless `keepHeldItem` is true (DeployerApplicationRecipe, DeployerBlockEntity)",
-        _NO_BEDROCK_CHANCE,
-    ),
-    "create:mechanical_crafting": _create(
-        "mechanical crafting recipe: a shaped `pattern` (up to 9x9) laid out across a grid of "
-        "create:mechanical_crafter blocks, mirrored too unless `acceptMirrored` is false "
-        "(MechanicalCraftingRecipe, RecipeGridHandler)",
-        "Bedrock shaped recipes are at most 3x3, so most patterns don't fit a crafting table either",
-    ),
-    "create:sequenced_assembly": _create(
-        "sequenced assembly recipe: the `ingredient` becomes the `transitionalItem` and is passed "
-        "through the `sequence` of deploying, pressing, filling or cutting steps by those machines, "
-        "`loops` times, before one of the `results` is picked by weight (SequencedAssemblyRecipe "
-        "#advance and #rollResult)",
-        "a Bedrock recipe makes one fixed result in one step, so the steps, the loops and the weighted "
-        "pick can't be carried",
-    ),
-}
-
-# Mekanism 10.7.19.85 for NeoForge 1.21.1 (mekanism/Mekanism tag
-# v1.21.1-10.7.19.85 @a00109e4; the jar's Implementation-Version 10.7.19):
-# serializers registered in MekanismRecipeSerializersInternal L54-98, recipe
-# field names from SerializationConstants. The machine each type runs in is
-# the recipe class's own getToastSymbol (the block Java shows for it):
-# Basic{Crushing,Enriching,Smelting}Recipe L36, BasicChemicalInfuserRecipe L39,
-# BasicPigmentMixingRecipe L39, BasicPigmentExtractingRecipe L36,
-# Basic{Activating,Centrifuging,ChemicalOxidizer,Compressing,Injecting,
-# MetallurgicInfuser,Painting,Purifying}Recipe L37, BasicWashingRecipe L60,
-# CombinerRecipe L120, ElectrolysisRecipe L93, FluidToFluidRecipe L89,
-# ChemicalCrystallizerRecipe L116, ChemicalDissolutionRecipe L30,
-# NucleosynthesizingRecipe L43, PressurizedReactionRecipe L125, RotaryRecipe
-# L160, SawmillRecipe L104. The two conversion types have no machine of their
-# own: Java reads them from every energy slot (EnergyInventorySlot L33/L131)
-# and every chemical slot that fills or converts (ChemicalInventorySlot
-# L34/L223). Base processing times are the tile classes'
-# BASE_TICKS_REQUIRED; the Solar Neutron Activator needs sky
-# (TileEntitySolarNeutronActivator#canSeeSun L178-186) and the evaporation
-# tower is a heat-driven multiblock (EvaporationMultiblockData).
-_MACHINE_RECIPES = {
-    "mekanism:crushing": _mek(
-        "Crusher recipe: `input` becomes `output` in mekanism:crusher (or a crushing factory) over "
-        "time, using energy (BasicCrushingRecipe, TileEntityElectricMachine)"
-    ),
-    "mekanism:enriching": _mek(
-        "Enrichment Chamber recipe: `input` becomes `output` in mekanism:enrichment_chamber (or an "
-        "enriching factory) over time, using energy (BasicEnrichingRecipe, TileEntityElectricMachine)"
-    ),
-    "mekanism:smelting": _mek(
-        "Energized Smelter recipe: `input` becomes `output` in mekanism:energized_smelter (or a "
-        "smelting factory) over time, using energy (BasicSmeltingRecipe, TileEntityElectricMachine)"
-    ),
-    "mekanism:sawing": _mek(
-        "Precision Sawmill recipe: `input` becomes `main_output` in mekanism:precision_sawmill (or a "
-        "sawing factory) over time, using energy, with any `secondary_output` produced "
-        "at `secondary_chance` (SawmillRecipe, TileEntityPrecisionSawmill)",
-        "a Bedrock recipe result has no chance field, so a `secondary_chance` below 1 can't be carried",
-    ),
-    "mekanism:combining": _mek(
-        "Combiner recipe: `main_input` and `extra_input` become `output` in mekanism:combiner (or a "
-        "combining factory) over time, using energy (CombinerRecipe, TileEntityCombiner)"
-    ),
-    **{t: _mek(
-        f"{machine} recipe: `item_input` becomes `output` in mekanism:{block} (or a {factory} factory) "
-        f"over time, using energy and drawing `chemical_input` from the machine's chemical tank (each "
-        f"tick when `per_tick_usage` is true, else once; {cls}, TileEntity{tile})",
-        _NO_BEDROCK_CHEMICAL,
-    ) for t, machine, block, factory, cls, tile in (
-        ("mekanism:compressing", "Osmium Compressor", "osmium_compressor", "compressing",
-         "BasicCompressingRecipe", "OsmiumCompressor"),
-        ("mekanism:purifying", "Purification Chamber", "purification_chamber", "purifying",
-         "BasicPurifyingRecipe", "PurificationChamber"),
-        ("mekanism:injecting", "Chemical Injection Chamber", "chemical_injection_chamber", "injecting",
-         "BasicInjectingRecipe", "ChemicalInjectionChamber"),
-        ("mekanism:metallurgic_infusing", "Metallurgic Infuser", "metallurgic_infuser", "infusing",
-         "BasicMetallurgicInfuserRecipe", "MetallurgicInfuser"),
-    )},
-    "mekanism:painting": _mek(
-        "Painting Machine recipe: `item_input` is painted into `output` in mekanism:painting_machine "
-        "over time, using energy and drawing pigment `chemical_input` from its tank (each tick when "
-        "`per_tick_usage` is true, else once; BasicPaintingRecipe, TileEntityPaintingMachine)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:nucleosynthesizing": _mek(
-        "Antiprotonic Nucleosynthesizer recipe: `item_input` becomes `output` in "
-        "mekanism:antiprotonic_nucleosynthesizer over `duration` ticks, using energy and drawing "
-        "`chemical_input` (antimatter) from its tank, each tick when `per_tick_usage` is true "
-        "(NucleosynthesizingRecipe, "
-        "TileEntityAntiprotonicNucleosynthesizer)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:dissolution": _mek(
-        "Chemical Dissolution Chamber recipe: `item_input` dissolves with `chemical_input` into the "
-        "chemical `output` in mekanism:chemical_dissolution_chamber over time, using energy, the "
-        "chemical drawn each tick when `per_tick_usage` is true (ChemicalDissolutionRecipe, "
-        "TileEntityChemicalDissolutionChamber)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:oxidizing": _mek(
-        "Chemical Oxidizer recipe: `input` is turned into the chemical `output` in "
-        "mekanism:chemical_oxidizer over time, using energy (BasicChemicalOxidizerRecipe, "
-        "TileEntityChemicalOxidizer)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:pigment_extracting": _mek(
-        "Pigment Extractor recipe: `input` is turned into the pigment `output` in "
-        "mekanism:pigment_extractor over time, using energy (BasicPigmentExtractingRecipe, "
-        "TileEntityPigmentExtractor)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:chemical_infusing": _mek(
-        "Chemical Infuser recipe: the chemicals `left_input` and `right_input` combine into `output` "
-        "in mekanism:chemical_infuser, using energy (BasicChemicalInfuserRecipe, "
-        "TileEntityChemicalInfuser)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:pigment_mixing": _mek(
-        "Pigment Mixer recipe: the pigments `left_input` and `right_input` mix into `output` in "
-        "mekanism:pigment_mixer, using energy (BasicPigmentMixingRecipe, TileEntityPigmentMixer)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:centrifuging": _mek(
-        "Isotopic Centrifuge recipe: the chemical `input` becomes the chemical `output` in "
-        "mekanism:isotopic_centrifuge, using energy (BasicCentrifugingRecipe, "
-        "TileEntityIsotopicCentrifuge)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:activating": _mek(
-        "Solar Neutron Activator recipe: the chemical `input` becomes the chemical `output` in "
-        "mekanism:solar_neutron_activator, only while it can see the sky (BasicActivatingRecipe, "
-        "TileEntitySolarNeutronActivator#canSeeSun)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:crystallizing": _mek(
-        "Chemical Crystallizer recipe: the chemical `input` crystallizes into the item `output` in "
-        "mekanism:chemical_crystallizer over time, using energy (ChemicalCrystallizerRecipe, "
-        "TileEntityChemicalCrystallizer)",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    "mekanism:washing": _mek(
-        "Chemical Washer recipe: `fluid_input` washes the slurry `chemical_input` into `output` in "
-        "mekanism:chemical_washer, using energy (BasicWashingRecipe, TileEntityChemicalWasher)",
-        _NO_BEDROCK_CHEMICAL, _NO_BEDROCK_MB,
-    ),
-    "mekanism:separating": _mek(
-        "Electrolytic Separator recipe: the fluid `input` splits into `left_chemical_output` and "
-        "`right_chemical_output` in mekanism:electrolytic_separator, using energy (ElectrolysisRecipe, "
-        "TileEntityElectrolyticSeparator)",
-        _NO_BEDROCK_CHEMICAL, _NO_BEDROCK_MB,
-    ),
-    "mekanism:rotary": _mek(
-        "Rotary Condensentrator recipe: `chemical_input` condenses into `fluid_output`, or "
-        "`fluid_input` decondenses into `chemical_output`, by the mode set on "
-        "mekanism:rotary_condensentrator, using energy (RotaryRecipe, "
-        "TileEntityRotaryCondensentrator)",
-        _NO_BEDROCK_CHEMICAL, _NO_BEDROCK_MB,
-    ),
-    "mekanism:evaporating": _mek(
-        "Thermal Evaporation recipe: the fluid `input` evaporates into the fluid `output` in the "
-        "thermal evaporation tower (a multiblock run from mekanism:thermal_evaporation_controller) "
-        "at a rate set by the tower's heat (FluidToFluidRecipe, EvaporationMultiblockData)",
-        _NO_BEDROCK_MB,
-    ),
-    "mekanism:reaction": _mek(
-        "Pressurized Reaction Chamber recipe: `item_input`, `fluid_input` and `chemical_input` react "
-        "over `duration` ticks, using extra `energy_required`, into `item_output` and "
-        "`chemical_output` in mekanism:pressurized_reaction_chamber (PressurizedReactionRecipe, "
-        "TileEntityPressurizedReactionChamber)",
-        _NO_BEDROCK_CHEMICAL, _NO_BEDROCK_MB,
-    ),
-    "mekanism:energy_conversion": _mek(
-        "energy conversion: `input` placed in a Mekanism machine's or energy cube's energy slot is "
-        "used up for `output` energy (ItemStackToEnergyRecipe, EnergyInventorySlot#fillOrConvert); "
-        "there is no "
-        "crafted result, and Bedrock has no energy store to add to"
-    ),
-    "mekanism:chemical_conversion": _mek(
-        "chemical conversion: `input` placed in a Mekanism machine's chemical slot is used up for "
-        "the chemical `output` in its tank (BasicChemicalConversionRecipe, "
-        "ChemicalInventorySlot#fillOrConvert); there "
-        "is no crafted result",
-        _NO_BEDROCK_CHEMICAL,
-    ),
-    **_CREATE_MACHINE_RECIPES,
-}
+NO_BEDROCK_MB = "Bedrock can't store a measured amount of fluid (#174)"
 
 
 def machine_recipe_reason(java_type: object) -> str | None:
     """Why a recipe of this type runs in a Mekanism (#172) or Create (#173)
-    machine, or None if it isn't one this module knows: a type in
-    :data:`_MACHINE_RECIPES`."""
-    return _MACHINE_RECIPES.get(java_type) if isinstance(java_type, str) else None
+    machine, or None if it isn't one an adapter knows: a type an adapter
+    registers as ``machine_recipe`` with a fixed reason (Alloy Forgery's
+    forging reason reads the recipe; see :mod:`portkit.adapters`)."""
+    return _adapter_reason(MACHINE_RECIPE, java_type)
 
 
 def code_recipe_reason(java_type: object, recipe: dict, loader: str | None = None) -> str | None:
     """Why a recipe of this modded type is code (#180), or None if it isn't
-    one this module knows to be: a type in :data:`_CODE_RECIPES`, or a
-    non-vanilla type whose JSON carries nothing but recipe-book fields and
-    ``loader``'s load conditions (a "special" recipe)."""
+    one this module knows to be: a type an adapter registers as
+    ``code_recipe``, or a non-vanilla type whose JSON carries nothing but
+    recipe-book fields and ``loader``'s load conditions (a "special" recipe)."""
     if not isinstance(java_type, str):
         return None
-    if java_type in _CODE_RECIPES:
-        return _CODE_RECIPES[java_type]
+    known = _adapter_reason(CODE_RECIPE, java_type)
+    if known is not None:
+        return known
     if java_type.startswith("minecraft:"):
         return None
     if set(recipe) - _NO_DATA_KEYS - set(condition_keys(loader)):
@@ -1496,21 +865,11 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         if mapping is None:
             # A type one mod's code defines: its adapter says why (#245).
             from ..adapters import recipe_reason
+            # (The fluid, modular tool, machine and code tables are all
+            # adapters' now, and check() keeps their types disjoint.)
             found = recipe_reason(java_type, recipe, mod)
             if found is not None:
                 result.unhandled.append(Unhandled(rel, *found))
-                continue
-            fluid = fluid_recipe_reason(java_type)
-            if fluid is not None:
-                result.unhandled.append(Unhandled(rel, FLUID_RECIPE, fluid))
-                continue
-            tool = modular_tool_reason(java_type)
-            if tool is not None:
-                result.unhandled.append(Unhandled(rel, MODULAR_TOOL, tool))
-                continue
-            machine = machine_recipe_reason(java_type)
-            if machine is not None:
-                result.unhandled.append(Unhandled(rel, MACHINE_RECIPE, machine))
                 continue
             code = code_recipe_reason(java_type, recipe, mod.loader)
             if code is not None:
