@@ -232,7 +232,11 @@ def test_markdown_has_the_ranked_table_trend_and_mods():
     assert md.startswith("# Gap leaderboard")
     assert "| 1 | 2 | 11 | 2 | loot | table has N pools | c | +0 mods, +0 files |" in md
     assert "| d | crashed: KeyError: 'model' |" in md
-    assert "## Mods" in md
+    assert "## Mods" in md and "mct" not in md
+    shards = _two_shards()
+    shards[0]["mods"]["a"]["mct"] = {"error": 1, "warning": 7, "recommendation": 0}
+    md = gaps.render_markdown(gaps.leaderboard(shards))
+    assert "mct errors / warnings |" in md and "| 1 / 7 |" in md
 
 
 def test_cli_board_writes_json_and_markdown(tmp_path, capsys):

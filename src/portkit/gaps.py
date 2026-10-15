@@ -352,6 +352,14 @@ def _trend_cell(r: dict) -> str:
     return f"{t['mods']:+d} mods, {t['files']:+d} files"
 
 
+def _mct_cell(mct) -> str:
+    if not isinstance(mct, dict):
+        return ""
+    if "failed" in mct:
+        return "failed"
+    return f"{mct.get('error', 0)} / {mct.get('warning', 0)}"
+
+
 def render_markdown(board: dict, top: int = 50) -> str:
     """The leaderboard as a page: summary, ranked reasons, then per mod."""
     lines = ["# Gap leaderboard", ""]
@@ -379,8 +387,10 @@ def render_markdown(board: dict, top: int = 50) -> str:
     if prev and prev.get("gone"):
         lines += ["", f"## Gone since the previous run ({len(prev['gone'])})", ""]
         lines += [f"- {_md_cell(k)}" for k in prev["gone"][:top]]
-    lines += ["", "## Mods", "", "| mod | status | loader | Minecraft | license | coverage | residue | seconds |",
-              "|---|---|---|---|---|---:|---:|---:|"]
+    has_mct = any(isinstance(m.get("mct"), dict) and "error" in m["mct"] for m in board["mods"])
+    lines += ["", "## Mods", "", "| mod | status | loader | Minecraft | license | coverage | residue | seconds |"
+              + (" mct errors / warnings |" if has_mct else ""),
+              "|---|---|---|---|---|---:|---:|---:|" + ("---:|" if has_mct else "")]
     for m in board["mods"]:
         cov = "" if m["coverage"] is None else f"{m['coverage']:.1f}%"
         if m.get("coverage_delta"):
@@ -388,7 +398,8 @@ def render_markdown(board: dict, top: int = 50) -> str:
         status = m["status"] if m["status"] == "ok" else f"{m['status']}: {_md_cell(m.get('detail') or '')[:80]}"
         lines.append(f"| {m['name']} | {status} | {m.get('loader') or ''} | {m.get('minecraft') or ''} "
                      f"| {_md_cell(m.get('license') or '')} | {cov} | {m.get('residue') if m.get('residue') is not None else ''} "
-                     f"| {m.get('seconds') if m.get('seconds') is not None else ''} |")
+                     f"| {m.get('seconds') if m.get('seconds') is not None else ''} |"
+                     + (f" {_mct_cell(m.get('mct'))} |" if has_mct else ""))
     return "\n".join(lines) + "\n"
 
 

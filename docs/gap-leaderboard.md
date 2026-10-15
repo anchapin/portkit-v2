@@ -72,6 +72,11 @@ Columns:
   "Gone since the previous run". The mods table shows each mod's coverage
   change.
 
+With mct (on the nightly schedule, and on a manual run unless unticked) the
+mods table also gives Mojang's validator's error and warning counts per mod,
+report-only as in the corpus. A mod that converts to nothing gets one mct
+error for its empty pack.
+
 A mod that never produced residue still shows up: a crash, a timeout or a jar
 portkit can't ingest (no `assets/` or `data/` tree, such as a pure-code mod)
 becomes a `conversion` row. A jar that fails to download or verify is listed

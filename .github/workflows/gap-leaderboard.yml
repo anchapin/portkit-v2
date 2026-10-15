@@ -7,8 +7,6 @@ name: gap-leaderboard
 # a trend against the previous successful run. Report-only: it never fails on
 # what it finds. See docs/gap-leaderboard.md.
 on:
-  push: # TEMPORARY: first runs on the PR branch (a new workflow can't be dispatched until it is on develop)
-    branches: [hark/issue-234-gap-leaderboard]
   schedule:
     - cron: "41 8 * * *"
   workflow_dispatch:
@@ -36,7 +34,7 @@ jobs:
       SHARDS: 4
       PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.sample-cache
       PORTKIT_REFERENCE_CACHE: ${{ github.workspace }}/.reference-cache
-      MCT_FLAG: ${{ (github.event_name != 'workflow_dispatch' || inputs.mct) && '--mct' || '' }}
+      MCT_FLAG: ${{ (github.event_name == 'schedule' || inputs.mct) && '--mct' || '' }}
     steps:
       - uses: actions/checkout@v4
 
