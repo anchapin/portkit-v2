@@ -81,7 +81,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   them); a script-set state (no scripts for static blocks); converting
   `up`/`down` six-way connections (no Bedrock trait reports vertical
   connections).
-- **Status:** proposed (PR pending).
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order; PR #221).
 - **Links:** #56, #67, #220.
 
 ## 2026-10-14: a vanilla texture reference names Bedrock's own vanilla texture of the same file name; no art is copied
