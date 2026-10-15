@@ -3,7 +3,7 @@
 The station pattern of #177 (:mod:`portkit.converters.stations`,
 docs/decisions.md) applied to Waystones' waystone: the converter writes a
 generated data table (``scripts/portkit/data/waystones_waystone.js``) read by a
-hand-written runtime (``portkit/runtime/waystone.js`` and its node-tested
+hand-written runtime (``portkit/adapters/waystones/runtime/waystone.js`` and its node-tested
 logic ``waystone_core.js``) that does what Waystones' Java code does, cited per
 line there. It covers the ten waystone blocks (``WaystoneBlock``): placing
 one (both halves), activating it, naming it, the menu of the waystones a player
@@ -57,7 +57,7 @@ Where each value comes from (no fabrication, #87):
 * **The experience cost**: the ``warpRequirements`` config default, parsed
   here the way ``RequirementModifierParser`` parses it, with
   ``enableCosts`` / ``enableCooldowns``; values from
-  ``portkit/data/waystones_config_defaults.json`` (cited per value). Each
+  ``portkit/adapters/waystones/data/waystones_config_defaults.json`` (cited per value). Each
   modifier's conditions are decided for this runtime (:data:`FIXED_CONDITIONS`:
   a teleport here always starts at a waystone and ends at one with the default
   ``ACTIVATION`` visibility, or at a sharestone and ends at one of its colour);
@@ -82,10 +82,9 @@ import re
 from dataclasses import dataclass
 from importlib import resources
 
-from ..conditions import LoadContext
-from ..model import ConversionResult, SourceMod, Unhandled
-from ..png import decode_rgba
-from .stations import (
+from ...conditions import LoadContext
+from ...converters.lang import _translate_key
+from ...converters.station_kit import (
     FORMS,
     SCRIPT_FORMAT,
     SCRIPT_MODULE,
@@ -93,12 +92,19 @@ from .stations import (
     DerivedTexture,
     FacingBlock,
     Overlay,
-    _js_module,
-    _RUNTIME_DIR,
+    RUNTIME_DIR as _RUNTIME_DIR,
+    js_module as _js_module,
     runtime_source,
 )
-from .lang import _translate_key
-from .textures import shortname
+from ...converters.textures import shortname
+from ...model import ConversionResult, SourceMod, Unhandled
+from ...png import decode_rgba
+
+
+def adapter_runtime(name: str) -> str:
+    """One of this adapter's fixed runtime scripts (``runtime/``), verbatim."""
+    return resources.files(__package__).joinpath("runtime", name).read_text(encoding="utf-8")
+
 
 NS = "waystones"
 STATION = "waystone"
@@ -699,7 +705,7 @@ def _derived(name: str) -> list[tuple[str, int]]:
 def _runes(mod: SourceMod, family: str = "sharestone") -> tuple[str | None, str]:
     """(the rune texture's path below the mod root, "") when this jar's
     ``family`` blocks can wear their runes, else (None, why)."""
-    from .blocks import _overlay_pieces
+    from ...converters.blocks import _overlay_pieces
 
     ref = _rune_model(family)
     path = mod.assets / "models" / "block" / f"{family}_runes.json"
@@ -1124,7 +1130,7 @@ class _Refuse(Exception):
 
 
 def _defaults(version: str) -> dict | None:
-    text = resources.files("portkit.data").joinpath(DEFAULTS_DATA).read_text(encoding="utf-8")
+    text = resources.files(__package__).joinpath("data", DEFAULTS_DATA).read_text(encoding="utf-8")
     return (json.loads(text).get("versions") or {}).get(version)
 
 
@@ -1176,7 +1182,7 @@ def warp_portal_textures(mod: SourceMod) -> list[DerivedTexture]:
     """The warp portal's two flipbooks, cut from the jar's animation strip
     (WARP_PORTAL_SLICES), or [] when the strip isn't the 16 x 32-frame one
     the portal's models draw halves of, or a derived key is taken."""
-    from ..png import decode_rgba as _decode
+    from ...png import decode_rgba as _decode
 
     path = mod.root / WARP_PORTAL_TEXTURE
     try:
@@ -1400,7 +1406,7 @@ def _jar_lang(mod: SourceMod) -> dict:
 
 def _item_paths(files: dict) -> dict[str, str]:
     """identifier -> behavior pack path of every item definition written so far."""
-    from .recipes import emitted_definitions
+    from ...converters.recipes import emitted_definitions
 
     return {ident: path for ident, (kind, path, _) in emitted_definitions(files).items() if kind == "item"}
 
@@ -2160,8 +2166,11 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         + "".join(f"// warpRequirements left out: {d}\n" for d in plan.dropped)
     ).rstrip("\n")
     result.files[data_path] = _js_module(header, table)
-    for name in ("waystone.js", "waystone_core.js", FORMS):
-        result.files[f"{_RUNTIME_DIR}/{name}"] = runtime_source(name)
+    # The adapter's runtime (adapters/waystones/runtime/, pick 6a) ships at
+    # the core runtime's path, beside the station kit and forms.js it imports.
+    for name in ("waystone.js", "waystone_core.js"):
+        result.files[f"{_RUNTIME_DIR}/{name}"] = adapter_runtime(name)
+    result.files[f"{_RUNTIME_DIR}/{FORMS}"] = runtime_source(FORMS)
     blocks_ways = [n for n in blocks if n not in SHARESTONE_BLOCKS and n not in PORTSTONE_BLOCKS]
     blocks_share = [n for n in blocks if n in SHARESTONE_BLOCKS]
     blocks_port = [n for n in blocks if n in PORTSTONE_BLOCKS]
