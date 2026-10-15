@@ -108,6 +108,18 @@ def shorten_paths(result: ConversionResult) -> dict[str, str]:
             for e in flipbook
         ]
 
+    # An attachable names its textures by path (items._attachable).
+    for path, body in list(result.files.items()):
+        if not path.startswith("attachables/") or not isinstance(body, dict):
+            continue
+        description = (body.get("minecraft:attachable") or {}).get("description")
+        if not isinstance(description, dict) or not isinstance(description.get("textures"), dict):
+            continue
+        textures = {k: moved.get(v, v) if isinstance(v, str) else v
+                    for k, v in description["textures"].items()}
+        result.files[path] = {**body, "minecraft:attachable": {
+            **body["minecraft:attachable"], "description": {**description, "textures": textures}}}
+
     sounds = result.files.get(_SOUNDS)
     if isinstance(sounds, dict) and isinstance(sounds.get("sound_definitions"), dict):
         definitions = {}

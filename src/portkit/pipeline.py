@@ -274,6 +274,32 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
                 f"{path}: dropped with its block {block}, which did not convert"
             )
 
+    # A held model's attachable (items._attachable) goes with its item, and
+    # with its texture: an attachable naming a missing file renders untextured.
+    items = {
+        ((body.get("minecraft:item") or {}).get("description") or {}).get("identifier")
+        for path, body in result.files.items()
+        if path.startswith("items/") and isinstance(body, dict)
+    }
+    for path in sorted(p for p in result.files if p.startswith("attachables/")):
+        body = result.files[path]
+        if not isinstance(body, dict):
+            continue
+        description = (body.get("minecraft:attachable") or {}).get("description") or {}
+        texture = (description.get("textures") or {}).get("default")
+        geometry = (description.get("geometry") or {}).get("default")
+        if description.get("identifier") not in items:
+            why = f"dropped with its item {description.get('identifier')}, which did not convert"
+        elif isinstance(texture, str) and f"{texture}.png" not in result.files:
+            why = f"dropped: its texture {texture} did not convert (see that texture's own residue entry)"
+        else:
+            continue
+        del result.files[path]
+        geo = f"models/entity/{Path(path).stem}.held.geo.json"
+        if isinstance(geometry, str) and geo in result.files:
+            del result.files[geo]
+        result.notes.append(f"{path}: held model {why}")
+
     if borrowed:
         index = dict(result.files.get("textures/item_texture.json") or {
             "resource_pack_name": namespace,

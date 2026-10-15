@@ -131,7 +131,7 @@ def engine_floor(files: dict) -> tuple[int, int, int]:
     for relpath, content in files.items():
         is_block = relpath.startswith("blocks/")
         is_item = relpath.startswith("items/")
-        is_geometry = relpath.startswith("models/blocks/") and relpath.endswith(".geo.json")
+        is_geometry = relpath.startswith(("models/blocks/", "models/entity/")) and relpath.endswith(".geo.json")
         if not ((is_block or is_item or is_geometry) and isinstance(content, dict)):
             continue
         version = str(content.get("format_version", ""))
