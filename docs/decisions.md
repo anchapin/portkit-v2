@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Citadel books move into a library adapter behind a `books` hook
 
-- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #PR2.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #252.
 - **Decision:** step 6 of the #245 migration. `converters/books.py` (the
   Citadel guide-book reader, #182) moves unchanged to
   `adapters/citadel/books.py`; `adapters/citadel` registers it as a library
