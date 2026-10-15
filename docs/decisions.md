@@ -87,8 +87,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   art, not source data); converting the code-selected `*_hand` models of
   Alex's Mobs (Java picks them in code, #176) or the bow/crossbow use states
   (behavior parents, a separate policy).
-- **Status:** pending review.
-- **Links:** #181, #87, #167, #169.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
+- **Links:** #181, #87, #167, #169, PR #224.
 
 ## 2026-10-15: non-boolean mod config values are cited with their range and set with `--config <mod>.<option>=<number>`; out of range is an error
 
