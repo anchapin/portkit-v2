@@ -123,6 +123,9 @@ SKIP_KINDS = {
                        "station to write it for, and the reason names the machine"),
     "custom_fluid": ("the item holds a mod's fluid and its icon is drawn from that fluid at runtime (#174); "
                      "Bedrock add-ons can't define the fluid, and drawing the icon would invent it"),
+    "entity": ("the file only works with a Java entity (its spawn egg or loot table), and entities don't "
+               "convert: a mob's geometry, animations and AI are Java code, so a Bedrock entity would invent "
+               "them (#176); the reason says what the bytecode read"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
