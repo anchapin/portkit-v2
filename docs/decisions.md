@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: Waystones move into an adapter behind a `station` hook
 
-- **Status:** pending review (Hark), PR to be linked.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #253.
 - **Decision:** step 7 of the #245 migration. `converters/waystones.py`
   (#178) moves unchanged to `adapters/waystones/convert.py`, its runtime
   (`waystone.js`, `waystone_core.js`) to `adapters/waystones/runtime/` and
