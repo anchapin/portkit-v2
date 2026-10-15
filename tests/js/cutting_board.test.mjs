@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import * as core from "../../src/portkit/runtime/cutting_board_core.js";
+import * as kit from "../../src/portkit/runtime/station_core.js";
 import { registerCuttingBoard } from "../../src/portkit/runtime/cutting_board.js";
 import { ItemStack, _block, _dimension, _player, _startup, world } from "@minecraft/server";
 
@@ -211,7 +212,7 @@ test("breaking the board drops what it held; a new board starts empty", () => {
   assert.equal(dimension.spawned.length, 1);
   assert.equal(dimension.spawned[0].stack.amount, 4);
   assert.equal(dimension.spawned[0].stack.nameTag, "Bob");
-  world.setDynamicProperty(core.storageKey(table.component, dimension.id, block.location), '{"id":"x","amount":1}');
+  world.setDynamicProperty(kit.storageKey(table.component, dimension.id, block.location), '{"id":"x","amount":1}');
   component.onPlace({ block, dimension });
   assert.equal(world._properties.size, 0);
 });

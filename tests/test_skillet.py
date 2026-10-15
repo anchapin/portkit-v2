@@ -136,7 +136,7 @@ def test_entry_wires_the_skillet_and_the_tree_validates(converted):
     result, tree = converted
     main = (tree / "behavior_pack/scripts/portkit/main.js").read_text()
     assert "registerSkillet(skilletTable)" in main and "registerStove(stoveTable)" in main
-    for name in ("skillet.js", "skillet_core.js", "cooking_pot_core.js", "station_storage.js"):
+    for name in ("skillet.js", "skillet_core.js", "cooking_pot_core.js", "station_core.js", "station_storage.js"):
         assert (tree / "behavior_pack/scripts/portkit" / name).read_text() == stations.runtime_source(name)
     assert result.report.ok, result.report.errors
     note = next(n for n in result.notes if n.startswith("farmersdelight:skillet: cooks"))

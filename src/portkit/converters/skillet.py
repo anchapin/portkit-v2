@@ -269,7 +269,9 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         + "".join(vanilla_source)
     ).rstrip("\n")
     result.files[data_path] = _js_module(header, table)
-    for name in ("skillet.js", "skillet_core.js", "cooking_pot_core.js"):
+    # The heat rule it shares with the cooking pot is the station kit's
+    # (station_core.js, shipped by stations.convert), so the pot's core is not needed.
+    for name in ("skillet.js", "skillet_core.js"):
         result.files[f"{_RUNTIME_DIR}/{name}"] = runtime_source(name)
 
     body = json.loads(json.dumps(block_body))

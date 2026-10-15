@@ -30,10 +30,10 @@ import {
   soundChance,
   status,
   step,
-  storageKey,
   takesDamage,
 } from "./stove_core.js";
-import { centre, describe, dropStored, loadStored, play, rebuild, saveStored } from "./station_storage.js";
+import { storageKey } from "./station_core.js";
+import { centre, describe, dropStored, enchantLevel, loadStored, play, rebuild, saveStored } from "./station_storage.js";
 
 function keyOf(table, block) {
   return storageKey(table.component, block.dimension.id, block.location);
@@ -73,12 +73,6 @@ function covered(block) {
   }
   if (!above) return false;
   return !(above.isAir || above.isLiquid);
-}
-
-function enchantLevel(stack, id) {
-  const enchantable = stack.getComponent("minecraft:enchantable");
-  const found = enchantable ? enchantable.getEnchantment(id) : undefined;
-  return found ? found.level : 0;
 }
 
 /** One use of the held tool: Unbreaking, then damage or break (ItemStack#hurtAndBreak). */

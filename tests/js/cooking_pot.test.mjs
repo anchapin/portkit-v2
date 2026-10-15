@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import * as core from "../../src/portkit/runtime/cooking_pot_core.js";
+import * as kit from "../../src/portkit/runtime/station_core.js";
 import { registerCookingPot } from "../../src/portkit/runtime/cooking_pot.js";
 import { Direction, ItemStack, _dimension, _player, _potBlock, _startup, world } from "@minecraft/server";
 
@@ -188,16 +189,16 @@ test("experience is floor(count x xp) plus the fraction by chance", () => {
 test("heat: lit sources, conductors over a source, and the tray rule", () => {
   const block = (id, states = {}) => ({ id, state: (n) => states[n] });
   const heat = FALLBACK.heat;
-  assert.equal(core.isHeated(heat, block("minecraft:magma"), undefined), true);
-  assert.equal(core.isHeated(heat, block("minecraft:campfire", { extinguished: true }), undefined), false);
-  assert.equal(core.isHeated(heat, block("minecraft:campfire", { extinguished: false }), undefined), true);
-  assert.equal(core.isHeated(heat, block("minecraft:cauldron", { cauldron_liquid: "lava", fill_level: 0 }), undefined), false);
-  assert.equal(core.isHeated(heat, block("minecraft:cauldron", { cauldron_liquid: "lava", fill_level: 6 }), undefined), true);
-  assert.equal(core.isHeated(heat, block("minecraft:hopper"), block("minecraft:magma")), true);
-  assert.equal(core.isHeated(heat, block("minecraft:hopper"), block("minecraft:stone")), false);
+  assert.equal(kit.isHeated(heat, block("minecraft:magma"), undefined), true);
+  assert.equal(kit.isHeated(heat, block("minecraft:campfire", { extinguished: true }), undefined), false);
+  assert.equal(kit.isHeated(heat, block("minecraft:campfire", { extinguished: false }), undefined), true);
+  assert.equal(kit.isHeated(heat, block("minecraft:cauldron", { cauldron_liquid: "lava", fill_level: 0 }), undefined), false);
+  assert.equal(kit.isHeated(heat, block("minecraft:cauldron", { cauldron_liquid: "lava", fill_level: 6 }), undefined), true);
+  assert.equal(kit.isHeated(heat, block("minecraft:hopper"), block("minecraft:magma")), true);
+  assert.equal(kit.isHeated(heat, block("minecraft:hopper"), block("minecraft:stone")), false);
   // Tray only asks whether the block is one; an unlit campfire still holds the tray.
-  assert.equal(core.trayState(heat, block("minecraft:campfire", { extinguished: true })), "tray");
-  assert.equal(core.trayState(heat, block("minecraft:magma")), "none");
+  assert.equal(kit.trayState(heat, block("minecraft:campfire", { extinguished: true })), "tray");
+  assert.equal(kit.trayState(heat, block("minecraft:magma")), "none");
   assert.ok(Math.abs(core.boilChance(0.1, 10) - (1 - 0.9 ** 10)) < 1e-12);
 });
 

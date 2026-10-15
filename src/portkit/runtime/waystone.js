@@ -65,22 +65,11 @@
 // warp portal) removes it.
 
 import { BlockPermutation, EquipmentSlot, GameMode, ItemStack, system, world } from "@minecraft/server";
-import { ActionFormData, FormCancelationReason, ModalFormData } from "@minecraft/server-ui";
+import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
+import { show } from "./forms.js";
+import { HoldTimer, destroyCommand } from "./station_core.js";
+import { centre, describe, heldAt, loadAll, loadStored, play, rebuild, saveStored } from "./station_storage.js";
 import * as core from "./waystone_core.js";
-import { centre, describe, loadStored, play, rebuild, saveStored } from "./station_storage.js";
-
-// A form shown while the player is still busy (the use that opened it) is
-// cancelled with UserBusy; it is shown again on the next tick, this often.
-const BUSY_RETRIES = 20;
-
-function show(form, player, retries = BUSY_RETRIES) {
-  return form.show(player).then((response) => {
-    if (response.canceled && response.cancelationReason === FormCancelationReason.UserBusy && retries > 0) {
-      return new Promise((resolve) => system.run(() => resolve(show(form, player, retries - 1))));
-    }
-    return response;
-  });
-}
 
 function free(block) {
   // hasSpaceToTeleport L249-253 asks for blocks that don't suffocate; scripts
@@ -116,11 +105,7 @@ function lowerPos(table, block, permutation) {
 }
 
 function records(table) {
-  const prefix = core.recordPrefix(table.namespace);
-  return world.getDynamicPropertyIds()
-    .filter((key) => key.startsWith(prefix))
-    .map((key) => loadStored(key))
-    .filter((record) => record && record.uid);
+  return loadAll(core.recordPrefix(table.namespace)).filter((record) => record && record.uid);
 }
 
 function activated(table, player) {
@@ -464,7 +449,7 @@ function arrived(table, target) {
   const dimension = world.getDimension(target.dimension);
   const block = dimension ? blockAt(dimension, target.pos) : undefined;
   // destroyBlock(pos, false): the break effects, no drops (its loot is empty).
-  if (block && isMemorial(table, block.typeId)) dimension.runCommand(core.destroyCommand(target.pos));
+  if (block && isMemorial(table, block.typeId)) dimension.runCommand(destroyCommand(target.pos));
 }
 
 /**
@@ -515,7 +500,7 @@ function broken(table, event) {
   if (other && other.typeId === permutation.type.id && other.permutation.getState(table.half_state) !== half) {
     const creative = player && player.getGameMode() === GameMode.Creative;
     if (half === "upper" && !creative) {
-      dimension.runCommand(core.destroyCommand(other.location));
+      dimension.runCommand(destroyCommand(other.location));
     } else {
       other.setType("minecraft:air");
     }
@@ -864,7 +849,7 @@ const AGE_SAVE = 20;
 // (WarpPortalManager.portalCooldowns, unsaved, keyed by tickCount).
 const portalUses = new Map();
 // Player id -> {player, slot, typeId, ticks, useTime}: a scroll in use.
-const charging = new Map();
+const charging = new HoldTimer();
 // Ticks counted by the portal interval (Java counts each entity's tickCount).
 let portalClock = 0;
 
@@ -893,7 +878,7 @@ function scrollUsed(table, event) {
     scrollDone(table, player, itemStack.typeId);
     return;
   }
-  charging.set(player.id, { player, slot: player.selectedSlotIndex, typeId: itemStack.typeId, ticks: 0, useTime });
+  charging.start(player, player.selectedSlotIndex, itemStack.typeId, useTime);
 }
 
 /**
@@ -915,15 +900,6 @@ function scrollDone(table, player, typeId) {
   else scrollItemFinished(table, player, typeId);
 }
 
-function heldAt(player, slot) {
-  const inventory = player.getComponent("minecraft:inventory");
-  try {
-    return inventory && inventory.container ? inventory.container.getItem(slot) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Each tick of a scroll in use: Java stops using an item the player no
  * longer holds in that hand (LivingEntity#updatingUsingItem); after the use
@@ -931,23 +907,7 @@ function heldAt(player, slot) {
  * released, so letting go does not stop it here.
  */
 function scrollTicks(table) {
-  for (const [id, c] of charging) {
-    const player = c.player;
-    if (!player || (player.isValid !== undefined && !player.isValid)) {
-      charging.delete(id);
-      continue;
-    }
-    const held = heldAt(player, c.slot);
-    if (player.selectedSlotIndex !== c.slot || !held || held.typeId !== c.typeId) {
-      charging.delete(id);
-      continue;
-    }
-    c.ticks += 1;
-    if (c.ticks >= c.useTime) {
-      charging.delete(id);
-      scrollDone(table, player, c.typeId);
-    }
-  }
+  charging.tick(heldAt, (c) => scrollDone(table, c.player, c.typeId));
 }
 
 /** findPortalPos L72-92 against this world: solid below, air or liquid for the rest. */
@@ -1612,7 +1572,7 @@ export function registerWaystones(table) {
     // WarpDamageResetHandler#onDamage L10-15: damage stops a scroll's use
     // (every scroll and the warp stone is an IResetUseOnDamage).
     world.afterEvents.entityHurt.subscribe((event) => {
-      if (event.hurtEntity) charging.delete(event.hurtEntity.id);
+      if (event.hurtEntity) charging.stop(event.hurtEntity.id);
     });
     if (table.warp_portals) system.runInterval(() => portalInterval(table), 1);
     else system.runInterval(() => scrollTicks(table), 1);

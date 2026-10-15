@@ -42,11 +42,23 @@ import {
   status,
   step,
   stepHeld,
-  storageKey,
   takeOut,
 } from "./skillet_core.js";
-import { blockMatches, isHeated, trayState } from "./cooking_pot_core.js";
-import { centre, describe, dropStored, give, loadStored, maxAmountOf, play, rebuild, saveStored } from "./station_storage.js";
+import { blockMatches, isHeated, storageKey, trayState } from "./station_core.js";
+import {
+  blockBelow as below,
+  blockView as view,
+  centre,
+  describe,
+  dropStored,
+  facingOf,
+  give,
+  loadStored,
+  maxAmountOf,
+  play,
+  rebuild,
+  saveStored,
+} from "./station_storage.js";
 
 function keyOf(table, block) {
   return storageKey(table.component, block.dimension.id, block.location);
@@ -60,21 +72,6 @@ function save(table, block, skillet) {
   saveStored(keyOf(table, block), skillet);
 }
 
-/** A block as the heat rules read it: { id, state(name) }, or undefined. */
-function view(block) {
-  if (!block) return undefined;
-  const permutation = block.permutation;
-  return { id: block.typeId, state: (name) => permutation.getState(name) };
-}
-
-function below(block, steps) {
-  try {
-    return block.below(steps);
-  } catch {
-    return undefined; // outside the world or an unloaded chunk
-  }
-}
-
 function heated(table, block) {
   // HeatableBlockEntity#isHeated (the cooking pot's rule, same tags).
   return isHeated(table.heat, view(below(block, 1)), view(below(block, 2)));
@@ -83,11 +80,6 @@ function heated(table, block) {
 /** Block#getTrayState (L195-197): "true" over a tray heat source. */
 function support(table, block) {
   return trayState(table.heat, view(below(block, 1))) === "tray" ? "true" : "false";
-}
-
-function facingOf(block) {
-  const facing = block.permutation.getState("minecraft:cardinal_direction");
-  return typeof facing === "string" ? facing : "north";
 }
 
 function message(table, player, role) {

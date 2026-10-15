@@ -6,13 +6,13 @@ station kind, copied verbatim into converted behavior packs under
 table each one reads (`scripts/portkit/data/<namespace>_<station>.js`) and the
 entry `scripts/portkit/main.js` that wires the two.
 
-- `cutting_board_core.js`: Farmer's Delight cutting board logic, no imports
-  (tested with node, `tests/js/`).
+- `cutting_board_core.js`: Farmer's Delight cutting board logic; imports only
+  `station_core.js` (tested with node, `tests/js/`).
 - `cutting_board.js`: its Bedrock binding (custom component registration,
   storage, sounds, item spawning).
 - `cooking_pot_core.js`: Farmer's Delight cooking pot logic (recipe matching,
-  the cook timer, meal/container/output slots, heat rule, experience), no
-  imports.
+  the cook timer, meal/container/output slots, experience); imports only
+  `station_core.js`.
 - `cooking_pot.js`: its Bedrock binding (interaction by hand, `onTick`,
   placement support state, breaking).
 - `stove_core.js`: Farmer's Delight stove logic (six spots, campfire recipe
@@ -26,10 +26,11 @@ entry `scripts/portkit/main.js` that wires the two.
 - `skillet.js`: its Bedrock binding (the placed skillet's use, `onTick`, tray
   state, sneak-only placement, breaking; held cooking with the skillet in the
   off-hand through `world.beforeEvents.itemUse` and a `system.runInterval`
-  loop; the hit sound). It imports the heat helpers of `cooking_pot_core.js`.
+  loop; the hit sound). It reads the heat rule from `station_core.js`.
 - `feast_core.js`: Farmer's Delight feast logic (what a use does at a
   serving count: serve, ask for the container, clear the leftovers; the
-  medley's serving by count; the clearing command), no imports.
+  medley's serving by count), no imports; the clearing command is
+  `station_core.js`'s.
 - `feast.js`: its Bedrock binding (one component for every feast block,
   `onPlayerInteract`; the serving count is the block's integer state, so
   nothing is stored; clearing runs `setblock ... destroy`, which drops through
@@ -41,7 +42,7 @@ entry `scripts/portkit/main.js` that wires the two.
   idle status, shard target, attunement step and each entity's on-plate count
   and cooldown; the warp portal's facing, the place a portal scroll opens it
   and each entity's portal cooldown; where a fleeting memorial goes and which
-  memorials a player's menus list), no imports.
+  memorials a player's menus list); imports only `station_core.js`.
 - `waystone.js`: its Bedrock binding (placement of both halves through
   `beforeOnPlayerPlace` and `world.afterEvents.playerPlaceBlock`, activation
   and the menu through `onPlayerInteract`, breaking through `onPlayerBreak`;
@@ -75,12 +76,28 @@ entry `scripts/portkit/main.js` that wires the two.
   no imports.
 - `book.js`: its Bedrock binding (`world.afterEvents.itemUse` opens the book a
   used item names at its root page; each page is a `@minecraft/server-ui`
-  `ActionFormData`). The converter writes the page table
+  `ActionFormData`, shown through `forms.js`). The converter writes the page table
   (`scripts/portkit/data/<namespace>_books.js`) from a Citadel book's page
   JSON, and the page text into the resource pack's `texts/*.lang`
   (`portkit.converters.books`).
-- `station_storage.js`: helpers the bindings share (world dynamic property
-  storage, stored stacks, giving and dropping items, sounds).
+
+The station kit (#245): namespace-free files any station runtime builds on.
+They name no mod; `portkit.converters.station_kit` ships them
+(`KIT_FILES` beside every station runtime, `FORMS` with a runtime that shows
+forms), and the conversion fails if a shipped script imports a file the pack
+does not ship (`station_kit.unresolved_imports`).
+
+- `station_core.js`: pure helpers, no imports (tested with node,
+  `tests/js/station_core.test.mjs`): the storage key and its prefix, the
+  counter-clockwise side step, the heat rule (heat sources, conductors, tray),
+  the `setblock ... destroy` command and `HoldTimer`, the held-item use timer
+  (Waystones' scrolls and warp stone).
+- `station_storage.js`: Bedrock-side helpers the bindings share (world dynamic
+  property storage and listing a station's records, stored stacks, giving and
+  dropping items, sounds, enchantment levels, the block view the heat rule
+  reads, the block below, a block's facing, the stack in an inventory slot).
+- `forms.js`: shows a `@minecraft/server-ui` form, shown again next tick
+  (up to 20 times) when cancelled because the player is busy.
 
 Every behaviour is cited to the mod's source in the comments. Change these
 files only with the source open; see docs/decisions.md (2026-10-13).

@@ -111,7 +111,7 @@ def cut_frames(data: bytes, frame_height: int, top: int, bottom: int) -> bytes |
 
 def convert(mod: SourceMod, derived=()) -> ConversionResult:
     """The mod's block and item textures, plus ``derived``
-    (:class:`portkit.converters.stations.DerivedTexture`): block textures a
+    (:class:`portkit.converters.station_kit.DerivedTexture`): block textures a
     station's overlay wears, tinted here from the jar's own (#178)."""
     result = ConversionResult()
     flipbooks: list[dict] = []

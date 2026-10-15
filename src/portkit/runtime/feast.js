@@ -16,7 +16,8 @@
 // tables, as Java's destroyBlock(pos, true) drops through its loot table.
 
 import { EquipmentSlot, GameMode, ItemStack, system } from "@minecraft/server";
-import { containerMessage, destroyCommand, interaction } from "./feast_core.js";
+import { containerMessage, interaction } from "./feast_core.js";
+import { destroyCommand } from "./station_core.js";
 import { centre, give, play } from "./station_storage.js";
 
 function destroy(block) {

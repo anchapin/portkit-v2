@@ -86,6 +86,7 @@ from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..png import decode_rgba
 from .stations import (
+    FORMS,
     SCRIPT_FORMAT,
     SCRIPT_MODULE,
     SCRIPT_VERSION,
@@ -2159,7 +2160,7 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
         + "".join(f"// warpRequirements left out: {d}\n" for d in plan.dropped)
     ).rstrip("\n")
     result.files[data_path] = _js_module(header, table)
-    for name in ("waystone.js", "waystone_core.js"):
+    for name in ("waystone.js", "waystone_core.js", FORMS):
         result.files[f"{_RUNTIME_DIR}/{name}"] = runtime_source(name)
     blocks_ways = [n for n in blocks if n not in SHARESTONE_BLOCKS and n not in PORTSTONE_BLOCKS]
     blocks_share = [n for n in blocks if n in SHARESTONE_BLOCKS]

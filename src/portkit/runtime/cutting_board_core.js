@@ -1,8 +1,8 @@
 // portkit station runtime: Farmer's Delight cutting board, pure logic (#177).
 //
 // Fixed file, copied verbatim into every pack that ships the cutting board
-// (portkit/runtime/; see docs/decisions.md, 2026-10-13). It imports nothing,
-// so node can test it offline (tests/js/). The recipe data lives in the
+// (portkit/runtime/; see docs/decisions.md, 2026-10-13). It imports only the
+// pure station kit (station_core.js), so node can test it offline (tests/js/). The recipe data lives in the
 // generated table (scripts/portkit/data/<namespace>_cutting_board.js); the
 // Bedrock side is cutting_board.js.
 //
@@ -11,6 +11,8 @@
 // and MehVahdJukaar/FarmersDelightRefabricated a8cb49ed (Fabric 3.6.28).
 // "BE" below is common/block/entity/CuttingBoardBlockEntity.java, "Block"
 // common/block/CuttingBoardBlock.java, NeoForge line numbers.
+
+import { counterClockwiseStep } from "./station_core.js";
 
 /** Whether the tool may cut with this recipe: any listed item or Bedrock tag. */
 export function toolMatches(tool, toolId, hasTag) {
@@ -47,9 +49,6 @@ export function rollResults(recipe, fortuneLevel, fortuneBonus, random) {
   return out;
 }
 
-const COUNTER_CLOCKWISE = { north: "west", west: "south", south: "east", east: "north" };
-const STEP = { north: [0, -1], south: [0, 1], west: [-1, 0], east: [1, 0] };
-
 /**
  * Where results appear and how they move. BE L101-105: from the block's centre,
  * 0.2 blocks toward the board's facing turned counter-clockwise, 0.2 up, moving
@@ -58,7 +57,7 @@ const STEP = { north: [0, -1], south: [0, 1], west: [-1, 0], east: [1, 0] };
  * the two agree).
  */
 export function spawnOffset(facing) {
-  const [x, z] = STEP[COUNTER_CLOCKWISE[facing] ?? "west"];
+  const [x, z] = counterClockwiseStep(facing);
   return { dx: x * 0.2, dy: 0.2, dz: z * 0.2, vx: x * 0.2, vy: 0, vz: z * 0.2 };
 }
 
@@ -105,9 +104,4 @@ export function amountToAdd(stored, heldAmount, maxAmount, sameItem) {
 export function takesDamage(unbreakingLevel, random) {
   if (unbreakingLevel <= 0) return true;
   return random() >= unbreakingLevel / (unbreakingLevel + 1);
-}
-
-/** The dynamic-property key holding the board at this position. */
-export function storageKey(component, dimensionId, location) {
-  return `${component}|${dimensionId}|${location.x},${location.y},${location.z}`;
 }

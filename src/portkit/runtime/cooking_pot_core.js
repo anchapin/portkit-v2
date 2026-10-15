@@ -1,8 +1,8 @@
 // portkit station runtime: Farmer's Delight cooking pot, pure logic (#177).
 //
 // Fixed file, copied verbatim into every pack that ships the cooking pot
-// (portkit/runtime/; see docs/decisions.md, 2026-10-13). It imports nothing,
-// so node can test it offline (tests/js/). The recipe data lives in the
+// (portkit/runtime/; see docs/decisions.md, 2026-10-13). It imports only the
+// pure station kit (station_core.js), so node can test it offline (tests/js/). The recipe data lives in the
 // generated table (scripts/portkit/data/<namespace>_cooking_pot.js); the
 // Bedrock side is cooking_pot.js.
 //
@@ -18,6 +18,8 @@
 // slot, the meal (BE's MEAL_DISPLAY_SLOT), the meal's container, the cook
 // timer and the recipes used since experience was last paid out. A stored
 // stack is { id, amount, ...item data }.
+
+import { counterClockwiseStep } from "./station_core.js";
 
 export const INPUT_SLOTS = 6;
 
@@ -105,9 +107,6 @@ export function isContainerValid(pot, id) {
   return !!id && !!pot.mealContainer && id === pot.mealContainer;
 }
 
-const COUNTER_CLOCKWISE = { north: "west", west: "south", south: "east", east: "north" };
-const STEP = { north: [0, -1], south: [0, 1], west: [-1, 0], east: [1, 0] };
-
 /**
  * Where an ingredient's leftover appears and how it moves.
  * BE#ejectIngredientRemainder (L336-343): 0.25 blocks from the centre toward
@@ -115,7 +114,7 @@ const STEP = { north: [0, -1], south: [0, 1], west: [-1, 0], east: [1, 0] };
  * 0.25 up.
  */
 export function ejectOffset(facing) {
-  const [x, z] = STEP[COUNTER_CLOCKWISE[facing] ?? "west"];
+  const [x, z] = counterClockwiseStep(facing);
   return { dx: x * 0.25, dy: 0.7, dz: z * 0.25, vx: x * 0.08, vy: 0.25, vz: z * 0.08 };
 }
 
@@ -353,35 +352,6 @@ export function experience(used, recipes, random) {
   return total;
 }
 
-/** Whether a block ({ id, state(name) }) matches one heat rule of the table. */
-export function blockMatches(rule, block) {
-  if (!block || block.id !== rule.id) return false;
-  for (const [name, value] of Object.entries(rule.states ?? {})) {
-    if (block.state(name) !== value) return false;
-  }
-  for (const [name, value] of Object.entries(rule.not ?? {})) {
-    if (block.state(name) === value) return false;
-  }
-  return true;
-}
-
-/**
- * HeatableBlockEntity#isHeated (L19-38): the block below is a heat source
- * (lit, if it can be unlit), or a heat conductor with a heat source below it.
- */
-export function isHeated(heat, below, belowTwo) {
-  if (heat.sources.some((r) => blockMatches(r, below))) return true;
-  if (heat.conductors.some((r) => blockMatches(r, below))) {
-    return heat.sources.some((r) => blockMatches(r, belowTwo));
-  }
-  return false;
-}
-
-/** Block#getTrayState (L137-142): tray over a tray heat source, else none. */
-export function trayState(heat, below) {
-  return heat.tray.some((r) => blockMatches(r, below)) ? "tray" : "none";
-}
-
 /**
  * Chance that one run of `interval` ticks plays the boil sound, from Java's 1
  * in 10 per client tick (Block#animateTick, L176-188): the chance at least one
@@ -406,9 +376,4 @@ export function status(pot, heated, recipe) {
   if (pot.output) parts.push(`ready: ${pot.output.amount} ${pot.output.id}`);
   parts.push(heated ? "heated" : "not heated");
   return parts.join(" | ");
-}
-
-/** The dynamic-property key holding the pot at this position. */
-export function storageKey(component, dimensionId, location) {
-  return `${component}|${dimensionId}|${location.x},${location.y},${location.z}`;
 }

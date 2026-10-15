@@ -5,6 +5,10 @@
 // inventory, so each station keeps what it holds in a world dynamic property
 // per block position, as JSON. A stored stack keeps its id, count, name, lore,
 // durability damage and enchantments; other item data is not kept.
+//
+// Part of the namespace-free station kit (#245) with station_core.js (pure
+// helpers) and forms.js. The block view, facing, enchantment, held-item and
+// record-listing helpers were copies in the mods' runtimes before #245.
 
 import { EnchantmentTypes, ItemStack, world } from "@minecraft/server";
 
@@ -17,6 +21,13 @@ export function loadStored(key) {
   } catch {
     return undefined;
   }
+}
+
+/** Every stored JSON value whose key starts with `prefix` (a station's records), in getDynamicPropertyIds order. */
+export function loadAll(prefix) {
+  return world.getDynamicPropertyIds()
+    .filter((key) => key.startsWith(prefix))
+    .map((key) => loadStored(key));
 }
 
 /** Store `value` under `key` as JSON; undefined clears it. */
@@ -90,5 +101,44 @@ export function dropStored(dimension, stored, amount, at) {
     const size = Math.min(left, max);
     dimension.spawnItem(rebuild(stored, size), at);
     left -= size;
+  }
+}
+
+/** The level of enchantment `id` on a stack, 0 without it. */
+export function enchantLevel(stack, id) {
+  const enchantable = stack.getComponent("minecraft:enchantable");
+  const found = enchantable ? enchantable.getEnchantment(id) : undefined;
+  return found ? found.level : 0;
+}
+
+/** A block as table rules read it (the heat rule): { id, state(name) }, or undefined. */
+export function blockView(block) {
+  if (!block) return undefined;
+  const permutation = block.permutation;
+  return { id: block.typeId, state: (name) => permutation.getState(name) };
+}
+
+/** The block `steps` below, or undefined outside the world or in an unloaded chunk. */
+export function blockBelow(block, steps) {
+  try {
+    return block.below(steps);
+  } catch {
+    return undefined; // outside the world or an unloaded chunk
+  }
+}
+
+/** A block's minecraft:cardinal_direction, north when it has none. */
+export function facingOf(block) {
+  const facing = block.permutation.getState("minecraft:cardinal_direction");
+  return typeof facing === "string" ? facing : "north";
+}
+
+/** The stack in a player's inventory slot, or undefined. */
+export function heldAt(player, slot) {
+  const inventory = player.getComponent("minecraft:inventory");
+  try {
+    return inventory && inventory.container ? inventory.container.getItem(slot) : undefined;
+  } catch {
+    return undefined;
   }
 }

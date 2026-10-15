@@ -1,14 +1,16 @@
 // portkit station runtime: Waystones waystone, sharestone, portstone, warp plate, warp portal, scroll, warp stone and fleeting memorial logic (#178).
 //
 // Fixed file, copied verbatim into every pack that ships waystones
-// (portkit/runtime/; see docs/decisions.md). No imports, so it runs under
-// node (tests/js/waystone.test.mjs, tests/js/warp_plate.test.mjs,
+// (portkit/runtime/; see docs/decisions.md). It imports only the pure station
+// kit (station_core.js), so it runs under node (tests/js/waystone.test.mjs, tests/js/warp_plate.test.mjs,
 // tests/js/warp_portal.test.mjs, tests/js/memorial.test.mjs). The Bedrock
 // binding is waystone.js.
 //
 // Cited to Waystones v21.1.46 (TwelveIterations/Waystones @9d280c1a,
 // common/src/main/java/net/blay09/mods/waystones/); the data table's header
 // lists the exact lines.
+
+import { storageKey, storagePrefix } from "./station_core.js";
 
 /**
  * The experience points a teleport costs: the data table's warp requirement
@@ -200,11 +202,11 @@ export function withActivated(activated, uid) {
 
 /** Dynamic property key of the waystone whose lower half is at `pos` in `dimensionId`. */
 export function recordKey(namespace, dimensionId, pos) {
-  return `${namespace}:portkit_waystone|${dimensionId}|${pos.x},${pos.y},${pos.z}`;
+  return storageKey(`${namespace}:portkit_waystone`, dimensionId, pos);
 }
 
 export function recordPrefix(namespace) {
-  return `${namespace}:portkit_waystone|`;
+  return storagePrefix(`${namespace}:portkit_waystone`);
 }
 
 /** World dynamic property counting placements (a record's `order`). */
@@ -215,11 +217,6 @@ export function orderKey(namespace) {
 /** Player dynamic property holding the uids the player activated, in order. */
 export function activatedKey(namespace) {
   return `${namespace}:portkit_waystones`;
-}
-
-/** `setblock` that removes the block at `location` and drops its loot (Java's destroyBlock with drops). */
-export function destroyCommand(location) {
-  return `setblock ${location.x} ${location.y} ${location.z} air destroy`;
 }
 
 // -- warp plates ---------------------------------------------------------------
