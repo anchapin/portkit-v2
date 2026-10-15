@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: the per-mod recipe residue tables live in their mods' adapters
 
-- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #NNN.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #250.
 - **Decision:** step 4 of the #245 migration (pick 5: Python first). The
   tables in `converters/recipes.py` that give a mod's recipe types their
   residue kind and reason move unchanged into one adapter per mod, as
