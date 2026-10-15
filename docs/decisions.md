@@ -27,6 +27,38 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: the core may not gain mod namespace literals (ratchet lint, allowlist mode); the adapter interface stays open
+
+- **Status:** lint and audit approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR (this); adapter interface picks 1-10 in `docs/adapter-audit-2026-10-15.md` section 6 **proposed, open for Alex**.
+- **Decision:** first slice of #245 (step 1 + step 4 in allowlist mode), no
+  code moves and no behaviour change. (1) `docs/adapter-audit-2026-10-15.md`
+  lists the single-mod code in `src/portkit`: about 10,300 of 37,132 lines
+  (Waystones 4,573; Farmer's Delight stations ~4,580; per-mod recipe residue
+  tables in `recipes.py` ~766; Alloy Forgery 351; Mekanism/Mantle load
+  conditions ~60; Citadel books 698 counted as a library), classified as
+  adapter-only, per-mod data, or reusable pieces for #239, with a migration
+  order. (2) `tests/test_core_namespace_free.py` scans code string literals
+  (not comments or docstrings) in every `src/portkit` `.py`/`.js` outside
+  `src/portkit/adapters/` for mod namespaces: a known namespace as `ns:`, a
+  whole-literal `ns:path` of any non-platform namespace, a bare known
+  namespace, or a `/`/`.`-delimited segment; the known list is every
+  `assets/`/`data/` namespace of the 13 corpus and 13 deco-set jars plus
+  `citadel`. Today's 313 hits are frozen per (file, namespace) in
+  `tests/data/core_namespace_allowlist.json`; a new or higher count fails, and
+  a lower count fails until the allowlist is lowered, so it only shrinks.
+- **Why:** portkit has to scale to arbitrary mods
+  (`docs/brainstorm-2026-10-15-scaling.md`); single-mod code in shared modules
+  makes every core change touch Waystones/FD paths and hides how much of the
+  converter is generic. A ratchet stops the share growing while the moves
+  happen one adapter at a time with md5-identical packs as the gate.
+- **Rejected:** a lint over every word in the file (comments and docstrings
+  cite the mods that motivated generic code; scrubbing them loses the
+  citations); a fixed list without rule B (a new mod's hard-coded ids would
+  slip past); an allowlist that only caps counts (removed references could
+  come back unnoticed); moving code in the same PR (the interface needs
+  Alex's picks first).
+- **Links:** #245, #239, #234; `docs/adapter-audit-2026-10-15.md`.
+
 ## 2026-10-15: Alloy Forgery forging recipes are `machine_recipe` residue carrying the recipe's rules; forge definitions, tiers, fuels and its recipe tags are `machine_data`
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #233.
