@@ -27,6 +27,31 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: Mantle's and Mekanism's load-condition types live in their adapters
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #248.
+- **Decision:** step 2 of the #245 migration. `mantle:tag_filled` and
+  `mantle:tag_combination_filled` move from `conditions.py` to
+  `src/portkit/adapters/mantle` (a library adapter, `library=True`: Mantle is
+  the library Tinkers' Construct's data uses), and
+  `mekanism:mod_version_loaded` to `src/portkit/adapters/mekanism`, each as a
+  `conditions` hook evaluated through the registry seam in
+  `LoadContext._one`. The handlers are the old code, unchanged; they use the
+  core's helpers (`LoadContext.tag_filled`, `loaded`, `tags`, and `present`,
+  renamed from `_present` because an adapter now calls it; `ITEM_REGISTRY`
+  is the public name of the item-registry values). `ADAPTERS` is
+  `(mantle, mekanism)`, alphabetical. `referenced_flags` is untouched (it
+  still lists these types as candidate flags, as before). The core namespace
+  allowlist drops by the 4 literals that moved (313 -> 309; `conditions.py`
+  leaves it). The Mantle tests move to `tests/adapters/mantle/`; Mekanism's
+  condition had no test and gets one in `tests/adapters/mekanism/`. All 13
+  corpus and 7 deco conversions are md5-identical to develop.
+- **Why:** these are the only mod-defined condition types the core evaluated
+  by name; every other mod condition is a cited config flag
+  (`config_flag_defaults.json`, which stays in core per pick 9).
+- **Rejected:** keeping Mantle in core as a "generic format" (pick 2b).
+- **Links:** #245, `docs/adapter-audit-2026-10-15.md` section 7 step 2.
+
 ## 2026-10-15: single-mod code reaches the core only through an explicit, ordered adapter registry
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #247; built to Alex's approved picks 1-4 (2026-10-15).

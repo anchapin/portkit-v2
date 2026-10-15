@@ -17,7 +17,9 @@ not load. This module decides each file against the conversion context:
   ``tag_combination_filled``): an item tag's membership in that context, from
   the jar's tag files and the fetched loader and vanilla tag data
   (:class:`portkit.converters.tags.TagResolver`). Unknown membership, or a
-  registry other than items, is undecidable.
+  registry other than items, is undecidable. A condition type one mod or
+  library defines (Mantle's, Mekanism's ``mod_version_loaded``) is evaluated
+  by its adapter (:mod:`portkit.adapters`, #245) with these same helpers.
 - **Items** (``item_exists``, Fabric ``registry_contains``): an item of an
   absent mod doesn't exist. Whether this mod or vanilla registers an id is
   decided in Java code, so that is undecidable.
@@ -110,6 +112,8 @@ _PLATFORM = {
 }
 
 _ITEM_REGISTRY = ("minecraft:item", "item", None)
+# The registry values that mean "items" (public for condition adapters, #245).
+ITEM_REGISTRY = _ITEM_REGISTRY
 
 # Wrapper recipe types: a list of {conditions, recipe}, the first entry whose
 # conditions hold is the recipe (Forge 1.20.1 ConditionalRecipe).
@@ -253,7 +257,7 @@ class LoadContext:
             return True if modid in platform or modid == self.mod.namespace else None
         return modid in known
 
-    def _present(self, ident: str) -> bool | None:
+    def present(self, ident: str) -> bool | None:
         """Whether an item id exists in Java alongside this mod (None: can't say)."""
         tag = ident.startswith("#")
         ident = ident[1:] if tag else ident
@@ -282,7 +286,7 @@ class LoadContext:
                           f" ({self.tags.unknown_reason(tag) or 'no tag data'})")
         undecided = False
         for member in members:
-            here = self._present(member)
+            here = self.present(member)
             if here:
                 return True, f"tag {tag} holds {member}"
             if here is None:
@@ -406,13 +410,6 @@ class LoadContext:
             if not isinstance(values, list):
                 return Verdict(None, f"{kind} has no values list")
             return self._mods(kind, values, every=local == "all_mods_loaded")
-        if kind == "mekanism:mod_version_loaded":
-            loaded = self.loaded(cond.get("modid"))
-            if loaded is False:
-                return Verdict(False, f"{kind} {cond.get('modid')}", absent=[cond.get("modid")])
-            # mekanism ModVersionLoadedCondition: a loaded mod at least as new;
-            # Maven version ordering isn't reimplemented here.
-            return Verdict(None, f"{kind} {cond.get('modid')} >= {cond.get('version')} on a loaded mod")
         if builtin and local == "tag_empty":
             filled, why = self.tag_filled(cond.get("tag"), cond.get("registry"))
             return Verdict(None if filled is None else not filled, f"{kind}: {why}")
@@ -421,10 +418,6 @@ class LoadContext:
             if not isinstance(values, list):
                 return Verdict(None, f"{kind} has no values list")
             return self._all([self._tag(kind, v, cond.get("registry")) for v in values], "and")
-        if kind == "mantle:tag_filled":
-            return self._tag(kind, cond.get("tag"), cond.get("registry"))
-        if kind == "mantle:tag_combination_filled":
-            return self._combination(cond)
         if builtin and local == "item_exists":
             return self._items(kind, [cond.get("item")])
         if kind == "fabric:registry_contains":
@@ -458,36 +451,6 @@ class LoadContext:
     def _tag(self, kind: str, tag, registry) -> Verdict:
         filled, why = self.tag_filled(tag, registry)
         return Verdict(filled, f"{kind}: {why}")
-
-    def _combination(self, cond: dict) -> Verdict:
-        # Mantle TagCombinationCondition.test: some entry of the first match tag
-        # (not in ignore) is in every other match tag.
-        kind = "mantle:tag_combination_filled"
-        registry = cond.get("registry")
-        match = cond.get("match")
-        match = [match] if isinstance(match, str) else match
-        if not isinstance(match, list) or not match or registry not in _ITEM_REGISTRY:
-            return Verdict(None, f"{kind}: unreadable match list or a non-item registry")
-        sets = []
-        for tag in match + ([cond["ignore"]] if isinstance(cond.get("ignore"), str) else []):
-            members = self.tags.context_members(tag) if isinstance(tag, str) else None
-            if members is None:
-                return Verdict(None, f"{kind}: tag {tag}'s membership isn't known")
-            present = []
-            for m in members:
-                here = self._present(m)
-                if here is None:
-                    return Verdict(None, f"{kind}: whether tag {tag}'s members are registered isn't known")
-                if here:
-                    present.append(m)
-            sets.append(set(present))
-        ignore = sets[len(match)] if len(sets) > len(match) else set()
-        hit = sorted(m for m in sets[0] - ignore if all(m in s for s in sets[1:len(match)]))
-        if hit:
-            return Verdict(True, f"{kind}: {hit[0]} is in {', '.join(match)}")
-        return Verdict(False, f"{kind}: no item is in all of {', '.join(match)}"
-                              + (f" outside {cond['ignore']}" if cond.get("ignore") else "")
-                              + " with only this mod, the loader and vanilla")
 
     def _items(self, kind: str, items: list) -> Verdict:
         parts = []
