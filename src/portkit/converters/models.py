@@ -18,6 +18,7 @@ wrong is the failure mode this project exists to avoid.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import math
 from pathlib import Path
@@ -779,14 +780,197 @@ def _zero_rotation(rotation) -> bool:
         return False
 
 
+# --------------------------------------------------------------------------
+# uvlock. A blockstate entry with "uvlock": true turns the model but keeps each
+# face's texture fixed to the world. Java does this per face, in the face's own
+# texture plane, through one matrix (all quarter turns, so exact in integers):
+#   M = GLOBAL_TO_LOCAL[face] * R^-1 * LOCAL_TO_GLOBAL[face']
+# where R is the blockstate rotation (BlockModelRotation: rotateYXZ(-y, -x, 0)),
+# face' the face R sends ``face`` to (Direction#rotate), and LOCAL_TO_GLOBAL the
+# per-face turns of BlockMath (south identity, east rotY(+90), west rotY(-90),
+# north rotY(180), up rotX(-90), down rotX(+90); GLOBAL_TO_LOCAL their
+# inverses), applied about the texture's centre (BlockMath#blockCenterToCorner).
+# Two generations of Java use M differently:
+#   - MC 1.20.1 / 1.21.1 client jars, FaceBakery#recomputeUVs (1.21.1 L61-102,
+#     with BlockMath#getUVLockTransform L52-64): M maps the uv's two corners,
+#     each axis keeps its sign when the mapped pair runs the same way
+#     (Math.signum), and the texture rotation becomes
+#     floorMod(-round(atan2(M*(cos r, sin r))/90)*90, 360). The baked vertex k
+#     then reads BlockFaceUV#getU/getV(k) of that new uv and rotation.
+#   - MC 1.21.8 client jar, FaceBakery#bakeQuad + BlockMath#getFaceTransformation
+#     + BlockModelRotation (ModelState#inverseFaceTransformation): M maps each
+#     vertex's uv directly.
+# They agree on most faces and disagree on some mirrored, degenerate or
+# texture-rotated uvs. portkit takes a face only where both give the same uv at
+# every vertex, so the result does not depend on which Java the mod targets.
+# Checked against both jars run in a JVM over 3,840 cases (16 turns x 6 faces x
+# 4 rotations x 10 uvs): the port matches each exactly.
+def _rot_quarters(degrees: int) -> tuple[int, int]:
+    return [(1, 0), (0, 1), (-1, 0), (0, -1)][(int(degrees) // 90) % 4]
+
+
+def _rot_y_matrix(degrees: int) -> tuple:
+    c, s = _rot_quarters(degrees)
+    return ((c, 0, s), (0, 1, 0), (-s, 0, c))
+
+
+def _rot_x_matrix(degrees: int) -> tuple:
+    c, s = _rot_quarters(degrees)
+    return ((1, 0, 0), (0, c, -s), (0, s, c))
+
+
+def _mat_mul(a: tuple, b: tuple) -> tuple:
+    return tuple(tuple(sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)) for i in range(3))
+
+
+def _mat_vec(a: tuple, v: tuple) -> tuple:
+    return tuple(sum(a[i][k] * v[k] for k in range(3)) for i in range(3))
+
+
+def _transpose(a: tuple) -> tuple:
+    return tuple(tuple(a[j][i] for j in range(3)) for i in range(3))
+
+
+_IDENTITY = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
+_UV_LOCAL_TO_GLOBAL = {
+    "south": _IDENTITY, "east": _rot_y_matrix(90), "west": _rot_y_matrix(-90),
+    "north": _rot_y_matrix(180), "up": _rot_x_matrix(-90), "down": _rot_x_matrix(90),
+}
+
+
+def _uvlock_matrix(face: str, x_degrees: int, y_degrees: int) -> tuple:
+    """(M, face') for one face under a blockstate x/y turn (see above)."""
+    turn = _mat_mul(_rot_y_matrix(-y_degrees), _rot_x_matrix(-x_degrees))
+    landed = _face_for(_mat_vec(turn, _FACE_NORMAL[face]))
+    matrix = _mat_mul(_mat_mul(_transpose(_UV_LOCAL_TO_GLOBAL[face]), _transpose(turn)),
+                      _UV_LOCAL_TO_GLOBAL[landed])
+    return matrix, landed
+
+
+def _uv_map(matrix: tuple, u: float, v: float) -> tuple[float, float]:
+    p = _mat_vec(matrix, (u - _HALF, v - _HALF, -_HALF))
+    return p[0] + _HALF, p[1] + _HALF
+
+
+def _uv_vertices(uv: list, rotation: int) -> list[tuple[float, float]]:
+    """BlockFaceUV#getU/getV for vertex 0..3."""
+    out = []
+    for k in range(4):
+        d = (k + rotation // 90) % 4
+        out.append((uv[0] if d in (0, 1) else uv[2], uv[1] if d in (0, 3) else uv[3]))
+    return out
+
+
+def _signum(value: float) -> int:
+    return (value > 0) - (value < 0)
+
+
+# The game version whose uvlock applies, set by blocks.convert from the mod's
+# declared version (SourceMod.minecraft) for the length of one conversion.
+UVLOCK_GAME: contextvars.ContextVar[str | None] = contextvars.ContextVar("uvlock_game", default=None)
+# recomputeUVs is in Mojang's mappings up to MC 1.21.4 (FaceBakery, BlockMath
+# #getUVLockTransform; 1.16.5, 1.19.2, 1.20.1 decompile to the same body); from
+# 1.21.5 they name ModelState#faceTransformation / #inverseFaceTransformation
+# and BlockMath#getFaceTransformation instead (client.txt of 1.21.4 / 1.21.5).
+UVLOCK_PER_VERTEX_SINCE = "1.21.5"
+
+
+def uvlock_uv(face: str, uv: list, rotation: int, x_degrees: int,
+              y_degrees: int, minecraft: str | None = None) -> tuple[tuple[list[float], int] | None, str]:
+    """The (uv, rotation) Java's uvlock gives ``face`` under a blockstate x/y
+    turn, still on the face as declared (the box then turns rigidly), or why
+    not (see the comment above).
+
+    ``minecraft`` is the game version the mod declares (default: the one
+    UVLOCK_GAME holds): before 1.21.5 recomputeUVs applies, from 1.21.5 the
+    per-vertex mapping. With no declared version a face is taken only where
+    the two agree."""
+    from ..data.tags import version_key
+
+    if minecraft is None:
+        minecraft = UVLOCK_GAME.get()
+    declared = version_key(minecraft) if minecraft else None
+    generation = None
+    if declared is not None:
+        generation = "per_vertex" if declared >= version_key(UVLOCK_PER_VERTEX_SINCE) else "recompute"
+    try:
+        u0, v0, u1, v1 = (float(c) for c in uv)
+        rotation = int(rotation or 0)
+    except (TypeError, ValueError):
+        return None, f"face {face} has an unreadable uv or rotation"
+    if rotation % 90:
+        return None, f"face {face} has a texture rotation that is not a quarter turn"
+    rotation %= 360
+    matrix, _ = _uvlock_matrix(face, x_degrees, y_degrees)
+    a, b = _uv_map(matrix, u0, v0), _uv_map(matrix, u1, v1)
+    nu0, nu1 = (a[0], b[0]) if _signum(u1 - u0) == _signum(b[0] - a[0]) else (b[0], a[0])
+    nv0, nv1 = (a[1], b[1]) if _signum(v1 - v0) == _signum(b[1] - a[1]) else (b[1], a[1])
+    c, s = _rot_quarters(rotation)
+    vx, vy, _ = _mat_vec(matrix, (c, s, 0))
+    degrees = math.degrees(math.atan2(vy, vx))
+    new_rotation = (-int(math.floor(degrees / 90 + 0.5)) * 90) % 360
+    recomputed = [nu0, nv0, nu1, nv1]
+    per_vertex = [_uv_map(matrix, u, v) for u, v in _uv_vertices([u0, v0, u1, v1], rotation)]
+    if generation == "recompute" or _uv_vertices(recomputed, new_rotation) == per_vertex:
+        return ([_tidy(c) for c in recomputed], new_rotation), ""
+    if generation == "per_vertex":
+        us = sorted({p[0] for p in per_vertex})
+        vs = sorted({p[1] for p in per_vertex})
+        lo_u, hi_u, lo_v, hi_v = us[0], us[-1], vs[0], vs[-1]
+        for candidate in ([lo_u, lo_v, hi_u, hi_v], [hi_u, lo_v, lo_u, hi_v],
+                          [lo_u, hi_v, hi_u, lo_v], [hi_u, hi_v, lo_u, lo_v]):
+            for turn in (0, 90, 180, 270):
+                if _uv_vertices(candidate, turn) == per_vertex:
+                    return ([_tidy(c) for c in candidate], turn), ""
+        return None, f"uvlock maps the uv on the {face} face to no rectangle"  # pragma: no cover
+    return None, (
+        f"uvlock re-maps the uv on the {face} face differently before MC 1.21.5 "
+        "(FaceBakery#recomputeUVs) and from it (per-vertex face transformation), "
+        "and the mod declares no game version"
+    )
+
+
+def _tidy(value: float):
+    return int(value) if float(value).is_integer() else value
+
+
+def _locked_face(face: str, spec: dict, start: list, end: list, xq: int, yq: int,
+                 new_start: list, new_end: list) -> tuple[tuple[str, dict] | None, str]:
+    """One face of an element under a uvlocked quarter turn: where it lands and
+    its spec there. A face whose landed texture is Java's position-derived uv
+    keeps that form (no rotation), as before."""
+    corners = spec.get("uv")
+    uv = [float(c) for c in corners] if corners is not None else auto_uv(face, start, end)
+    target, turn = _rigid_face_turn(face, xq, yq)
+    out = {k: v for k, v in spec.items() if k != "rotation"}
+    plain = auto_uv(target, new_start, new_end)
+    if uv == auto_uv(face, start, end) and not spec.get("rotation"):
+        # A texture fixed to the world stays fixed: the position-derived uv of
+        # where the face lands (this also covers zero-area faces, whose uv
+        # is a line both Java generations treat alike as invisible).
+        out["uv"] = plain
+        return (target, out), ""
+    found, why = uvlock_uv(face, uv, spec.get("rotation") or 0, 90 * xq, 90 * yq)
+    if found is None:
+        return None, why
+    new_uv, new_rotation = found
+    new_rotation = (new_rotation + turn) % 360
+    if _uv_vertices([float(c) for c in new_uv], new_rotation) == _uv_vertices(plain, 0):
+        out["uv"] = plain
+    else:
+        out["uv"] = new_uv
+        if new_rotation:
+            out["rotation"] = new_rotation
+    return (target, out), ""
+
+
 def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]:
     """An element as a Java blockstate y turn leaves it, or why not.
 
-    Only the case we can state exactly is taken: uvlock on, an unrotated
-    element, and uvs that are Java's own position-derived ones (or absent).
-    Then the turned element simply wears the position-derived uvs of where it
-    lands. Without uvlock Java also spins the up/down textures, which is not
-    mapped yet.
+    With uvlock on, an unrotated element is taken: a face whose uv is Java's
+    own position-derived one (or absent) wears the position-derived uv of
+    where it lands; a hand-set uv is re-mapped as Java's uvlock does it
+    (uvlock_uv). Without uvlock the textures ride along (_turn_with_textures).
     """
     if degrees % 90:
         return None, f"y turn of {degrees} degrees is not a quarter turn"
@@ -809,24 +993,35 @@ def turn_y(element: dict, degrees: int, uvlock: bool) -> tuple[dict | None, str]
         return None, _NEGATIVE_UVLOCK
 
     faces = element.get("faces") or {}
+    begin, finish = [x1, y1, z1], [x2, y2, z2]
+    hand_set = set()
     for face, spec in faces.items():
         corners = spec.get("uv") if isinstance(spec, dict) else None
-        if corners is not None and [float(v) for v in corners] != auto_uv(face, [x1, y1, z1], [x2, y2, z2]):
-            return None, (
-                f"part turns a model with a hand-set uv on its {face} face, and uvlock "
-                "would replace it in a way that is not mapped yet"
-            )
+        if corners is not None and [float(v) for v in corners] != auto_uv(face, begin, finish):
+            hand_set.add(face)
 
     for _ in range(quarters):
         x1, z1, x2, z2 = 16 - z2, x1, 16 - z1, x2
-        faces = {_Y_TURN_FACES.get(f, f): spec for f, spec in faces.items()}
     start, end = [x1, y1, z1], [x2, y2, z2]
     turned = {}
     for face, spec in faces.items():
+        if face in hand_set:
+            # A hand-set uv: Java's uvlock re-maps it (FaceBakery#recomputeUVs).
+            if face not in _FACE_NORMAL:
+                return None, f"element has an unreadable {face} face"
+            landed, why = _locked_face(face, spec, begin, finish, 0, quarters, start, end)
+            if landed is None:
+                return None, why
+            target, spec = landed
+            turned[target] = spec
+            continue
+        target = face
+        for _ in range(quarters):
+            target = _Y_TURN_FACES.get(target, target)
         spec = dict(spec) if isinstance(spec, dict) else spec
         if isinstance(spec, dict):
-            spec["uv"] = auto_uv(face, start, end)
-        turned[face] = spec
+            spec["uv"] = auto_uv(target, start, end)
+        turned[target] = spec
     return {**element, "from": start, "to": end, "faces": turned}, ""
 
 
@@ -998,6 +1193,19 @@ def _turned_rotation(rotation, xq: int, yq: int) -> tuple[dict | None, str]:
     return out, ""
 
 
+def _rigid_face_turn(face: str, xq: int, yq: int) -> tuple[str, int]:
+    """(face it lands on, in-plane texture turn) for a rigid x/y quarter turn."""
+    target = _face_for(_turn_vector(_FACE_NORMAL[face], xq, yq))
+    up = _turn_vector(_FACE_TEX_UP[face], xq, yq)
+    turn = {
+        _FACE_TEX_UP[target]: 0,
+        _FACE_TEX_RIGHT[target]: 90,
+        _neg(_FACE_TEX_UP[target]): 180,
+        _neg(_FACE_TEX_RIGHT[target]): 270,
+    }[up]
+    return target, turn
+
+
 def turn_rigid(element: dict, x_degrees: int, y_degrees: int,
                carry_rotation: bool = False) -> tuple[dict | None, str]:
     """An element as a Java blockstate x/y turn without uvlock leaves it, or why not.
@@ -1037,14 +1245,7 @@ def turn_rigid(element: dict, x_degrees: int, y_degrees: int,
         spec = dict(spec)
         if spec.get("uv") is None:
             spec["uv"] = auto_uv(face, start, end)
-        target = _face_for(_turn_vector(_FACE_NORMAL[face], xq, yq))
-        up = _turn_vector(_FACE_TEX_UP[face], xq, yq)
-        turn = {
-            _FACE_TEX_UP[target]: 0,
-            _FACE_TEX_RIGHT[target]: 90,
-            _neg(_FACE_TEX_UP[target]): 180,
-            _neg(_FACE_TEX_RIGHT[target]): 270,
-        }[up]
+        target, turn = _rigid_face_turn(face, xq, yq)
         try:
             base = int(spec.get("rotation") or 0)
         except (TypeError, ValueError):
@@ -1202,11 +1403,11 @@ def turn_locked(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | N
     """An element as a Java blockstate x/y turn WITH uvlock leaves it, or why not.
 
     uvlock keeps every face's texture fixed to the world while the box moves.
-    That is exactly the uv Java derives from a face's position (see auto_uv),
-    so the case taken is the one we can state: an unrotated element whose faces
-    carry position-derived uvs (or none) and no texture rotation. The box moves
-    as turn_rigid moves it, each face lands where its normal now points, and
-    wears the position-derived uv of where it landed.
+    The case taken: an unrotated element whose faces carry no texture
+    rotation. The box moves as turn_rigid moves it and each face lands where
+    its normal now points. A face whose uv is position-derived (or absent)
+    wears the position-derived uv of where it landed; a hand-set uv is
+    re-mapped as Java's uvlock does it (uvlock_uv, FaceBakery#recomputeUVs).
     """
     if not (x_degrees % 360 or y_degrees % 360):
         return element, ""
@@ -1222,17 +1423,6 @@ def turn_locked(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | N
     for face, spec in (element.get("faces") or {}).items():
         if not isinstance(spec, dict):
             continue
-        corners = spec.get("uv")
-        if corners is not None:
-            try:
-                same = [float(v) for v in corners] == auto_uv(face, start, end)
-            except (TypeError, ValueError, KeyError):
-                same = False
-            if not same:
-                return None, (
-                    f"blockstate turns a model with a hand-set uv on its {face} face, and "
-                    "uvlock would replace it in a way that is not mapped yet"
-                )
         if spec.get("rotation"):
             return None, (
                 f"blockstate turns a model whose {face} face turns its texture, and uvlock "
@@ -1241,11 +1431,18 @@ def turn_locked(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | N
     moved, why = turn_rigid(element, x_degrees, y_degrees)
     if moved is None:
         return None, why
+    xq, yq = (x_degrees // 90) % 4, (y_degrees // 90) % 4
     faces = {}
-    for face, spec in (moved.get("faces") or {}).items():
-        spec = {k: v for k, v in spec.items() if k != "rotation"}
-        spec["uv"] = auto_uv(face, moved["from"], moved["to"])
-        faces[face] = spec
+    for face, spec in (element.get("faces") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        landed, why = _locked_face(face, spec, start, end, xq, yq, moved["from"], moved["to"])
+        if landed is None:
+            return None, why
+        target, locked = landed
+        if "cullface" in moved["faces"].get(target, {}):
+            locked["cullface"] = moved["faces"][target]["cullface"]
+        faces[target] = locked
     return {**moved, "faces": faces}, ""
 
 

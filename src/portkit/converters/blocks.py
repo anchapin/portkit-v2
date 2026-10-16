@@ -1468,6 +1468,17 @@ def _model_block(
 
 
 def convert(mod: SourceMod, stations: dict | None = None, experiments: frozenset = frozenset()) -> ConversionResult:
+    """Convert the mod's blocks (_convert_blocks), with uvlock read for the
+    game version the mod declares (models.UVLOCK_GAME, #236)."""
+    token = models.UVLOCK_GAME.set(getattr(mod, "minecraft", None))
+    try:
+        return _convert_blocks(mod, stations, experiments)
+    finally:
+        models.UVLOCK_GAME.reset(token)
+
+
+def _convert_blocks(mod: SourceMod, stations: dict | None = None,
+                    experiments: frozenset = frozenset()) -> ConversionResult:
     """Convert the mod's blocks.
 
     ``experiments`` names the Bedrock experiments the user's world turns on

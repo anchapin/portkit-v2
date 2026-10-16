@@ -131,7 +131,7 @@ def test_clashing_texture_keys_get_their_own_names(tmp_path):
 
 def test_a_part_that_cannot_turn_is_residue_naming_it(tmp_path):
     rotated = {**SIDE, "elements": [{**SIDE["elements"][0], "faces": {
-        "up": {"texture": "#pane", "uv": [0, 0, 1, 1]}}}]}
+        "up": {"texture": "#pane", "uv": [1, 0, 0, 1]}}}]}
     state = {"multipart": [
         {"apply": {"model": "examplemod:block/post"}},
         {"apply": {"model": "examplemod:block/side", "y": 90, "uvlock": True}, "when": {"east": "true"}},
@@ -140,7 +140,7 @@ def test_a_part_that_cannot_turn_is_residue_naming_it(tmp_path):
     assert "blocks/pane.json" not in result.files
     reason = result.unhandled[-1].reason
     assert reason.startswith("connection multipart part 2 (examplemod:block/side)")
-    assert "hand-set uv" in reason
+    assert "uvlock re-maps the uv on the up face differently before MC 1.21.5" in reason
 
 
 def test_pane_and_bars_templates_are_read():
