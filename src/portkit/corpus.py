@@ -55,6 +55,7 @@ class Mod:
     rule: str = ""  # which branch of the version rule picked the build
     redistribution: str = ""  # how the jar is fetched and whether it may be cached/redistributed
     listed_lib: bool = False  # #277 marks it [lib]
+    cf_mod_id: int = 0  # CurseForge project id, for host = "curseforge" (official API only, #278 pick 2)
     unfetchable: str = ""  # the reason, when the jar can't be fetched (then url/sha512/version_id may be empty)
 
     def path(self, cache: Path) -> Path:
@@ -91,6 +92,8 @@ def load(manifest: Path = MANIFEST) -> list[Mod]:
         for key in ("listed_lib",):
             if not isinstance(entry.get(key, False), bool):
                 raise CorpusError(f"{manifest}: mod {entry['name']!r} {key} must be true or false")
+        if not isinstance(entry.get("cf_mod_id", 0), int):
+            raise CorpusError(f"{manifest}: mod {entry['name']!r} cf_mod_id must be an integer")
         if not isinstance(entry.get("rank", 0), int):
             raise CorpusError(f"{manifest}: mod {entry['name']!r} rank must be an integer")
         entry = {"version_id": "", "url": "", "sha512": "", **entry}

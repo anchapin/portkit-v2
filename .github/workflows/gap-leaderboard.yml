@@ -11,6 +11,8 @@ name: gap-leaderboard
 # fixtures/real/gauntlet.toml: `set: gauntlet` on a manual run, and weekly on
 # Mondays. Its board job writes docs/gauntlet.md's content (the
 # gauntlet-board artifact); the board is committed by hand, as the baseline is.
+# Its two CurseForge-only mods are fetched only with the CURSEFORGE_API_KEY
+# secret, through the official API, never cached (#278 pick 2).
 on:
   schedule:
     - cron: "41 8 * * *"   # the sample, nightly
@@ -91,7 +93,18 @@ jobs:
       # process with a timeout, and records its residue by normalized reason.
       # A fetch failure, crash or timeout is a row in the shard, not a failure.
       # The gauntlet also profiles and classifies each jar from its contents.
+      #
+      # CurseForge-only gauntlet mods (#278 pick 2): resolved only through the
+      # official API (api.curseforge.com/v1, x-api-key) with the repo secret
+      # CURSEFORGE_API_KEY, and fetched only when allowModDistribution is true.
+      # Those jars go to a temporary directory and are re-fetched every run,
+      # never into .sample-cache (an Actions cache any PR can read). The key is
+      # only given to the gauntlet set on this repo's own schedule/dispatch
+      # runs, never to pull_request runs (this workflow has no such trigger;
+      # the guard keeps it so if one is added), and portkit never prints it.
       - name: Convert ${{ env.SET }} shard ${{ matrix.shard }}/${{ env.SHARDS }}
+        env:
+          CURSEFORGE_API_KEY: ${{ (env.SET == 'gauntlet' && github.event_name != 'pull_request') && secrets.CURSEFORGE_API_KEY || '' }}
         run: |
           if [ "$SET" = gauntlet ]; then
             portkit gauntlet run --shard ${{ matrix.shard }}/$SHARDS $MCT_FLAG --out gauntlet-shard-${{ matrix.shard }}.json

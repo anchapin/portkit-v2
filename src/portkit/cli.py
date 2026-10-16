@@ -967,9 +967,25 @@ def cmd_gauntlet(args) -> int:
                 print("note: --mct asked for, but `mct` is not on PATH; skipping it")
         where = manifest.resolve()
         label = str(where.relative_to(gaps_root())) if where.is_relative_to(gaps_root()) else str(manifest)
-        doc = gaps.run_shard(mods, shard=args.shard, manifest=label,
-                             fetch=lambda mod: corpus.fetch(mod)[0], timeout=args.timeout,
-                             mct_exe=mct_exe, profile=gauntlet.profile_and_classify)
+        # CurseForge-only mods: fetched only through the official API with
+        # CURSEFORGE_API_KEY and only when allowModDistribution is true
+        # (#278 pick 2), into a temporary directory that is deleted after the
+        # run, never into the corpus cache (which CI caches).
+        index, total = gaps.parse_shard(args.shard)
+        here = {m.name for m in gaps.shard_of(mods, index, total)}
+        gated, allow = gauntlet.gate_curseforge([m for m in mods if m.name in here])
+        gated = {m.name: m for m in gated}
+        mods = [gated.get(m.name, m) for m in mods]
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="portkit-curseforge-") as fresh:
+            def fetch(mod):
+                return corpus.fetch(mod, Path(fresh) if mod.host == "curseforge" else None)[0]
+
+            doc = gaps.run_shard(mods, shard=args.shard, manifest=label, fetch=fetch, timeout=args.timeout,
+                                 mct_exe=mct_exe, profile=gauntlet.profile_and_classify)
+        if allow:  # what the official API said, per CurseForge mod in this shard
+            doc["curseforge_allow_mod_distribution"] = allow
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(doc, indent=1) + "\n")

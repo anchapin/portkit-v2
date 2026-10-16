@@ -3,7 +3,8 @@
   "#277's top-50 gauntlet, in the issue's order (#278). Read by portkit.gauntlet (THE_50).",
   "modrinth: the Modrinth slug, checked against api.modrinth.com/v2/project/<slug> on 2026-10-16.",
   "curseforge: the CurseForge slug, for mods not on Modrinth (search finds only unofficial ports and other mods);",
-  "their licence and licence_source are read from the mod's source repository.",
+  "their licence and licence_source are read from the mod's source repository; cf_mod_id is the CurseForge project id",
+  "the official API (api.curseforge.com/v1) addresses them by (#278 pick 2: official API with a key only).",
   "listed_lib: #277 marks the mod [lib]; kept to compare with the class read from the jar."
  ],
  "mods": [
@@ -219,7 +220,8 @@
    "curseforge": "the-twilight-forest",
    "licence": "LGPL-2.1-only (code); CC-BY-NC-SA-4.0 (assets)",
    "licence_source": "https://github.com/TeamTwilight/twilightforest (LICENSE, ASSET_LICENSE)",
-   "redistribution": "licences allow copying with attribution (assets non-commercial, share-alike); CurseForge's third-party distribution flag needs its API key and was not read; jar measured and discarded, cached only in this repo's Actions cache"
+   "redistribution": "licences allow copying with attribution (assets non-commercial, share-alike); fetched only through the official CurseForge API with a key, only when allowModDistribution is true, fresh each run, never cached or committed (#278 pick 2)",
+   "cf_mod_id": 227639
   },
   {
    "rank": 35,
@@ -318,7 +320,8 @@
    "curseforge": "chisel",
    "licence": "GPL-2.0-only",
    "licence_source": "https://github.com/Chisel-Team/Chisel (repository licence)",
-   "redistribution": "GPL-2.0 allows copying; CurseForge's third-party distribution flag needs its API key and was not read; jar measured and discarded, cached only in this repo's Actions cache"
+   "redistribution": "GPL-2.0 allows copying; fetched only through the official CurseForge API with a key, only when allowModDistribution is true, fresh each run, never cached or committed (#278 pick 2)",
+   "cf_mod_id": 235279
   }
  ]
 }

@@ -6,8 +6,10 @@
 # else 1.20.1, releases before pre-releases, on the loader the converter reads best
 # (1.21.1: neoforge, fabric, forge, quilt; 1.20.1: forge, fabric, neoforge, quilt).
 # `rule` says which branch picked the build; off-rule means neither version exists.
-# Modrinth first; CurseForge-only mods via cfwidget + CurseForge's public CDN
-# (#278 pick 2). `unfetchable` marks a jar that can't be fetched, with the reason.
+# Modrinth first. CurseForge-only mods stay `unfetchable` here, file id and sha512
+# kept as metadata; a run with CURSEFORGE_API_KEY fetches them through the official
+# API only when allowModDistribution is true, never from the CDN directly and never
+# cached (#278 pick 2). `unfetchable` marks a jar that can't be fetched, with the reason.
 
 [[mod]]
 name = "jei"
@@ -609,16 +611,17 @@ rank = 34
 title = "The Twilight Forest"
 project = "the-twilight-forest"
 host = "curseforge"
+cf_mod_id = 227639
 version_id = "7797302"
 version = "Twilight Forest - MC 1.21.1 - 4.8.3345"
 loader = "neoforge"
 minecraft = "1.21.1"
 rule = "1.21.1 neoforge release"
 license = "LGPL-2.1-only (code); CC-BY-NC-SA-4.0 (assets)"
-redistribution = "licences allow copying with attribution (assets non-commercial, share-alike); CurseForge's third-party distribution flag needs its API key and was not read; jar measured and discarded, cached only in this repo's Actions cache"
-url = "https://mediafilez.forgecdn.net/files/7797/302/twilightforest-1.21.1-4.8.3345-universal.jar"
+redistribution = "licences allow copying with attribution (assets non-commercial, share-alike); fetched only through the official CurseForge API with a key, only when allowModDistribution is true, fresh each run, never cached or committed (#278 pick 2)"
 sha512 = "371dd7079b174091363327df70ed64c84e8e36fcab49b4c33bbcbe39650f6bccc12d3e14818cdfbbaa519a999f64a0a92c03ec981f55a315b044dc7cb5c27ef4"
 listed_lib = false
+unfetchable = "CurseForge-only; awaiting official CurseForge API key (allowModDistribution must be true)"
 notes = "CurseForge project 227639; licence from https://github.com/TeamTwilight/twilightforest (LICENSE, ASSET_LICENSE)"
 
 [[mod]]
@@ -897,14 +900,15 @@ rank = 50
 title = "Chisel"
 project = "chisel"
 host = "curseforge"
+cf_mod_id = 235279
 version_id = "2915375"
 version = "Chisel - MC1.12.2-1.0.2.45"
 loader = "forge"
 minecraft = "1.12.2"
 rule = "off-rule: no 1.21.1 or 1.20.1 build; newest release"
 license = "GPL-2.0-only"
-redistribution = "GPL-2.0 allows copying; CurseForge's third-party distribution flag needs its API key and was not read; jar measured and discarded, cached only in this repo's Actions cache"
-url = "https://mediafilez.forgecdn.net/files/2915/375/Chisel-MC1.12.2-1.0.2.45.jar"
+redistribution = "GPL-2.0 allows copying; fetched only through the official CurseForge API with a key, only when allowModDistribution is true, fresh each run, never cached or committed (#278 pick 2)"
 sha512 = "c8b7b9e25e9a37cd35c78382c9143801ae9aadc8e2a873c95fd9df22c97d5ddd6c3d4fe855e14575cbc0a7204064c891c4a9025e352008ce59abf7b46b6a77b9"
 listed_lib = false
+unfetchable = "CurseForge-only; awaiting official CurseForge API key (allowModDistribution must be true)"
 notes = "CurseForge project 235279; licence from https://github.com/Chisel-Team/Chisel (repository licence)"

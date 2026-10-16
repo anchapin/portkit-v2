@@ -7,9 +7,11 @@ the harness every #277 sub-issue runs on:
    (``RULE_VERSIONS`` / ``LOADER_PREFERENCE``) and writes
    ``fixtures/real/gauntlet.toml`` in the corpus manifest format, so
    ``portkit.corpus`` loads and fetches it (sha512-checked, never committed).
-   Modrinth first (``api.modrinth.com/v2``); a mod that is not on Modrinth is
-   pinned from CurseForge's CDN (see ``pin_curseforge``), or recorded as
-   ``unfetchable`` with the reason.
+   Modrinth first (``api.modrinth.com/v2``). A mod that is only on CurseForge
+   is recorded ``unfetchable`` with its pinned file id and sha512 kept as
+   metadata (#278 pick 2): it is fetched only through CurseForge's official
+   API with a key, and only when its author allows third-party distribution
+   (see ``gate_curseforge``).
 2. ``profile`` reads a jar's own contents (file counts by kind, mixin configs,
    entrypoints, declared dependencies) and ``classify`` puts it in one class:
    content, library, client-only, performance/mixin-only or UI/info. The
@@ -29,8 +31,10 @@ Nothing here changes a conversion.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
+import os
 import re
 import tomllib
 import urllib.parse
@@ -49,8 +53,19 @@ BASELINE = ROOT / "fixtures" / "real" / "gauntlet-baseline.json"
 SCHEMA = 1
 
 MODRINTH = "https://api.modrinth.com/v2"
-CFWIDGET = "https://api.cfwidget.com/minecraft/mc-mods"
-FORGECDN = "https://mediafilez.forgecdn.net/files"
+# CurseForge (#278 pick 2, Alex 2026-10-16): only through the official API
+# (``api.curseforge.com/v1`` with the ``x-api-key`` header), only with a key
+# (``CURSEFORGE_API_KEY``), and only for a mod whose ``allowModDistribution``
+# is true. Overwolf treats downloading from CurseForge's CDN outside the API
+# as scraping, so nothing here builds a CDN url itself; the jar url is the
+# ``downloadUrl`` the API hands out. CurseForge jars are fetched fresh each
+# run into a temporary directory, never into the (Actions-cached) corpus cache.
+CURSEFORGE_API = "https://api.curseforge.com/v1"
+CURSEFORGE_KEY_ENV = "CURSEFORGE_API_KEY"
+CURSEFORGE_AWAITING = ("CurseForge-only; awaiting official CurseForge API key "
+                       "(allowModDistribution must be true)")
+CURSEFORGE_DISALLOWED = ("CurseForge-only; allowModDistribution is false (the author does not allow "
+                         "third-party downloads through the official API)")
 _USER_AGENT = "anchapin/portkit-v2 gauntlet pin (github.com/anchapin/portkit-v2)"
 
 # --- the version rule (#278 pick 1) ------------------------------------------
@@ -81,6 +96,7 @@ class Listed:
     title: str
     modrinth: str = ""        # Modrinth slug, when the mod is hosted there
     curseforge: str = ""      # CurseForge slug, for mods only hosted there
+    cf_mod_id: int = 0        # CurseForge project id (the official API addresses mods by id)
     listed_lib: bool = False  # #277 marks it [lib]; kept to compare with the jar's class
     licence: str = ""         # CurseForge-only mods: the licence, read from the source repo
     licence_source: str = ""
@@ -193,61 +209,158 @@ def _slot_of(build: dict, rule: str) -> tuple[str, str]:
     return (games[-1] if games else ""), (loaders[0] if loaders else "")
 
 
-def forgecdn_url(file_id: int, filename: str) -> str:
-    """CurseForge's public CDN path for a file id: /files/<id // 1000>/<id % 1000>/<name>."""
-    return f"{FORGECDN}/{file_id // 1000}/{file_id % 1000}/{urllib.parse.quote(filename)}"
-
-
 _CF_LOADERS = {"Forge": "forge", "NeoForge": "neoforge", "Fabric": "fabric", "Quilt": "quilt"}
+_CF_RELEASE_TYPES = {1: "release", 2: "beta", 3: "alpha"}
+
+
+def curseforge_key() -> str:
+    """The official API key from the environment (the repo's Actions secret
+    of the same name), or "" when there is none. Never logged."""
+    return os.environ.get(CURSEFORGE_KEY_ENV, "").strip()
+
+
+def _cf_get(path: str, key: str, opener=urllib.request.urlopen):
+    """GET an official CurseForge API path. The key travels only in the
+    ``x-api-key`` header; errors name the path, never the key."""
+    req = urllib.request.Request(f"{CURSEFORGE_API}{path}",
+                                 headers={"User-Agent": _USER_AGENT, "Accept": "application/json",
+                                          "x-api-key": key})
+    try:
+        with opener(req, timeout=60) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PinError(f"CurseForge API GET {path}: {str(exc).replace(key, '***') if key else exc}") from None
 
 
 def _cf_builds(files: list) -> list[dict]:
-    """CurseForge file ids rise with upload time, so the id orders the builds
-    (newest first) without parsing cfwidget's timestamps."""
+    """Host-neutral builds from the official API's file list. File ids rise
+    with upload time, so the id orders the builds (newest first)."""
     out = []
     for f in files or []:
-        name = str(f.get("name", ""))
-        if not name.endswith(".jar"):
+        name = str(f.get("fileName", ""))
+        if not name.endswith(".jar") or f.get("isAvailable") is False:
             continue
-        tags = f.get("versions") or []
-        out.append({"type": f.get("type"), "loaders": [_CF_LOADERS[t] for t in tags if t in _CF_LOADERS],
+        tags = f.get("gameVersions") or []
+        out.append({"type": _CF_RELEASE_TYPES.get(f.get("releaseType"), "alpha"),
+                    "loaders": [_CF_LOADERS[t] for t in tags if t in _CF_LOADERS],
                     "game_versions": [t for t in tags if re.fullmatch(r"\d+\.\d+(\.\d+)?", t)],
                     "date": f"{int(f['id']):012d}", "id": str(f["id"]),
-                    "version": f.get("display") or name, "filename": name})
+                    "version": f.get("displayName") or name, "filename": name})
     return out
 
 
-def pin_curseforge(item: Listed, opener=urllib.request.urlopen, download=None) -> dict:
-    """A CurseForge-only mod, pinned without CurseForge's API key.
+def _cf_files(mod_id: int, key: str, opener) -> list:
+    files, index = [], 0
+    while True:
+        page = _cf_get(f"/mods/{mod_id}/files?index={index}&pageSize=50", key, opener)
+        files += page.get("data") or []
+        total = (page.get("pagination") or {}).get("totalCount", 0)
+        index += 50
+        if index >= total or not page.get("data") or index >= 10000:
+            return files
 
-    The file list comes from cfwidget (an open mirror of CurseForge's public
-    project pages, ``api.cfwidget.com``), the jar from CurseForge's public CDN
-    (``mediafilez.forgecdn.net``), and the sha512 from downloading it once
-    here. When either is unreachable the mod is recorded as unfetchable with
-    the reason rather than blocking the gauntlet.
-    """
+
+def _previous_pins(manifest: Path = MANIFEST) -> dict:
     try:
-        data = _get_json(f"{CFWIDGET}/{item.curseforge}", opener)
+        return {e["name"]: e for e in tomllib.loads(Path(manifest).read_text()).get("mod", [])}
+    except (OSError, ValueError):
+        return {}
+
+
+def pin_curseforge(item: Listed, opener=urllib.request.urlopen, download=None, key: str | None = None,
+                   previous: dict | None = None) -> dict:
+    """A CurseForge-only mod. Always written ``unfetchable`` (the gate is
+    lifted per run by ``gate_curseforge``), with the pinned build as metadata.
+
+    With an API key the build is picked by the version rule from the official
+    file list, and hashed once through the API's ``downloadUrl`` only when
+    ``allowModDistribution`` is true. Without a key the previous pin is kept
+    as it was; nothing is fetched.
+    """
+    key = curseforge_key() if key is None else key
+    prior = dict((previous or {}).get(item.name) or {})
+    if not key:
+        if prior.get("host") == "curseforge":
+            prior.pop("url", None)
+            return {**prior, "rank": item.rank, "title": item.title, "cf_mod_id": item.cf_mod_id,
+                    "redistribution": item.redistribution, "unfetchable": CURSEFORGE_AWAITING}
+        return _unfetchable(item, "curseforge", CURSEFORGE_AWAITING)
+    try:
+        project = _cf_get(f"/mods/{item.cf_mod_id}", key, opener).get("data") or {}
+        builds = _cf_builds(_cf_files(item.cf_mod_id, key, opener))
     except PinError as exc:
-        return _unfetchable(item, "curseforge", f"CurseForge file list unreachable without an API key ({exc})")
-    builds = _cf_builds(data.get("files") or [])
+        return _unfetchable(item, "curseforge", f"{CURSEFORGE_AWAITING}; API error: {exc}")
+    allowed = project.get("allowModDistribution") is True
     chosen = pick(builds) or pick_off_rule(builds)
     if chosen is None:
-        return _unfetchable(item, "curseforge", "no Java-loader .jar in the CurseForge file list")
+        return _unfetchable(item, "curseforge", "no Java-loader .jar in the official CurseForge file list")
     build, rule = chosen
     mc, loader = _slot_of(build, rule)
-    url = forgecdn_url(int(build["id"]), build["filename"])
-    try:
-        sha = (download or _sha512_of_url)(url, opener)
-    except PinError as exc:
-        return _unfetchable(item, "curseforge", f"CurseForge CDN refused the jar without an API key ({exc})")
-    return {
+    entry = {
         "name": item.name, "rank": item.rank, "title": item.title, "project": item.curseforge,
-        "host": "curseforge", "version_id": build["id"], "version": build["version"],
-        "loader": loader, "minecraft": mc, "rule": rule, "license": item.licence or "unknown",
-        "redistribution": item.redistribution, "url": url, "sha512": sha, "listed_lib": item.listed_lib,
-        "notes": f"CurseForge project {data.get('id')}; licence from {item.licence_source}",
+        "host": "curseforge", "cf_mod_id": item.cf_mod_id, "version_id": build["id"],
+        "version": build["version"], "loader": loader, "minecraft": mc, "rule": rule,
+        "license": item.licence or "unknown", "redistribution": item.redistribution,
+        "listed_lib": item.listed_lib,
+        "unfetchable": CURSEFORGE_AWAITING if allowed else CURSEFORGE_DISALLOWED,
+        "notes": f"CurseForge project {item.cf_mod_id}; licence from {item.licence_source}",
     }
+    if allowed:
+        try:
+            url = (_cf_get(f"/mods/{item.cf_mod_id}/files/{build['id']}", key, opener).get("data") or {}).get("downloadUrl")
+            if url:
+                entry["sha512"] = (download or _sha512_of_url)(url, opener)
+        except PinError:
+            pass
+    if not entry.get("sha512") and prior.get("version_id") == build["id"]:
+        entry["sha512"] = prior.get("sha512", "")
+    return entry
+
+
+def gate_curseforge(mods, key: str | None = None, opener=urllib.request.urlopen, log=print):
+    """Lift ``unfetchable`` from CurseForge mods the official API lets us fetch.
+
+    For each ``host = "curseforge"`` mod: with no key it stays unfetchable as
+    pinned. With a key, ``allowModDistribution`` is read from
+    ``/v1/mods/{id}``; false (or missing) marks it unfetchable with that
+    reason; true takes the pinned file's ``downloadUrl`` from
+    ``/v1/mods/{id}/files/{fileId}`` and clears the mark, so the run fetches
+    it (still sha512-checked against the pin). Returns (mods, {name: allow}).
+    """
+    key = curseforge_key() if key is None else key
+    out, allow = [], {}
+    for mod in mods:
+        if getattr(mod, "host", "") != "curseforge" or not key:
+            out.append(mod)
+            continue
+        if not getattr(mod, "cf_mod_id", 0) or not mod.version_id:
+            out.append(dataclasses.replace(mod, unfetchable=f"{CURSEFORGE_AWAITING}; no CurseForge mod/file id pinned"))
+            continue
+        try:
+            data = _cf_get(f"/mods/{mod.cf_mod_id}", key, opener).get("data") or {}
+        except PinError as exc:
+            log(f"{mod.name}: CurseForge API error: {exc}")
+            out.append(dataclasses.replace(mod, unfetchable=f"{CURSEFORGE_AWAITING}; API error: {exc}"[:300]))
+            continue
+        allowed = data.get("allowModDistribution")
+        allow[mod.name] = allowed
+        log(f"{mod.name}: CurseForge mod {mod.cf_mod_id} allowModDistribution={allowed}")
+        if allowed is not True:
+            out.append(dataclasses.replace(mod, unfetchable=CURSEFORGE_DISALLOWED))
+            continue
+        try:
+            url = (_cf_get(f"/mods/{mod.cf_mod_id}/files/{mod.version_id}", key, opener).get("data") or {}).get("downloadUrl")
+        except PinError as exc:
+            out.append(dataclasses.replace(mod, unfetchable=f"official API file lookup failed: {exc}"[:300]))
+            continue
+        if not url:
+            out.append(dataclasses.replace(mod, unfetchable="official API gave no downloadUrl for the pinned file"))
+            continue
+        out.append(dataclasses.replace(
+            mod, unfetchable="", url=url,
+            redistribution="official CurseForge API (allowModDistribution true); fetched fresh each run, "
+                           "measured and discarded, never cached or committed"))
+    return out, allow
 
 
 def _sha512_of_url(url: str, opener=urllib.request.urlopen) -> str:
@@ -263,19 +376,24 @@ def _sha512_of_url(url: str, opener=urllib.request.urlopen) -> str:
 
 
 def _unfetchable(item: Listed, host: str, reason: str, licence: str = "") -> dict:
-    return {"name": item.name, "rank": item.rank, "title": item.title,
-            "project": item.modrinth or item.curseforge, "host": host,
-            "license": licence or item.licence or "unknown", "listed_lib": item.listed_lib,
-            "unfetchable": reason, "redistribution": item.redistribution}
+    entry = {"name": item.name, "rank": item.rank, "title": item.title,
+             "project": item.modrinth or item.curseforge, "host": host,
+             "license": licence or item.licence or "unknown", "listed_lib": item.listed_lib,
+             "unfetchable": reason, "redistribution": item.redistribution}
+    if item.cf_mod_id:
+        entry["cf_mod_id"] = item.cf_mod_id
+    return entry
 
 
-def pin(items=THE_50, opener=urllib.request.urlopen, download=None, log=print) -> list[dict]:
+def pin(items=THE_50, opener=urllib.request.urlopen, download=None, log=print,
+        key: str | None = None, previous: dict | None = None) -> list[dict]:
     entries = []
+    previous = _previous_pins() if previous is None else previous
     for item in items:
         if item.modrinth:
             entry = pin_modrinth(item, opener)
         elif item.curseforge:
-            entry = pin_curseforge(item, opener, download)
+            entry = pin_curseforge(item, opener, download, key=key, previous=previous)
         else:
             entry = _unfetchable(item, "", "no host known")
         log(f"{item.rank:2} {item.name}: " + (f"unfetchable: {entry['unfetchable']}" if entry.get("unfetchable")
@@ -284,7 +402,7 @@ def pin(items=THE_50, opener=urllib.request.urlopen, download=None, log=print) -
     return entries
 
 
-_KEYS = ("name", "rank", "title", "project", "host", "version_id", "version", "loader", "minecraft",
+_KEYS = ("name", "rank", "title", "project", "host", "cf_mod_id", "version_id", "version", "loader", "minecraft",
          "rule", "license", "redistribution", "url", "sha512", "listed_lib", "unfetchable", "notes")
 
 
@@ -306,8 +424,10 @@ def render_manifest(entries: list[dict], today: str) -> str:
         "# else 1.20.1, releases before pre-releases, on the loader the converter reads best",
         "# (1.21.1: neoforge, fabric, forge, quilt; 1.20.1: forge, fabric, neoforge, quilt).",
         "# `rule` says which branch picked the build; off-rule means neither version exists.",
-        "# Modrinth first; CurseForge-only mods via cfwidget + CurseForge's public CDN",
-        "# (#278 pick 2). `unfetchable` marks a jar that can't be fetched, with the reason.",
+        "# Modrinth first. CurseForge-only mods stay `unfetchable` here, file id and sha512",
+        "# kept as metadata; a run with CURSEFORGE_API_KEY fetches them through the official",
+        "# API only when allowModDistribution is true, never from the CDN directly and never",
+        "# cached (#278 pick 2). `unfetchable` marks a jar that can't be fetched, with the reason.",
         "",
     ]
     body = []

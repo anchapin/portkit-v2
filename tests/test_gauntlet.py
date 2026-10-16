@@ -1,6 +1,7 @@
 """The top-50 gauntlet harness (#278): pin rule, jar profile/class, run, board."""
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import tomllib
@@ -58,12 +59,6 @@ def test_off_rule_when_neither_version_exists():
     assert gauntlet.pick_off_rule([_b("x", "release", ["bukkit"], ["1.21.1"], "2026")]) is None
 
 
-def test_forgecdn_url_splits_the_file_id():
-    assert gauntlet.forgecdn_url(7797302, "twilightforest-1.21.1-4.8.3345-universal.jar") == \
-        "https://mediafilez.forgecdn.net/files/7797/302/twilightforest-1.21.1-4.8.3345-universal.jar"
-    assert gauntlet.forgecdn_url(4865011, "a b+c.jar").endswith("/4865/11/a%20b%2Bc.jar")
-
-
 def _modrinth_opener(project, versions):
     def opener(request, timeout):
         path = urllib.parse.urlparse(request.full_url).path
@@ -93,31 +88,163 @@ def test_pin_modrinth_from_api_data():
     assert entry["host"] == "modrinth" and entry["license"] == "MIT" and entry["rank"] == 9
 
 
-def test_pin_curseforge_pins_the_cdn_jar_or_records_why_not():
-    files = {"id": 1, "files": [
-        {"id": 7797302, "name": "tf-1.21.1.jar", "type": "release", "display": "TF 1.21.1",
-         "versions": ["1.21.1", "NeoForge", "Client"], "uploaded_at": "whenever"},
-        {"id": 9091040, "name": "tf-fabric.jar", "type": "beta", "display": "TF fabric",
-         "versions": ["1.21.1", "Fabric"], "uploaded_at": "later"},
-    ]}
+# --- CurseForge: the official API only, with a key, when distribution is allowed (#278 pick 2) ---
 
+_CF_FILES = [
+    {"id": 7797302, "fileName": "tf-1.21.1.jar", "releaseType": 1, "displayName": "TF 1.21.1",
+     "gameVersions": ["1.21.1", "NeoForge", "Client"], "isAvailable": True},
+    {"id": 9091040, "fileName": "tf-fabric.jar", "releaseType": 2, "displayName": "TF fabric",
+     "gameVersions": ["1.21.1", "Fabric"], "isAvailable": True},
+]
+
+
+def _cf_api(allow, seen, files=_CF_FILES, download_url="https://edge.forgecdn.net/files/7797/302/tf-1.21.1.jar"):
+    """A mocked api.curseforge.com/v1: records (path, x-api-key) per call."""
     def opener(request, timeout):
-        return io.BytesIO(json.dumps(files).encode())
+        url = urllib.parse.urlparse(request.full_url)
+        assert url.netloc == "api.curseforge.com" and url.path.startswith("/v1/"), request.full_url
+        seen.append((url.path, request.get_header("X-api-key")))
+        parts = url.path.split("/")
+        if url.path.endswith("/files"):
+            body = {"data": files, "pagination": {"index": 0, "pageSize": 50, "resultCount": len(files),
+                                                  "totalCount": len(files)}}
+        elif "files" in parts:
+            body = {"data": {"id": int(parts[-1]), "downloadUrl": download_url}}
+        else:
+            body = {"data": {"id": int(parts[-1]), "allowModDistribution": allow}}
+        return io.BytesIO(json.dumps(body).encode())
+    return opener
 
-    item = gauntlet.Listed(34, "twilight_forest", "TF", curseforge="the-twilight-forest", licence="LGPL",
-                           redistribution="r")
+
+def _no_network(request, timeout):
+    raise AssertionError(f"no request expected, got {request.full_url}")
+
+
+def _cf_mod(**kw):
+    base = dict(name="twilight_forest", project="the-twilight-forest", version_id="7797302", url="",
+                sha512="a" * 128, license="LGPL", host="curseforge", cf_mod_id=227639,
+                unfetchable=gauntlet.CURSEFORGE_AWAITING)
+    return corpus.Mod(**{**base, **kw})
+
+
+def test_gate_without_a_key_leaves_curseforge_mods_unfetchable_and_calls_nothing():
+    mod = _cf_mod()
+    mr = _mod("a")
+    mods, allow = gauntlet.gate_curseforge([mod, mr], key="", opener=_no_network, log=lambda *_: None)
+    assert mods == [mod, mr] and allow == {}
+    assert mods[0].unfetchable == gauntlet.CURSEFORGE_AWAITING
+
+
+def test_gate_with_distribution_allowed_takes_the_api_download_url():
+    seen, logs = [], []
+    mods, allow = gauntlet.gate_curseforge([_cf_mod(), _mod("a")], key="k-secret",
+                                           opener=_cf_api(True, seen), log=logs.append)
+    tf, mr = mods
+    assert allow == {"twilight_forest": True}
+    assert tf.unfetchable == "" and tf.url == "https://edge.forgecdn.net/files/7797/302/tf-1.21.1.jar"
+    assert tf.sha512 == "a" * 128 and "never cached" in tf.redistribution
+    assert mr == _mod("a")  # Modrinth mods untouched
+    assert seen == [("/v1/mods/227639", "k-secret"), ("/v1/mods/227639/files/7797302", "k-secret")]
+    assert not any("k-secret" in line for line in logs)
+
+
+@pytest.mark.parametrize("allow", [False, None])
+def test_gate_with_distribution_not_allowed_marks_it_unfetchable(allow):
     seen = []
-    entry = gauntlet.pin_curseforge(item, opener, download=lambda url, op: seen.append(url) or "a" * 128)
+    mods, flags = gauntlet.gate_curseforge([_cf_mod()], key="k", opener=_cf_api(allow, seen), log=lambda *_: None)
+    assert mods[0].unfetchable == gauntlet.CURSEFORGE_DISALLOWED and mods[0].url == ""
+    assert "allowModDistribution is false" in mods[0].unfetchable
+    assert flags == {"twilight_forest": allow}
+    assert seen == [("/v1/mods/227639", "k")]  # never asks for a download url
+
+
+def test_gate_api_errors_are_unfetchable_rows_that_never_show_the_key():
+    def opener(request, timeout):
+        raise OSError(f"HTTP Error 403: Forbidden ({request.get_header('X-api-key')})")
+    logs = []
+    mods, allow = gauntlet.gate_curseforge([_cf_mod()], key="k-secret", opener=opener, log=logs.append)
+    assert mods[0].unfetchable.startswith(gauntlet.CURSEFORGE_AWAITING) and "403" in mods[0].unfetchable
+    assert "k-secret" not in mods[0].unfetchable and not any("k-secret" in x for x in logs)
+    assert allow == {}
+
+
+def test_gate_without_a_pinned_mod_id_stays_unfetchable():
+    mods, _ = gauntlet.gate_curseforge([_cf_mod(cf_mod_id=0)], key="k", opener=_no_network, log=lambda *_: None)
+    assert mods[0].unfetchable.startswith(gauntlet.CURSEFORGE_AWAITING)
+
+
+def test_pin_curseforge_without_a_key_keeps_the_pin_as_metadata():
+    item = gauntlet.Listed(34, "twilight_forest", "TF", curseforge="the-twilight-forest", cf_mod_id=227639,
+                           licence="LGPL", redistribution="r")
+    prior = {"twilight_forest": {"name": "twilight_forest", "host": "curseforge", "version_id": "7797302",
+                                 "sha512": "b" * 128, "url": "https://example.invalid/old.jar", "license": "LGPL",
+                                 "project": "the-twilight-forest"}}
+    entry = gauntlet.pin_curseforge(item, _no_network, key="", previous=prior)
+    assert entry["unfetchable"] == gauntlet.CURSEFORGE_AWAITING and entry["sha512"] == "b" * 128
+    assert "url" not in entry and entry["cf_mod_id"] == 227639 and entry["redistribution"] == "r"
+    fresh = gauntlet.pin_curseforge(item, _no_network, key="", previous={})
+    assert fresh["unfetchable"] == gauntlet.CURSEFORGE_AWAITING and "sha512" not in fresh
+
+
+def test_pin_curseforge_with_a_key_picks_by_the_rule_and_hashes_only_when_allowed():
+    item = gauntlet.Listed(34, "twilight_forest", "TF", curseforge="the-twilight-forest", cf_mod_id=227639,
+                           licence="LGPL", redistribution="r")
+    got = []
+    entry = gauntlet.pin_curseforge(item, _cf_api(True, []), download=lambda url, op: got.append(url) or "c" * 128,
+                                    key="k", previous={})
     assert entry["version_id"] == "7797302" and entry["rule"] == "1.21.1 neoforge release"
-    assert seen == ["https://mediafilez.forgecdn.net/files/7797/302/tf-1.21.1.jar"]
-    assert entry["sha512"] == "a" * 128 and entry["host"] == "curseforge" and entry["license"] == "LGPL"
+    assert got == ["https://edge.forgecdn.net/files/7797/302/tf-1.21.1.jar"] and entry["sha512"] == "c" * 128
+    assert entry["unfetchable"] == gauntlet.CURSEFORGE_AWAITING and "url" not in entry
 
     def refuse(url, op):
-        raise gauntlet.PinError("HTTP Error 403: Forbidden")
+        raise AssertionError("must not download a jar whose author disallows distribution")
+    entry = gauntlet.pin_curseforge(item, _cf_api(False, []), download=refuse, key="k", previous={})
+    assert entry["unfetchable"] == gauntlet.CURSEFORGE_DISALLOWED and "sha512" not in entry
 
-    entry = gauntlet.pin_curseforge(item, opener, download=refuse)
-    assert entry["unfetchable"].startswith("CurseForge CDN refused the jar without an API key")
-    assert "url" not in entry
+
+def test_cli_gauntlet_run_fetches_curseforge_jars_outside_the_corpus_cache(tmp_path, monkeypatch):
+    manifest = tmp_path / "g.toml"
+    jar = tmp_path / "src.jar"
+    with zipfile.ZipFile(jar, "w") as z:
+        z.writestr("assets/tf/lang/en_us.json", "{}")
+    sha = hashlib.sha512(jar.read_bytes()).hexdigest()
+    manifest.write_text(gauntlet.render_manifest([{
+        "name": "twilight_forest", "rank": 34, "title": "TF", "project": "tf", "host": "curseforge",
+        "cf_mod_id": 227639, "version_id": "7797302", "license": "LGPL", "sha512": sha,
+        "unfetchable": gauntlet.CURSEFORGE_AWAITING}], "2026-10-16"))
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("PORTKIT_CORPUS_CACHE", str(cache))
+    monkeypatch.setenv("CURSEFORGE_API_KEY", "k-secret")
+    monkeypatch.setattr(gauntlet, "_cf_get", lambda path, key, opener=None: (
+        {"data": {"allowModDistribution": True}} if path == "/mods/227639"
+        else {"data": {"downloadUrl": jar.as_uri()}}))
+    where = []
+
+    def fake_run_shard(mods, *, fetch, **kw):
+        where.append(fetch(mods[0]))
+        assert where[0].is_file() and not where[0].is_relative_to(cache)
+        return {"schema": 1, "kind": "gap-shard", "mods": {}}
+
+    monkeypatch.setattr(gaps, "run_shard", fake_run_shard)
+    out = tmp_path / "shard.json"
+    assert main(["gauntlet", "run", "--manifest", str(manifest), "--out", str(out)]) == 0
+    doc = json.loads(out.read_text())
+    assert doc["curseforge_allow_mod_distribution"] == {"twilight_forest": True}
+    assert not where[0].exists()  # the temporary directory is gone after the run
+    assert not cache.exists() or not any(cache.iterdir())
+    assert "k-secret" not in out.read_text()
+
+
+def test_no_workflow_downloads_from_curseforge_directly_or_caches_its_jars():
+    for wf in (ROOT / ".github" / "workflows").glob("*.yml"):
+        text = wf.read_text()
+        for banned in ("forgecdn", "cfwidget", "mediafilez"):
+            assert banned not in text, (wf.name, banned)
+        if "CURSEFORGE_API_KEY" in text:
+            assert "pull_request" not in text.split("on:", 1)[1].split("permissions:", 1)[0], wf.name
+            assert "github.event_name != 'pull_request'" in text, wf.name
+    src = (ROOT / "src" / "portkit" / "gauntlet.py").read_text()
+    assert "cfwidget" not in src and "mediafilez" not in src
 
 
 def test_rendered_manifest_round_trips_with_an_unfetchable_entry(tmp_path):
@@ -412,13 +539,18 @@ def test_the_committed_gauntlet_pins_all_50_in_order():
     assert [m.name for m in mods] == [x.name for x in gauntlet.THE_50]
     for m in mods:
         assert m.license and m.host in ("modrinth", "curseforge"), m.name
+        if m.host == "curseforge":
+            # pick 2: official API with a key only; the pin is metadata
+            assert m.unfetchable == gauntlet.CURSEFORGE_AWAITING and not m.url, m.name
+            assert m.cf_mod_id and m.version_id and len(m.sha512) == 128, m.name
+            continue
         if m.unfetchable:
             continue
         assert len(m.sha512) == 128 and m.version_id and m.rule, m.name
         if m.host == "modrinth":
             assert m.url.startswith("https://cdn.modrinth.com/data/") and f"/versions/{m.version_id}/" in m.url
         else:
-            assert m.url.startswith("https://mediafilez.forgecdn.net/files/") and m.redistribution
+            raise AssertionError(f"{m.name}: CurseForge mods stay unfetchable in the manifest (#278 pick 2)")
         if not m.rule.startswith("off-rule"):
             assert m.minecraft in gauntlet.RULE_VERSIONS and m.loader in gauntlet.LOADER_PREFERENCE[m.minecraft]
     assert len({m.sha512 for m in mods if m.sha512}) == len([m for m in mods if m.sha512])
