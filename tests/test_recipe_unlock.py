@@ -1,6 +1,8 @@
 """Recipe unlock data from the Java recipe advancement (#260)."""
 import json
 
+import pytest
+
 from portkit.converters import recipes
 from portkit.converters.recipe_unlock import ALWAYS_UNLOCKED, advancement_index, criteria
 from portkit.model import SourceMod
@@ -11,6 +13,18 @@ SHAPED = {
     "key": {"W": {"item": "examplemod:warp_stone"}, "S": {"item": "minecraft:stone"}},
     "result": {"item": "examplemod:waystone"},
 }
+
+
+@pytest.fixture(autouse=True)
+def vanilla_items(tmp_path, monkeypatch):
+    """A tiny Bedrock vanilla item list: Bedrock has minecraft:stone and
+    minecraft:trapdoor, not Java's minecraft:oak_trapdoor."""
+    path = tmp_path / "vanilla-items.txt"
+    path.write_text("# test list\nminecraft:stone\nminecraft:trapdoor\nminecraft:stick\n")
+    monkeypatch.setenv("PORTKIT_VANILLA_ITEMS", str(path))
+
+
+EMITTED = {"examplemod:warp_stone": ("item", "items/warp_stone.json", {})}
 
 
 def build(tmp_path, recipes_by_name, advancements=None, lane="recipe", adv_lane="advancement"):
@@ -55,7 +69,7 @@ def test_unlock_comes_from_the_recipe_advancement(tmp_path):
     mod = build(tmp_path, {"waystone": SHAPED}, {
         "waystone": adv("examplemod:waystone", {"has_warp_stone": has({"items": "examplemod:warp_stone"})}),
     })
-    result = recipes.convert(mod)
+    result = recipes.convert(mod, emitted=EMITTED)
     body = body_of(result, "recipes/waystone.json")
     assert body["unlock"] == [{"item": "examplemod:warp_stone"}]
     # Placed before the result, as vanilla writes it.
@@ -69,17 +83,28 @@ def test_no_advancement_falls_back_to_always_unlocked_with_a_note(tmp_path):
     assert any("no Java recipe advancement" in n and "AlwaysUnlocked (fallback)" in n for n in result.notes)
 
 
-def test_an_item_neither_shipped_nor_in_the_recipe_is_dropped(tmp_path):
-    # minecraft:ender_pearl is not in the recipe: a vanilla id we can't check
-    # against Bedrock's item list, so it isn't written (#261).
+def test_items_bedrock_doesnt_know_are_dropped(tmp_path):
+    # Java's minecraft:oak_trapdoor is Bedrock's minecraft:trapdoor, and
+    # examplemod:warp_stone isn't shipped: BDS refuses an unlock naming either.
     mod = build(tmp_path, {"waystone": SHAPED}, {
         "waystone": adv("examplemod:waystone", {
-            "has_pearl": has({"items": ["minecraft:ender_pearl"]}),
+            "has_trapdoor": has({"items": ["minecraft:oak_trapdoor"]}),
+            "has_warp": has({"items": ["examplemod:warp_stone"]}),
             "has_stone": has({"items": ["minecraft:stone"]}),
         }),
     })
     body = body_of(recipes.convert(mod), "recipes/waystone.json")
     assert body["unlock"] == [{"item": "minecraft:stone"}]
+
+
+def test_without_the_vanilla_list_no_vanilla_item_is_written(tmp_path, monkeypatch):
+    monkeypatch.setenv("PORTKIT_VANILLA_ITEMS", str(tmp_path / "missing.txt"))
+    mod = build(tmp_path, {"waystone": SHAPED}, {
+        "waystone": adv("examplemod:waystone", {"has_stone": has({"items": ["minecraft:stone"]})}),
+    })
+    result = recipes.convert(mod)
+    assert body_of(result, "recipes/waystone.json")["unlock"] == ALWAYS_UNLOCKED
+    assert any("vanilla item list isn't cached" in n for n in result.notes)
 
 
 def test_emitted_items_are_kept_even_outside_the_recipe(tmp_path):
@@ -89,6 +114,11 @@ def test_emitted_items_are_kept_even_outside_the_recipe(tmp_path):
     emitted = {"examplemod:warp_dust": ("item", "items/warp_dust.json", {})}
     body = body_of(recipes.convert(mod, emitted=emitted), "recipes/waystone.json")
     assert body["unlock"] == [{"item": "examplemod:warp_dust"}]
+
+
+def test_always_unlocked_is_an_object_not_a_list(tmp_path):
+    # BDS reads a list entry as an item: "has an invalid unlock ingredient".
+    assert ALWAYS_UNLOCKED == {"context": "AlwaysUnlocked"}
 
 
 def test_nothing_expressible_falls_back_with_a_per_recipe_note(tmp_path):
@@ -128,7 +158,7 @@ def test_tag_criteria_old_item_key_and_hash_strings(tmp_path):
             "has_logs": has({"items": "#minecraft:logs"}),  # not in the recipe: dropped
         }),
     }, lane="recipes", adv_lane="advancements")
-    body = body_of(recipes.convert(mod), "recipes/sign.json")
+    body = body_of(recipes.convert(mod, emitted=EMITTED), "recipes/sign.json")
     assert body["unlock"] == [{"item": "examplemod:warp_stone"}, {"tag": "minecraft:planks"}]
 
 
@@ -139,7 +169,7 @@ def test_shared_advancement_and_nested_recipe_ids(tmp_path):
     }  # no requirements: every criterion, here just one
     mod = build(tmp_path, {"stones/a": SHAPED, "stones/b": {**SHAPED, "result": {"item": "examplemod:other"}}},
                 {"shared": shared})
-    result = recipes.convert(mod)
+    result = recipes.convert(mod, emitted=EMITTED)
     for name in ("a", "b"):
         assert body_of(result, f"recipes/{name}.json")["unlock"] == [{"item": "examplemod:warp_stone"}]
 
@@ -165,3 +195,32 @@ def test_index_and_criteria_read_namespace_less_ids(tmp_path):
     found = criteria(index["minecraft:torch"])
     assert found.items == ["minecraft:stick"]
     assert found.dropped == ["data/other/advancements/x.json#tick: minecraft:tick criterion is not one held item"]
+
+
+def test_vanilla_items_derive_and_fetch_check_the_pin(tmp_path, monkeypatch):
+    import io
+
+    from portkit.data import ReferenceDataError, vanilla_items
+
+    raw = json.dumps({"data_items": [
+        {"name": "minecraft:trapdoor", "raw_id": 1}, {"name": "minecraft:acacia_boat"}, {"raw_id": 3},
+    ]}).encode()
+    text = vanilla_items.derive(raw).decode()
+    assert [line for line in text.splitlines() if not line.startswith("#")] == [
+        "minecraft:acacia_boat", "minecraft:trapdoor"]
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    with pytest.raises(ReferenceDataError, match="sha256 mismatch"):
+        vanilla_items.fetch(tmp_path, opener=lambda request, timeout: Response(raw))
+    monkeypatch.setattr(vanilla_items, "SHA256", vanilla_items._sha256(vanilla_items.derive(raw)))
+    path, downloaded = vanilla_items.fetch(tmp_path, opener=lambda request, timeout: Response(raw))
+    assert downloaded and vanilla_items.cached(tmp_path) == path
+    monkeypatch.delenv("PORTKIT_VANILLA_ITEMS")
+    monkeypatch.setenv("PORTKIT_REFERENCE_CACHE", str(tmp_path))
+    assert vanilla_items.ids() == frozenset({"minecraft:acacia_boat", "minecraft:trapdoor"})
