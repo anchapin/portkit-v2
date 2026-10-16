@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from ...model import ConversionResult
 from .. import Adapter, StationHooks
-from . import cooking_pot, cutting_board, feasts, skillet, stove
+from . import cooking_pot, cutting_board, feasts, knives, skillet, stove
 from .cutting_board import CAMPFIRE, COOKING, CUTTING, CUTTING_BOARD_BLOCKS, RECIPE_TYPES, SHARED_TYPES
 
 
@@ -35,7 +35,8 @@ def convert(mod, deferred, loot, files, context) -> tuple[ConversionResult, str]
     """Each FD station's table and runtime: the cutting board, the cooking pot,
     the stove (whenever its block converted: vanilla's campfire recipes fill
     its table too), the skillet (the same table) and the feasts (the loot
-    tables they asked for), in that order; their entry lines joined."""
+    tables they asked for), in that order; their entry lines joined. Then the
+    knives' tier durability (:mod:`.knives`, #263)."""
     cutting = [d for d in deferred if d[1].get("type") == CUTTING]
     cooking = [d for d in deferred if d[1].get("type") == COOKING]
     campfire = [d for d in deferred if d[1].get("type") == CAMPFIRE]
@@ -49,6 +50,8 @@ def convert(mod, deferred, loot, files, context) -> tuple[ConversionResult, str]
         result = result.merge(converted)
         if entry:
             entries.append(entry)
+    # The knives' durability (#263): items only, no runtime entry.
+    result = result.merge(knives.convert(mod, files))
     return result, "".join(entries)
 
 

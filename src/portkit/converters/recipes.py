@@ -94,6 +94,19 @@ EXPANSION_CAP = 16
 # minecraft:tags on an item needs item format_version 1.20.50 or later
 # (learn.microsoft.com, Items Documentation - minecraft:tags).
 _ITEM_TAGS_FORMAT = "1.20.50"
+# The item tag each smithing-table slot takes (#263). Mojang bedrock-samples
+# documentation/Recipes.html, recipe_smithing_transform: items "must have the
+# minecraft:transform_templates / transformable_items / transform_materials
+# tag to be accepted into the respective UI slot". A mod item a converted
+# smithing recipe names in a slot carries that slot's tag (the Java recipe is
+# the evidence that it goes there). The base must also be armor or a tool:
+# BDS 1.26.52.3 rejects a base without minecraft:durability ("base item is
+# not a piece of armor or equipment"), which only a cited adapter writes.
+_SMITHING_SLOT_TAGS = {
+    "template": "minecraft:transform_templates",
+    "base": "minecraft:transformable_items",
+    "addition": "minecraft:transform_materials",
+}
 # minecraft:block_placer's replace_block_item needs item format_version 1.21.50
 # or later (learn.microsoft.com, Items Documentation - minecraft:block_placer).
 _BLOCK_ITEM_FORMAT = "1.21.50"
@@ -998,6 +1011,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                     result.unhandled.append(Unhandled(rel, "recipe", clash))
                     continue
                 write(rel, out_path, ident, {"format_version": "1.20.10", body_key: body})
+                if body_key == "minecraft:recipe_smithing_transform":
+                    for slot, slot_tag in _SMITHING_SLOT_TAGS.items():
+                        if emitted and body.get(slot) in emitted:
+                            item_tags.setdefault(body[slot], set()).add(slot_tag)
             continue
         mapping = _SUPPORTED.get(java_type)
         if mapping is None:
