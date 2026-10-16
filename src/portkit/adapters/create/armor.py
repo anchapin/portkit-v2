@@ -22,7 +22,7 @@ isn't in Create's jar.
 """
 from __future__ import annotations
 
-from ... import itemcode
+from ... import armorlook, itemcode
 from ...model import SourceMod
 
 ALL_ITEMS = "com/simibubi/create/AllItems"
@@ -71,9 +71,14 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
         cls = built.cls.rsplit("/", 1)[-1]
         rules = itemcode.enchantment_overrides(index, built.cls)
         extra = (f"which enchantments it takes, decided by {cls} in code ({', '.join(rules)})",) if rules else ()
+        look = armorlook.forge_look(index, built.cls, built.desc, built.args, material)
+        if isinstance(look, itemcode.ArmorLook):
+            look = itemcode.ArmorLook(look.kind, look.namespace, look.path, look.suffix,
+                                      f"Create mc1.20.1-6.0.8 jar: AllItems.<clinit> registers {name} as new {cls}(...); "
+                                      + look.source)
         piece = itemcode.armor_piece(stats, kind, None, CITE.format(
             name=name, cls=cls, material=f"{material.owner.rsplit('/', 1)[-1]}.{material.name}",
-            type=getattr(kind, "name", kind)), extra) if stats else None
+            type=getattr(kind, "name", kind)), extra, look=look, material=material.name) if stats else None
         if piece is not None:
             found[name] = piece
     return found

@@ -9,5 +9,9 @@ public class ToyArmorItems {
     public static final Object CODE_CHESTPLATE = register("code_chestplate", p -> new ToyCodeArmor(p));
     public static final Object BRANCH_LEGGINGS = register("branch_leggings", p -> new ToyBranchArmor(true, p));
     public static final Object TOUGH_HELMET = register("tough_helmet", p -> new ToyPlateItem(ArmorItem.Type.HELMET, p.durability(5)));
+    public static final Object TEXTURED_HELMET = register("textured_helmet", p -> new ToyTexturedHelmet(p));
+    public static final Object ODD_HELMET = register("odd_helmet", p -> new ToyOddTexture(p));
+    public static final Object MODEL_HELMET = register("model_helmet", p -> new ToyModelHelmet(p));
+    public static final Object OVERLAY_HELMET = register("overlay_helmet", p -> new ToyOverlayHelmet(p));
     static Object register(String name, Function<Item.Properties, Item> factory) { return factory.apply(new Item.Properties()); }
 }

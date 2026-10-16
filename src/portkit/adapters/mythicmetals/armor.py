@@ -29,7 +29,7 @@ that decides a number in code is not answered.
 """
 from __future__ import annotations
 
-from ... import itemcode
+from ... import armorlook, itemcode
 from ...bytecode import ClassIndex, instructions
 from ...model import SourceMod
 from .durability import ARMOR, ARMOR_SET, _field_makers, _suffix_fields
@@ -129,6 +129,24 @@ def _piece_class(index: ClassIndex, set_cls: str, material, kind) -> tuple[str, 
     return value.cls, built_material, built_kind, tuple(p.split(" ", 1)[1] for p in props if p.startswith("component "))
 
 
+def _look(index: ClassIndex, cls: str, record, material: str, renderers: frozenset, understood: bool):
+    """How the piece is drawn worn: the material record's layer texture, or why not."""
+    if not understood:
+        return "Mythic Metals registers a Fabric ArmorRenderer for items that can't be read, so which pieces it draws isn't known"
+    custom = armorlook.subclass_of(index, cls, renderers)
+    if custom is not None:
+        return (f"Mythic Metals draws it with its own model: MythicMetalsClient.registerArmorRenderer registers a "
+                f"Fabric ArmorRenderer for every {custom.rsplit('/', 1)[-1]} ({cls.rsplit('/', 1)[-1]} is one); "
+                + armorlook.VANILLA_LOOK_SOURCES["fabric_renderer"])
+    if not isinstance(record, itemcode.New) or len(record.args) != 7:
+        return None
+    return armorlook.layers_look(armorlook.material_layers(index, record.args[4]),
+                                 f"Mythic Metals 0.24.6+1.21 jar: MythicArmorMaterials.{material} layers = "
+                                 f"List.of(MythicArmorMaterials.layer(...)), layer(name) = new ArmorMaterial.Layer("
+                                 f"RegistryHelper.id(name)), id(name) = ResourceLocation.fromNamespaceAndPath("
+                                 f"\"mythicmetals\", name)")
+
+
 def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
     """Each wanted Mythic Metals armor piece -> its :class:`portkit.itemcode.ArmorPiece`."""
     index = mod.classes
@@ -146,6 +164,9 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
         if len(kinds) == 1:
             types[field] = itemcode.Static(kinds[0].owner, kinds[0].name)
     bonuses = _mixin_bonuses(index)
+    renderers, statics, understood = armorlook.fabric_renderers(index)
+    # Items named by a static aren't mapped to piece names here: refuse rather than miss one.
+    understood = understood and not statics
     found: dict[str, object] = {}
     for field, value in itemcode.static_values(armor).items():
         if not isinstance(value, itemcode.New) or len(value.args) < 2:
@@ -190,7 +211,9 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
                            for c in settings)
             if built_material.name in bonuses:
                 extra += (bonuses[built_material.name],)
-            got = itemcode.armor_piece(stats, built_kind, durability, source, extra)
+            look = _look(index, cls, materials.get(built_material.name), built_material.name, renderers, understood)
+            got = itemcode.armor_piece(stats, built_kind, durability, source, extra, look=look,
+                                       material=built_material.name)
             if got is not None:
                 found[name] = got
     return found

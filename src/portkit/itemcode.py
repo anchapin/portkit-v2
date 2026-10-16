@@ -578,7 +578,7 @@ class _Returned:
 RETURNED = _Returned()  # what :func:`_run` gives for a void method that ran to its ``return``
 
 
-def _run(cf: ClassFile, method, args: list, on_init):
+def _run(cf: ClassFile, method, args: list, on_init, fields: dict | None = None, past_init: bool = False):
     """Run ``method`` with ``args`` (no branches) on a small stack machine.
 
     ``on_init(owner, desc, call_args)`` is called for ``invokespecial <init>``
@@ -590,6 +590,9 @@ def _run(cf: ClassFile, method, args: list, on_init):
     ``component <owner>.<field>``), and a call taking an ``ArmorMaterial`` and returning a
     ``Holder`` (a registry's ``wrapAsHolder``) is that material. An
     ``if_acmpeq``/``if_acmpne`` comparing two known statics is followed.
+    With ``past_init`` the constructor body goes on after ``on_init`` (whose
+    answer is dropped), and ``fields`` (when given) collects each
+    ``this.f = value`` the body makes, by field name.
     """
     if method is None or method.code is None:
         return None, []
@@ -657,7 +660,10 @@ def _run(cf: ClassFile, method, args: list, on_init):
                 if op == 0xB7 and ref.name == "<init>":
                     target = stack.pop()
                     if target is _THIS:
-                        return on_init(ref.owner, ref.desc, call_args), props
+                        answer = on_init(ref.owner, ref.desc, call_args)
+                        if not past_init:
+                            return answer, props
+                        continue
                     if isinstance(target, New):
                         target.desc, target.args = ref.desc, call_args
                     continue
@@ -677,6 +683,8 @@ def _run(cf: ClassFile, method, args: list, on_init):
                 return stack.pop(), props
             elif op in (0xB5, 0xB1):  # putfield / return
                 if op == 0xB5:
+                    if fields is not None and len(stack) >= 2 and stack[-2] is _THIS:
+                        fields[insn.arg.name] = stack[-1]
                     del stack[-2:]
                 else:
                     return RETURNED, props
@@ -780,10 +788,34 @@ class ArmorPiece:
     knockback: float
     source: str
     not_carried: tuple[str, ...] = ()
+    # How the piece is drawn when worn (:class:`ArmorLook`, read by
+    # :mod:`portkit.armorlook`), a reason it can't be drawn from its textures
+    # (a custom model, a tint), or None when no reader could tell.
+    look: object = None
+    # The material's constant name (``KYBER``), the hint a labelled DEFAULT
+    # texture name may be tried with when ``look`` is None.
+    material: str = ""
+
+
+@dataclass(frozen=True)
+class ArmorLook:
+    """Where a worn armor piece's texture comes from, as the mod's code says.
+
+    ``kind`` ``"layer"``: Java's ``<namespace>:textures/models/armor/<path>_layer_<1|2><suffix>.png``
+    (layer 2 for leggings), the 1.20 material name / 1.21.1 ``ArmorMaterial.Layer``
+    / Forge ``getArmorTexture`` scheme. ``kind`` ``"equipment"``: a 1.21.2+
+    equipment asset ``<namespace>:<path>`` whose JSON names the textures.
+    ``source`` cites where it was read."""
+
+    kind: str
+    namespace: str
+    path: str
+    suffix: str = ""
+    source: str = ""
 
 
 def armor_piece(stats: ArmorStats, kind, durability: int | None, source: str,
-                not_carried: tuple[str, ...] = ()) -> ArmorPiece | None:
+                not_carried: tuple[str, ...] = (), look: object = None, material: str = "") -> ArmorPiece | None:
     """The piece of armor type ``kind`` (a ``Static`` of ``ArmorItem.Type``)
     built on ``stats``; durability from the material (1.20) unless given."""
     if not isinstance(kind, Static) or kind.owner != ARMOR_TYPE or kind.name not in ARMOR_TYPE_ORDER:
@@ -795,7 +827,7 @@ def armor_piece(stats: ArmorStats, kind, durability: int | None, source: str,
             or stats.enchantability < 0:
         return None
     return ArmorPiece(kind.name, protection, durability, stats.enchantability, stats.toughness, stats.knockback,
-                      source, not_carried)
+                      source, not_carried, look, material)
 
 
 def registration_calls(cf: ClassFile, name: str, method: str = "<clinit>") -> list[str] | None:

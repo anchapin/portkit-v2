@@ -305,6 +305,16 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
         else:
             continue
         del result.files[path]
+        if isinstance(geometry, str) and geometry.startswith("geometry.humanoid.armor."):
+            # A worn armor look (armor.attachable): its layer texture goes too
+            # once no other attachable wears it.
+            worn = {((((b.get("minecraft:attachable") or {}).get("description") or {}).get("textures") or {})
+                     .get("default")) for p, b in result.files.items()
+                    if p.startswith("attachables/") and isinstance(b, dict)}
+            if isinstance(texture, str) and texture not in worn and f"{texture}.png" in result.files:
+                del result.files[f"{texture}.png"]
+            result.notes.append(f"{path}: worn armor look {why}")
+            continue
         geo = f"models/entity/{Path(path).stem}.held.geo.json"
         if isinstance(geometry, str) and geo in result.files:
             del result.files[geo]

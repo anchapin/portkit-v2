@@ -14,8 +14,8 @@
     },
     "create": {
       "coverage": 32.5,
-      "files": 4012,
-      "residue": 8337,
+      "files": 4021,
+      "residue": 8334,
       "errors": 0
     },
     "farmers_delight_fabric": {
@@ -37,9 +37,9 @@
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 47.3,
-      "files": 1736,
-      "residue": 1933,
+      "coverage": 49.8,
+      "files": 1871,
+      "residue": 1885,
       "errors": 0
     },
     "silent_gear_1165": {
