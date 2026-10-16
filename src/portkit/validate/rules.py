@@ -383,6 +383,7 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
     if custom and _format_tuple(data.get("format_version")) < _CUSTOM_COMPONENT_FORMAT:
         report.add(rel, "block.custom_component",
                    f"custom component {custom[0]!r} needs block format_version 1.21.90 or later")
+    _check_render_methods(report, rel, body)
     instances = components.get("minecraft:material_instances")
     if instances is None:
         return
@@ -395,6 +396,36 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
         if not isinstance(texture, str):
             report.add(rel, "block.material_instances", f"{face}: texture must be a shortname")
         # Whether that shortname resolves is a cross-pack question: see validate.xrefs.
+
+
+def _check_render_methods(report: ValidationReport, rel: str, body: dict) -> None:
+    """One render method per material_instances object (#262).
+
+    Mojang's block docs (bedrock-samples documentation/Blocks.html,
+    minecraft:material_instances): render_method "must be the same for each".
+    BDS 1.26.52.3 logs "MaterialInstances can't mix and match opaque and
+    transparent materials" as an error and warns on any other mix. Checked on
+    the block's components, each permutation's, and their item_visual; an
+    instance without render_method is opaque (the documented default)."""
+    places = [("components", body.get("components"))]
+    places += [(f"permutations[{i}]", p.get("components")) for i, p in enumerate(body.get("permutations") or [])
+               if isinstance(p, dict)]
+    for where, components in places:
+        if not isinstance(components, dict):
+            continue
+        visual = components.get("minecraft:item_visual")
+        for label, instances in (
+            ("minecraft:material_instances", components.get("minecraft:material_instances")),
+            ("minecraft:item_visual", visual.get("material_instances") if isinstance(visual, dict) else None),
+        ):
+            if not isinstance(instances, dict):
+                continue
+            methods = sorted({str(spec.get("render_method", "opaque")) for spec in instances.values()
+                              if isinstance(spec, dict)})
+            if len(methods) > 1:
+                report.add(rel, "block.render_method",
+                           f"{where} {label}: instances mix render methods {methods}; Bedrock needs one "
+                           "render_method for every instance of a block")
 
 
 _AUDIO_EXTENSIONS = (".ogg", ".fsb", ".wav")
