@@ -81,6 +81,7 @@ from ..conditions import CONDITIONAL_TYPES, LoadContext, condition_keys
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
 from ..data import java_items, vanilla_items
+from ..data.smithing_bases import vanilla_base_refusal
 from .recipe_unlock import ALWAYS_UNLOCKED, NEEDS_UNLOCK, advancement_index, unlock_entries, with_unlock
 from .recipe_unlock import criteria as unlock_criteria
 from .tags import MultiMembers, TagResolver
@@ -1537,8 +1538,10 @@ def withdraw_unequipped_smithing(result: ConversionResult) -> None:
     or a mod block is refused by Bedrock (see ``_SMITHING_BASE_RULE``), so it
     goes back to the residue under its source recipe with the reason. It is
     not rewritten as a crafting recipe (Alex, 2026-10-16: that would drop the
-    smithing table and what the upgrade carries over). Vanilla bases are not
-    checked here. The smithing slot tags an item carried only for a recipe
+    smithing table and what the upgrade carries over). A vanilla base is
+    checked against Bedrock's vanilla data (:mod:`portkit.data.smithing_bases`,
+    #270): one that isn't armor or a tool there (``minecraft:stick``) withdraws
+    the recipe the same way. The smithing slot tags an item carried only for a recipe
     that was withdrawn (here or by :func:`drop_unshipped_recipes`) are taken
     off it again.
     """
@@ -1553,7 +1556,12 @@ def withdraw_unequipped_smithing(result: ConversionResult) -> None:
         refused = []
         for path in paths:
             base = result.files[path][SMITHING].get("base")
-            if not isinstance(base, str) or ":" not in base or base.startswith("minecraft:"):
+            if not isinstance(base, str) or ":" not in base:
+                continue
+            if base.startswith("minecraft:"):
+                refusal = vanilla_base_refusal(base)
+                if refusal:
+                    refused.append(refusal)
                 continue
             found = emitted.get(base)
             if found is None:

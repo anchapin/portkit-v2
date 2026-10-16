@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 from ..data import FETCH_COMMAND, bedrock_vanilla_sounds
+from ..data.smithing_bases import vanilla_base_refusal
 from ..paths import MAX_PATH, MAX_SEGMENTS, too_long
 from ..png import dimensions
 from .collisions import check_collisions
@@ -638,8 +639,9 @@ def _check_smithing_bases(report: ValidationReport, pack_root: Path, prefix: str
     the base's "only accepted items are armor and tools"; BDS 1.26.52.3 refuses
     a base without minecraft:durability ("base item is not a piece of armor or
     equipment", #263). Checked for bases the pack defines (a block, or an item
-    without durability); vanilla bases and ids the pack doesn't define are
-    other rules' business."""
+    without durability) and for vanilla bases, against Bedrock's vanilla data
+    (portkit.data.smithing_bases, #270: minecraft:stick is not armor or a
+    tool); other ids the pack doesn't define are other rules' business."""
     recipes = sorted((pack_root / "recipes").glob("*.json"))
     if not recipes:
         return
@@ -651,7 +653,14 @@ def _check_smithing_bases(report: ValidationReport, pack_root: Path, prefix: str
             continue
         body = data.get("minecraft:recipe_smithing_transform") if isinstance(data, dict) else None
         base = body.get("base") if isinstance(body, dict) else None
-        if not isinstance(base, str) or base.startswith("minecraft:"):
+        if not isinstance(base, str):
+            continue
+        if base.startswith("minecraft:"):
+            refusal = vanilla_base_refusal(base)
+            if refusal:
+                report.add(f"{prefix}/recipes/{path.name}", "recipe.smithing_base",
+                           f"smithing base {refusal}; Bedrock's smithing table takes only armor and tools "
+                           "as the base")
             continue
         if items is None:
             items = _definitions(pack_root, "items", "minecraft:item")

@@ -27,6 +27,18 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: a vanilla smithing base must be armor or a tool in Bedrock's vanilla data, else its recipe is residue
+
+- **Status:** proposed (Hark; policy is Alex's 2026-10-16 decision on #268).
+- **Decision:** a converted `recipe_smithing_transform` whose base is a vanilla item ships only when Bedrock's vanilla data shows that item is armor or a tool (#270, follow-up to #268). A vanilla item can't be given durability, so there is nothing to equip: the recipe either ships as it is or goes back to the residue under its source recipe with the reason, like a mod base with no readable durability. No crafting-table downgrade and no invented stats. The list is `portkit.data.smithing_bases` (86 Bedrock ids, each with its source):
+  1. **Mojang's own data** (bedrock-samples@46ba6ea9): the 12 bases of Mojang's vanilla smithing transform recipes (`behavior_pack/recipes/smithing_netherite_*.json`: diamond tools, armor and spear, and diamond horse and nautilus armor, which have no durability at all) and the 7 spears, whose vanilla definitions in `behavior_pack/items` carry `minecraft:durability`.
+  2. **Bedrock armor and tools with durability** per minecraft.wiki's Durability page (oldid 3790798): turtle shell and the leather, golden, copper, chainmail, iron, diamond and netherite armor; wooden to netherite swords, pickaxes, axes, shovels and hoes; flint and steel, brush, fishing rod, carrot and warped fungus on a stick, shears, shield, bow, trident, elytra, crossbow, mace and wolf armor. Bedrock hard-codes these, so bedrock-samples has no definition for them. Every id is checked against bedrock-samples' `mojang-items.json` (test, `-m realmods`).
+  3. Any other vanilla base (`minecraft:stick`) is refused, in the withdraw pass and in the validator rule `recipe.smithing_base` alike.
+- **Measured (corpus + deco):** vanilla smithing bases in the pinned jars are `minecraft:stick` (BetterEnd `terminite_sword_handle`, `thallasium_sword_handle`), `elytra` (BetterEnd `armored_elytra`, Mythic Metals `celestium_elytra`), chainmail armor (Mythic Metals 4), diamond tools and armor (Mythic Metals 9) and netherite tools and armor (Mythic Metals 9, Create 3). Only the two stick recipes are withdrawn: BetterEnd 3315 -> 3313 files, residue 5589 -> 5591, coverage 37.2% unchanged (baseline rebanked); the terminite and thallasium ingots and upgrade templates lose the slot tags only those recipes used. Mythic Metals, Create, Farmer's Delight (both) md5-identical; no other corpus or deco jar has a smithing recipe with a vanilla base.
+- **Why:** Mojang bedrock-samples `documentation/Recipes.html`, recipe_smithing_transform: the base's "only accepted items are armor and tools". A stick is neither. Bedrock's own recipes take horse armor, which has no durability, so for vanilla items the test is armor-or-tool in Bedrock's data, not the `minecraft:durability` component a mod item needs (#263).
+- **Rejected:** a crafting-table downgrade and invented durability (Alex, 2026-10-16, #268). Only Mojang's 12 recipe bases (would withdraw chainmail, netherite and elytra upgrades that Bedrock takes). Java's vanilla tags or item components (Java data; `enchantable/durability` doesn't exist in 1.20.1). Fetching the list on demand like the other vanilla data: the check would then change with the cache, and the list is 86 item ids with no file content (`portkit/data/NOTICE.md`).
+- **Links:** #270, #268 / PR #269, #263 / PR #267.
+
 ## 2026-10-16: a smithing base's durability is read from the mod's code, else its recipe is residue
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order; the policy is Alex's 2026-10-16 decision on #268).
