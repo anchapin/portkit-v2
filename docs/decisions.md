@@ -27,6 +27,41 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: uvlock re-maps a hand-set uv as Java does, by the game version the mod declares
+
+- **Decision:** A blockstate turn with `"uvlock": true` no longer refuses a
+  face with a hand-set uv. `models.uvlock_uv` ports Java's uvlock: one matrix
+  per face, `GLOBAL_TO_LOCAL[face] * R^-1 * LOCAL_TO_GLOBAL[face']` about the
+  texture centre (BlockModelRotation `rotateYXZ(-y, -x, 0)`, BlockMath's
+  per-face table), in exact integers. Before MC 1.21.5 Java applies it
+  through `FaceBakery#recomputeUVs` (two uv corners, per-axis sign kept,
+  rotation `floorMod(-round(atan2/90)*90, 360)`); from 1.21.5 it maps each
+  vertex's uv (`ModelState#inverseFaceTransformation`). The generation is read
+  from the mod's declared version (`SourceMod.minecraft`, set for one block
+  conversion through `models.UVLOCK_GAME`); a mod declaring none gets a face
+  only where both generations bake the same uv at every vertex, else residue
+  naming the split. The face's (uv, rotation) is then carried by the rigid
+  turn as before; a face whose uv is position-derived keeps landing on the
+  position-derived uv where it lands (unchanged, and checked equal to Java's
+  recompute for every non-degenerate box and all 16 turns). Texture-rotated
+  faces stay refused in `turn_locked` (Java's recompute flips 90/270 even
+  for an unturned uvlocked model before 1.21.5, which portkit does not model).
+- **Why:** #236's second slice. Buttons, fence gates, palisade fences and
+  attach-face blocks (BetterEnd, Tinkers, Supplementaries, Silent Gear,
+  Storage Drawers, Cluttered, Biomes O' Plenty, Cataclysm, Quark, ...) stopped
+  only at this refusal. Grounding: the MC 1.21.1 and 1.21.8 client jars run
+  in a JVM over 3,840 cases (16 turns x 6 faces x 4 rotations x 10 uvs) match
+  the port exactly (tests/data/uvlock_java.json keeps 576 of them as numbers);
+  1.16.5, 1.19.2 and 1.20.1 decompile to the same recomputeUVs body and
+  table; the 1.21.4/1.21.5 cut is where Mojang's mappings move from
+  `recomputeUVs`/`getUVLockTransform` to `faceTransformation`/
+  `getFaceTransformation`.
+- **Rejected:** taking only faces both generations agree on for every mod
+  (leaves Cataclysm's 1.20.1 murals as residue although their Java is known);
+  porting one generation for all mods (wrong for the other); keeping the
+  refusal.
+- **Links:** #236, PR (this one), #257 (first slice).
+
 ## 2026-10-15: the vanilla parents random mods name most (orientable, cross, carpet, button, fence gate, cube_top and friends) are read from the fetched templates
 
 - **Decision:** The fetched vanilla template set (`portkit reference fetch`,
