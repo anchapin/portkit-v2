@@ -172,8 +172,8 @@ def convert(mod: SourceMod, files: dict, tags: TagResolver | None = None) -> Con
             f"stack of one, from the numbers the mod's code gives them (#274; Bedrock: {BEDROCK_SOURCES}; "
             f"vanilla: {'; '.join(vanilla)}): "
             + " | ".join(parts)
-            + ". Worn rendering (attachables, armor layer textures) is not written yet: worn, they don't show "
-            "on the player.")
+            + ". Worn rendering is not written yet: no attachable or armor layer texture, so nothing is drawn "
+            "for them on the player.")
     if dropped:
         result.notes.append(
             "Java armor toughness and knockback resistance have no Bedrock item component, so they aren't "

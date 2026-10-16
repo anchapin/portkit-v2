@@ -54,8 +54,8 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
         if chain is None:
             continue
         material, kind, props, desc = chain
-        calls = itemcode.registration_calls(registry, name) or []
-        if desc != itemcode.ARMOR_ITEM_1_20 or not isinstance(material, itemcode.Static):
+        calls = itemcode.registration_calls(registry, name)
+        if calls is None or desc != itemcode.ARMOR_ITEM_1_20 or not isinstance(material, itemcode.Static):
             continue
         if material.owner.startswith("net/minecraft/"):
             found[name] = (f"it is built on vanilla's {material.owner.rsplit('/', 1)[-1]}.{material.name}, "
