@@ -17,6 +17,9 @@
         "item": "examplemod:copper_ingot"
       }
     },
+    "unlock": {
+      "context": "AlwaysUnlocked"
+    },
     "result": {
       "item": "examplemod:copper_block"
     }

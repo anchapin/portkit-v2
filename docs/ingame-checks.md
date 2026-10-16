@@ -52,3 +52,8 @@ and Privacy Policy". `fetch-server` refuses without `--accept-eula`.
 
 The workflow is `.github/workflows/ingame.yml` (manual dispatch, report-only;
 see docs/decisions.md 2026-10-15 for the open choices).
+
+BDS stops at a recipe's first problem. Until converted crafting recipes carried
+`unlock` (#260) every one stopped there ("1.20+ Recipes require unlock data"),
+so ingredient and result ids Bedrock doesn't know only show up once the unlock
+is in place (#261).

@@ -7,27 +7,27 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 37.2,
+      "coverage": 40.0,
       "files": 3558,
-      "residue": 6011,
+      "residue": 5346,
       "errors": 0
     },
     "create": {
-      "coverage": 31.4,
+      "coverage": 33.7,
       "files": 4185,
-      "residue": 9141,
+      "residue": 8226,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 36.2,
+      "coverage": 38.3,
       "files": 906,
-      "residue": 1595,
+      "residue": 1459,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 41.0,
+      "coverage": 43.7,
       "files": 883,
-      "residue": 1272,
+      "residue": 1138,
       "errors": 0
     },
     "mekanism": {
@@ -37,15 +37,15 @@
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 47.6,
+      "coverage": 47.7,
       "files": 1753,
-      "residue": 1932,
+      "residue": 1922,
       "errors": 0
     },
     "silent_gear_1165": {
-      "coverage": 33.3,
+      "coverage": 34.6,
       "files": 1180,
-      "residue": 2362,
+      "residue": 2235,
       "errors": 0
     },
     "storage_drawers_1122": {
@@ -55,27 +55,27 @@
       "errors": 0
     },
     "storage_drawers_1192": {
-      "coverage": 43.4,
+      "coverage": 45.5,
       "files": 304,
-      "residue": 396,
+      "residue": 364,
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 29.0,
+      "coverage": 29.9,
       "files": 1577,
-      "residue": 3855,
+      "residue": 3690,
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 48.4,
+      "coverage": 48.9,
       "files": 16649,
-      "residue": 17737,
+      "residue": 17429,
       "errors": 0
     },
     "waystones": {
-      "coverage": 31.0,
+      "coverage": 32.7,
       "files": 328,
-      "residue": 730,
+      "residue": 676,
       "errors": 0
     }
   }
