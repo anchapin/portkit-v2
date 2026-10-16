@@ -1341,7 +1341,8 @@ def convert(mod: SourceMod, emitted: dict | None = None,
 
 
 def _named_items(body: dict) -> list[str]:
-    """Every item id a written Bedrock recipe body names: inputs, result, unlock."""
+    """Every item id a written Bedrock recipe body names in its inputs and result
+    (its unlock entries are checked on their own, see :func:`drop_unshipped_recipes`)."""
     found: list[str] = []
 
     def walk(value):
