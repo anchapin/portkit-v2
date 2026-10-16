@@ -38,6 +38,12 @@ BDS_VERSION = "1.26.52.3"
 BDS_URL = f"https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-{BDS_VERSION}.zip"
 BDS_SHA256 = ""
 
+# minecraft.net's CDN holds a request open and drops it unless the User-Agent
+# starts like a browser's (checked 2026-10-15: "curl/..." and a bare tool name
+# get no response; "Mozilla/5.0 (X11; Linux x86_64) ..." gets the zip). The
+# rest of the string still says who is asking.
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) portkit-ingame (+https://github.com/anchapin/portkit-v2)"
+
 EULA_URL = "https://minecraft.net/eula"
 PRIVACY_URL = "https://www.microsoft.com/en-us/privacy/privacystatement"
 
@@ -77,7 +83,7 @@ def fetch(dest: Path, accept_eula: bool, url: str = BDS_URL, sha256: str = BDS_S
         )
     dest.mkdir(parents=True, exist_ok=True)
     archive = dest.parent / f"{dest.name}.zip"
-    req = urllib.request.Request(url, headers={"User-Agent": "portkit-ingame (github.com/anchapin/portkit-v2)"})
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     digest = hashlib.sha256()
     with urllib.request.urlopen(req, timeout=300) as resp, archive.open("wb") as fh:
         while chunk := resp.read(1 << 20):
