@@ -87,8 +87,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   templates (their colour is code: a biome or colour handler, #87); reading
   `rescale` on a mod's own elements (it would change packs of mods this
   decision doesn't touch; left as a follow-up).
-- **Status:** proposed (PR pending).
-- **Links:** #236, #221, #56, #87.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order; PR #257).
+- **Links:** #236, #221, #56, #87, #257.
 
 ## 2026-10-15: Forge SRG and Fabric intermediary jars are read in Mojang's names (fetched, pinned name tables)
 
