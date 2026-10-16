@@ -36,7 +36,9 @@ from .testpack import write_test_pack
 # net-secondary.web.minecraft-services.net/api/v1.0/download/links, named).
 BDS_VERSION = "1.26.52.3"
 BDS_URL = f"https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-{BDS_VERSION}.zip"
-BDS_SHA256 = ""
+# sha256 first read by the six branch runs of 2026-10-15 (Actions run 38837767733),
+# all six downloads agreeing.
+BDS_SHA256 = "f6348d84fa714d04ca194f207e89453ca6bba0a1359396475271a52a150471c6"
 
 # minecraft.net's CDN holds a request open and drops it unless the User-Agent
 # starts like a browser's (checked 2026-10-15: "curl/..." and a bare tool name
