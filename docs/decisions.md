@@ -27,6 +27,60 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: converted packs are checked in Mojang's Bedrock Dedicated Server by a generated Script API pack; downloading the server is an EULA acceptance, made explicitly
+
+- **Status:** DESIGN, open for Alex (picks 1-6 on the PR). Not merged.
+- **Decision (proposed):** `portkit ingame` fetches a pinned Bedrock Dedicated
+  Server (1.26.52.3 Linux zip, sha256 `f6348d84...71c6`, from minecraft.net)
+  only with `--accept-eula`, installs a converted tree and a generated check
+  behavior pack (`portkit.ingame.testpack`; stable `@minecraft/server` 2.0.0)
+  into a flat creative world, and reads the server output: every block places
+  and reads back, every item and block item spawns, a converted container
+  (#226) has the slot count the converter wrote, a connection block (#221) has
+  its four cardinal states joined to its own kind and not to air. Any failed
+  check, an unfinished script, or a content-log ERROR fails the run; the
+  report, server output and content log are uploaded, never the server.
+  `.github/workflows/ingame.yml` runs it on x86-64 Ubuntu 24.04 for Farmer's
+  Delight (NeoForge), Waystones, Supplementaries, Cluttered (with and without
+  `upcoming_creator_features`) and Night Lights (`fixtures/ingame/mods.toml`
+  pins the two deco jars), manual dispatch only, report-only.
+- **Terms (read 2026-10-15):** the download page
+  (minecraft.net/en-us/download/server/bedrock) gates DOWNLOAD behind "I agree
+  to the Minecraft End User License Agreement and Privacy Policy", linking
+  minecraft.net/eula and the Microsoft Privacy Statement. The EULA: "If you
+  buy, download, or use any of our Services ... that means you agree to this
+  Minecraft EULA and the Microsoft Services Agreement"; "you must not
+  distribute anything we've made unless we specifically agree to it", which
+  includes to "give copies of our game software or content to anyone else".
+  Hence: the CI download is an acceptance on the repo owner's behalf (pick 1),
+  and the zip is neither committed, cached nor put in an artifact.
+- **Found on the first runs (develop 9c44ef0 converter, Actions run
+  38838745295):** every check passes on all six packs (place 1,752, items
+  385, block items 1,752, containers 74/74 at the converted slot counts,
+  connection 37/37), and every pack fails on content-log errors: (a) every
+  converted recipe is logged "1.20+ Recipes require unlock data" (format
+  1.20.10 without `unlock`; 2,408 recipes over the six runs); (b) 301 recipes
+  name an item the pack doesn't ship ("missing or invalid" + "Recipe result
+  malformed": Cluttered 262 over 199 ids, Supplementaries 36, Farmer's Delight
+  3), including two vanilla ids with different Bedrock names
+  (`minecraft:bricks`, `minecraft:white_bed`); (c) 29 blocks mix opaque and
+  transparent `material_instances` (Supplementaries 22, Farmer's Delight 6,
+  Waystones' warp plate); (d) Farmer's Delight's netherite knife smithing
+  recipe: "base item is not a piece of armor or equipment".
+- **Why:** almost every converter PR ended "unverified in game"; the server
+  is the oracle for what the game accepts. Scripted checks, not GameTest
+  structures: `@minecraft/server-gametest` needs the Beta APIs experiment and
+  structure files per test, while a stable-API script on world load needs
+  neither and covers generated per-pack checks.
+- **Rejected:** GameTest framework (experiment toggle, per-test structures);
+  caching the server zip (a stored copy outside Mojang's distribution);
+  running on the PR gate now (every pack is red on (a) until recipes carry
+  `unlock`); tracking the newest BDS release (moves checks unannounced).
+- **Unverified:** whether the server still registers a recipe it logs (a) for
+  (the log is ERROR; Script API can't list recipes); anything client-side
+  (geometry, textures, bone visibility, render methods, container UI).
+- **Links:** #238, #221, #226, #87.
+
 ## 2026-10-15: uvlock re-maps a hand-set uv as Java does, by the game version the mod declares
 
 - **Decision:** A blockstate turn with `"uvlock": true` no longer refuses a

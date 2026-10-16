@@ -63,6 +63,7 @@ PROPERTIES = {
     "difficulty": "peaceful",
     "allow-cheats": "true",
     "max-players": "1",
+    "allow-list": "false",
     "content-log-file-enabled": "true",
     "content-log-console-output-enabled": "true",
     "content-log-level": "info",
