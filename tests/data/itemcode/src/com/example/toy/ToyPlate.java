@@ -2,7 +2,7 @@ package com.example.toy;
 import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.ArmorMaterial;
 public enum ToyPlate implements ArmorMaterial {
-    PLATE("plate", 15, new int[]{2, 5, 4, 1}, 12, 1.5F, 0.0F),
+    PLATE("toy:plate", 15, new int[]{2, 5, 4, 1}, 12, 1.5F, 0.0F),
     HEAVY("heavy", 30, new int[]{3, 8, 6, 3}, 9, 2.0F, 0.1F);
     private static final int[] MAX_DAMAGE_ARRAY = new int[]{11, 16, 15, 13};
     private final String name;
@@ -20,4 +20,5 @@ public enum ToyPlate implements ArmorMaterial {
     @Override public int getEnchantmentValue() { return this.enchantability; }
     @Override public float getToughness() { return this.toughness; }
     @Override public float getKnockbackResistance() { return this.knockback; }
+    @Override public String getName() { return this.name; }
 }
