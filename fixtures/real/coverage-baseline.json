@@ -1,15 +1,15 @@
 {
   "fixtures": {
     "alexs_mobs": {
-      "coverage": 26.4,
-      "files": 1107,
-      "residue": 3085,
+      "coverage": 26.5,
+      "files": 1110,
+      "residue": 3083,
       "errors": 0
     },
     "betterend": {
-      "coverage": 35.7,
-      "files": 3436,
-      "residue": 6187,
+      "coverage": 36.3,
+      "files": 3484,
+      "residue": 6122,
       "errors": 0
     },
     "create": {
@@ -19,33 +19,33 @@
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 34.5,
-      "files": 870,
-      "residue": 1653,
+      "coverage": 36.2,
+      "files": 906,
+      "residue": 1595,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 39.0,
-      "files": 849,
-      "residue": 1326,
+      "coverage": 41.0,
+      "files": 883,
+      "residue": 1272,
       "errors": 0
     },
     "mekanism": {
       "coverage": 12.7,
-      "files": 1300,
-      "residue": 8921,
+      "files": 1302,
+      "residue": 8918,
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 47.5,
-      "files": 1751,
-      "residue": 1933,
+      "coverage": 47.6,
+      "files": 1753,
+      "residue": 1932,
       "errors": 0
     },
     "silent_gear_1165": {
-      "coverage": 33.1,
-      "files": 1173,
-      "residue": 2370,
+      "coverage": 33.2,
+      "files": 1176,
+      "residue": 2368,
       "errors": 0
     },
     "storage_drawers_1122": {
@@ -61,20 +61,20 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 28.2,
-      "files": 1538,
-      "residue": 3913,
+      "coverage": 28.3,
+      "files": 1543,
+      "residue": 3908,
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 48.2,
-      "files": 16571,
-      "residue": 17829,
+      "coverage": 48.3,
+      "files": 16618,
+      "residue": 17780,
       "errors": 0
     },
     "waystones": {
-      "coverage": 30.9,
-      "files": 326,
+      "coverage": 31.0,
+      "files": 328,
       "residue": 730,
       "errors": 0
     }

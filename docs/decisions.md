@@ -27,6 +27,69 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: the vanilla parents random mods name most (orientable, cross, carpet, button, fence gate, cube_top and friends) are read from the fetched templates
+
+- **Decision:** The fetched vanilla template set (`portkit reference fetch`,
+  misode/mcmeta 1.20.1-summary at the same commit, re-pinned) adds
+  `cube_bottom_top`, `cube_top`, `orientable`, `orientable_with_bottom`,
+  `orientable_vertical`, `template_glazed_terracotta`, `dried_kelp_block`,
+  `cross`, `flower_pot_cross`, `carpet`, `button`, `button_pressed`,
+  `template_fence_gate`, `_open`, `_wall`, `_wall_open` and `ladder` (with
+  `thin_block`). `cube_top` and `orientable_vertical` join the full-cube face
+  table (Bedrock's `full_block`, as `cube_all` and `orientable` already map).
+  A plain (stateless or coded-facing) block whose model only names a fetched
+  template that isn't a full cube now takes the template's boxes as a custom
+  shape, through the same parent-chain and `#texture` resolution the stairs,
+  walls and panes use; a parent outside the set keeps its refusal. Java's
+  `rescale` on a template element's rotation (the cross and flower-pot planes)
+  is folded into the box: stretched about the rotation origin by 1/cos(angle)
+  on the two turned axes. Two templates changed their boxes between versions
+  and are read only for mods declaring the version they match or later
+  (`SINCE`): the button (top-face uv turned in 1.20) and the ladder (back-face
+  uv mirrored in 1.17); an older or undeclared mod keeps such a block as
+  residue saying so. Tinted templates (`tinted_cross`, `leaves`, `lily_pad`)
+  are not fetched, and a template face with a `tintindex` is refused.
+- **Why:** These parents were the largest vanilla-parent residue in the
+  measured data (corpus, deco set and the 50-mod gap-leaderboard sample, raw
+  reasons ranked by parent on develop d0ae602): 1,251 entries named them
+  (carpet 435, cross 320, glazed terracotta 185, flower-pot cross 74,
+  orientable 55, cube_bottom_top 52, button 42, fence gate 36, ...). The
+  boxes are Mojang's data, read from the fetched summary (never vendored), so
+  converting them is a lookup, not an inference. Compared on the fields the
+  converter reads (from, to, rotation, faces) across mcmeta's 1.16.5, 1.17.1,
+  1.18.2, 1.19.2, 1.19.3, 1.19.4, 1.20, 1.20.1, 1.21.1, 1.21.8, 26.1 and 26.3
+  summaries they are identical except the button and ladder above. No 26.x
+  release moves them (unlike bars in 26.1, #221); 26.3 only swaps `shade:
+  false` for `shade_direction_override` on the cross, flower pot and ladder
+  planes, lighting hints the converter doesn't read. The rescale fold is
+  exact: FaceBakery scales each rotated vertex about the origin by a factor
+  that is the same on both turned axes, so it commutes with the rotation;
+  uvs are Java's explicit ones either way. After (CI real-mods 38829976227,
+  gap-leaderboard 38829978831): 1,143 of the 1,251 entries convert; corpus
+  residue -239 (Farmer's Delight -54/-58, BetterEnd -65, Tinkers -49,
+  Supplementaries -5, Mekanism -3, Silent Gear -2, Alex's Mobs -2, Mythic
+  Metals -1; Create, Waystones, Storage Drawers md5-identical); deco -147
+  (Wallpapercraft -115 carpets, Cluttered -32; the other 10 md5-identical);
+  sample -1,038, mean coverage 12.24% -> 12.47% (Chipped -709, Biomes O' Plenty
+  -90, Farmer's Delight -54/-52, Quark -51, Cobblemon -42, BetterEnd -22,
+  Deeper Darker -13, Supplementaries -5; the other 39 unchanged). mct 0 errors
+  on every tree. The 108 left fail later and say why: buttons (37) and fence
+  gates (36) are turned with uvlock while vanilla's template sets its own uvs
+  (the existing "hand-set uv" refusal), ladders (20) reach outside the block
+  at some facing, 8 furnaces extend a model in another namespace, 5 Quark
+  buttons declare no game version.
+- **Rejected:** Bedrock's built-in `minecraft:geometry.cross` for the cross
+  (one more special case, and it only serves the plain cross; the template
+  route covers the cross, the potted cross and 6-way-facing crosses alike);
+  vendoring the models (Mojang's EULA; the fetch is the existing path);
+  one template set per game version (two templates differ, and only for old
+  versions; refusing them there is honest and cheap); converting tinted
+  templates (their colour is code: a biome or colour handler, #87); reading
+  `rescale` on a mod's own elements (it would change packs of mods this
+  decision doesn't touch; left as a follow-up).
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order; PR #257).
+- **Links:** #236, #221, #56, #87, #257.
+
 ## 2026-10-15: Forge SRG and Fabric intermediary jars are read in Mojang's names (fetched, pinned name tables)
 
 - **Decision:** the bytecode readers (facing/boxes #212, booleans #215/#219,

@@ -84,12 +84,24 @@ def test_a_rotated_variant_is_refused(tmp_path):
     assert "rotates" in result.unhandled[0].reason
 
 
-@pytest.mark.parametrize("parent", ["minecraft:block/cross", "minecraft:block/stairs", "block/slab"])
+@pytest.mark.parametrize("parent", ["minecraft:block/tinted_cross", "minecraft:block/template_wall_sign",
+                                    "block/lily_pad"])
 def test_a_model_that_is_not_a_cube_is_refused(tmp_path, parent):
+    """A vanilla parent outside the fetched template set (tinted, entity-drawn)."""
     model = {"parent": parent, "textures": {"all": "examplemod:block/steel_block"}}
     result = blocks.convert(build(tmp_path, CUBE, model))
     assert result.files == {}
     assert "not a full cube" in result.unhandled[0].reason
+
+
+@pytest.mark.parametrize("parent", ["minecraft:block/cross", "minecraft:block/stairs", "block/slab"])
+def test_a_template_parent_without_the_templates_says_to_fetch_them(tmp_path, parent):
+    """#236: a vanilla template parent's boxes come from the fetched set."""
+    model = {"parent": parent, "textures": {"all": "examplemod:block/steel_block"}}
+    result = blocks.convert(build(tmp_path, CUBE, model))
+    assert result.files == {}
+    assert "aren't cached" in result.unhandled[0].reason
+    assert "portkit reference fetch" in result.unhandled[0].reason
 
 
 def test_a_vanilla_texture_reference_is_refused_without_the_vanilla_index(tmp_path):
@@ -124,7 +136,8 @@ def test_the_fixture_converts_the_cubes_and_refuses_the_rest(tmp_path, fixtures_
     assert produced == ["steel_block.json", "steel_pillar.json"]
     reasons = " ".join(u.reason for u in out.unhandled)
     assert "blockstate variant" in reasons
-    assert "not a full cube" in reasons
+    # The cross: its boxes are vanilla's, from the fetched templates (#236).
+    assert "minecraft:block/cross" in reasons and "aren't cached" in reasons
     assert "a vanilla texture" in reasons
 
 

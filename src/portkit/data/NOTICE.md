@@ -65,8 +65,13 @@ and prints the sha256 to pin after bumping a version.
 Nothing from these is stored here or shipped either. The block converter needs
 the elements of a few vanilla parent models (`block/stairs`, `inner_stairs`,
 `outer_stairs`, `slab`, `slab_top`, `template_wall_post`, `template_wall_side`,
-`template_wall_side_tall`, `fence_post`, `fence_side`, `cube`, `cube_all`,
-`cube_column`, `cube_column_horizontal`, and their parent `block/block`).
+`template_wall_side_tall`, `fence_post`, `fence_side`, the glass pane and iron
+bars templates, `cube`, `cube_all`, `cube_column`, `cube_column_horizontal`,
+and, since #236, `cube_bottom_top`, `cube_top`, `orientable`,
+`orientable_with_bottom`, `orientable_vertical`, `template_glazed_terracotta`,
+`dried_kelp_block`, `cross`, `flower_pot_cross`, `carpet`, `button`,
+`button_pressed`, the four `template_fence_gate*` models and `ladder`, with
+their parents `block/block` and `block/thin_block`).
 `portkit reference fetch` downloads `assets/model/data.json` of
 [misode/mcmeta](https://github.com/misode/mcmeta) `1.20.1-summary` at
 `15f05b54846b0cc5adebe63b245c7045ba105709` (the commit the vanilla-1.20.1 tag
@@ -75,7 +80,10 @@ the result against the sha256 pinned in `portkit/data/models.py` and caches it
 as `models-vanilla-1.20.1-<sha12>.json`. Generated from Minecraft: (c) Mojang AB,
 subject to the [Minecraft EULA](https://www.minecraft.net/en-us/eula). The same
 derivation is identical for the 1.16.5, 1.19.2, 1.21.1, 1.21.8 and 26.1
-summaries, so one set serves every mod. The tests use hand-written shapes in
+summaries, so one set serves every mod (the #236 parents were also checked
+against 1.17.1, 1.18.2, 1.19.3, 1.19.4, 1.20 and 26.3; the button, changed in
+1.20, and the ladder, changed in 1.17, are read only for mods declaring those
+versions or later, `SINCE` in `portkit/data/models.py`). The tests use hand-written shapes in
 `tests/data/model_templates.json`, not copies. `python -m portkit.data.models
 --pin` prints the sha256 to pin after bumping the commit.
 
