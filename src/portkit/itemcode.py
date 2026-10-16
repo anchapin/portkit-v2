@@ -219,12 +219,12 @@ def static_values(cf: ClassFile) -> dict[str, object]:
 
 
 def _getter_field(cf: ClassFile, name: str, desc: str) -> str | None:
-    """The field ``name``'s body returns when it is ``return this.field``."""
+    """The field ``name``'s body returns when it is ``return this.field`` (an int or float)."""
     method = cf.method(name, desc)
     if method is None or method.code is None:
         return None
     ops = instructions(cf, method.code)
-    if len(ops) == 3 and ops[0].name == "aload_0" and ops[1].op == 0xB4 and ops[2].op == 0xAC \
+    if len(ops) == 3 and ops[0].name == "aload_0" and ops[1].op == 0xB4 and ops[2].op in (0xAC, 0xAE) \
             and ops[1].arg.owner == cf.name:
         return ops[1].arg.name
     return None
@@ -256,13 +256,13 @@ def _ctor_param(cf: ClassFile, field_name: str) -> tuple[str, int] | None:
 
 
 def _local(insn) -> int | None:
-    """The local slot an ``iload``/``aload`` family instruction reads."""
-    name = insn.name
-    for prefix in ("iload", "aload", "fload"):
-        if name == prefix:
-            return insn.arg
-        if name.startswith(prefix + "_"):
-            return int(name[-1])
+    """The local slot an ``iload``/``fload``/``aload`` family instruction reads."""
+    op = insn.op
+    if op in (0x15, 0x17, 0x19):  # iload, fload, aload <index>
+        return insn.arg
+    for first in (0x1A, 0x22, 0x2A):  # iload_0, fload_0, aload_0 .. _3
+        if first <= op <= first + 3:
+            return op - first
     return None
 
 
@@ -376,3 +376,451 @@ def sets_durability(index: ClassIndex, owner: str, stop: str = "net/minecraft/")
                     return True
         cls = cf.super_name
     return False
+
+
+# --- armor (#274) ---------------------------------------------------------------
+#
+# What vanilla ArmorItem does with its material, read from Mojang's client jars
+# with their mappings (client.txt):
+#
+# * 1.20.1 ``ArmorItem(ArmorMaterial, Type, Properties)`` sets
+#   ``defense = material.getDefenseForType(type)``, ``toughness =
+#   material.getToughness()``, ``knockbackResistance =
+#   material.getKnockbackResistance()`` and the durability above, and its
+#   ``getEnchantmentValue()`` is ``material.getEnchantmentValue()``. (Its armor
+#   attribute modifiers add knockback resistance only for
+#   ``ArmorMaterials.NETHERITE``.)
+# * 1.21.1 ``ArmorItem(Holder<ArmorMaterial>, Type, Properties)``:
+#   ``getDefense()`` is ``material.value().getDefense(type)``, read from the
+#   record ``ArmorMaterial(Map<Type, Integer> defense, int enchantmentValue,
+#   Holder equipSound, Supplier repairIngredient, List layers, float
+#   toughness, float knockbackResistance)``, and ``getEnchantmentValue()`` is
+#   ``material.value().enchantmentValue()``.
+
+ARMOR_ITEM = "net/minecraft/world/item/ArmorItem"
+HOLDER = "net/minecraft/core/Holder"
+ARMOR_ITEM_1_20 = f"(L{ARMOR_MATERIAL};L{ARMOR_TYPE};L{PROPERTIES};)V"
+ARMOR_ITEM_1_21 = f"(L{HOLDER};L{ARMOR_TYPE};L{PROPERTIES};)V"
+ARMOR_MATERIAL_RECORD = "(Ljava/util/Map;ILnet/minecraft/core/Holder;Ljava/util/function/Supplier;Ljava/util/List;FF)V"
+# Methods an armor item class may override to decide its armor numbers, slot or
+# enchantability in code (vanilla ArmorItem/Item, Forge IForgeItem, NeoForge
+# IItemExtension; Mojang names): an item class declaring one is not read.
+ARMOR_OVERRIDES = DURABILITY_OVERRIDES | frozenset({
+    "getDefense", "getToughness", "getDefaultAttributeModifiers", "getAttributeModifiers",
+    "getEnchantmentValue", "isEnchantable", "getEquipmentSlot", "getMaterial", "getType",
+})
+# Item.Properties calls that set numbers an armor item's material would
+# otherwise give (1.21.1 ``attributes`` replaces its modifiers; ``component``
+# with a vanilla component type could set any of them; a mod's own component
+# type is recorded as ``component <owner>.<field>`` instead).
+ARMOR_PROPERTY_CALLS = DURABILITY_CALLS | frozenset({"attributes", "component"})
+
+VANILLA_SOURCES.update({
+    "armor_stats_1_20": ("Minecraft 1.20.1 net.minecraft.world.item.ArmorItem#<init>(ArmorMaterial, "
+                         "ArmorItem.Type, Item.Properties): defense = material.getDefenseForType(type), "
+                         "toughness = material.getToughness(), knockbackResistance = "
+                         "material.getKnockbackResistance(); ArmorItem#getEnchantmentValue() = "
+                         "material.getEnchantmentValue() (client jar sha1 "
+                         "0c3ec587af28e5a785c0b4a7b8a30f9a8f78f838, Mojang client.txt)"),
+    "armor_stats_1_21": ("Minecraft 1.21.1 net.minecraft.world.item.ArmorItem: getDefense() = "
+                         "material.value().getDefense(type), getEnchantmentValue() = "
+                         "material.value().enchantmentValue(), from the record ArmorMaterial(defense, "
+                         "enchantmentValue, equipSound, repairIngredient, layers, toughness, "
+                         "knockbackResistance) (client jar sha1 30c73b1c5da787909b2f73340419fdf13b9def88, "
+                         "Mojang client.txt)"),
+})
+
+
+@dataclass(frozen=True)
+class Param:
+    """A value an enclosing method got as its parameter ``index``."""
+
+    index: int
+
+
+@dataclass
+class ArmorStats:
+    """What an armor material gives an ``ArmorItem``: defense per armor type,
+    enchantability, toughness, knockback resistance and (1.20 materials)
+    durability per armor type."""
+
+    defense: dict[str, int]
+    enchantability: int
+    toughness: float
+    knockback: float
+    durability: dict[str, int] | None = None
+
+
+def _int(value) -> int | None:
+    if isinstance(value, Call) and value.owner == "java/lang/Integer" and value.name == "valueOf" \
+            and len(value.args) == 1:
+        value = value.args[0]
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _number(value) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _type_map(value) -> dict[str, int] | None:
+    """``Map.of(ArmorItem.Type.HELMET, 3, ...)`` -> {"HELMET": 3, ...}."""
+    if not isinstance(value, Call) or value.owner != "java/util/Map" or value.name != "of" or len(value.args) % 2:
+        return None
+    out = {}
+    for key, amount in zip(value.args[::2], value.args[1::2]):
+        number = _int(amount)
+        if not isinstance(key, Static) or key.owner != ARMOR_TYPE or number is None:
+            return None
+        out[key.name] = number
+    return out or None
+
+
+def armor_material_record(value) -> ArmorStats | None:
+    """A 1.21 ``new ArmorMaterial(Map.of(...), enchantability, sound, repair,
+    layers, toughness, knockback)`` (a static initializer's value) -> its
+    stats, when every number is a constant."""
+    if not isinstance(value, New) or value.cls != ARMOR_MATERIAL or value.desc != ARMOR_MATERIAL_RECORD \
+            or len(value.args) != 7:
+        return None
+    defense, ench = _type_map(value.args[0]), _int(value.args[1])
+    tough, knock = _number(value.args[5]), _number(value.args[6])
+    if defense is None or ench is None or tough is None or knock is None:
+        return None
+    return ArmorStats(defense, ench, tough, knock)
+
+
+def _getter(cf: ClassFile, name: str, desc: str) -> tuple[str, object] | None:
+    """("field", f) for ``return this.f``, ("const", v) for ``return v``."""
+    field_name = _getter_field(cf, name, desc)
+    if field_name is not None:
+        return "field", field_name
+    method = cf.method(name, desc)
+    if method is None or method.code is None:
+        return None
+    ops = instructions(cf, method.code)
+    if len(ops) == 2 and ops[1].op in (0xAC, 0xAE):
+        if ops[0].op in _ICONST:
+            return "const", _ICONST[ops[0].op]
+        if ops[0].op in (0x0B, 0x0C, 0x0D):
+            return "const", _FCONST[ops[0].op]
+        if ops[0].op in (0x10, 0x11) or (ops[0].op in (0x12, 0x13) and isinstance(ops[0].arg, (int, float))):
+            return "const", ops[0].arg
+    return None
+
+
+def _getter_values(cf: ClassFile, name: str, desc: str) -> dict[str, object] | None:
+    """Material constant -> what ``name()`` returns for it."""
+    found = _getter(cf, name, desc)
+    if found is None:
+        return None
+    kind, what = found
+    if kind == "const":
+        return {k: what for k, v in static_values(cf).items() if isinstance(v, New) and v.cls == cf.name}
+    return _per_constant(cf, what)
+
+
+def armor_material_enum(index: ClassIndex, owner: str) -> dict[str, ArmorStats]:
+    """Material constant -> its stats, for a 1.20-style ``ArmorMaterial`` enum
+    whose getters return a constructor-set field (or a constant), with
+    ``getDefenseForType`` = ``this.array[type.ordinal()]`` and durability as
+    :func:`armor_type_durability` reads it."""
+    cf = index.get(owner)
+    if cf is None or ARMOR_MATERIAL not in cf.interfaces:
+        return {}
+    method = cf.method("getDefenseForType", f"(L{ARMOR_TYPE};)I")
+    if method is None or method.code is None:
+        return {}
+    ops = instructions(cf, method.code)
+    if [i.name for i in ops] != ["aload_0", "getfield", "aload_1", "invokevirtual", "iaload", "ireturn"] \
+            or ops[1].arg.owner != cf.name or ops[3].arg.name != "ordinal":
+        return {}
+    defenses = _per_constant(cf, ops[1].arg.name)
+    ench = _getter_values(cf, "getEnchantmentValue", "()I")
+    tough = _getter_values(cf, "getToughness", "()F")
+    knock = _getter_values(cf, "getKnockbackResistance", "()F")
+    durability = armor_type_durability(index, owner)
+    if ench is None or tough is None or knock is None:
+        return {}
+    out = {}
+    for name, array in defenses.items():
+        if not isinstance(array, Array) or len(array.items) != len(ARMOR_TYPE_ORDER) \
+                or not all(_int(v) is not None for v in array.items):
+            continue
+        e, t, k = _int(ench.get(name)), _number(tough.get(name)), _number(knock.get(name))
+        if e is None or t is None or k is None or name not in durability:
+            continue
+        out[name] = ArmorStats(dict(zip(ARMOR_TYPE_ORDER, array.items)), e, t, k, durability[name])
+    return out
+
+
+def resolve_static(index: ClassIndex, value):
+    """A mod static holding another static (``TYPE = ArmorItem.Type.HELMET``)
+    -> that static; anything else unchanged."""
+    seen = set()
+    while isinstance(value, Static) and not value.owner.startswith("net/minecraft/") and value not in seen:
+        seen.add(value)
+        cf = index.get(value.owner)
+        held = static_values(cf).get(value.name) if cf else None
+        if not isinstance(held, Static):
+            break
+        value = held
+    return value
+
+
+_THIS = Param(-1)
+
+
+def _run(cf: ClassFile, method, args: list, on_init):
+    """Run ``method`` with ``args`` (no branches) on a small stack machine.
+
+    ``on_init(owner, desc, call_args)`` is called for ``invokespecial <init>``
+    on ``this`` and its answer returned. Otherwise the value of the first
+    ``areturn`` is returned. None when the body does something not modelled.
+    Item.Properties calls are recorded in ``props`` (their receiver passes
+    through; ``component`` with a mod's own component type is recorded as
+    ``component <owner>.<field>``), and a call taking an ``ArmorMaterial`` and returning a
+    ``Holder`` (a registry's ``wrapAsHolder``) is that material. An
+    ``if_acmpeq``/``if_acmpne`` comparing two known statics is followed.
+    """
+    if method is None or method.code is None:
+        return None, []
+    types = arg_types(method.desc)
+    is_static = bool(method.access & 0x0008)
+    local: dict[int, object] = {}
+    slot = 0
+    if not is_static:
+        local[0] = _THIS
+        slot = 1
+    for i, t in enumerate(types):
+        local[slot] = args[i] if i < len(args) else UNKNOWN
+        slot += 2 if t in ("J", "D") else 1
+    stack: list = []
+    props: list[str] = []
+    code = instructions(cf, method.code)
+    at = {insn.offset: i for i, insn in enumerate(code)}
+    pc, steps = 0, 0
+    try:
+        while pc < len(code) and steps < 4096:
+            insn = code[pc]
+            pc += 1
+            steps += 1
+            op = insn.op
+            if op in (0xA5, 0xA6):  # if_acmpeq / if_acmpne on two known statics: follow it
+                right, left = stack.pop(), stack.pop()
+                if not (isinstance(left, Static) and isinstance(right, Static)) or insn.arg not in at:
+                    return None, props
+                if (left == right) == (op == 0xA5):
+                    pc = at[insn.arg]
+                continue
+            if op == 0xA7 and insn.arg in at:  # goto
+                pc = at[insn.arg]
+                continue
+            if op in _BRANCHES and op not in (0xB0, 0xB1):
+                return None, props
+            loaded = _local(insn)
+            if loaded is not None:
+                stack.append(local.get(loaded, UNKNOWN))
+            elif op in _ICONST:
+                stack.append(_ICONST[op])
+            elif op in _FCONST:
+                stack.append(_FCONST[op])
+            elif op in (0x10, 0x11):
+                stack.append(insn.arg)
+            elif op in (0x12, 0x13, 0x14):
+                stack.append(insn.arg if isinstance(insn.arg, (int, float, str)) else UNKNOWN)
+            elif op == 0x01:
+                stack.append(None)
+            elif op == 0xB2:
+                stack.append(Static(insn.arg.owner, insn.arg.name))
+            elif op == 0xBB:
+                stack.append(New(insn.arg[1]))
+            elif op == 0x59:
+                stack.append(stack[-1])
+            elif op == 0x57:
+                stack.pop()
+            elif op == 0xC0:
+                pass
+            elif op in (0xB6, 0xB7, 0xB8, 0xB9):
+                ref = insn.arg
+                n = len(arg_types(ref.desc))
+                call_args = stack[len(stack) - n:] if n else []
+                del stack[len(stack) - n:]
+                if op == 0xB7 and ref.name == "<init>":
+                    target = stack.pop()
+                    if target is _THIS:
+                        return on_init(ref.owner, ref.desc, call_args), props
+                    if isinstance(target, New):
+                        target.desc, target.args = ref.desc, call_args
+                    continue
+                receiver = None if op == 0xB8 else stack.pop()
+                if ref.owner == PROPERTIES:
+                    tag = call_args[0] if call_args else None
+                    if ref.name == "component" and isinstance(tag, Static) and not tag.owner.startswith("net/minecraft/"):
+                        props.append(f"component {tag.owner}.{tag.name}")  # a mod's own data component
+                    else:
+                        props.append(ref.name)
+                    stack.append(receiver)
+                elif n == 1 and ref.desc.endswith(f")L{HOLDER};") and ref.desc.startswith(f"(L{ARMOR_MATERIAL};"):
+                    stack.append(call_args[0])  # wraps a material in its registry holder
+                elif _returns(ref.desc):
+                    stack.append(Call(ref.owner, ref.name, call_args, receiver))
+            elif op == 0xB0:  # areturn
+                return stack.pop(), props
+            elif op in (0xB5, 0xB1):  # putfield / return
+                if op == 0xB5:
+                    del stack[-2:]
+                else:
+                    return None, props
+            else:
+                return None, props
+    except (IndexError, ValueError):
+        return None, props
+    return None, props
+
+
+def built_object(cf: ClassFile, method: str, desc: str | None = None) -> New | None:
+    """The object a factory method (a registration lambda) builds and returns,
+    with its constructor arguments; the method's own parameters are
+    :class:`Param` values."""
+    m = cf.method(method, desc)
+    if m is None:
+        return None
+    n = len(arg_types(m.desc))
+    value, _ = _run(cf, m, [Param(i) for i in range(n)], lambda *a: None)
+    return value if isinstance(value, New) and value.desc is not None else None
+
+
+def armor_item_args(index: ClassIndex, cls: str, desc: str, args: list,
+                    _depth: int = 0) -> tuple[object, object, list[str], str] | None:
+    """Follow ``new cls(args)`` (constructor ``desc``) up its constructor
+    chain to vanilla ``ArmorItem``'s: ``(material, type, Item.Properties
+    calls on the way, ArmorItem constructor desc)``, with mod statics that
+    hold another static resolved. None when a constructor branches, builds
+    on something other than ArmorItem, or isn't in the jar."""
+    if _depth > 8:
+        return None
+    if cls == ARMOR_ITEM:
+        if desc not in (ARMOR_ITEM_1_20, ARMOR_ITEM_1_21) or len(args) != 3:
+            return None
+        return resolve_static(index, args[0]), resolve_static(index, args[1]), [], desc
+    if cls.startswith("net/minecraft/"):
+        return None
+    cf = index.get(cls)
+    if cf is None:
+        return None
+
+    def on_init(owner, init_desc, call_args):
+        if owner not in (cf.super_name, cls):
+            return None
+        return armor_item_args(index, owner, init_desc, call_args, _depth + 1)
+
+    found, props = _run(cf, cf.method("<init>", desc), list(args), on_init)
+    if found is None:
+        return None
+    material, kind, more, item_desc = found
+    return material, kind, props + more, item_desc
+
+
+def armor_overrides(index: ClassIndex, owner: str) -> list[str]:
+    """The :data:`ARMOR_OVERRIDES` ``owner`` or a mod superclass declares."""
+    found, seen, cls = set(), set(), owner
+    while cls and not cls.startswith("net/minecraft/") and cls not in seen:
+        seen.add(cls)
+        cf = index.get(cls)
+        if cf is None:
+            break
+        found |= {m.name for m in cf.methods if m.name in ARMOR_OVERRIDES}
+        cls = cf.super_name
+    return sorted(found)
+
+
+def decides_armor_in_code(index: ClassIndex, owner: str) -> bool | None:
+    """Whether ``owner`` or a mod superclass declares a method that decides
+    its armor numbers, slot, enchantability or durability in code
+    (:data:`ARMOR_OVERRIDES`) (True), none (False), or can't be read (None)."""
+    seen = set()
+    cls = owner
+    while cls and not cls.startswith("net/minecraft/") and cls not in seen:
+        seen.add(cls)
+        cf = index.get(cls)
+        if cf is None:
+            return None
+        if any(m.name in ARMOR_OVERRIDES for m in cf.methods):
+            return True
+        cls = cf.super_name
+    return False
+
+
+@dataclass(frozen=True)
+class ArmorPiece:
+    """One mod armor item as its code builds it (the ``item_armor`` adapter
+    hook's answer): its ``ArmorItem.Type``, the numbers vanilla ``ArmorItem``
+    gives it, and where each came from. ``not_carried`` lists what else the
+    mod's code gives the piece that the converter doesn't write."""
+
+    kind: str
+    protection: int
+    durability: int
+    enchantability: int
+    toughness: float
+    knockback: float
+    source: str
+    not_carried: tuple[str, ...] = ()
+
+
+def armor_piece(stats: ArmorStats, kind, durability: int | None, source: str,
+                not_carried: tuple[str, ...] = ()) -> ArmorPiece | None:
+    """The piece of armor type ``kind`` (a ``Static`` of ``ArmorItem.Type``)
+    built on ``stats``; durability from the material (1.20) unless given."""
+    if not isinstance(kind, Static) or kind.owner != ARMOR_TYPE or kind.name not in ARMOR_TYPE_ORDER:
+        return None
+    protection = stats.defense.get(kind.name)
+    if durability is None and stats.durability is not None:
+        durability = stats.durability.get(kind.name)
+    if not isinstance(protection, int) or protection < 0 or not isinstance(durability, int) or durability <= 0 \
+            or stats.enchantability < 0:
+        return None
+    return ArmorPiece(kind.name, protection, durability, stats.enchantability, stats.toughness, stats.knockback,
+                      source, not_carried)
+
+
+def registration_calls(cf: ClassFile, name: str, method: str = "<clinit>") -> list[str] | None:
+    """The names of the calls a registration chain makes on the entry it names
+    ``name`` (from its ``ldc name`` up to the ``putstatic`` that keeps it),
+    e.g. Registrate's ``item``, ``properties``, ``tag``, ``register``; None
+    when ``name`` isn't registered there exactly once."""
+    m = cf.method(method)
+    if m is None or m.code is None:
+        return None
+    runs, run = [], None
+    for insn in instructions(cf, m.code):
+        if insn.op in (0x12, 0x13) and insn.arg == name:
+            run = []
+            runs.append(run)
+        elif run is not None:
+            if insn.op == 0xB3:
+                run = None
+            elif insn.op in (0xB6, 0xB7, 0xB8, 0xB9) and isinstance(insn.arg, Ref):
+                run.append(insn.arg.name)
+    return runs[0] if len(runs) == 1 else None
+
+
+# Methods that decide which enchantments an item takes (or has) in code; the
+# numbers are still the material's, so these are named, not refused.
+ENCHANTMENT_OVERRIDES = frozenset({
+    "canApplyAtEnchantingTable", "isBookEnchantable", "supportsEnchantment", "isPrimaryItemFor",
+    "getEnchantmentLevel", "getAllEnchantments",
+})
+
+
+def enchantment_overrides(index: ClassIndex, owner: str) -> list[str]:
+    """The :data:`ENCHANTMENT_OVERRIDES` ``owner`` or a mod superclass declares."""
+    found, seen, cls = set(), set(), owner
+    while cls and not cls.startswith("net/minecraft/") and cls not in seen:
+        seen.add(cls)
+        cf = index.get(cls)
+        if cf is None:
+            break
+        found |= {m.name for m in cf.methods if m.name in ENCHANTMENT_OVERRIDES}
+        cls = cf.super_name
+    return sorted(found)

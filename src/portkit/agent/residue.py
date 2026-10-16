@@ -94,6 +94,8 @@ from .tools import SYSTEM_PROMPT, ToolBox
 # session.
 SKIP_KINDS = {
     "java_code": "compiled bytecode; the agent's tools read text files only",
+    "armor": ("the item is armor whose slot and numbers are the mod's code (#274), which the agent's tools "
+              "can't read; writing minecraft:wearable without them would invent its stats"),
     "nested_jar": "nested jars are not unpacked, so there is nothing to read",
     "namespace_collision": "a collision is a packaging decision, not a file to convert",
     "output_collision": "two converters wrote one output path; a converter bug, not a file to convert",
