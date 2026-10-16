@@ -135,6 +135,25 @@ SKIP_KINDS = {
     "code_only": ("the mod ships nothing Bedrock can hold (explained-empty, #279): this lang text or asset is "
                   "only read by its Java code (screens, HUD, renderer), and the reason names the jar's reason "
                   "classes"),
+    # #277 lang: what a .lang line can't carry (portkit.converters.lang).
+    "lang_code_string": ("no block, item, entity or creative tab owns the string, so only the mod's Java code "
+                         "shows it (screens, tooltips, chat, config, integrations); a Bedrock add-on has no "
+                         "text surface for it unless a portkit runtime shows it, and those keys already ship"),
+    "lang_unshipped": ("the line names something the pack doesn't ship (a block, item or entity that is "
+                       "residue on its own account, another mod's or a vanilla entry, or a registry portkit "
+                       "converts none of: effects, enchantments, biomes, fluids, ...), so it would name "
+                       "nothing; it ships with its owner when that converts"),
+    "lang_locale": ("Bedrock loads texts/ only for its own fixed list of languages, and this locale isn't "
+                    "one of them"),
+    "lang_unreadable": ("Java's own reader (Gson) rejects the file too, so Java never shows its text and "
+                        "there is nothing to carry over"),
+    # #277 unowned: leftover models and textures the jar's references explain (portkit.ownership).
+    "owned_by_residue": ("only residue that has its own entry uses these files (a refused block's blockstate, "
+                         "a particle definition): they ship with their owner when it converts, not alone"),
+    "java_only_asset": ("nothing in the jar's JSON names these files, so only the mod's Java code draws them "
+                        "(screens, entity and block-entity renderers, effect icons, armor layers, custom model "
+                        "loaders) or, for atlases, Java's texture stitcher reads them; nothing in a Bedrock "
+                        "pack would draw them"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }

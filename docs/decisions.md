@@ -27,6 +27,32 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: .lang carries lines for what ships; lang and leftover assets are explained from the jar's own references
+
+- **Decision:** These are three rules for the content mods' two biggest unexplained reason classes (#277 rule 4).
+  - (1) **.lang**: a `tile.`/`item.`/`entity.`/`itemGroup.name.` line ships when the final pack defines its identifier or names its key (`lang.settle`, run after the withdraw passes). A line for one of the jar's own blocks, items or entities that didn't ship is kept, so the name is there when its owner converts; the owner's own residue already says why it didn't ship. Lines for creative tabs, other mods' entries and sub-keys (`block.<ns>.x.tooltip`) are dropped. Source text is never changed.
+  - (2) **Lang keys** with no line are explained with one entry per file and kind:
+    - `lang_code_string`: no block, item, entity, creative tab or registry entry owns the key, so only Java code shows it.
+    - `lang_unshipped`: a registry portkit converts none of (effect, enchantment, biome, fluid, attribute, trim, painting, structure, ...), a vanilla-namespaced extension, a creative tab, or another mod's content.
+    - `lang_locale`: no Bedrock slot.
+    - `lang_unreadable`: Gson rejects the file too. Only `,,` / `,}` inside an object is claimed, per `JsonReader.doPeek` in gson 2.10.1.
+    
+    Lang files are read as `utf-8-sig` (Gson skips a BOM). Locales are read en_us first.
+  - (3) **Unowned models, textures and atlases** (`portkit.ownership`) are traced back through blockstates, item definitions, model parents/textures/overrides/loader parts, OBJ `mtllib` and particle definitions:
+    - `owned_by_residue` when every user is residue with its own entry, including a refused block's item model;
+    - `java_only_asset` when no JSON names the file, only Java-only models do, or it is an atlas;
+    - left `unowned` when a shipped user names it (a converter gap).
+    
+    All six kinds are explained (`SKIP_KINDS`), and they still count as residue for coverage. Explained-empty mods (#279) keep `code_only`.
+- **Why:** Almost all of the 6872 `lang` entries were keys no Bedrock line can carry, reported one by one as "unrecognised". Almost all unowned models belonged to blocks already refused for their own reasons, and almost all unowned textures are drawn only by Java code (GUI, entity renderers, effect icons, armor layers). Saying which, with the owner named, turns noise into reasons. The leftovers are the real gaps: block-item inventory models and modular-tool parts. Alex prefers keeping source assets: nothing is deleted, and an owned file ships when its owner does.
+- **Rejected:**
+  - Writing lines for everything (keys that name nothing, and bogus `tile.x.tooltip.name` keys).
+  - Dropping the jar's own unshipped-content lines. The agent would lose the name, and the owner is already residue.
+  - Inventing locale mappings (es_ar to es_MX).
+  - Parsing JSON leniently beyond what Gson is shown to do.
+  - Mod-specific GUI/texture lists. The answer comes from the jar's own references.
+- **Links:** #292 (PR #294), #277, #279. Data tags: #293.
+
 ## 2026-10-16: a mod with nothing Bedrock can hold is explained-empty: no pack, a report of reason classes read from the jar
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order); pick 1 is
