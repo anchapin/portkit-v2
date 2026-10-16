@@ -27,6 +27,61 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: converted crafting recipes carry `unlock` read from the Java recipe advancement; AlwaysUnlocked is the labelled fallback
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
+- **Decision:** every `minecraft:recipe_shaped` and `minecraft:recipe_shapeless`
+  the converter writes gets an `unlock` (`portkit.converters.recipe_unlock`).
+  Its entries come from the jar's own recipe advancements
+  (`data/*/advancement[s]/**` whose `rewards.recipes` names the recipe): in a
+  single OR requirement group, each `minecraft:inventory_changed` criterion with
+  exactly one plain item predicate (`items` / `item` / `tag`) gives its items or
+  tag; `recipe_unlocked` criteria are skipped. An item is written only when this
+  conversion ships it or Bedrock has it as a vanilla id (Mojang's item list,
+  bedrock-samples `metadata/vanilladata_modules/mojang-items.json`, fetched by
+  `portkit reference fetch` and sha256-pinned, never vendored); a tag only when
+  the converted recipe takes that same tag. Every recipe written from one Java
+  recipe (per-member expansions too) takes the same entries. When no
+  advancement rewards the recipe, or nothing survives, the recipe gets
+  `{"context": "AlwaysUnlocked"}` (an object, as vanilla writes every context),
+  with a note. Furnace and smithing recipes are left as they were. The
+  advancement files read for a shipped recipe count as consumed.
+- **Why:** Bedrock Dedicated Server 1.26.52.3 logged "1.20+ Recipes require
+  unlock data" for all 2,408 crafting recipes over the five in-game packs (#238
+  run 38841956046), and not for furnace or smithing recipes. Java states what
+  unlocks a recipe in the recipe book in data (its `has_<item>` advancement),
+  and vanilla Bedrock's own recipes take the same items (bedrock-samples
+  `behavior_pack/recipes`: 1,706 `item` and 19 `tag` unlock entries), so the
+  item rule is the source's own, not a guess. A criterion Bedrock can't say (an
+  AND of criteria, a count or component condition, another trigger) is dropped,
+  which only narrows the unlock. Item ids are checked because BDS refuses the
+  whole recipe for an unlock item it doesn't know ("has an invalid unlock
+  ingredient"), and many Java vanilla ids aren't Bedrock's
+  (`minecraft:oak_trapdoor` is `minecraft:trapdoor`). Players craft from the
+  grid regardless of unlock while the `dolimitedcrafting` gamerule is off
+  ("Determines whether players should be able to craft only those recipes that
+  they've unlocked first", learn.microsoft.com /gamerule); `unlock` decides when
+  the recipe book lists the recipe.
+- **Fallback:** AlwaysUnlocked, the vanilla crafting table's own unlock, for
+  recipes Java gives no expressible advancement (Night Lights, Mekanism, Alex's
+  Mobs and Mythic Metals' crafting recipes ship none). The recipe book lists
+  them from the start.
+- **Rejected:** AlwaysUnlocked for every recipe (drops what the mod says about
+  progression, unlike vanilla Bedrock); `{"context": "None"}` for recipes without
+  an advancement (Java's book doesn't list them until crafted, but whether
+  Bedrock ever lists a `None` recipe is unverified, so the recipe could stay
+  out of the book for good); `unlock` written as a list holding a context (BDS
+  reads each list entry as an item and refuses it, branch run 38842744549);
+  Java vanilla ids unchecked (refused by BDS, see above); `unlock` on furnace
+  and smithing recipes (BDS doesn't ask for it; left for a recipe-book pass).
+- **Measured:** in-game (ingame.yml on the branch vs develop 38841956046): the
+  unlock errors go 2,408 -> 0 on all six runs; every check still passes. With
+  the unlock in place BDS validates further and reports ingredient and result
+  ids the recipes already named that Bedrock doesn't have (Java vanilla ids such
+  as `minecraft:lily_pad`, `minecraft:terracotta`, `minecraft:bricks`, and
+  unshipped mod items), which it skipped before: those are #261.
+- **Links:** #260, #238 (pick 3), #261.
+
 ## 2026-10-15: converted packs are checked in Mojang's Bedrock Dedicated Server by a generated Script API pack; downloading the server is an EULA acceptance, made explicitly
 
 - **Status:** approved (Alex, 2026-10-15). All six DEFAULT picks on PR #259
