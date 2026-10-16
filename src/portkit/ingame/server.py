@@ -41,8 +41,8 @@ BDS_SHA256 = ""
 # minecraft.net's CDN holds a request open and drops it unless the User-Agent
 # starts like a browser's (checked 2026-10-15: "curl/..." and a bare tool name
 # get no response; "Mozilla/5.0 (X11; Linux x86_64) ..." gets the zip). The
-# rest of the string still says who is asking.
-USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) portkit-ingame (+https://github.com/anchapin/portkit-v2)"
+# rest of the string still says who is asking (a URL in it gets dropped too).
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) portkit-ingame"
 
 EULA_URL = "https://minecraft.net/eula"
 PRIVACY_URL = "https://www.microsoft.com/en-us/privacy/privacystatement"
