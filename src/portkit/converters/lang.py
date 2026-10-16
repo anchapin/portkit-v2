@@ -439,11 +439,11 @@ def settle(result: ConversionResult, namespaces=()) -> None:
         first = next(iter(sorted(news.values(), key=lambda v: v[1])))[1]
         source = _source_for(result.consumed, bedrock, first if ":" in first else "")
         if unshipped:
-            labels = {k: ("creative tab" if ident == "creative tab" else "block, item or entity")
+            # The jar's own content kept its lines above, so what is left is
+            # a creative tab or another mod's (or namespace's) entry.
+            labels = {k: ("creative tab" if ident == "creative tab" else "another mod's block, item or entity")
                       for k, (_, ident) in unshipped.items()}
-            entry = _unshipped_entry(source, labels, where)
-            entry.reason += "; a block, item or entity of this jar has its own residue entry saying why"
-            result.unhandled.append(entry)
+            result.unhandled.append(_unshipped_entry(source, labels, where))
         if code:
             result.unhandled.append(_code_entry(source, code, where + " (sub-keys of a block or item, "
                                                 "e.g. its tooltip)"))
