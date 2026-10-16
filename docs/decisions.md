@@ -57,11 +57,13 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   which only narrows the unlock. Item ids are checked because BDS refuses the
   whole recipe for an unlock item it doesn't know ("has an invalid unlock
   ingredient"), and many Java vanilla ids aren't Bedrock's
-  (`minecraft:oak_trapdoor` is `minecraft:trapdoor`). Players craft from the
-  grid regardless of unlock while the `dolimitedcrafting` gamerule is off
-  ("Determines whether players should be able to craft only those recipes that
-  they've unlocked first", learn.microsoft.com /gamerule); `unlock` decides when
-  the recipe book lists the recipe.
+  (`minecraft:oak_trapdoor` is `minecraft:trapdoor`). `unlock` decides when
+  the recipe book lists the recipe; only with the `dolimitedcrafting` gamerule
+  on ("Determines whether players should be able to craft only those recipes
+  that they've unlocked first", learn.microsoft.com /gamerule) does it also
+  gate crafting, as Java's `doLimitedCrafting` does with the same advancement.
+  Recipe-book and crafting behaviour were not observed in game (the Script API
+  can't list recipes).
 - **Fallback:** AlwaysUnlocked, the vanilla crafting table's own unlock, for
   recipes Java gives no expressible advancement (Night Lights, Mekanism, Alex's
   Mobs and Mythic Metals' crafting recipes ship none). The recipe book lists
@@ -74,12 +76,17 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   reads each list entry as an item and refuses it, branch run 38842744549);
   Java vanilla ids unchecked (refused by BDS, see above); `unlock` on furnace
   and smithing recipes (BDS doesn't ask for it; left for a recipe-book pass).
-- **Measured:** in-game (ingame.yml on the branch vs develop 38841956046): the
+- **Measured:** in-game (ingame.yml on the branch, runs 38843367960 and
+  38844281443, vs develop 38841956046): the
   unlock errors go 2,408 -> 0 on all six runs; every check still passes. With
   the unlock in place BDS validates further and reports ingredient and result
   ids the recipes already named that Bedrock doesn't have (Java vanilla ids such
   as `minecraft:lily_pad`, `minecraft:terracotta`, `minecraft:bricks`, and
-  unshipped mod items), which it skipped before: those are #261.
+  unshipped mod items), which it skipped before: those are #261. Corpus (13
+  mods): 3,860 crafting recipes take derived entries, 2,502 AlwaysUnlocked;
+  the advancement files read now count as consumed (corpus residue -2,546,
+  sample -2,796, mean coverage 12.56% -> 12.94%); only `recipes/*.json` gain
+  `unlock`, every other pack file md5-identical; mct 0 errors.
 - **Links:** #260, #238 (pick 3), #261.
 
 ## 2026-10-15: converted packs are checked in Mojang's Bedrock Dedicated Server by a generated Script API pack; downloading the server is an EULA acceptance, made explicitly

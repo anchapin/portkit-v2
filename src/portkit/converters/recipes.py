@@ -1181,8 +1181,8 @@ def convert(mod: SourceMod, emitted: dict | None = None,
     if unlocks["no_advancement"]:
         result.notes.append(
             f"recipe unlock: {unlocks['no_advancement']} crafting recipe(s) have no Java recipe "
-            "advancement, so Bedrock gets unlock AlwaysUnlocked (fallback); the recipe book shows "
-            "them from the start, and they craft either way"
+            "advancement, so Bedrock gets unlock AlwaysUnlocked (fallback): the recipe book lists "
+            "them from the start"
         )
     note = context.note() if own_context else None
     if note:

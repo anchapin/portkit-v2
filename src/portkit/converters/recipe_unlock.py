@@ -44,9 +44,13 @@ Rule, in order:
    takes the same entries.
 4. Fallback, labelled: no advancement rewards the recipe, or none of its
    entries survive -> ``{"context": "AlwaysUnlocked"}`` (an object, as
-   vanilla writes every context), the vanilla crafting table's own unlock. Players can craft every recipe from the grid
-   either way while the ``dolimitedcrafting`` gamerule is off (its default);
-   ``unlock`` decides when the recipe book shows it.
+   vanilla writes every context), the vanilla crafting table's own unlock.
+
+``unlock`` decides when the recipe book lists a recipe. The ``dolimitedcrafting``
+gamerule, when true, lets players craft only recipes they have unlocked
+(learn.microsoft.com, /gamerule); with it off, a recipe crafts from the grid
+whether or not it is unlocked. Neither was observed in game here (the Script API
+can't list recipes or a player's recipe book).
 """
 from __future__ import annotations
 
