@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-16T23:06:25+00:00",
+ "generated": "2026-10-16T23:42:51+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -297,9 +297,9 @@
   "waystones": {
    "class": "content",
    "status": "ok",
-   "coverage": 10.29,
+   "coverage": 10.3,
    "files": 82,
-   "residue": 715,
+   "residue": 714,
    "errors": 0,
    "done": false
   },
@@ -316,9 +316,9 @@
   "quark": {
    "class": "content",
    "status": "ok",
-   "coverage": 28.69,
-   "files": 2195,
-   "residue": 5455,
+   "coverage": 28.96,
+   "files": 2219,
+   "residue": 5444,
    "errors": 0,
    "done": false
   },
@@ -327,61 +327,61 @@
    "status": "ok",
    "coverage": 19.17,
    "files": 808,
-   "residue": 3408,
+   "residue": 3406,
    "errors": 0,
    "done": false
   },
   "twilight_forest": {
    "class": "content",
    "status": "ok",
-   "coverage": 23.91,
-   "files": 2215,
-   "residue": 7050,
+   "coverage": 24.02,
+   "files": 2223,
+   "residue": 7030,
    "errors": 0,
    "done": false
   },
   "tinkers_construct": {
    "class": "content",
    "status": "ok",
-   "coverage": 52.75,
-   "files": 15275,
-   "residue": 13682,
+   "coverage": 52.78,
+   "files": 15282,
+   "residue": 13670,
    "errors": 0,
    "done": false
   },
   "biomes_o_plenty": {
    "class": "content",
    "status": "ok",
-   "coverage": 39.1,
-   "files": 1205,
-   "residue": 1877,
+   "coverage": 39.58,
+   "files": 1225,
+   "residue": 1870,
    "errors": 0,
    "done": false
   },
   "immersive_engineering": {
    "class": "content",
    "status": "ok",
-   "coverage": 25.96,
-   "files": 2285,
-   "residue": 6517,
+   "coverage": 25.99,
+   "files": 2286,
+   "residue": 6509,
    "errors": 0,
    "done": false
   },
   "botania": {
    "class": "content",
    "status": "ok",
-   "coverage": 46.08,
-   "files": 3553,
-   "residue": 4157,
+   "coverage": 46.22,
+   "files": 3567,
+   "residue": 4151,
    "errors": 0,
    "done": false
   },
   "storage_drawers": {
    "class": "content",
    "status": "ok",
-   "coverage": 38.05,
+   "coverage": 38.12,
    "files": 457,
-   "residue": 744,
+   "residue": 742,
    "errors": 0,
    "done": false
   },
@@ -475,9 +475,9 @@
   "cooking_for_blockheads": {
    "class": "content",
    "status": "ok",
-   "coverage": 28.37,
+   "coverage": 28.41,
    "files": 429,
-   "residue": 1083,
+   "residue": 1081,
    "errors": 0,
    "done": false
   },

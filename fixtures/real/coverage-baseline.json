@@ -3,49 +3,49 @@
     "alexs_mobs": {
       "coverage": 28.9,
       "files": 1097,
-      "residue": 2700,
+      "residue": 2698,
       "errors": 0
     },
     "betterend": {
-      "coverage": 37.7,
-      "files": 3313,
-      "residue": 5486,
+      "coverage": 38.0,
+      "files": 3349,
+      "residue": 5474,
       "errors": 0
     },
     "create": {
       "coverage": 40.9,
       "files": 4021,
-      "residue": 5822,
+      "residue": 5818,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 41.0,
+      "coverage": 41.1,
       "files": 903,
-      "residue": 1299,
+      "residue": 1295,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 46.9,
+      "coverage": 47.0,
       "files": 880,
-      "residue": 995,
+      "residue": 991,
       "errors": 0
     },
     "mekanism": {
       "coverage": 15.7,
       "files": 1222,
-      "residue": 6568,
+      "residue": 6564,
       "errors": 0
     },
     "mythicmetals": {
       "coverage": 57.0,
       "files": 1871,
-      "residue": 1414,
+      "residue": 1411,
       "errors": 0
     },
     "silent_gear_1165": {
       "coverage": 36.3,
-      "files": 1088,
-      "residue": 1910,
+      "files": 1089,
+      "residue": 1908,
       "errors": 0
     },
     "storage_drawers_1122": {
@@ -55,27 +55,27 @@
       "errors": 0
     },
     "storage_drawers_1192": {
-      "coverage": 41.2,
+      "coverage": 41.3,
       "files": 268,
-      "residue": 383,
+      "residue": 381,
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 29.9,
+      "coverage": 30.0,
       "files": 1539,
-      "residue": 3604,
+      "residue": 3598,
       "errors": 0
     },
     "tinkers_construct": {
       "coverage": 52.0,
-      "files": 16576,
-      "residue": 15285,
+      "files": 16583,
+      "residue": 15274,
       "errors": 0
     },
     "waystones": {
-      "coverage": 36.9,
+      "coverage": 37.0,
       "files": 328,
-      "residue": 560,
+      "residue": 559,
       "errors": 0
     }
   }

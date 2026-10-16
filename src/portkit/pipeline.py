@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import codeonly, ownership
+from . import codeonly, datatags, ownership
 from .converters import lang
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
@@ -503,6 +503,11 @@ def convert(
         # And a trim recipe whose base is the pack's own item that isn't armor
         # carrying minecraft:trimmable_armors (#272).
         withdraw_unacceptable_trims(result)
+        # The pack's blocks are final: Java's tool and tier block tags become
+        # Bedrock's vanilla block tags on them (#293).
+        claimed, tag_notes = datatags.tool_tags(staged.root, result.files, getattr(meta, "loader", None))
+        result.consumed |= claimed
+        result.notes.extend(tag_notes)
         # Now that the pack's blocks, items and entities are final, its .lang
         # keeps only the lines naming one of them (#277 lang).
         lang.settle(result, selected)
@@ -539,6 +544,11 @@ def convert(
             # draws them (#277 unowned).
             shipped = {i for i in (_declared(b) for b in result.files.values()) if i}
             unhandled = ownership.refine(unhandled, staged.root, result.consumed, shipped)
+            # And its leftover data tags: what reads them, and whether their
+            # members shipped (#293).
+            unhandled = datatags.refine(unhandled, staged.root, result.consumed, shipped,
+                                        datatags.jar_namespaces(staged.root), getattr(meta, "loader", None),
+                                        set(result.files))
         if outcome is None and (out_dir / codeonly.REPORT_NAME).is_file():
             # An earlier run's report would make this tree read as explained-empty.
             (out_dir / codeonly.REPORT_NAME).unlink()

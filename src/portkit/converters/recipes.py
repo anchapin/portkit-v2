@@ -1003,6 +1003,45 @@ def _wearable(body) -> bool:
     return isinstance(components, dict) and isinstance(components.get("minecraft:wearable"), dict)
 
 
+def _bedrock_vanilla_tags(mod: SourceMod, emitted: dict | None, tags: TagResolver,
+                          item_tags: dict[str, set[str]], result: ConversionResult) -> None:
+    """The mod's members of a Java tag Bedrock's own recipes also take carry it (#293).
+
+    A Java mod adds its planks to ``#minecraft:planks`` so that vanilla's stick,
+    crafting table and chest recipes take them; no recipe of the mod has to name
+    the tag. Bedrock's vanilla recipes take the same tag under the same name
+    (:data:`_BEDROCK_VANILLA_TAGS`), so each of the mod's members this pack
+    emits carries it: an item in its ``minecraft:tags``, a block through an
+    item that replaces its own (:func:`_block_item`). Members are the jar's
+    share of the tag (from the merged membership when the reference data has
+    it, else the jar's own direct entries). A block with its own item file
+    can't carry it and is named in a note.
+    """
+    if emitted is None:
+        return
+    for java_tag in sorted(_BEDROCK_VANILLA_TAGS):
+        if tags.tag_file(java_tag) is None:
+            continue
+        found = tags.members(java_tag)
+        if found is not None:
+            members, sources = found.members, list(found.sources)
+        else:
+            members = tags.own_share(java_tag)
+            sources = [tags.tag_file(java_tag).relative_to(mod.root).as_posix()]
+        members = [m for m in members if m.startswith(f"{mod.namespace}:")]
+        tagged = [m for m in members if (emitted.get(m) or ("",))[0] in ("item", "block")]
+        cannot = [m for m in members if (emitted.get(m) or ("",))[0] == "block_and_item"]
+        if not tagged:
+            continue
+        for member in tagged:
+            item_tags.setdefault(member, set()).add(java_tag)
+        result.consumed.update(sources)
+        result.notes.append(
+            f"{len(tagged)} of this mod's members of #{java_tag} ({', '.join(sources)}) carry Bedrock's "
+            f"tag of that name, which Bedrock's own recipes take (#293)"
+            + (f"; {', '.join(cannot)} can't (a block with its own item file)" if cannot else ""))
+
+
 def _trimmable_armor_tags(mod: SourceMod, emitted: dict | None, tags: TagResolver,
                           item_tags: dict[str, set[str]], result: ConversionResult) -> None:
     """Tag this mod's Java trimmable armor with Bedrock's ``minecraft:trimmable_armors`` (#272).
@@ -1493,6 +1532,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 f"({name}__<member>)"
             )
 
+    _bedrock_vanilla_tags(mod, emitted, tag_resolver, item_tags, result)
     _trimmable_armor_tags(mod, emitted, tag_resolver, item_tags, result)
     for member, member_tags in sorted(item_tags.items()):
         kind, item_path, source_body = emitted[member]

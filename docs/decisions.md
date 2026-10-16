@@ -27,6 +27,27 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: leftover data tags become Bedrock block and item tags where Bedrock reads them, else they are explained from the jar
+
+- **Decision:** A Java tag file no converter read (#293) goes one of four ways, decided from the jar's own files (`portkit.datatags`):
+  - (1) **Tool and tier block tags** become Bedrock vanilla block tags on the blocks the pack ships, as `tag:<name>` components: `minecraft:mineable/{pickaxe,axe,shovel,hoe}` -> `minecraft:is_{pickaxe,axe,shovel,hoe}_item_destructible`; `minecraft:needs_{stone,iron,diamond}_tool` -> `minecraft:{stone,iron,diamond}_tier_destructible`; Forge's `forge:needs_netherite_tool` -> `minecraft:netherite_tier_destructible`. Membership is the jar's own share (nested tags through the jar's files). A block at block format 1.26.20 or later (no `tag:*` components) is left untagged with a note. The validator no longer counts `tag:*` as a custom component, and flags it at 1.26.20+ (`block.tag_component`).
+  - (2) **Bedrock vanilla item tags** (`_BEDROCK_VANILLA_TAGS`: planks, logs, wool, coals, ...) are carried by the mod's emitted members even when no recipe of the mod names the tag, so Bedrock's own recipes (sticks, crafting table, torches) take them as Java's do. Blocks carry it through a replacing item (`_block_item`); a block with its own item file can't and is named in a note.
+  - (3) **Explained kinds** (all in `SKIP_KINDS`):
+    - `tag_unshipped_registry`: a registry portkit converts nothing of (fluid, worldgen biome/structure, enchantment, damage_type, banner_pattern, entity_type, point_of_interest_type, menu, potion, ...). An entity-type tag stays `unowned` when the pack ships entities.
+    - `owned_by_residue`: a residue data file names the tag (a machine recipe, a loot table), or every member from this jar is residue.
+    - `tag_unread`: members ship but no data file of the jar reads it (only Java code or other mods would) and Bedrock has no tag of the name its systems read; or it names only vanilla entries (an add-on can't re-tag vanilla items) and other mods' entries.
+  - (4) A tag a **shipped** file names (other than a recipe advancement read for its unlock) that is still unclaimed stays `unowned`: a converter gap.
+  - **Forge/NeoForge `remove`** is now applied by the tag resolver (`TagResolver`) and by `jar_members`: on forge/neoforge jars the listed ids and `#tags` leave the merged tag; on fabric/quilt the key is ignored (Fabric's loader doesn't read it); on a jar with no declared loader a removing file makes the membership unknown.
+- **Why:** 2178 tag files in 13 gauntlet content mods were reported as "no converter claims yet". Java says which tool mines a block and which tier it needs only through tags, and Bedrock has vanilla tags for the same thing (learn.microsoft.com Vanilla Block Tags and `tag:`; stable since Bedrock 1.21.50 per feedback.minecraft.net). Java's vanilla recipes accept a mod's planks through `#minecraft:planks`, and Bedrock's take the same tag. Everything else has no Bedrock reader, and saying which (registry, residue owner, or nobody reads it) turns noise into reasons. `remove` is a Forge extension (docs.minecraftforge.net 1.20.x Tags) NeoForge keeps (docs.neoforged.net Tags); ignoring it gave wrong memberships (Mekanism's `trimmable_armor` removes all 8 of its entries).
+- **Rejected:**
+  - Bedrock's shears and sword block tags (`is_shears_item_destructible`, `is_sword_item_destructible`): they don't work (wiki.bedrock.dev Tool-Based Destruction, MCPE-189586).
+  - Forge's `needs_wood_tool` / `needs_gold_tool`: Bedrock removed `wood_tier_destructible` and `gold_tier_destructible` in 1.21.50.
+  - Mod tool types (`<mod>:mineable/hammer`) as custom Bedrock block tags: no Bedrock item reads them (the pack's items carry no `minecraft:digger`), so they are `tag_unread`.
+  - Java tool item tags (`minecraft:pickaxes`) -> Bedrock `minecraft:is_pickaxe`: different names and meaning, and Bedrock reads them for digging and loot, which the pack's items don't do yet.
+  - Vanilla's own nesting of block tags (`#minecraft:logs` inside `mineable/axe`) is not read: no vanilla block tag data is fetched yet, so a mod log only in `#minecraft:logs` gets no axe tag (under-tagged, never over-tagged).
+  - Writing tags for unconverted registries, or tags nobody reads, onto items: it would change nothing in game.
+- **Links:** #293, #277, #292 (same explain-from-the-jar rule), #272 (Mekanism `remove` side note).
+
 ## 2026-10-16: .lang carries lines for what ships; lang and leftover assets are explained from the jar's own references
 
 - **Decision:** These are three rules for the content mods' two biggest unexplained reason classes (#277 rule 4).

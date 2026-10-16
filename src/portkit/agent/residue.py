@@ -154,6 +154,13 @@ SKIP_KINDS = {
                         "(screens, entity and block-entity renderers, effect icons, armor layers, custom model "
                         "loaders) or, for atlases, Java's texture stitcher reads them; nothing in a Bedrock "
                         "pack would draw them"),
+    # #293 leftover data tags (portkit.datatags).
+    "tag_unshipped_registry": ("a tag of a registry portkit converts nothing of (fluids, biomes, structures, "
+                               "enchantments, damage types, entity types, ...), so the pack holds nothing it "
+                               "could group"),
+    "tag_unread": ("no data file of the jar reads the tag (only the mod's Java code or other mods would) and "
+                   "Bedrock has no tag of that name its own systems read, or it names only vanilla entries an "
+                   "add-on can't re-tag; writing it onto items would change nothing"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
