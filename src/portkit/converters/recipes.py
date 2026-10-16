@@ -528,6 +528,18 @@ def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult,
 TRIM = "minecraft:recipe_smithing_trim"
 
 
+def _replaces(tags: TagResolver, tag: str) -> bool:
+    """Whether the jar's own file for ``tag`` sets ``"replace": true``."""
+    path = tags.tag_file(tag)
+    if path is None:
+        return False
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("replace") is True
+
+
 def _trim_pattern_refusal(recipe: dict, template) -> str | None:
     """Why Java 1.21.5+'s fixed ``pattern`` can't be said on Bedrock, or None.
 
@@ -573,6 +585,12 @@ def _smithing_trim(recipe: dict, identifier: str, rel: str, result: ConversionRe
                 f"({trim_items.MOJANG_SOURCE})"))
             return None
         if isinstance(spec, dict) and spec.get("tag") == trim_items.JAVA_SLOT_TAGS[slot]:
+            if tags is not None and _replaces(tags, spec["tag"]):
+                result.unhandled.append(Unhandled(
+                    rel, "recipe", f"trim {slot} tag {spec['tag']}: the jar's own file replaces Java's tag "
+                    f"(\"replace\": true), so Bedrock's {trim_items.TRIM_SLOT_TAGS[slot]}, which holds vanilla's "
+                    "members, would not be the same set: not written, and not rewritten as another recipe"))
+                return None
             body[slot] = {"tag": trim_items.TRIM_SLOT_TAGS[slot]}
             own = tags.own_share(spec["tag"]) if slot != "base" and tags is not None else []
             if own:

@@ -167,6 +167,16 @@ def test_another_tag_in_a_slot_is_residue(tmp_path):
                              "than one item")
 
 
+def test_a_jar_replacing_the_java_tag_is_residue(tmp_path):
+    root = tmp_path / "mod"
+    mod = _mod(root, _trim())
+    _write(root, TRIMMABLE, {"replace": True, "values": ["toy:boots"]})
+    result = recipes.convert(mod)
+    assert "recipes/trim.json" not in result.files
+    assert result.unhandled[0].reason.startswith("trim base tag minecraft:trimmable_armor: the jar's own file "
+                                                 "replaces Java's tag")
+
+
 def test_a_pattern_matching_its_template_converts(tmp_path):
     result, why = _convert(tmp_path, _trim(pattern="minecraft:coast"))
     assert why == [] and "pattern" not in result.files["recipes/trim.json"][recipes.TRIM]
@@ -326,6 +336,8 @@ def test_validator_refuses_trim_tags_that_break_mojangs_recipe(tmp_path):
         "items/boots.json": _body("toy:boots", **WEARABLE, **TAGGED),
         "items/plain.json": _body("toy:plain", **{"minecraft:tags": {"tags": ["toy:shiny"]}}),
     })
-    assert [(f[1], f[3].split(" ")[0]) for f in found] == [
-        ("item.trim_tag", "toy:cap"), ("item.trim_tag", "toy:pattern"), ("item.trim_tag", "toy:steel")]
+    assert [(f[0], f[1], f[3].split(" ")[0]) for f in found] == [
+        ("behavior_pack/items/cap.json", "item.trim_tag", "toy:cap"),
+        ("behavior_pack/items/pattern.json", "item.trim_tag", "toy:pattern"),
+        ("behavior_pack/items/steel.json", "item.trim_tag", "toy:steel")]
     assert all(f[2] == "error" for f in found)

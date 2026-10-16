@@ -701,12 +701,19 @@ def _check_smithing_trims(report: ValidationReport, pack_root: Path, prefix: str
     ``minecraft:smithing_armor_trim``, which BDS then reports as an error.
     """
     items = _definitions(pack_root, "items", "minecraft:item")
-    for ident, components in sorted(items.items()):
-        if ident.startswith("minecraft:"):
+    for path in sorted((pack_root / "items").rglob("*.json")):
+        try:
+            body = json.loads(path.read_text(encoding="utf-8")).get("minecraft:item")
+        except (ValueError, OSError, AttributeError):
+            continue
+        description = body.get("description") if isinstance(body, dict) else None
+        ident = description.get("identifier") if isinstance(description, dict) else None
+        components = body.get("components") if isinstance(body, dict) else None
+        if not isinstance(ident, str) or ident.startswith("minecraft:") or not isinstance(components, dict):
             continue
         refusal = trim_items.item_tag_refusal(ident, components)
         if refusal:
-            report.add(f"{prefix}/items", "item.trim_tag", refusal)
+            report.add(f"{prefix}/{path.relative_to(pack_root).as_posix()}", "item.trim_tag", refusal)
     blocks = None
     for path in sorted((pack_root / "recipes").glob("*.json")):
         try:
