@@ -29,8 +29,14 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-15: converted packs are checked in Mojang's Bedrock Dedicated Server by a generated Script API pack; downloading the server is an EULA acceptance, made explicitly
 
-- **Status:** DESIGN, open for Alex (picks 1-6 on the PR). Not merged.
-- **Decision (proposed):** `portkit ingame` fetches a pinned Bedrock Dedicated
+- **Status:** approved (Alex, 2026-10-15). All six DEFAULT picks on PR #259
+  were chosen: (1) CI passes `--accept-eula` and the workflow runs only on
+  manual dispatch; (2) one BDS release is pinned by URL + sha256 and bumped by
+  hand; (3) report-only until converted recipes carry unlock data, then a
+  known-errors baseline and a PR gate; (4) dispatch-only now, nightly once
+  picks 1 and 3 settle; (5) no cache of the server zip; (6) a browser-like
+  User-Agent for the minecraft.net download.
+- **Decision:** `portkit ingame` fetches a pinned Bedrock Dedicated
   Server (1.26.52.3 Linux zip, sha256 `f6348d84...71c6`, from minecraft.net)
   only with `--accept-eula`, installs a converted tree and a generated check
   behavior pack (`portkit.ingame.testpack`; stable `@minecraft/server` 2.0.0)
