@@ -62,7 +62,6 @@ PROPERTIES = {
     "gamemode": "creative",
     "difficulty": "peaceful",
     "allow-cheats": "true",
-    "online-mode": "false",
     "max-players": "1",
     "content-log-file-enabled": "true",
     "content-log-console-output-enabled": "true",
