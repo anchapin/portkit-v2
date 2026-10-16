@@ -1,4 +1,5 @@
-"""Vanilla Java block model templates, fetched on demand (stairs, slabs, walls, panes, bars).
+"""Vanilla Java block model templates, fetched on demand (stairs, slabs, walls, panes, bars,
+orientables, crosses, carpets, buttons, fence gates and friends).
 
 A mod's stairs model is usually three lines: ``"parent": "minecraft:block/stairs"``
 and the three textures it wears. The boxes themselves live in vanilla's
@@ -19,6 +20,23 @@ The glass pane and iron bars templates (#56) were added on 2026-10-14 and
 checked the same way: the panes are identical in all six; 26.1 moves the
 iron_bars_* models onto new template_bars_* parents, whose resolved elements
 and texture variable names are identical to 1.20.1's.
+
+The parents of #236 (orientable, orientable_with_bottom, orientable_vertical,
+cube_top, cube_bottom_top, template_glazed_terracotta, cross,
+flower_pot_cross, carpet, button, button_pressed, the four
+template_fence_gate* models, ladder and dried_kelp_block), ranked by how much
+residue they caused across the corpus, the deco set and the gap-leaderboard
+sample, were added on 2026-10-15 and compared, on the fields the converter
+reads (from, to, rotation, faces), with mcmeta's 1.16.5, 1.17.1, 1.18.2,
+1.19.2, 1.19.3, 1.19.4, 1.20, 1.21.1, 1.21.8, 26.1 and 26.3 summaries. They
+are identical in all of them except two, which :data:`SINCE` records: 1.20
+turned the button's top-face uv (1.19.4 and older write [5, 10, 11, 6]), and
+1.17 mirrored the ladder's back-face uv (1.16.5 writes [0, 0, 16, 16]). 26.3
+replaces ``shade: false`` on the cross, flower pot and ladder planes with
+``shade_direction_override``, a lighting hint the converter doesn't read; no
+26.x release moves any of these onto new template names. Templates whose faces
+are tinted (tinted_cross, leaves, lily_pad: their colour comes from a biome or
+colour handler in code) are deliberately not in the set.
 
 Without the set, :func:`templates` returns None and the block converter keeps
 these shapes as residue, saying to run the fetch. ``PORTKIT_MODEL_REFERENCE``
@@ -58,11 +76,29 @@ TEMPLATES = (
     "block/iron_bars_post", "block/iron_bars_post_ends", "block/iron_bars_cap",
     "block/iron_bars_cap_alt", "block/iron_bars_side", "block/iron_bars_side_alt",
     "block/cube", "block/cube_all", "block/cube_column", "block/cube_column_horizontal",
+    # #236: the vanilla parents random mods name most, by residue count.
+    "block/cube_bottom_top", "block/cube_top",
+    "block/orientable", "block/orientable_with_bottom", "block/orientable_vertical",
+    "block/template_glazed_terracotta", "block/dried_kelp_block",
+    "block/cross", "block/flower_pot_cross", "block/carpet",
+    "block/button", "block/button_pressed",
+    "block/template_fence_gate", "block/template_fence_gate_open",
+    "block/template_fence_gate_wall", "block/template_fence_gate_wall_open",
+    "block/ladder",
 )
+
+# Templates whose boxes changed between game versions: the first version whose
+# model matches this (1.20.1) set. A mod declaring an older game version, or
+# none, keeps such a block as residue rather than wear the newer model.
+SINCE = {
+    "minecraft:block/button": "1.20",
+    "minecraft:block/button_pressed": "1.20",
+    "minecraft:block/ladder": "1.17",
+}
 
 # sha256 of the derived JSON (see derive). `python -m portkit.data.models --pin`
 # prints it; bump it together with COMMIT.
-SHA256 = "5b2d3fff3b1536e00e2f92b9951941f987f3d4a6c5a4f6dbac27791d8cfbcb49"
+SHA256 = "1cd9d731f649d596b954e8e5b6373104c8e37e62d6037d2f4cc5ac0fe716b611"
 
 
 def derive(summary: bytes) -> bytes:

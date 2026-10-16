@@ -19,6 +19,7 @@ wrong is the failure mode this project exists to avoid.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from ..model import SourceMod
@@ -42,6 +43,10 @@ PARENTS: dict[str, dict[str, str]] = {
     "minecraft:block/orientable_with_bottom": {
         "up": "top", "down": "bottom", "north": "front", "*": "side",
     },
+    # #236: vanilla's cube_top and orientable_vertical are full cubes too
+    # (block/cube with these face variables; mcmeta summaries 1.16.5-26.3).
+    "minecraft:block/cube_top": {"up": "top", "*": "side"},
+    "minecraft:block/orientable_vertical": {"up": "front", "*": "side"},
 }
 
 _MAX_PARENT_DEPTH = 8
@@ -1061,7 +1066,16 @@ def turn_rigid(element: dict, x_degrees: int, y_degrees: int,
 # (minecraft:block/stairs) and only fills in textures; the boxes are vanilla's.
 # portkit reads those parents from the fetched reference set
 # (portkit.data.models), never from a copy in the repository.
-def expand_template(model: dict) -> tuple[dict | None, str]:
+def is_template(parent: str) -> bool:
+    """Whether ``parent`` is one of the vanilla templates portkit fetches by
+    name (portkit.data.models.TEMPLATES), as opposed to a chain parent that
+    comes along (block/block) or a model it doesn't read."""
+    from ..data.models import TEMPLATES
+
+    return parent.startswith("minecraft:") and parent.partition(":")[2] in TEMPLATES
+
+
+def expand_template(model: dict, minecraft: str | None = None) -> tuple[dict | None, str]:
     """A flattened model with its vanilla template's elements filled in.
 
     A model that already has elements comes back as it is. Otherwise its
@@ -1069,6 +1083,10 @@ def expand_template(model: dict) -> tuple[dict | None, str]:
     elements found on the way up are the model's, textures merge with the
     model's own taking precedence, and ``#name`` texture variables are resolved
     to what they finally point at, so each face names a real texture.
+
+    ``minecraft`` is the game version the mod declares: a template whose boxes
+    changed between versions (``portkit.data.models.SINCE``) is only used for
+    a mod declaring the version it matches or later.
     """
     if model.get("elements"):
         return model, ""
@@ -1076,7 +1094,8 @@ def expand_template(model: dict) -> tuple[dict | None, str]:
     if not isinstance(parent, str):
         return None, "model has no parent and no elements"
     from ..data import FETCH_COMMAND
-    from ..data.models import templates
+    from ..data.models import SINCE, templates
+    from ..data.tags import version_key
 
     known = templates()
     if known is None:
@@ -1100,6 +1119,15 @@ def expand_template(model: dict) -> tuple[dict | None, str]:
             textures.setdefault(key, value)
         if elements is None and body.get("elements"):
             elements = body["elements"]
+            since = SINCE.get(current)
+            if since is not None:
+                declared = version_key(minecraft)
+                if declared is None or declared < version_key(since):
+                    return None, (
+                        f"vanilla template {current!r} changed its boxes in {since}, and this "
+                        f"mod declares {('game version ' + str(minecraft)) if minecraft else 'no game version'}; "
+                        "portkit reads only the newer model"
+                    )
         current = body.get("parent") if isinstance(body.get("parent"), str) else None
     if not elements:
         return None, f"vanilla template {parent!r} has no elements"
@@ -1114,6 +1142,13 @@ def expand_template(model: dict) -> tuple[dict | None, str]:
                     spec["uv"] = auto_uv(face, element["from"], element["to"])
                 except (KeyError, TypeError, ValueError):
                     return None, f"vanilla template {parent!r} has an element without usable from/to"
+            if isinstance(spec, dict) and "tintindex" in spec:
+                return None, (
+                    f"vanilla template {parent!r} tints its {face} face, a colour Java's "
+                    "code computes"
+                )
+        if not _apply_rescale(element):
+            return None, f"vanilla template {parent!r} has an unreadable rescaled rotation"
 
     resolved: dict = {}
     for key, value in textures.items():
@@ -1123,6 +1158,44 @@ def expand_template(model: dict) -> tuple[dict | None, str]:
             value = textures[value[1:]]
         resolved[key] = value
     return {**model, "elements": elements, "textures": resolved}, ""
+
+
+def _apply_rescale(element: dict) -> bool:
+    """Fold a rotation's ``rescale`` into the box, in place. False if unreadable.
+
+    Java (FaceBakery.applyElementRotation, rotateVertexBy) rotates each vertex
+    about the origin and then multiplies it, relative to the origin, by
+    1/cos(angle) on the two axes the rotation turns (22.5 and 45 degrees are the
+    only angles it writes). That scale is the same on both axes of the plane the
+    rotation turns, so it commutes with the rotation: stretching the box about
+    the origin first, then rotating, puts every vertex where Java puts it.
+    Bedrock has no rescale, so the stretched box is what the geometry carries.
+    Face uvs are untouched, as in Java (they were made explicit above, from the
+    unstretched box, before this runs). Used only for vanilla templates
+    (vanilla's cross planes); a mod's own rescaled elements are read as before.
+    """
+    spec = element.get("rotation")
+    if not isinstance(spec, dict) or not spec.get("rescale"):
+        return True
+    try:
+        angle = float(spec.get("angle", 0))
+        origin = [float(v) for v in spec.get("origin", _CENTRE_ORIGIN)]
+        start = [float(v) for v in element["from"]]
+        end = [float(v) for v in element["to"]]
+    except (KeyError, TypeError, ValueError):
+        return False
+    axis = _AXIS_INDEX.get(spec.get("axis"))
+    if axis is None or len(origin) != 3:
+        return False
+    factor = 1.0 / math.cos(math.radians(abs(angle)))
+    for i in range(3):
+        if i == axis:
+            continue
+        start[i] = round(origin[i] + (start[i] - origin[i]) * factor, 4)
+        end[i] = round(origin[i] + (end[i] - origin[i]) * factor, 4)
+    element["from"], element["to"] = start, end
+    element["rotation"] = {k: v for k, v in spec.items() if k != "rescale"}
+    return True
 
 
 def turn_locked(element: dict, x_degrees: int, y_degrees: int) -> tuple[dict | None, str]:

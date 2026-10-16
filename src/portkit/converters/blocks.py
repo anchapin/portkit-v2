@@ -984,7 +984,7 @@ def _flat_model(mod: SourceMod, result: ConversionResult, model_ref: str) -> tup
         return None, why
     # A model that only names a vanilla parent (stairs, a wall post, a cube)
     # gets that parent's boxes from the fetched templates.
-    return models.expand_template(flat)
+    return models.expand_template(flat, mod.minecraft)
 
 
 def _convert_palisade(
@@ -1399,7 +1399,7 @@ def _model_block(
         if not flat.get("elements"):
             # A plain cube turned whole (a pillar lying on its side): its
             # vanilla parent's box, turned with its textures, as Java does.
-            expanded, why = models.expand_template(flat)
+            expanded, why = models.expand_template(flat, mod.minecraft)
             if expanded is None:
                 return None, None, None, (
                     f"blockstate turns {model_ref!r} (x={turn[0]} y={turn[1]}), a plain "
@@ -1414,6 +1414,19 @@ def _model_block(
                 return None, None, None, why
             turned.append(moved)
         flat = {**flat, "elements": turned}
+
+    parent = flat.get("parent")
+    if not flat.get("elements") and isinstance(parent, str) and parent not in models.PARENTS:
+        # #236: a vanilla parent that isn't a full cube (a carpet, a cross, a
+        # glazed terracotta) gets its boxes from the fetched templates and
+        # becomes a custom shape below. A parent outside the template set
+        # keeps faces()'s refusal.
+        expanded, why = models.expand_template(flat, mod.minecraft)
+        if expanded is not None:
+            flat = expanded
+            textures = flat.get("textures") or {}
+        elif models.is_template(parent):
+            return None, None, None, why
 
     if flat.get("elements"):
         # A custom shape: its own geometry file, and one material instance per
@@ -2893,7 +2906,7 @@ def _model_elements(mod: SourceMod, result: ConversionResult, model_ref: str) ->
     if flat is None:
         return None, why
     if not flat.get("elements"):
-        expanded, why = models.expand_template(flat)
+        expanded, why = models.expand_template(flat, mod.minecraft)
         if expanded is None:
             return None, f"{model_ref}: {why}"
         flat = expanded
