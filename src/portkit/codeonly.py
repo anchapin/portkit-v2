@@ -147,6 +147,10 @@ REASONS: dict[str, Reason] = {
     "nested_modules": Reason(
         "nested modules",
         "the mod's code ships in jars nested inside it, which are not unpacked"),
+    "java_code": Reason(
+        "Java code",
+        "the mod is JVM bytecode with none of the shapes above and no content files; there is no "
+        "deterministic mapping from it to the Bedrock Script API"),
 }
 
 
@@ -415,7 +419,7 @@ def reason_classes(f: dict) -> list[dict]:
     if classes and not out:
         # Code with none of the shapes above is still code: say so rather
         # than leave the outcome unexplained.
-        out["gameplay_hooks"] = [f"{classes} class(es) of Java code with no content files"]
+        out["java_code"] = [f"{classes} class(es) of Java code with no content files"]
     return [{"class": k, "label": REASONS[k].label, "evidence": out[k], "bedrock": REASONS[k].bedrock}
             for k in REASONS if k in out]
 

@@ -192,3 +192,30 @@ def test_classify_client_side_screens_are_ui():
     assert classify(_prof("client", lang=10, screens=4, render=6, events=["x"]))[0] == "UI/info"
     assert classify(_prof("client", lang=10, screens=4, render=80, events=["x"]))[0] == "client-only"
     assert classify(_prof("client", lang=10, render=80, events=["x"]))[0] == "client-only"
+
+
+def test_plain_code_is_reported_as_java_code():
+    assert [r["class"] for r in codeonly.reason_classes({"classes": 4})] == ["java_code"]
+    assert codeonly.reason_classes({"classes": 0}) == []
+
+
+def test_board_counts_explained_empty_and_rolls_up_its_reasons():
+    from portkit import gauntlet
+
+    shard = {"schema": 1, "kind": "gap-shard", "manifest": "m", "shard": "1/1", "generated": "2026-10-16T00:00:00+00:00",
+             "mods": {
+                 "perf": {"status": "ok", "files": 0, "residue": 3, "coverage": 0.0, "valid": True, "errors": 0,
+                          "outcome": "explained-empty", "mct": {"skipped": "explained-empty: no pack"},
+                          "reason_classes": [{"class": "mixin_patch", "evidence": ["2 mixin(s)"]}],
+                          "reasons": {"java_code: x": {"kind": "java_code", "reason": "x", "entries": 1, "files": 2},
+                                      "code_only: y": {"kind": "code_only", "reason": "y", "entries": 1, "files": 1}},
+                          "profile": {"class": "performance/mixin-only", "evidence": []}},
+                 "gap": {"status": "ok", "files": 0, "residue": 1, "coverage": 0.0, "valid": False, "errors": 1,
+                         "reasons": {}, "profile": {"class": "UI/info", "evidence": []}}}}
+    b = gauntlet.board([shard])
+    assert b["done"] == 1 and b["explained_empty"] == 1
+    assert b["explained_empty_rollup"] == [{"reason_class": "mixin_patch", "mods": 1, "mod_names": ["perf"]}]
+    md = gauntlet.render_markdown(b)
+    assert "1 of them explained-empty" in md and "## Why nothing converts" in md
+    assert "| explained-empty | no pack | yes |" in md
+    assert gauntlet.baseline_of(b)["mods"]["perf"]["outcome"] == "explained-empty"

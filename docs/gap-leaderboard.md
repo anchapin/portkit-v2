@@ -213,8 +213,8 @@ mct is skipped for it. The reason classes (`portkit.codeonly.REASONS`):
 `mixin_patch`, `client_rendering` (world renderer calls, shaders, CTM,
 CEM/EMF `.jem`/`.jpm`, random/emissive entity textures, built-in resource
 packs), `gui_screen`, `hud_overlay`, `config_screen`, `keybind`,
-`networking`, `commands`, `gameplay_hooks`, `library_api` and
-`nested_modules`. A jar with no `assets/` or `data/` tree now ingests when it
+`networking`, `commands`, `gameplay_hooks`, `library_api`,
+`nested_modules`, and `java_code` for code of none of those shapes. A jar with no `assets/` or `data/` tree now ingests when it
 carries loader metadata.
 
 **Reason classes and done.** A reason class is a residue kind; files no

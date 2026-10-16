@@ -58,8 +58,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
      `.jem`/`.jpm`, random/emissive entity textures, built-in resource
      packs), `gui_screen`, `hud_overlay`, `config_screen`, `keybind`,
      `networking`, `commands`, `gameplay_hooks`, `library_api`,
-     `nested_modules`. Code with none of these shapes is reported as
-     `gameplay_hooks` ("N classes of Java code with no content files").
+     `nested_modules`, and `java_code` for code with none of these shapes
+     ("N classes of Java code with no content files").
   4. **Ingest.** A jar with no `assets/` or `data/` tree ingests when it
      carries loader metadata (fabric.mod.json, quilt.mod.json, mods.toml,
      neoforge.mods.toml, mcmod.info); its pack identity is its declared mod
