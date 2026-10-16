@@ -27,6 +27,46 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: a block's material instances share one render method, from the Java render_type or else the textures' alpha
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
+- **Decision:** when the faces of one converted block want different
+  `render_method`s (a holey texture gets `alpha_test`, an opaque one none), every
+  material instance of that `minecraft:material_instances` object (the block's,
+  each permutation's, and `item_visual`'s) gets the same one (#262):
+  1. **The Java render type**, when every model the block resolved names the same
+     one (NeoForge/Forge `render_type`, inherited from the nearest parent that
+     names it, as `BlockGeometryBakingContext#getRenderTypeHint` does; unprefixed
+     names are `minecraft:`). `solid` -> `opaque`, `cutout`/`cutout_mipped`/
+     `cutout_mipped_all` -> `alpha_test`, `translucent` -> `blend`: the Bedrock
+     method the Mojang docs describe for that kind of texture ("without an alpha
+     layer"; "only fully opaque or fully transparent"; "like stained glass ...
+     translucency"). `tripwire`, mod-registered names, two models naming
+     different types, or a model naming none (its layer is set in mod code) are
+     unread and fall through.
+  2. **Otherwise the textures' alpha:** the one transparent method a face asked
+     for (`alpha_test` for a texture with holes; alpha_test on the opaque faces
+     draws them the same); `alpha_test` + `blend` together -> `blend`. Any other
+     mix (e.g. `double_sided` + `alpha_test`) is left alone with a note, and the
+     validator rejects it.
+  Blocks whose faces already agree are untouched, even when the model names a
+  render_type (reading render_type for every block is a separate change). The
+  validator gains `block.render_method`: an error for any mix in one
+  material_instances object (an unset method counts as `opaque`, the default).
+- **Why:** Mojang's block docs say render_method "must be the same for each"
+  (bedrock-samples@46ba6ea9 `documentation/Blocks.html`, minecraft:material_instances),
+  and BDS 1.26.52.3 logs "MaterialInstances can't mix and match opaque and
+  transparent materials" as a content-log ERROR (29 on the in-game check: FD 6,
+  Supplementaries 22, Waystones warp plate 1). Java also draws a whole model in
+  one block layer, so one method per block is the faithful reading. Nothing is
+  invented: the method is the Java model's own render type or the one a face's
+  texture already asked for.
+- **Rejected:** splitting the transparent part into its own block (changes the
+  block count and placement for a rendering detail); always `blend` (draws
+  cutout textures with sorting artefacts and half render distance for no reason);
+  dropping alpha_test to opaque (holes render as their RGB, often black).
+- **Links:** #262, #238 (in-game check that found it).
+
 ## 2026-10-16: recipes are written in Bedrock's vanilla ids (GeyserMC/mappings), and a recipe naming an item the pack doesn't ship is residue
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).

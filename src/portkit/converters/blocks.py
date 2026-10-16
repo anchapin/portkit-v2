@@ -1518,9 +1518,12 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     directional_bool: list[dict] = []
     coded: list[dict] = []
     coded_bool: list[dict] = []
+    render_types: dict[str, set] = {}
+    outer = models.RENDER_TYPES_SEEN.set(None)
     for path in sorted(src.glob("*.json")):
         rel = result.claim(mod, path)
         name = path.stem
+        models.RENDER_TYPES_SEEN.set(render_types.setdefault(name, set()))
         try:
             json.loads(path.read_text())
         except json.JSONDecodeError as exc:
@@ -1650,6 +1653,8 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
         result.files[f"blocks/{name}.json"] = _block_definition(
             mod.namespace, name, identifier, instances or {}
         )
+    models.RENDER_TYPES_SEEN.reset(outer)
+    _one_render_method(result, render_types)
     # Containers go last: the format move reads every component the block
     # has (liquid_detection included), and the records' behaviour notes drop
     # what a container carries.
@@ -1745,6 +1750,111 @@ def _axis_block_definition(
             "permutations": permutations,
         },
     }
+
+
+# One render method per block (#262). Bedrock: render_method "must be the
+# same for each" material instance (Mojang bedrock-samples
+# documentation/Blocks.html, minecraft:material_instances); BDS 1.26.52.3
+# logs "MaterialInstances can't mix and match opaque and transparent
+# materials" as an ERROR. Java draws a whole model in one block layer too.
+# A Java render_type (NeoForge NamedRenderTypeManager's vanilla names) maps
+# to the Bedrock method the Mojang docs describe for that kind of texture:
+# solid -> opaque ("regular block texture without an alpha layer"), cutout*
+# -> alpha_test ("only fully opaque or fully transparent"), translucent ->
+# blend ("like stained glass ... translucency"). tripwire and mod-registered
+# names have no stated counterpart and fall back to the textures' alpha.
+_JAVA_RENDER_METHOD = {
+    "minecraft:solid": "opaque",
+    "minecraft:cutout": "alpha_test",
+    "minecraft:cutout_mipped": "alpha_test",
+    "minecraft:cutout_mipped_all": "alpha_test",
+    "minecraft:translucent": "blend",
+}
+
+
+def _java_render_method(render_types: set) -> tuple[str | None, str]:
+    """The Bedrock method the block's Java render type names, and that type,
+    when its models name exactly one known type (a model naming none leaves
+    it to mod code, unread)."""
+    names = {models.normalize(t) for t in render_types if isinstance(t, str)}
+    if len(names) != 1 or None in render_types:
+        return None, ""
+    name = names.pop()
+    return _JAVA_RENDER_METHOD.get(name), name
+
+
+def _shared_method(instances: dict, render_types: set) -> tuple[str | None, str]:
+    """The one render method a mixed material_instances object gets, and why.
+
+    The Java render type when the block's models name one; otherwise what
+    the textures' alpha asks for: a face whose texture has holes needs
+    alpha_test, and alpha_test on the opaque ones draws them the same
+    (_see_through). Two transparent methods together get blend, the one
+    that allows both transparency and translucency."""
+    java, name = _java_render_method(render_types)
+    if java is not None:
+        return java, f"Java render_type {name}"
+    methods = {spec.get("render_method", "opaque") for spec in instances.values()
+               if isinstance(spec, dict)}
+    clear = methods - {"opaque"}
+    if len(clear) == 1:
+        return clear.pop(), "texture alpha"
+    if clear == {"alpha_test", "blend"}:
+        return "blend", "texture alpha"
+    return None, f"render methods {sorted(methods)} have no shared reading"
+
+
+def _unify_instances(instances, render_types: set) -> tuple[str | None, str]:
+    """Give every instance of one material_instances object the same render
+    method, in place. Returns (method, source) when it changed anything."""
+    if not isinstance(instances, dict):
+        return None, ""
+    specs = [spec for spec in instances.values() if isinstance(spec, dict)]
+    if len({spec.get("render_method", "opaque") for spec in specs}) <= 1:
+        return None, ""
+    method, source = _shared_method(instances, render_types)
+    if method is None:
+        return None, source
+    for spec in specs:
+        if method == "opaque":
+            spec.pop("render_method", None)
+        else:
+            spec["render_method"] = method
+    return method, source
+
+
+def _one_render_method(result: ConversionResult, render_types: dict[str, set]) -> None:
+    """Every converted block's material_instances (base, each permutation,
+    item_visual) share one render method (#262)."""
+    for key, definition in result.files.items():
+        if not (key.startswith("blocks/") and key.endswith(".json")):
+            continue
+        block = definition.get("minecraft:block") if isinstance(definition, dict) else None
+        if not isinstance(block, dict):
+            continue
+        name = key[len("blocks/"):-len(".json")]
+        seen = render_types.get(name, set())
+        objects = [block.get("components") or {}]
+        objects += [p.get("components") or {} for p in block.get("permutations") or []
+                    if isinstance(p, dict)]
+        changed: set[tuple[str, str]] = set()
+        refused = ""
+        for components in objects:
+            visual = components.get("minecraft:item_visual")
+            for instances in (components.get("minecraft:material_instances"),
+                              visual.get("material_instances") if isinstance(visual, dict) else None):
+                method, source = _unify_instances(instances, seen)
+                if method is not None:
+                    changed.add((method, source))
+                elif source:
+                    refused = source
+        if changed:
+            method, source = sorted(changed)[0]
+            result.notes.append(
+                f"{name}: its faces wanted different render methods; Bedrock needs one per "
+                f"block, so every face draws {method} (from the {source}).")
+        if refused:
+            result.notes.append(f"{name}: material instances mix render methods: {refused}.")
 
 
 def _see_through(mod, reference: str) -> bool:

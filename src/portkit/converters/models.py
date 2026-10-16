@@ -133,16 +133,24 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
     textures: dict = {}
     seen: list[Path] = []
     current = model
+    render_type = None
     for _ in range(_MAX_PARENT_DEPTH):
         textures = {**(current.get("textures") or {}), **textures}
+        if render_type is None and isinstance(current.get("render_type"), str):
+            # NeoForge/Forge render_type hint: the model's own, else its
+            # parent's (BlockGeometryBakingContext#getRenderTypeHint).
+            render_type = current["render_type"]
         parent = current.get("parent")
+        extra = {"render_type": render_type} if render_type is not None else {}
         if not isinstance(parent, str):
-            return _unfolded({**current, "textures": textures}, seen)
+            _note_render_type(render_type)
+            return _unfolded({**current, **extra, "textures": textures}, seen)
         parent = normalize(parent)
         if parent.startswith("minecraft:"):
             # Vanilla: either one of the shapes we have tabulated, or a refusal
             # for faces() to explain. Either way the chain stops here.
-            return _unfolded({**current, "parent": parent, "textures": textures}, seen)
+            _note_render_type(render_type)
+            return _unfolded({**current, **extra, "parent": parent, "textures": textures}, seen)
 
         path = model_path(mod, parent)
         if path is None:
@@ -155,6 +163,21 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
         except json.JSONDecodeError as exc:
             return {}, seen, f"parent model {parent!r} is invalid JSON: {exc}"
     return {}, seen, "model parent chain is deeper than we follow"
+
+
+# Java render types (#262). NeoForge/Forge models may name the block layer
+# they draw in ("render_type", NamedRenderTypeManager's vanilla names);
+# Fabric and older Forge set it in mod code, which we don't read. While a
+# block converts, blocks.py holds a set here and every model resolved for it
+# adds its render type (None when it names none).
+RENDER_TYPES_SEEN: contextvars.ContextVar[set | None] = contextvars.ContextVar(
+    "render_types_seen", default=None)
+
+
+def _note_render_type(render_type: str | None) -> None:
+    seen = RENDER_TYPES_SEEN.get()
+    if seen is not None:
+        seen.add(render_type)
 
 
 def _unfolded(flat: dict, seen: list[Path]) -> tuple[dict, list[Path], str]:
