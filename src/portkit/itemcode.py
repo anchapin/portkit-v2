@@ -118,8 +118,7 @@ class Array:
 
 def arg_types(desc: str) -> list[str]:
     """A method descriptor's parameter types (``(I[ILfoo;)V`` -> ``I``, ``[I``, ``Lfoo;``)."""
-    out, i, inner = [], 1, desc[1:desc.index(")")]
-    i = 0
+    out, i, inner = [], 0, desc[1:desc.index(")")]
     while i < len(inner):
         start = i
         while inner[i] == "[":

@@ -64,7 +64,7 @@ def _suffix_fields(cf) -> dict[str, str]:
     return out
 
 
-def _field_makers(cf, maker_desc_prefix: str) -> dict[str, list]:
+def _field_makers(cf) -> dict[str, list]:
     """``<init>``'s ``this.field = this.makeX(...)`` / ``baseArmorItem(.., Type.T, ..)``:
     field -> the instructions since the previous field store."""
     out = {}
@@ -103,7 +103,7 @@ def _tools(index: ClassIndex, names: frozenset) -> dict[str, tuple[int, str]]:
         return {}
     uses = itemcode.tier_uses(index, TOOL_MATERIALS)
     suffixes = _suffix_fields(base)
-    makers = _field_makers(base, "make")
+    makers = _field_makers(base)
     found = {}
     for field, value in itemcode.static_values(tools).items():
         if not isinstance(value, itemcode.New) or not value.args:
@@ -158,7 +158,7 @@ def _armor(index: ClassIndex, names: frozenset) -> dict[str, tuple[int, str]]:
         return {}
     suffixes = _suffix_fields(base)
     types = {}
-    for field, run in _field_makers(base, "").items():
+    for field, run in _field_makers(base).items():
         kinds = [i.arg.name for i in run if i.op == 0xB2 and i.arg.owner == itemcode.ARMOR_TYPE]
         if len(kinds) == 1:
             types[field] = kinds[0]
