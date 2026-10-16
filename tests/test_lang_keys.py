@@ -180,3 +180,22 @@ def test_newlines_in_a_value_become_linebreak_tokens(tmp_path, sep):
     lines = text.splitlines()
     assert "tile.examplemod:drawer.name=Drawer~LINEBREAK~Hold in off-hand to lock" in lines
     assert all("=" in line for line in lines)
+
+
+def test_settle_keeps_a_line_for_the_jar_s_own_unshipped_block(tmp_path):
+    from portkit.model import ConversionResult
+
+    result = ConversionResult(files={
+        "blocks/copper_block.json": _BLOCK,
+        "texts/en_US.lang": ("tile.examplemod:copper_block.name=Copper Block\n"
+                             "tile.examplemod:tin_block.name=Tin Block\n"
+                             "tile.othermod:lead_block.name=Lead Block\n"),
+        "texts/languages.json": ["en_US"],
+    }, consumed={"assets/examplemod/lang/en_us.json"})
+    lang.settle(result, ["examplemod"])
+    assert result.files["texts/en_US.lang"] == ("tile.examplemod:copper_block.name=Copper Block\n"
+                                                "tile.examplemod:tin_block.name=Tin Block\n")
+    # tin_block's own block entry explains it; only the other mod's line is news
+    assert [u.kind for u in result.unhandled] == ["lang_unshipped"]
+    assert "othermod:lead_block" in result.unhandled[0].reason
+    assert "tin_block" not in result.unhandled[0].reason

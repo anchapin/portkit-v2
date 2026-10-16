@@ -94,6 +94,7 @@ UNREADABLE = "lang_unreadable"
 KINDS = frozenset({"lang", CODE_STRING, UNSHIPPED, LOCALE, UNREADABLE})
 
 
+
 # A .lang value is one line. Java lang JSON allows a newline inside a value
 # (multi-line tooltips); Bedrock spells it ~LINEBREAK~, the way the vanilla
 # en_US.lang does. Written raw, the tail of the value lands on a line of its own
@@ -364,19 +365,23 @@ def _source_for(consumed: set[str], bedrock: str, ident: str = "") -> str:
     return (own or found or [f"texts/{bedrock}.lang"])[0]
 
 
-def settle(result: ConversionResult) -> None:
+def settle(result: ConversionResult, namespaces=()) -> None:
     """Keep only the content lines that name something the pack ships.
 
     Runs on the merged pack, after blocks and items were withdrawn
     (:func:`portkit.pipeline.drop_untextured`, the recipe and smithing passes):
     a ``tile.``/``item.``/``entity.``/``itemGroup.name.`` line stays when the
     pack defines that identifier or names the key itself (a
-    ``minecraft:display_name``); the rest is residue, explained: a sub-key
-    (``block.<ns>.<name>.tooltip``) is a string Java code shows, anything else
-    names a block, item, entity or creative tab the pack doesn't ship (see that
-    thing's own residue entry). The source text of every kept line is
-    untouched. A locale left with no lines drops out of languages.json.
+    ``minecraft:display_name``). A line naming one of this jar's own blocks,
+    items or entities (``namespaces``) that didn't ship stays too, so the name
+    is there when its owner converts (a residue agent writing it, #105); the
+    owner's own residue entry already says why it didn't ship. The rest
+    is dropped, explained: a sub-key (``block.<ns>.<name>.tooltip``) is a
+    string Java code shows; a creative tab, or another mod's entry, names
+    nothing the pack has. The source text of every kept line is untouched. A
+    locale left with no lines drops out of languages.json.
     """
+    own = set(namespaces)
     files = result.files
     langs = sorted(p for p in files if p.startswith("texts/") and p.endswith(".lang") and isinstance(files[p], str))
     if not langs:
@@ -405,6 +410,10 @@ def settle(result: ConversionResult) -> None:
             if m:
                 ident = m.group(1)
                 if ident in shipped:
+                    kept.append(line)
+                elif ident.split(":", 1)[0] in own and "." not in ident.split(":", 1)[1]:
+                    # The owner is residue on its own account; its line waits
+                    # for it rather than being residue twice.
                     kept.append(line)
                 elif "." in ident.split(":", 1)[1]:
                     gone[key] = (CODE_STRING, ident)

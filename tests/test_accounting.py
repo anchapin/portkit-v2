@@ -62,8 +62,10 @@ def test_unowned_files_drag_coverage_down(tmp_path, fixtures_dir):
             target = source / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(item.read_bytes())
+    # A folder nothing reads (#277: models and textures the jar's references
+    # explain are re-filed by portkit.ownership, so use another folder).
     for i in range(10):
-        m = source / "assets" / "examplemod" / "models" / "block" / f"m{i}.json"
+        m = source / "assets" / "examplemod" / "widgets" / "block" / f"m{i}.json"
         m.parent.mkdir(parents=True, exist_ok=True)
         m.write_text("{}")
 

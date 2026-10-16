@@ -13,7 +13,6 @@ def test_lang_keys_are_remapped(fixtures_dir):
     text = result.files["texts/en_US.lang"]
     assert "tile.examplemod:copper_block.name=Copper Block" in text
     assert "item.examplemod:copper_ingot.name=Copper Ingot" in text
-    assert "itemGroup.name.main=Example Mod" in text
     assert result.unhandled == []
 
 

@@ -106,9 +106,26 @@ def references(root: Path) -> dict[str, set[str]]:
                 add(f"assets/{ns}/textures/particle/{p}.png", rel)
             else:
                 # A model names models (parent, overrides, a loader's parts)
-                # and textures; which one a string is shows on disk.
+                # and textures; which one a string is shows on disk. A name
+                # with its own extension is a file under assets/<ns>/ (an OBJ
+                # model loader's "ns:models/block/x.obj").
                 add(f"assets/{ns}/models/{p}.json", rel)
                 add(f"assets/{ns}/textures/{p}.png", rel)
+                if "." in p.rsplit("/", 1)[-1]:
+                    add(f"assets/{ns}/{p}", rel)
+    # A Wavefront model names its material library ("mtllib x.mtl"), a file
+    # next to it.
+    for path in sorted(assets.glob("*/models/**/*")):
+        if not path.is_file() or path.suffix == ".json":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel = str(path.relative_to(root))
+        for line in text.splitlines():
+            if line.startswith("mtllib "):
+                add(str(path.parent.relative_to(root) / line.split(None, 1)[1].strip()), rel)
     return users
 
 
@@ -120,9 +137,14 @@ def _subject(rel: str) -> str | None:
 
 
 def classify(root: Path, files: list[str], consumed: set[str],
-             residue_sources: set[str]) -> dict[str, tuple[str, str]]:
+             residue_sources: set[str], shipped: set[str] | None = None) -> dict[str, tuple[str, str]]:
     """file -> (kind, owner) for the leftover files that are owned by residue
-    or Java-only; a file a converter should have claimed is left out."""
+    or Java-only; a file a converter should have claimed is left out.
+
+    ``shipped``: the identifiers the pack defines. An item model the items
+    converter read (``models/item/<name>.json``) for an item the pack doesn't
+    ship, whose blockstate of the same name is residue, is the refused block's
+    item: what it names goes with that block's residue."""
     users = references(root)
     memo: dict[str, tuple[str, str]] = {}
 
@@ -132,6 +154,12 @@ def classify(root: Path, files: list[str], consumed: set[str],
         if rel in residue_sources:
             return (OWNED, rel)
         if rel in consumed:
+            parts = rel.split("/")
+            if (shipped is not None and len(parts) == 5 and parts[2:4] == ["models", "item"]
+                    and f"{parts[1]}:{parts[4][:-5]}" not in shipped):
+                block = f"assets/{parts[1]}/blockstates/{parts[4]}"
+                if block in residue_sources:
+                    return (OWNED, block)
             return (_SHIPPED, rel)
         if rel in seen:  # a reference cycle adds nothing
             return (JAVA_ONLY, "")
@@ -163,7 +191,7 @@ def classify(root: Path, files: list[str], consumed: set[str],
         if _subject(rel) is None:
             continue
         target = rel[:-len(".mcmeta")] if rel.endswith(".png.mcmeta") else rel
-        if not target.endswith((".json", ".png")):
+        if not target.endswith((".json", ".png")) and target.split("/")[2] != "models":
             continue
         parts = target.split("/")
         if parts[2] == "models" and len(parts) == 5 and parts[3] == "item" and not users.get(target):
@@ -182,7 +210,8 @@ def _group(rel: str) -> str:
     return "/".join(parts[:4]) + "/" if len(parts) > 4 else "/".join(parts[:3]) + "/"
 
 
-def refine(unhandled: list[Unhandled], root: Path, consumed: set[str]) -> list[Unhandled]:
+def refine(unhandled: list[Unhandled], root: Path, consumed: set[str],
+           shipped: set[str] | None = None) -> list[Unhandled]:
     """Re-file the unowned models, textures and atlases the jar's references
     explain; the rest of the residue is returned unchanged."""
     groups = [u for u in unhandled if u.kind == "unowned" and _subject(u.source.rstrip("/") + "/x") is not None]
@@ -199,7 +228,7 @@ def refine(unhandled: list[Unhandled], root: Path, consumed: set[str]) -> list[U
     # An unowned particle definition is residue too; its sprites point at it.
     sources |= {f for f in (str(p.relative_to(root)) for p in (root / "assets").glob("*/particles/*.json"))
                 if f not in consumed} if (root / "assets").is_dir() else set()
-    found = classify(root, leftover, consumed, sources)
+    found = classify(root, leftover, consumed, sources, shipped)
 
     entries: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for rel, (kind, owner) in sorted(found.items()):

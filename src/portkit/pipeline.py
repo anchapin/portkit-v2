@@ -25,7 +25,7 @@ from .data.mappings import attach as attach_mappings
 from .icon import resolve as resolve_icon
 from .ingest import ingest
 from .meta import ModMetadata, parse as parse_metadata
-from .model import ConversionResult, SourceMod, Unhandled
+from .model import ConversionResult, SourceMod, Unhandled, _declared
 from .pack import addon_name, write_mcaddon, write_tree
 from .paths import shorten_paths
 from .validate import ValidationReport, validate_tree
@@ -505,7 +505,7 @@ def convert(
         withdraw_unacceptable_trims(result)
         # Now that the pack's blocks, items and entities are final, its .lang
         # keeps only the lines naming one of them (#277 lang).
-        lang.settle(result)
+        lang.settle(result, selected)
         shorten_paths(result)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}
         icon, icon_source, icon_note = resolve_icon(staged.icons, namespace)
@@ -537,7 +537,8 @@ def convert(
             # A shipping mod's leftover models and textures: the jar's own
             # references say whether residue owns them or only Java code
             # draws them (#277 unowned).
-            unhandled = ownership.refine(unhandled, staged.root, result.consumed)
+            shipped = {i for i in (_declared(b) for b in result.files.values()) if i}
+            unhandled = ownership.refine(unhandled, staged.root, result.consumed, shipped)
         if outcome is None and (out_dir / codeonly.REPORT_NAME).is_file():
             # An earlier run's report would make this tree read as explained-empty.
             (out_dir / codeonly.REPORT_NAME).unlink()
