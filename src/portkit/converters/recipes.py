@@ -1480,6 +1480,9 @@ def _durability(body) -> bool:
 def equip_smithing_bases(mod: SourceMod, files: dict) -> ConversionResult:
     """Give this namespace's smithing bases the durability its code gives them (#268).
 
+    Runs on the merged pack (``files``), once :func:`drop_unshipped_recipes`
+    withdrew what it does, so only recipes that ship count.
+
     A mod item a written ``recipe_smithing_transform`` takes as its base is a
     tool or armor to Bedrock only with ``minecraft:durability``. Java keeps that
     number in code, so each adapter's ``item_durability`` hook reads it (from
@@ -1527,15 +1530,17 @@ def equip_smithing_bases(mod: SourceMod, files: dict) -> ConversionResult:
 def withdraw_unequipped_smithing(result: ConversionResult) -> None:
     """Withdraw every smithing recipe whose base Bedrock won't take (#268).
 
-    Runs on the merged pack after :func:`drop_unshipped_recipes`. A
+    Runs on the merged pack after :func:`drop_unshipped_recipes` and
+    :func:`equip_smithing_bases`. A
     ``recipe_smithing_transform`` whose base is a mod item without
     ``minecraft:durability`` (no durability could be read from the mod's code)
     or a mod block is refused by Bedrock (see ``_SMITHING_BASE_RULE``), so it
     goes back to the residue under its source recipe with the reason. It is
     not rewritten as a crafting recipe (Alex, 2026-10-16: that would drop the
     smithing table and what the upgrade carries over). Vanilla bases are not
-    checked here. The smithing slot tags an item carried only for a withdrawn
-    recipe are taken off it again.
+    checked here. The smithing slot tags an item carried only for a recipe
+    that was withdrawn (here or by :func:`drop_unshipped_recipes`) are taken
+    off it again.
     """
     emitted = emitted_definitions(result.files)
     residue_sources = {u.source for u in result.unhandled}
@@ -1544,7 +1549,6 @@ def withdraw_unequipped_smithing(result: ConversionResult) -> None:
         value = result.files[path]
         if path.startswith("recipes/") and isinstance(value, dict) and isinstance(value.get(SMITHING), dict):
             by_source.setdefault(result.recipe_sources.get(path, path), []).append(path)
-    withdrawn = False
     for source, paths in by_source.items():
         refused = []
         for path in paths:
@@ -1562,7 +1566,6 @@ def withdraw_unequipped_smithing(result: ConversionResult) -> None:
             continue
         for path in paths:
             del result.files[path]
-        withdrawn = True
         why = (f"smithing base {'; '.join(sorted(set(refused)))}: not written, since {_SMITHING_BASE_RULE}; "
                "not rewritten as a crafting recipe, which would drop the smithing table and what the upgrade "
                "carries over")
@@ -1570,8 +1573,8 @@ def withdraw_unequipped_smithing(result: ConversionResult) -> None:
             result.notes.append(f"{source}: {why}")
         else:
             result.unhandled.append(Unhandled(source, "recipe", why))
-    if withdrawn:
-        _drop_orphan_slot_tags(result)
+    # Tags for recipes withdrawn here or by drop_unshipped_recipes.
+    _drop_orphan_slot_tags(result)
 
 
 def _drop_orphan_slot_tags(result: ConversionResult) -> None:

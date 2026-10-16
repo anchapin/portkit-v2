@@ -115,9 +115,6 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
             book_entries.append(book_entry)
     result = result.merge(stations.convert(mod, deferred, result.files, context, loot=deferred_loot,
                                            extra_entries=book_entries or None))
-    # Smithing bases get the durability the mod's code gives them (#268), once
-    # every converter and adapter wrote its items.
-    result = result.merge(recipes.equip_smithing_bases(mod, result.files))
     # Every relative import a shipped script makes must be shipped too (the
     # station kit's shared files, #245): a missing one is a converter bug, and
     # Bedrock would refuse the whole script pack, so fail loudly instead.
