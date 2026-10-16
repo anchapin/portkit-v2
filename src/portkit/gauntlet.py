@@ -460,9 +460,6 @@ def _metadata(zf: zipfile.ZipFile, names: list[str]) -> dict:
         badges = (((fabric.get("custom") or {}).get("modmenu") or {}).get("badges") or [])
         if "library" in badges:
             flags.add("modmenu_library_badge")
-        if (fabric.get("custom") or {}).get("fabric-api:module-lifecycle") or fabric.get("jars"):
-            if len(fabric.get("jars") or []) >= 5:
-                flags.add("bundles_modules")
     quilt = _read_json(zf, "quilt.mod.json") if "quilt.mod.json" in names else None
     if isinstance(quilt, dict):
         loaders.append("quilt")
@@ -510,43 +507,60 @@ def _metadata(zf: zipfile.ZipFile, names: list[str]) -> dict:
             "mixin_classes": mixin_classes, "dependencies": sorted(deps), "flags": sorted(flags)}
 
 
-CLASSES = ("content", "library", "performance/mixin-only", "client-only", "UI/info")
+_FLAG_TEXT = {"language_adapter": "provides a language adapter",
+              "modmenu_library_badge": "Mod Menu badge \"library\""}
+
+CLASSES = ("content", "library", "client-only", "performance/mixin-only", "UI/info")
 
 
 def classify(prof: dict) -> tuple[str, list[str]]:
-    """(class, evidence). First rule that holds, in this order:
+    """(class, evidence). The first rule that holds, in this order:
 
     content     the jar ships game content Bedrock can hold: blockstates, item
                 definitions, recipes, loot tables, worldgen or structures.
-    library     the jar says it is one: a language adapter, Mod Menu's
-                "library" badge, it bundles 5+ nested module jars, or most of
-                its classes sit in an ``api`` package.
+    library     the jar says it is one (a language adapter, Mod Menu's
+                "library" badge), is a bundle of nested module jars (5+ of
+                them and at most 10 classes of its own), keeps most of its
+                classes in an ``api`` package, or is code only: 100+ classes,
+                no textures, lang or sounds, and few mixins (under 10% of its
+                classes), i.e. code other mods or the server call.
+    client-only the jar declares it runs on one side (Fabric environment
+                "client", NeoForge clientSideOnly, a minecraft dependency on
+                side CLIENT, or Forge/NeoForge displayTest IGNORE_ALL_VERSION).
     performance/mixin-only
-                mixin configs and no assets beyond lang, icons and config-GUI
-                textures (at most 8 textures, no sounds, no shaders).
-    client-only the jar declares it runs on the client only (Fabric
-                environment "client", NeoForge clientSideOnly, or a minecraft
-                dependency on side CLIENT).
+                mixins are at least 10% of its classes, and it has at most 10
+                lang files, 8 textures, no sounds and no shaders.
     UI/info     everything else: screens, overlays, tooltips, keybinds.
     """
     c, flags = prof["counts"], set(prof.get("flags") or ())
     content = [f"{k} {c[k]}" for k in _CONTENT_KEYS if c.get(k)]
     if content:
         return "content", content
-    lib = sorted(flags & {"language_adapter", "modmenu_library_badge", "bundles_modules"})
-    if c.get("classes") and c.get("api_classes", 0) * 2 >= c["classes"]:
-        lib.append(f"api classes {c['api_classes']}/{c['classes']}")
+    classes = c.get("classes", 0)
+    mixins = sum((prof.get("mixin_classes") or {}).values())
+    share = mixins / classes if classes else 0.0
+    lib = [_FLAG_TEXT[f] for f in sorted(flags & set(_FLAG_TEXT))]
+    if c.get("nested_jars", 0) >= 5 and classes <= 10:
+        lib.append(f"bundles {c['nested_jars']} nested jars, {classes} classes of its own")
+    if classes and c.get("api_classes", 0) * 2 >= classes:
+        lib.append(f"api classes {c['api_classes']}/{classes}")
+    if (classes >= 100 and not c.get("textures") and not c.get("lang") and not c.get("sounds")
+            and share < 0.10):
+        lib.append(f"code only: {classes} classes, no textures, lang or sounds, {mixins} mixin(s)")
     if lib:
         return "library", lib
-    mixin_total = sum((prof.get("mixin_classes") or {}).values())
-    if (prof.get("mixin_configs") and c.get("textures", 0) <= 8 and not c.get("sounds")
-            and not c.get("shaders") and not c.get("gui_textures", 0) > 8):
-        return "performance/mixin-only", [f"{len(prof['mixin_configs'])} mixin config(s), "
-                                          f"{mixin_total} mixin(s)", f"textures {c.get('textures', 0)}"]
     if prof.get("environment") == "client":
-        return "client-only", ["declared client-only"]
+        return "client-only", ["declares client-only"]
+    if "display_test_ignore_all" in flags:
+        return "client-only", ["one-sided: displayTest IGNORE_ALL_VERSION"]
+    if (prof.get("mixin_configs") and share >= 0.10 and c.get("lang", 0) <= 10
+            and c.get("textures", 0) <= 8 and not c.get("sounds") and not c.get("shaders")):
+        return "performance/mixin-only", [f"{mixins} mixin(s) in {classes} classes "
+                                          f"({len(prof['mixin_configs'])} config(s))",
+                                          f"lang {c.get('lang', 0)}, textures {c.get('textures', 0)}"]
     return "UI/info", [f"textures {c.get('textures', 0)} (gui {c.get('gui_textures', 0)})",
-                       f"lang {c.get('lang', 0)}", f"environment {prof.get('environment')}"]
+                       f"lang {c.get('lang', 0)}", f"{mixins} mixin(s) in {classes} classes",
+                       f"environment {prof.get('environment')}"]
 
 
 def profile_and_classify(jar: Path | str) -> dict:
