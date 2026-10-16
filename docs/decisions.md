@@ -27,6 +27,46 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: smithing-slot item tags from the recipe; Farmer's Delight knives carry their tier's durability
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
+- **Decision:** two changes so a converted smithing upgrade is one Bedrock accepts (#263):
+  1. **Slot tags (core, recipes).** A mod item that a converted
+     `recipe_smithing_transform` names as template, base or addition carries
+     that slot's item tag: `minecraft:transform_templates`,
+     `minecraft:transformable_items`, `minecraft:transform_materials` (item
+     format raised to 1.20.50 for `minecraft:tags`, as for other recipe tags).
+     This applies only to item definitions. A block in a slot is left as it is.
+  2. **FD knives (adapter).** Farmer's Delight's knife items (NeoForge 1.3.4 and
+     Refabricated 26.1-3.6.28, the versions the FD adapter reads) get their tool
+     tier's durability and a stack of one: flint 131 (FD's own tier), iron 250,
+     golden 32, diamond 1561, netherite 2031 (minecraft.wiki Tiers, the skillet's
+     revision), from FD's ModItems (`KnifeItem(Tier)` / `.durability(material.durability())`).
+     Java can't have max_damage with a stack above one (minecraft.wiki Data
+     component format, 24w12a). Refabricated's copper knife is left as it was,
+     because the cited table doesn't state copper's durability unambiguously.
+     Damage, mining speed, enchantability and repair aren't written yet.
+- **Why:** Mojang bedrock-samples@46ba6ea9 `documentation/Recipes.html`,
+  recipe_smithing_transform: the base's "only accepted items are armor and
+  tools", and each slot's items "must have" its tag "to be accepted into the
+  respective UI slot". BDS 1.26.52.3 rejected FD's netherite knife upgrade ("base
+  item is not a piece of armor or equipment"). Experiment ingame runs on
+  throwaway branches showed that the tag alone still fails (38858468149), while
+  tag + durability + stack 1 passes (38858470689). So the base needs durability,
+  which is a gameplay number: only an adapter with a cited source writes it (the
+  skillet precedent, #87).
+- **Rejected:** downgrading the recipe to shapeless crafting (it loses the
+  smithing table and the carry-over of enchantments and damage). Leaving it as
+  residue (the knife upgrade would vanish when the numbers are citable). Writing
+  durability in the core for every smithing base (no cited number for an
+  arbitrary mod's item).
+- **Left:** other mods' custom smithing bases still lack durability, so BDS
+  would still reject them. That's BetterEnd's tool heads and hammers, Mythic
+  Metals' custom tools, and Create's copper diving gear. They aren't in the
+  in-game set. How to handle them (residue, crafting downgrade, or per-mod stats)
+  is an open policy call.
+- **Links:** #263, #238.
+
 ## 2026-10-16: a block's material instances share one render method, from the Java render_type or else the textures' alpha
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
