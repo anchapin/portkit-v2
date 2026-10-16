@@ -79,7 +79,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **Unverified:** whether the server still registers a recipe it logs (a) for
   (the log is ERROR; Script API can't list recipes); anything client-side
   (geometry, textures, bone visibility, render methods, container UI).
-- **Links:** #238, #221, #226, #87.
+- **Links:** #238, PR #259, #221, #226, #87.
 
 ## 2026-10-15: uvlock re-maps a hand-set uv as Java does, by the game version the mod declares
 
