@@ -10,19 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 AGENT_MOD = ROOT / "fixtures" / "agent_mod" / "input"
 
 
-def test_three_groups_each_with_a_reason_the_agent_can_act_on(tmp_path):
+def test_four_groups_each_with_a_reason_the_agent_can_act_on(tmp_path):
     result = convert(AGENT_MOD, tmp_path / "out")
     groups = {g.key: g.reasons[0] for g in group_residue(result.unhandled)}
     assert set(groups) == {
         "item:assets/examplemod/models/item/steel_sword.json",
         "recipe:data/examplemod/recipes/alloy_block.json",
         "recipe:data/examplemod/recipes/steel_trim.json",
+        # #261: the sword's recipe waits for the sword, which is residue above
+        "recipe:data/examplemod/recipes/steel_sword.json",
     }
     alloy = groups["recipe:data/examplemod/recipes/alloy_block.json"]
     assert "examplemod:bronze_ingot" in alloy and "examplemod:steel_ingot" in alloy
     # since #160 a fully emitted tag converts; tin keeps this group for the agent
     assert alloy.endswith("not converted: examplemod:tin_ingot")
     assert "minecraft:recipe_smithing_trim" in groups["recipe:data/examplemod/recipes/steel_trim.json"]
+    assert groups["recipe:data/examplemod/recipes/steel_sword.json"].startswith(
+        "names examplemod:steel_sword, which the pack doesn't ship")
 
 
 def test_a_smithing_trim_the_agent_writes_validates(tmp_path):
@@ -38,6 +42,7 @@ def test_a_smithing_trim_the_agent_writes_validates(tmp_path):
         },
     }
     path = tmp_path / "out" / "behavior_pack" / "recipes" / "steel_trim.json"
+    path.parent.mkdir(exist_ok=True)  # no recipe of the mod ships (#261)
     path.write_text(json.dumps(trim))
     assert validate(tmp_path / "out").ok
 
@@ -45,6 +50,7 @@ def test_a_smithing_trim_the_agent_writes_validates(tmp_path):
 def test_a_smithing_trim_missing_a_slot_is_an_error(tmp_path):
     convert(AGENT_MOD, tmp_path / "out")
     path = tmp_path / "out" / "behavior_pack" / "recipes" / "steel_trim.json"
+    path.parent.mkdir(exist_ok=True)  # no recipe of the mod ships (#261)
     path.write_text(json.dumps({
         "format_version": "1.20.10",
         "minecraft:recipe_smithing_trim": {

@@ -923,6 +923,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         owners[out_path] = rel
         identifiers[ident] = rel
         result.files[out_path] = value
+        result.recipe_sources[out_path] = rel
 
     advancements = advancement_index(mod.root)
     unlocks = {"derived": 0, "no_advancement": 0, "fallback": 0}
@@ -1330,3 +1331,93 @@ def convert(mod: SourceMod, emitted: dict | None = None,
     if note:
         result.notes.append(note)
     return result
+
+
+def _named_items(body: dict) -> list[str]:
+    """Every item id a written Bedrock recipe body names: inputs, result, unlock."""
+    found: list[str] = []
+
+    def walk(value):
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, dict) and isinstance(value.get("item"), str):
+            found.append(value["item"])
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+
+    key = body.get("key")
+    if isinstance(key, dict):
+        walk(list(key.values()))
+    for slot in ("ingredients", *_ITEM_SLOTS):
+        if slot in body:
+            walk(body[slot])
+    return found
+
+
+def _recipe_body(value) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    for key, body in value.items():
+        if key.startswith("minecraft:recipe_") and isinstance(body, dict):
+            return body
+    return None
+
+
+def drop_unshipped_recipes(result: ConversionResult) -> None:
+    """Withdraw every recipe naming a mod's item the pack doesn't ship (#261).
+
+    Runs on the merged pack, once every namespace converted and blocks whose
+    textures didn't convert were withdrawn (:func:`portkit.pipeline.drop_untextured`):
+    an item another namespace of the jar ships counts, and one withdrawn
+    after the recipes converted doesn't. Bedrock Dedicated Server refuses a
+    recipe naming an item it doesn't know ("The Item: cluttered:heart_cake is
+    missing or invalid, can't make the recipe" / "Recipe result malformed",
+    #238 in-game runs), so shipping it does nothing for the player; it goes
+    back to the residue under its source recipe, naming the items, and every
+    file written from that source goes with it (a recipe is never narrowed to
+    part of a tag). An unlock entry naming such an item (a recipe's own
+    inputs all ship) is dropped; with none left the unlock is
+    ``AlwaysUnlocked``, labelled in the notes. Vanilla ids are not checked
+    here (see :func:`bedrock_ids`).
+    """
+    shipped = set(emitted_definitions(result.files))
+    residue_sources = {u.source for u in result.unhandled}
+
+    def missing(item: str) -> bool:
+        return ":" in item and not item.startswith("minecraft:") and item not in shipped
+
+    by_source: dict[str, list[str]] = {}
+    for path in sorted(result.files):
+        if path.startswith("recipes/") and _recipe_body(result.files[path]) is not None:
+            by_source.setdefault(result.recipe_sources.get(path, path), []).append(path)
+    for source, paths in by_source.items():
+        named = sorted({i for p in paths for i in _named_items(_recipe_body(result.files[p])) if missing(i)})
+        if named:
+            for path in paths:
+                del result.files[path]
+            shown = ", ".join(named[:5]) + (f" and {len(named) - 5} more" if len(named) > 5 else "")
+            why = (f"names {shown}, which the pack doesn't ship (see {'their' if len(named) > 1 else 'its'} "
+                   f"own residue entry); not written, since Bedrock refuses a recipe naming an item "
+                   f"it doesn't know")
+            if source in residue_sources:
+                # Already residue on its own account (a station recipe the
+                # stove refused too): one entry per source, the rest in a note.
+                result.notes.append(f"{source}: crafting form {why}")
+            else:
+                result.unhandled.append(Unhandled(source, "recipe", why))
+            continue
+        for path in paths:
+            body = _recipe_body(result.files[path])
+            unlock = body.get("unlock")
+            if not isinstance(unlock, list):
+                continue
+            kept = [e for e in unlock
+                    if not (isinstance(e, dict) and isinstance(e.get("item"), str) and missing(e["item"]))]
+            if len(kept) == len(unlock):
+                continue
+            dropped = sorted(e["item"] for e in unlock if e not in kept)
+            body["unlock"] = kept or copy.deepcopy(ALWAYS_UNLOCKED)
+            result.notes.append(
+                f"{path}: unlock entry {', '.join(dropped)} dropped, the pack doesn't ship it"
+                + ("" if kept else "; unlock AlwaysUnlocked (fallback)"))

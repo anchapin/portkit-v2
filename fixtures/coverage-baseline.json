@@ -1,9 +1,9 @@
 {
   "fixtures": {
     "agent_mod": {
-      "coverage": 80.0,
-      "files": 12,
-      "residue": 3
+      "coverage": 73.3,
+      "files": 11,
+      "residue": 4
     },
     "animated_block_mod": {
       "coverage": 100.0,
@@ -62,7 +62,7 @@
     },
     "recipes_mod": {
       "coverage": 100.0,
-      "files": 10,
+      "files": 24,
       "residue": 0
     },
     "residue_mod": {
@@ -87,12 +87,12 @@
     },
     "simple_block_mod": {
       "coverage": 100.0,
-      "files": 7,
+      "files": 9,
       "residue": 0
     },
     "smithing_mod": {
-      "coverage": 80.0,
-      "files": 4,
+      "coverage": 92.9,
+      "files": 13,
       "residue": 1
     },
     "sounds_mod": {
@@ -102,7 +102,7 @@
     },
     "two_namespace_mod": {
       "coverage": 100.0,
-      "files": 7,
+      "files": 14,
       "residue": 0
     }
   }

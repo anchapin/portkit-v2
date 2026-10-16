@@ -103,6 +103,10 @@ class ConversionResult:
     # Station runtimes (#177): recipe type -> what its data table holds
     # ({"converted": n, "residue": m, "data": path, "block": id}).
     stations: dict[str, dict] = field(default_factory=dict)
+    # Recipe output path -> the source recipe it was written from (#261), so a
+    # recipe withdrawn after every namespace converted goes back to residue
+    # under its own source.
+    recipe_sources: dict[str, str] = field(default_factory=dict)
 
     def claim(self, mod: "SourceMod", path: Path) -> str:
         """Record a source file as looked at and return its relative path."""
@@ -164,6 +168,7 @@ class ConversionResult:
         merged.consumed |= other.consumed
         merged.notes = [*self.notes, *other.notes]
         merged.stations = {**self.stations, **other.stations}
+        merged.recipe_sources = {**other.recipe_sources, **self.recipe_sources}
         return merged
 
     @property
