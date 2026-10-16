@@ -147,3 +147,15 @@ README notes that GeyserMC "does not relicense Minecraft, its data, or any
 other material owned by Mojang or Microsoft", so it is handled like Mojang's
 lists: fetched, never vendored. Without it, recipes keep Java's vanilla ids.
 `python -m portkit.data.java_items --pin` prints the sha256 to pin.
+
+## Vanilla smithing bases (#270)
+
+`portkit/data/smithing_bases.py` lists, by hand, the Bedrock vanilla item ids a
+`recipe_smithing_transform` can take as its base: the bases of Mojang's own
+vanilla smithing recipes and the vanilla items whose definitions carry
+`minecraft:durability` in
+[Mojang/bedrock-samples](https://github.com/Mojang/bedrock-samples) at the
+pinned commit, and the armor and tools that have durability in Bedrock Edition
+per [minecraft.wiki's Durability page](https://minecraft.wiki/w/Durability?oldid=3790798).
+It holds item identifiers and where each comes from, nothing else: no file
+content, definitions or numbers from either source.
