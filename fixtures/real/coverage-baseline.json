@@ -7,15 +7,15 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 37.2,
+      "coverage": 37.1,
       "files": 3313,
-      "residue": 5591,
+      "residue": 5607,
       "errors": 0
     },
     "create": {
       "coverage": 32.5,
       "files": 4012,
-      "residue": 8336,
+      "residue": 8337,
       "errors": 0
     },
     "farmers_delight_fabric": {
@@ -33,13 +33,13 @@
     "mekanism": {
       "coverage": 12.0,
       "files": 1222,
-      "residue": 8996,
+      "residue": 9000,
       "errors": 0
     },
     "mythicmetals": {
       "coverage": 47.3,
       "files": 1736,
-      "residue": 1938,
+      "residue": 1933,
       "errors": 0
     },
     "silent_gear_1165": {
