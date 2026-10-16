@@ -12,7 +12,7 @@ the harness every #277 sub-issue runs on:
    ``unfetchable`` with the reason.
 2. ``profile`` reads a jar's own contents (file counts by kind, mixin configs,
    entrypoints, declared dependencies) and ``classify`` puts it in one class:
-   content, library, performance/mixin-only, client-only or UI/info. The
+   content, library, client-only, performance/mixin-only or UI/info. The
    class comes from the jar, never from the mod's description.
 3. ``portkit gauntlet run`` is ``portkit gaps run`` (#234) over this manifest
    with the profile added to each mod's record: same child-process
@@ -87,71 +87,16 @@ class Listed:
     redistribution: str = ""
 
 
-# The 50, in #277's order. Modrinth slugs were checked against
-# api.modrinth.com/v2/project/<slug> on 2026-10-16; Twilight Forest and Chisel
-# are not on Modrinth (search finds only unofficial ports and other mods).
-THE_50: tuple[Listed, ...] = (
-    Listed(1, "jei", "Just Enough Items (JEI)", "jei"),
-    Listed(2, "sodium", "Sodium", "sodium"),
-    Listed(3, "fabric_api", "Fabric API", "fabric-api", listed_lib=True),
-    Listed(4, "iris", "Iris Shaders", "iris"),
-    Listed(5, "entityculling", "Entity Culling", "entityculling"),
-    Listed(6, "cloth_config", "Cloth Config API", "cloth-config", listed_lib=True),
-    Listed(7, "ferritecore", "FerriteCore", "ferrite-core"),
-    Listed(8, "modmenu", "Mod Menu", "modmenu"),
-    Listed(9, "lithium", "Lithium", "lithium"),
-    Listed(10, "immediatelyfast", "ImmediatelyFast", "immediatelyfast"),
-    Listed(11, "yacl", "YetAnotherConfigLib (YACL)", "yacl", listed_lib=True),
-    Listed(12, "fabric_language_kotlin", "Fabric Language Kotlin", "fabric-language-kotlin", listed_lib=True),
-    Listed(13, "xaeros_minimap", "Xaero's Minimap", "xaeros-minimap"),
-    Listed(14, "entity_texture_features", "Entity Texture Features", "entitytexturefeatures"),
-    Listed(15, "architectury_api", "Architectury API", "architectury-api", listed_lib=True),
-    Listed(16, "sodium_extra", "Sodium Extra", "sodium-extra"),
-    Listed(17, "xaeros_world_map", "Xaero's World Map", "xaeros-world-map"),
-    Listed(18, "entity_model_features", "Entity Model Features", "entity-model-features"),
-    Listed(19, "veinminer", "VeinMiner", "veinminer"),
-    Listed(20, "appleskin", "AppleSkin", "appleskin"),
-    Listed(21, "not_enough_animations", "Not Enough Animations", "not-enough-animations"),
-    Listed(22, "reeses_sodium_options", "Reese's Sodium Options", "reeses-sodium-options"),
-    Listed(23, "skin_layers_3d", "3D Skin Layers", "3dskinlayers"),
-    Listed(24, "modernfix", "ModernFix", "modernfix"),
-    Listed(25, "continuity", "Continuity", "continuity"),
-    Listed(26, "geckolib", "GeckoLib", "geckolib", listed_lib=True),
-    Listed(27, "simple_voice_chat", "Simple Voice Chat", "simple-voice-chat"),
-    Listed(28, "placeholder_api", "Text Placeholder API", "placeholder-api", listed_lib=True),
-    Listed(29, "jade", "Jade", "jade"),
-    Listed(30, "waystones", "Waystones", "waystones"),
-    Listed(31, "journeymap", "JourneyMap", "journeymap"),
-    Listed(32, "quark", "Quark", "quark"),
-    Listed(33, "ae2", "Applied Energistics 2", "ae2"),
-    Listed(34, "twilight_forest", "The Twilight Forest", curseforge="the-twilight-forest",
-           licence="LGPL-2.1-only (code); CC-BY-NC-SA-4.0 (assets)",
-           licence_source="https://github.com/TeamTwilight/twilightforest (LICENSE, ASSET_LICENSE)",
-           redistribution=("licences allow copying with attribution (assets non-commercial, share-alike); "
-                           "CurseForge's third-party distribution flag needs its API key and was not read; "
-                           "jar measured and discarded, cached only in this repo's Actions cache")),
-    Listed(35, "tinkers_construct", "Tinkers' Construct", "tinkers-construct"),
-    Listed(36, "biomes_o_plenty", "Biomes O' Plenty", "biomes-o-plenty"),
-    Listed(37, "immersive_engineering", "Immersive Engineering", "immersiveengineering"),
-    Listed(38, "botania", "Botania", "botania"),
-    Listed(39, "storage_drawers", "Storage Drawers", "storagedrawers"),
-    Listed(40, "iron_chests", "Iron Chests", "iron-chests"),
-    Listed(41, "mouse_tweaks", "Mouse Tweaks", "mouse-tweaks"),
-    Listed(42, "controlling", "Controlling", "controlling"),
-    Listed(43, "natures_compass", "Nature's Compass", "natures-compass"),
-    Listed(44, "clumps", "Clumps", "clumps"),
-    Listed(45, "enchantment_descriptions", "Enchantment Descriptions", "enchantment-descriptions"),
-    Listed(46, "just_enough_resources", "Just Enough Resources (JER)", "just-enough-resources-jer"),
-    Listed(47, "better_advancements", "Better Advancements", "better-advancements"),
-    Listed(48, "comforts", "Comforts", "comforts"),
-    Listed(49, "cooking_for_blockheads", "Cooking for Blockheads", "cooking-for-blockheads"),
-    Listed(50, "chisel", "Chisel", curseforge="chisel",
-           licence="GPL-2.0-only",
-           licence_source="https://github.com/Chisel-Team/Chisel (repository licence)",
-           redistribution=("GPL-2.0 allows copying; CurseForge's third-party distribution flag needs its API "
-                           "key and was not read; jar measured and discarded, cached only in this repo's "
-                           "Actions cache")),
-)
+LIST = Path(__file__).resolve().parent / "data" / "gauntlet_50.json"
+
+
+def load_list(path: Path = LIST) -> tuple[Listed, ...]:
+    """#277's 50, in its order, from ``data/gauntlet_50.json`` (the mods are
+    named in a data file, not in core code: tests/test_core_namespace_free)."""
+    return tuple(Listed(**entry) for entry in json.loads(Path(path).read_text())["mods"])
+
+
+THE_50: tuple[Listed, ...] = load_list()
 
 
 class PinError(Exception):
@@ -577,8 +522,10 @@ def reason_class(key: str, slot: dict) -> str:
     kind = slot.get("kind") or key.split(":", 1)[0]
     m = re.search(r"\[([^\]]+)\]$", key)
     if kind in gaps._SOURCE_KEYED and m:
-        parts = m.group(1).strip("/").split("/")
-        return f"{kind} [{'/'.join(parts[:3])}/]"
+        parts = m.group(1).strip("/").split("/")[:3]
+        if len(parts) == 3 and "." in parts[2]:  # a file right under assets/<ns>/ (icon.png, *.properties)
+            parts = parts[:2]
+        return f"{kind} [{'/'.join(parts)}/]"
     return kind
 
 
@@ -749,7 +696,7 @@ def render_markdown(b: dict, top: int = 25) -> str:
                      f"| {_cell(top3)} | {_validate(m)} | {_mct(m)} | {'yes' if m['done'] else _cell(m['done_why'])} |")
     lines += ["", "## Class evidence", "",
               "Why each jar got its class (first rule that holds: content, library, "
-              "performance/mixin-only, client-only, UI/info; `portkit.gauntlet.classify`).", "",
+              "client-only, performance/mixin-only, UI/info; `portkit.gauntlet.classify`).", "",
               "| mod | class | evidence | #277 [lib] |", "|---|---|---|---|"]
     for m in b["mods"]:
         lines.append(f"| {_cell(m.get('title') or m['name'])} | {m['class']} | {_cell('; '.join(m['evidence']))} "

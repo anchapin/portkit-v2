@@ -339,6 +339,14 @@ def test_board_rolls_reason_classes_up_across_mods():
     assert "conversion" not in roll and "fetch" not in roll
 
 
+def test_reason_class_of_a_file_right_under_the_namespace():
+    slot = {"kind": "unowned"}
+    assert gauntlet.reason_class("unowned: N file(s) [assets/<ns>/icon.png/]", slot) == "unowned [assets/<ns>/]"
+    assert gauntlet.reason_class("unowned: N file(s) [assets/<ns>/textures/gui/]", slot) == \
+        "unowned [assets/<ns>/textures/]"
+    assert gauntlet.reason_class("lang: unrecognised translation key '…'", {"kind": "lang"}) == "lang"
+
+
 def test_board_mods_carry_class_status_and_the_done_flag():
     b = gauntlet.board(_shards())
     by = {m["name"]: m for m in b["mods"]}
