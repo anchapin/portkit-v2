@@ -132,6 +132,9 @@ SKIP_KINDS = {
     "entity": ("the file only works with a Java entity (its spawn egg or loot table), and entities don't "
                "convert: a mob's geometry, animations and AI are Java code, so a Bedrock entity would invent "
                "them (#176); the reason says what the bytecode read"),
+    "code_only": ("the mod ships nothing Bedrock can hold (explained-empty, #279): this lang text or asset is "
+                  "only read by its Java code (screens, HUD, renderer), and the reason names the jar's reason "
+                  "classes"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }

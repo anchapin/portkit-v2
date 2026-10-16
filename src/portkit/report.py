@@ -33,7 +33,7 @@ _CONTENT_TYPES = {
     "sounds": "sounds",
     "scripts": "station runtimes",
 }
-_SEVERITY_ORDER = {"error": 0, "warning": 1}
+_SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
 
 
 @dataclass
@@ -141,7 +141,7 @@ def _findings_section(findings: list[Finding]) -> list[str]:
         grouped[finding.severity].append(finding)
     for severity in sorted(grouped, key=lambda s: _SEVERITY_ORDER.get(s, 9)):
         items = grouped[severity]
-        label = "Errors" if severity == "error" else "Warnings"
+        label = {"error": "Errors", "info": "Notes"}.get(severity, "Warnings")
         lines.append(f"### {label} ({len(items)})")
         lines.append("")
         for finding in items:

@@ -182,6 +182,10 @@ def _child(jar: str, out: str, result: str) -> int:
         "errors": len(res.report.errors),
         "reasons": group_residue(res.unhandled),
     }
+    if res.outcome:
+        # Nothing converts, and the jar's facts say why (#279).
+        data["outcome"] = res.outcome
+        data["reason_classes"] = [{"class": r["class"], "evidence": r["evidence"]} for r in res.reason_classes]
     Path(result).write_text(json.dumps(data))
     return 0
 
@@ -226,7 +230,9 @@ def run_shard(mods, *, shard: str | None = None, manifest: str = "", fetch=None,
         try:
             record = convert(Path(jar), work, timeout)
             if record.get("status") == "ok" and mct_exe:
-                record["mct"] = _mct_counts(mct_exe, work / "out")
+                # An explained-empty mod has no pack for mct to read (#279).
+                record["mct"] = ({"skipped": "explained-empty: no pack"} if record.get("outcome")
+                                 else _mct_counts(mct_exe, work / "out"))
         finally:
             shutil.rmtree(work, ignore_errors=True)
         doc["mods"][mod.name] = {**meta, **record}

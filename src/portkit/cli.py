@@ -18,7 +18,7 @@ FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
 def _print_findings(report) -> None:
     for f in report.findings:
-        mark = "ERROR" if f.severity == "error" else "warn "
+        mark = {"error": "ERROR", "info": "info "}.get(f.severity, "warn ")
         print(f"  {mark} {f.path}: [{f.rule}] {f.message}")
 
 

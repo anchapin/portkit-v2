@@ -788,6 +788,17 @@ def validate_tree(tree: Path) -> ValidationReport:
     report = ValidationReport()
     packs = [p for p in (tree / "behavior_pack", tree / "resource_pack") if p.is_dir()]
     if not packs:
+        # A mod with nothing Bedrock can hold is reported, not packed (#279):
+        # a tree holding a well-formed explained-empty.json and no packs is
+        # that outcome, not an empty conversion.
+        from ..codeonly import REPORT_NAME, read_report
+
+        explained = read_report(tree)
+        if explained is not None:
+            report.add(str(tree / REPORT_NAME), "tree.explained_empty",
+                       "explained-empty: no pack, nothing converts (" + ", ".join(
+                           r["class"] for r in explained["reason_classes"]) + ")", severity="info")
+            return report
         report.add(str(tree), "tree.empty", "no behavior_pack/ or resource_pack/ found")
         return report
     for pack in packs:

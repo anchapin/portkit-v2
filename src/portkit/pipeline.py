@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import codeonly
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
 from .converters import convert_all
@@ -356,6 +357,11 @@ class PipelineResult:
     # recipes left as station_recipe residue, with the table's path.
     stations: dict[str, dict] = field(default_factory=dict)
 
+    # "explained-empty" when nothing converts and the jar's facts say why
+    # (#279); the reason classes are portkit.codeonly.reason_classes output.
+    outcome: str | None = None
+    reason_classes: list[dict] = field(default_factory=list)
+
     @property
     def notes(self) -> list[str]:
         """Things worth saying about the mod itself, not about its files.
@@ -397,6 +403,8 @@ class PipelineResult:
             "mcaddon": self.addon.name if self.addon else None,
             **({"config": config_record(self.config)} if self.config else {}),
             **({"stations": self.stations} if self.stations else {}),
+            **({"outcome": self.outcome, "reason_classes": [r["class"] for r in self.reason_classes]}
+               if self.outcome else {}),
             **({"agent": self.agent.summary()} if self.agent else {}),
         }
 
@@ -444,7 +452,7 @@ def convert(
         # An explicit namespace narrows the run to that one; otherwise every
         # namespace the mod ships is converted into the same pack.
         selected = [namespace] if namespace else list(staged.namespaces)
-        namespace = selected[0] if selected else staged.namespace
+        namespace = selected[0] if selected else _code_only_namespace(staged, Path(source))
         meta = parse_metadata(staged.metadata, namespace)
         # Namespaces come off disk alphabetically, which would make a compat
         # namespace the pack's identity. The mod's own id decides instead.
@@ -505,6 +513,22 @@ def convert(
             + result.unhandled
             + unowned(staged.root, result.consumed)
         )
+        # Nothing shipped: decide from the jar's facts whether that is the
+        # whole story (#279). An explained-empty mod gets no pack, its reason
+        # classes in explained-empty.json, and its lang/asset leftovers filed
+        # as code_only residue.
+        outcome, reasons = None, []
+        if not result.files:
+            facts = codeonly.facts(Path(source), classes=staged.classes)
+            explained, _ = codeonly.decide(result.files, unhandled, facts, staged.root, staged.namespaces)
+            if explained:
+                reasons = codeonly.reason_classes(facts)
+                unhandled = codeonly.explain_leftovers(unhandled, reasons, staged.root, staged.namespaces)
+                outcome = codeonly.OUTCOME
+                codeonly.write_report(out_dir, codeonly.report(meta, reasons, unhandled, facts))
+        if outcome is None and (out_dir / codeonly.REPORT_NAME).is_file():
+            # An earlier run's report would make this tree read as explained-empty.
+            (out_dir / codeonly.REPORT_NAME).unlink()
 
         tree = write_tree(result, namespace, out_dir, meta, icon=icon)
         file_count = len(result.files)
@@ -523,7 +547,7 @@ def convert(
         addon = None
         # A tree that fails the oracle is not something to hand a player as an
         # installable file, so the addon is only written for a valid one.
-        if emit_addon and report.ok:
+        if emit_addon and report.ok and outcome is None:
             addon = write_mcaddon(tree, out_dir / addon_name(namespace, meta))
         if unhandled:
             (out_dir / "unhandled.json").write_text(
@@ -551,4 +575,14 @@ def convert(
             agent=agent_run,
             config=records,
             stations=result.stations,
+            outcome=outcome,
+            reason_classes=reasons,
         )
+
+
+def _code_only_namespace(staged, source: Path) -> str:
+    """The pack identity of a mod with no resource namespace (#279): its
+    declared mod id, else the jar's file name, as a namespace."""
+    declared = parse_metadata(staged.metadata, "").mod_id or ""
+    raw = declared or source.stem
+    return re.sub(r"[^a-z0-9_]+", "_", raw.lower()).strip("_") or "mod"
