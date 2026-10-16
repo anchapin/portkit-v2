@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  AREA, CONNECTION_STATES, Tally, connectionVerdict, containerVerdict, describe, line, slot,
+  AREA, CONNECTION_STATES, Tally, connectionSlot, connectionVerdict, containerVerdict, describe, line, slot,
 } from "../../src/portkit/ingame/runtime/ingame_core.js";
 
 test("slots stay two apart inside the ticking area", () => {
@@ -48,4 +48,25 @@ test("tally and lines", () => {
   assert.deepEqual(t.failures, [{ check: "place", id: "a:c", detail: "x" }]);
   assert.equal(line("DONE", {}), "PORTKIT-INGAME DONE {}");
   assert.equal(describe(new TypeError("no")), "TypeError: no");
+});
+
+test("connection slots: neighbours inside the area, air south and west of each block", () => {
+  const used = new Map();
+  const blocks = [];
+  for (let i = 0; i < 512; i++) {
+    const { x, y, z } = connectionSlot(i);
+    blocks.push({ x, y, z });
+    for (const [px, pz, what] of [[x, z, "block"], [x + 1, z, "east"], [x, z - 1, "stone"]]) {
+      assert.ok(px >= 0 && px < AREA && pz >= 0 && pz < AREA, `${i}: ${px},${pz}`);
+      const key = `${px},${y},${pz}`;
+      assert.ok(!used.has(key), `${i}: ${key} taken`);
+      used.set(key, what);
+    }
+  }
+  for (const { x, y, z } of blocks) {
+    assert.ok(!used.has(`${x},${y},${z + 1}`), "south is not air");
+    assert.ok(!used.has(`${x - 1},${y},${z}`), "west is not air");
+  }
+  assert.deepEqual(connectionSlot(0), { x: 0, y: 100, z: 1 });
+  assert.deepEqual(connectionSlot(256), { x: 0, y: 102, z: 1 });
 });

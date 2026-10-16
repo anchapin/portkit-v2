@@ -29,6 +29,21 @@ export function slot(i, y0 = PLACE_Y) {
   };
 }
 
+/**
+ * Where the i-th connection check goes: four apart both ways (room for the
+ * same-kind neighbour to the east and the stone to the north, with air left
+ * south and west of every checked block), starting at z = 1 so the stone
+ * (z - 1) stays inside the ticking area; 256 a layer.
+ */
+export function connectionSlot(i) {
+  const inLayer = i % 256;
+  return {
+    x: (inLayer % 16) * 4,
+    y: CONNECTION_Y + Math.floor(i / 256) * 2,
+    z: Math.floor(inLayer / 16) * 4 + 1,
+  };
+}
+
 /** The four cardinal connection states (the `minecraft:connection` trait). */
 export const CONNECTION_STATES = [
   "minecraft:connection_north",

@@ -15,8 +15,8 @@
 // Content-log errors are the runner's to count (it reads the server output).
 import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
-  AREA, CONNECTION_STATES, CONNECTION_Y, ITEM_Y, Tally, connectionVerdict,
-  containerVerdict, describe, line, slot,
+  AREA, CONNECTION_STATES, ITEM_Y, Tally, connectionVerdict,
+  connectionSlot, containerVerdict, describe, line, slot,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
 
@@ -90,7 +90,7 @@ async function run() {
   // connection: the block, its own kind to the east, stone to the north
   for (let i = 0; i < CHECKS.connections.length; i++) {
     const id = CHECKS.connections[i];
-    const at = slot(i * 2, CONNECTION_Y);
+    const at = connectionSlot(i);
     try {
       dim.getBlock(at).setPermutation(BlockPermutation.resolve(id));
       dim.getBlock({ x: at.x, y: at.y, z: at.z - 1 }).setPermutation(BlockPermutation.resolve("minecraft:stone"));
