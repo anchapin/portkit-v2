@@ -1031,6 +1031,58 @@ def cmd_reference(args) -> int:
     return 1 if failed else 0
 
 
+def cmd_ingame(args) -> int:
+    """``portkit ingame fetch-server|pack|run``: in-game checks on a Bedrock Dedicated Server (#238)."""
+    from .ingame import server, testpack
+
+    if args.action == "fetch-server":
+        try:
+            server.fetch(Path(args.dir), args.accept_eula)
+        except (server.EulaNotAccepted, ValueError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(f"bedrock-server {server.BDS_VERSION} -> {args.dir}")
+        return 0
+    tree = Path(args.tree)
+    name = args.name or tree.name
+    if args.action == "pack":
+        checks = testpack.write_test_pack(tree / "behavior_pack", Path(args.out), name)
+        print(
+            f"check pack -> {args.out}: {len(checks.blocks)} blocks, {len(checks.items)} items, "
+            f"{len(checks.containers)} containers, {len(checks.connections)} connection blocks"
+        )
+        return 0
+    if not args.server:
+        print("run needs --server DIR (portkit ingame fetch-server)", file=sys.stderr)
+        return 2
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    prepared = server.prepare(Path(args.server), Path(args.work or out / "server"), tree, name)
+    if args.experiment:
+        server.enable_experiments(prepared.root, args.experiment)
+    result = server.run(prepared.root, f"{server.TAG} DONE", args.timeout, out / "server.log")
+    report = server.parse(result.lines)
+    report.update(
+        name=name, bds_version=server.BDS_VERSION, experiments=args.experiment or [],
+        exit_code=result.exit_code, timed_out=result.timed_out, seconds=result.seconds,
+    )
+    report["content_logs"] = [p.name for p in server.collect_logs(prepared.root, out / "content-log")]
+    why = server.verdict(report)
+    report["verdict"] = why or ["pass"]
+    (out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    summary = report.get("summary") or {}
+    print(f"{name}: {json.dumps(summary.get('checks', {}))}")
+    for row in report["failures"][:50]:
+        print(f"  FAIL {row.get('check')} {row.get('id')}: {row.get('detail')}")
+    for row in report["content_errors"][:50]:
+        print(f"  CONTENT-LOG {row}")
+    print(f"{name}: {'; '.join(why) if why else 'pass'} ({result.seconds}s)")
+    if not args.keep_server:
+        import shutil
+        shutil.rmtree(prepared.root, ignore_errors=True)
+    return 1 if why else 0
+
+
 def cmd_schemas(args) -> int:
     """``portkit schemas check|refresh`` (#155): is the stable npm release of
     each vendored Bedrock schema snapshot out, and re-vendor a snapshot from it.
@@ -1302,6 +1354,27 @@ def main(argv=None) -> int:
                    help="only the tag data this mod's loader and game version need "
                         "(default: every pinned set)")
     p.set_defaults(func=cmd_reference)
+
+    p = sub.add_parser(
+        "ingame",
+        help="in-game checks on a Bedrock Dedicated Server (#238): fetch the pinned server "
+             "(--accept-eula), write a converted tree's check pack, or run it headlessly",
+    )
+    p.add_argument("action", choices=["fetch-server", "pack", "run"])
+    p.add_argument("--dir", default="bds", help="fetch-server: where to unpack the server")
+    p.add_argument("--accept-eula", action="store_true",
+                   help="fetch-server: agree to the Minecraft EULA (minecraft.net/eula) and the "
+                        "Microsoft Privacy Statement, which downloading the server means")
+    p.add_argument("--tree", help="pack/run: a converted tree (behavior_pack/, resource_pack/)")
+    p.add_argument("--name", help="pack/run: a name for the run (default: the tree's directory name)")
+    p.add_argument("--out", default="ingame-out", help="pack: the check pack; run: the report directory")
+    p.add_argument("--server", help="run: an unpacked server (fetch-server --dir)")
+    p.add_argument("--work", help="run: the server copy to run in (default OUT/server)")
+    p.add_argument("--experiment", action="append", metavar="NAME",
+                   help="run: toggle this experiment on in the world's level.dat (repeatable)")
+    p.add_argument("--timeout", type=float, default=900, help="run: seconds before the run is stopped")
+    p.add_argument("--keep-server", action="store_true", help="run: keep the server copy afterwards")
+    p.set_defaults(func=cmd_ingame)
 
     p = sub.add_parser(
         "schemas",
