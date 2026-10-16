@@ -73,6 +73,7 @@ from pathlib import PurePosixPath
 from ..conditions import CONDITIONAL_TYPES, LoadContext, condition_keys
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
+from ..data import vanilla_items
 from .recipe_unlock import ALWAYS_UNLOCKED, NEEDS_UNLOCK, advancement_index, unlock_entries, with_unlock
 from .recipe_unlock import criteria as unlock_criteria
 from .tags import MultiMembers, TagResolver
@@ -1078,7 +1079,8 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             # Java recipe advancement's has_<item> items, else AlwaysUnlocked.
             java_id = f"{mod.namespace}:{key.with_suffix('').as_posix()}"
             found = unlock_criteria(advancements.get(java_id, []))
-            unlock = unlock_entries(found, [v for _, v in built], emitted, single_item)
+            unlock = unlock_entries(found, [v for _, v in built], emitted, single_item,
+                                    vanilla_items.ids())
             if unlock:
                 unlocks["derived"] += 1
             else:
@@ -1086,7 +1088,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 unlocks["no_advancement" if java_id not in advancements else "fallback"] += 1
                 if java_id in advancements:
                     why = "; ".join(found.dropped) or (
-                        "its items and tags are not ones this addon ships or the recipe names")
+                        "its items and tags are neither shipped by this addon nor Bedrock vanilla "
+                        "ids nor tags the recipe takes")
+                    if vanilla_items.ids() is None:
+                        why += f"; the Bedrock vanilla item list isn't cached, run `{FETCH_COMMAND}`"
                     result.notes.append(
                         f"{rel}: unlock AlwaysUnlocked (fallback): the Java advancement gives no "
                         f"Bedrock unlock entry ({why})")

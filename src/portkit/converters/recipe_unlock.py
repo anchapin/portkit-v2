@@ -31,27 +31,34 @@ Rule, in order:
    other trigger, with several predicates (has all of them), or with a count,
    component or NBT condition is dropped, which can only make the unlock
    narrower than Java's, never broader.
-2. An item is kept when this conversion emits it or the converted recipe itself
-   names it (an id the recipe already holds can't add a missing-item error of
-   its own). A tag is kept when the converted recipe takes that same tag; a
-   tag that means one item (the recipe converter's own rule) is that item.
-   Anything else is dropped (Bedrock has no other way to say it, and naming an
-   item the addon doesn't ship is a content-log error, #261).
+2. An item is kept when this conversion emits it, or when it is a vanilla id
+   Bedrock has (Mojang's item list, :mod:`portkit.data.vanilla_items`; Java's
+   ``minecraft:oak_trapdoor`` is not one, Bedrock calls it
+   ``minecraft:trapdoor``). A tag is kept when the converted recipe takes that
+   same tag; a tag that means one item (the recipe converter's own rule) is
+   that item, under the same check. Anything else is dropped: BDS refuses the
+   whole recipe when an unlock names an item it doesn't know ("has an invalid
+   unlock ingredient").
 3. Every recipe written from one Java recipe (its per-member expansions too)
    takes the same entries.
 4. Fallback, labelled: no advancement rewards the recipe, or none of its
-   entries survive -> ``[{"context": "AlwaysUnlocked"}]``, the vanilla
-   crafting table's own unlock. Players can craft every recipe from the grid
+   entries survive -> ``{"context": "AlwaysUnlocked"}`` (an object, as
+   vanilla writes every context), the vanilla crafting table's own unlock. Players can craft every recipe from the grid
    either way while the ``dolimitedcrafting`` gamerule is off (its default);
    ``unlock`` decides when the recipe book shows it.
 """
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ALWAYS_UNLOCKED = [{"context": "AlwaysUnlocked"}]
+# A context is written as one object, never in a list: BDS 1.26.52.3 reads a
+# list entry as an item ("has an invalid unlock ingredient", #260 ingame run
+# 38842744549), and every context unlock in bedrock-samples is an object
+# (crafting_table.json, chest.json, the boats).
+ALWAYS_UNLOCKED = {"context": "AlwaysUnlocked"}
 # Recipe bodies Bedrock wants unlock data on (BDS 1.26.52.3, #238 runs).
 NEEDS_UNLOCK = frozenset({"minecraft:recipe_shaped", "minecraft:recipe_shapeless"})
 _INVENTORY = "minecraft:inventory_changed"
@@ -186,46 +193,45 @@ def recipe_refs(body: dict) -> tuple[set[str], set[str]]:
     return items, tags
 
 
-def unlock_entries(found: Criteria, bodies: list[dict], emitted, single_item) -> list[dict]:
+def unlock_entries(found: Criteria, bodies: list[dict], emitted, single_item,
+                   vanilla: frozenset[str] | None) -> list[dict]:
     """Bedrock unlock entries for ``found``, given every body written from the
-    Java recipe. ``single_item(tag)`` is the one item a tag means, or None."""
-    items: set[str] = set()
+    Java recipe. ``single_item(tag)`` is the one item a tag means, or None;
+    ``vanilla`` is Bedrock's vanilla item ids (None: not known, so none kept)."""
     tags: set[str] = set()
     for body in bodies:
-        i, t = recipe_refs(body)
-        items |= i
-        tags |= t
+        tags |= recipe_refs(body)[1]
     emitted = emitted or {}
+    vanilla = vanilla or frozenset()
     out: list[dict] = []
 
     def add(entry):
         if entry not in out:
             out.append(entry)
 
+    def known(item: str) -> bool:
+        return item in emitted or item in vanilla
+
     for item in found.items:
-        if item in emitted or item in items:
+        if known(item):
             add({"item": item})
     for tag in found.tags:
         if tag in tags:
             add({"tag": tag})
             continue
         one = single_item(tag)
-        if one and (one in emitted or one in items):
+        if one and known(one):
             add({"item": one})
     return out
 
 
-def with_unlock(body: dict, unlock: list[dict]) -> dict:
+def with_unlock(body: dict, unlock: list[dict] | dict) -> dict:
     """``body`` with ``unlock`` placed before its result, as vanilla writes it."""
     out = {}
     for key, value in body.items():
         if key == "result":
-            out["unlock"] = copy_entries(unlock)
+            out["unlock"] = copy.deepcopy(unlock)
         out[key] = value
     if "unlock" not in out:
-        out["unlock"] = copy_entries(unlock)
+        out["unlock"] = copy.deepcopy(unlock)
     return out
-
-
-def copy_entries(unlock: list[dict]) -> list[dict]:
-    return [dict(e) for e in unlock]

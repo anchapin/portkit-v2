@@ -34,6 +34,8 @@ def _offline_vanilla_sounds(request, monkeypatch):
     monkeypatch.delenv("PORTKIT_RECIPE_REFERENCE", raising=False)
     # Bedrock's vanilla texture atlases: none unless a test points at its own.
     monkeypatch.delenv("PORTKIT_VANILLA_TEXTURES", raising=False)
+    # Bedrock's vanilla item ids (recipe unlocks, #260): none unless a test points at its own.
+    monkeypatch.delenv("PORTKIT_VANILLA_ITEMS", raising=False)
 
 
 @pytest.fixture(autouse=True)

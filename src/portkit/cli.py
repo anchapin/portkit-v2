@@ -673,11 +673,13 @@ def _corpus_cases(args):
     from .data import tags as tag_data
 
     from .data import models as model_data
+    from .data import vanilla_items
 
     if args.fetch:
         try:
             data.fetch_sounds()
             model_data.fetch()
+            vanilla_items.fetch()
             for tag_set in tag_data.SETS:
                 tag_data.fetch(tag_set)
         except data.ReferenceDataError as exc:
@@ -702,6 +704,14 @@ def _corpus_cases(args):
         print(f"warning: {message}", file=sys.stderr)
         if os.environ.get("GITHUB_ACTIONS") == "true":
             print(f"::warning title=model templates::{message}")
+    if vanilla_items.ids() is None:
+        # Recipe unlocks name a vanilla item only when Bedrock has it (#260).
+        message = (f"the Bedrock vanilla item list isn't cached, so recipe unlocks leave out "
+                   f"vanilla items and the numbers may differ from the baseline; run "
+                   f"`{data.FETCH_COMMAND}` or add --fetch")
+        print(f"warning: {message}", file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::warning title=vanilla items::{message}")
     if data.bedrock_vanilla_sounds() is None:
         # The corpus baseline is measured with the list; without it vanilla
         # sound references are dropped, which can move the numbers.
@@ -956,6 +966,7 @@ def cmd_reference(args) -> int:
         print(f"{args.mod}: loader {meta.loader or '?'}, minecraft {meta.minecraft or '?'} -> tag data: {chosen}")
     from .data import models as model_data
     from .data import recipes as recipe_data
+    from .data import vanilla_items
     from .data import vanilla_textures
 
     from .data import mappings as mapping_data
@@ -978,6 +989,8 @@ def cmd_reference(args) -> int:
         print(f"{model_data.SET_ID:28} {model_data.LABEL} {state}")
         state = "cached" if vanilla_textures.cached(cache) else "missing"
         print(f"{vanilla_textures.SET_ID:28} {vanilla_textures.LABEL} {state}")
+        state = "cached" if vanilla_items.cached(cache) else "missing"
+        print(f"{vanilla_items.SET_ID:28} {vanilla_items.LABEL} {state}")
         for recipe_set in recipe_data.SETS:
             state = "cached" if recipe_data.cached(recipe_set, cache) else "missing"
             print(f"{recipe_set.id:28} {recipe_set.label} {state}")
@@ -1001,6 +1014,12 @@ def cmd_reference(args) -> int:
     try:
         path, downloaded = vanilla_textures.fetch(cache)
         print(f"{'fetched' if downloaded else 'cached ':7} {vanilla_textures.SET_ID} -> {path}")
+    except data.ReferenceDataError as exc:
+        print(f"FAILED {exc}", file=sys.stderr)
+        failed += 1
+    try:
+        path, downloaded = vanilla_items.fetch(cache)
+        print(f"{'fetched' if downloaded else 'cached ':7} {vanilla_items.SET_ID} -> {path}")
     except data.ReferenceDataError as exc:
         print(f"FAILED {exc}", file=sys.stderr)
         failed += 1
