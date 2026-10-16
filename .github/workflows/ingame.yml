@@ -30,6 +30,8 @@ jobs:
           - { name: cluttered, manifest: fixtures/ingame/mods.toml }
           - { name: night_lights, manifest: fixtures/ingame/mods.toml }
           - { name: cluttered, manifest: fixtures/ingame/mods.toml, experiment: upcoming_creator_features }
+          # Wearable mod armor with worn-look attachables (#274). BDS loads the items; it doesn't draw them.
+          - { name: mythicmetals, manifest: fixtures/real/mods.toml }
     name: ${{ matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
     env:
       PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache
