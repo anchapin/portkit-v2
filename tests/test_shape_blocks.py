@@ -203,10 +203,18 @@ def test_uvlock_flip_keeps_textures_fixed_to_the_world():
     assert "rotation" not in turned["faces"]["down"]
 
 
-def test_uvlock_refuses_a_hand_set_uv():
+def test_uvlock_maps_a_hand_set_uv_as_java_does():
+    # #236: FaceBakery#recomputeUVs; north [0,0,4,4] turned y=90 lands on east
+    # with the same uv (MC 1.21.1 and 1.21.8 client jars agree).
     element = {"from": [0, 0, 0], "to": [16, 8, 16], "faces": {"north": {"texture": "#s", "uv": [0, 0, 4, 4]}}}
     turned, why = models.turn_locked(element, 0, 90)
-    assert turned is None and "hand-set uv" in why
+    assert why == "" and turned["faces"]["east"]["uv"] == [0, 0, 4, 4]
+
+
+def test_uvlock_refuses_a_uv_java_versions_bake_differently():
+    element = {"from": [0, 0, 0], "to": [16, 8, 16], "faces": {"up": {"texture": "#s", "uv": [1, 0, 0, 1]}}}
+    turned, why = models.turn_locked(element, 0, 90)
+    assert turned is None and "MC 1.21.8" in why
 
 
 # -- recognising the shapes --------------------------------------------------

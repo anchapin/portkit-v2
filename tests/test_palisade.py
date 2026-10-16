@@ -35,7 +35,7 @@ def test_four_quarter_turns_come_home():
 
 @pytest.mark.parametrize("change, phrase", [
     ({"rotation": {"angle": 22.5, "axis": "y", "origin": [8, 8, 8]}}, "themselves rotated"),
-    ({"faces": {"up": {"uv": [0, 0, 1, 1], "texture": "#side"}}}, "hand-set uv"),
+    ({"faces": {"up": {"uv": [1, 0, 0, 1], "texture": "#side"}}}, "differently in MC 1.20.1/1.21.1"),
 ])
 def test_turns_we_cannot_state_exactly_are_refused(change, phrase):
     turned, why = models.turn_y({**SIDE, **change}, 90, uvlock=True)
