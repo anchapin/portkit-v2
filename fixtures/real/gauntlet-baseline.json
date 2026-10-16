@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-16T21:31:31+00:00",
+ "generated": "2026-10-16T22:12:33+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -9,18 +9,20 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 1143,
-   "errors": 1,
-   "done": false
+   "residue": 1136,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "sodium": {
    "class": "client-only",
-   "status": "ingest_error",
-   "coverage": null,
-   "files": null,
-   "residue": null,
-   "errors": null,
-   "done": false
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 77,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "fabric_api": {
    "class": "library",
@@ -28,17 +30,19 @@
    "coverage": 0.0,
    "files": 0,
    "residue": 49,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "iris": {
    "class": "client-only",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 1000,
-   "errors": 1,
-   "done": false
+   "residue": 965,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "entityculling": {
    "class": "client-only",
@@ -46,35 +50,39 @@
    "coverage": 0.0,
    "files": 0,
    "residue": 45,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "cloth_config": {
+   "class": "library",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 646,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
+  },
+  "ferritecore": {
+   "class": "performance/mixin-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 77,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
+  },
+  "modmenu": {
    "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 657,
-   "errors": 1,
-   "done": false
-  },
-  "ferritecore": {
-   "class": "performance/mixin-only",
-   "status": "ingest_error",
-   "coverage": null,
-   "files": null,
-   "residue": null,
-   "errors": null,
-   "done": false
-  },
-  "modmenu": {
-   "class": "client-only",
-   "status": "ok",
-   "coverage": 0.0,
-   "files": 0,
-   "residue": 388,
-   "errors": 1,
-   "done": false
+   "residue": 222,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "lithium": {
    "class": "performance/mixin-only",
@@ -82,8 +90,9 @@
    "coverage": 0.0,
    "files": 0,
    "residue": 612,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "immediatelyfast": {
    "class": "client-only",
@@ -91,17 +100,19 @@
    "coverage": 0.0,
    "files": 0,
    "residue": 81,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "yacl": {
-   "class": "UI/info",
+   "class": "library",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 405,
-   "errors": 1,
-   "done": false
+   "residue": 380,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "fabric_language_kotlin": {
    "class": "library",
@@ -109,17 +120,19 @@
    "coverage": 0.0,
    "files": 0,
    "residue": 16,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "xaeros_minimap": {
    "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 759,
-   "errors": 1,
-   "done": false
+   "residue": 746,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "entity_texture_features": {
    "class": "client-only",
@@ -127,8 +140,9 @@
    "coverage": 0.0,
    "files": 0,
    "residue": 286,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "architectury_api": {
    "class": "library",
@@ -136,53 +150,59 @@
    "coverage": 0.0,
    "files": 0,
    "residue": 383,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "sodium_extra": {
-   "class": "client-only",
+   "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 305,
-   "errors": 1,
-   "done": false
+   "residue": 128,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "xaeros_world_map": {
    "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 391,
-   "errors": 1,
-   "done": false
+   "residue": 384,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "entity_model_features": {
    "class": "client-only",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 582,
-   "errors": 1,
-   "done": false
+   "residue": 296,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "veinminer": {
-   "class": "library",
+   "class": "gameplay code",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
    "residue": 337,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "appleskin": {
    "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 69,
-   "errors": 1,
-   "done": false
+   "residue": 48,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "not_enough_animations": {
    "class": "client-only",
@@ -190,62 +210,69 @@
    "coverage": 0.0,
    "files": 0,
    "residue": 84,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "reeses_sodium_options": {
-   "class": "client-only",
+   "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 192,
-   "errors": 1,
-   "done": false
+   "residue": 104,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "skin_layers_3d": {
    "class": "client-only",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 89,
-   "errors": 1,
-   "done": false
+   "residue": 88,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "modernfix": {
    "class": "performance/mixin-only",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 476,
-   "errors": 1,
-   "done": false
+   "residue": 323,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "continuity": {
    "class": "client-only",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 191,
-   "errors": 1,
-   "done": false
+   "residue": 187,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "geckolib": {
    "class": "library",
-   "status": "ingest_error",
-   "coverage": null,
-   "files": null,
-   "residue": null,
-   "errors": null,
-   "done": false
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 263,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "simple_voice_chat": {
    "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 770,
-   "errors": 1,
-   "done": false
+   "residue": 716,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "placeholder_api": {
    "class": "library",
@@ -253,17 +280,19 @@
    "coverage": 0.0,
    "files": 0,
    "residue": 119,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "jade": {
    "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 488,
-   "errors": 1,
-   "done": false
+   "residue": 315,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "waystones": {
    "class": "content",
@@ -279,9 +308,10 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 3080,
-   "errors": 1,
-   "done": false
+   "residue": 1713,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "quark": {
    "class": "content",
@@ -366,21 +396,23 @@
   },
   "mouse_tweaks": {
    "class": "UI/info",
-   "status": "ingest_error",
-   "coverage": null,
-   "files": null,
-   "residue": null,
-   "errors": null,
-   "done": false
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 22,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "controlling": {
-   "class": "client-only",
+   "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
    "residue": 52,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "natures_compass": {
    "class": "content",
@@ -393,39 +425,43 @@
   },
   "clumps": {
    "class": "performance/mixin-only",
-   "status": "ingest_error",
-   "coverage": null,
-   "files": null,
-   "residue": null,
-   "errors": null,
-   "done": false
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 15,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "enchantment_descriptions": {
    "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 204,
-   "errors": 1,
-   "done": false
+   "residue": 23,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "just_enough_resources": {
    "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 305,
-   "errors": 1,
-   "done": false
+   "residue": 162,
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "better_advancements": {
-   "class": "client-only",
+   "class": "UI/info",
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
    "residue": 42,
-   "errors": 1,
-   "done": false
+   "errors": 0,
+   "done": true,
+   "outcome": "explained-empty"
   },
   "comforts": {
    "class": "content",
