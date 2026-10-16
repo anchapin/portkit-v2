@@ -82,8 +82,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   the unlock in place BDS validates further and reports ingredient and result
   ids the recipes already named that Bedrock doesn't have (Java vanilla ids such
   as `minecraft:lily_pad`, `minecraft:terracotta`, `minecraft:bricks`, and
-  unshipped mod items), which it skipped before: those are #261. Corpus (13
-  mods): 3,860 crafting recipes take derived entries, 2,502 AlwaysUnlocked;
+  unshipped mod items), which it skipped before: those are #261. Corpus and
+  deco set (20 mods): 3,860 crafting recipes take derived entries, 2,502
+  AlwaysUnlocked;
   the advancement files read now count as consumed (corpus residue -2,546,
   sample -2,796, mean coverage 12.56% -> 12.94%); only `recipes/*.json` gain
   `unlock`, every other pack file md5-identical; mct 0 errors.
