@@ -44,7 +44,7 @@ where the texture is, the DEFAULT name ``<material>_layer_<n>.png`` (the
 material constant lowercased, in the item's namespace) is tried, only if that
 file is in the jar, and labelled DEFAULT in the notes. A piece the mod draws
 its own way (its own model, a tinted or multi-layer texture) or whose texture
-isn't a single 2:1 png in the jar ships without one, and a note says why;
+isn't a single 64x32 png in the jar ships without one, and a note says why;
 the source textures stay where they are.
 """
 from __future__ import annotations
@@ -153,7 +153,7 @@ def wear(body: dict, piece: ArmorPiece) -> dict:
 
 
 def _png(mod: SourceMod, rel: str) -> tuple[bytes | None, str]:
-    """The jar's png at ``rel`` if it is one 2:1 armor texture, else why not."""
+    """The jar's png at ``rel`` if it is a 64x32 armor layer texture, else why not."""
     path = mod.root / rel
     if not path.is_file():
         return None, f"its texture {rel} isn't in the jar"
@@ -162,9 +162,9 @@ def _png(mod: SourceMod, rel: str) -> tuple[bytes | None, str]:
     if size is None:
         return None, f"its texture {rel} isn't a png that can be read"
     width, height = size
-    if width != 2 * height or width % 64:
-        return None, (f"its texture {rel} is {width}x{height}, not the 2:1 layout (64x32 or a multiple) Java's and "
-                      "Bedrock's armor geometry map")
+    if (width, height) != (64, 32):
+        return None, (f"its texture {rel} is {width}x{height}, not the 64x32 layout Java's and Bedrock's armor "
+                      "geometry share (another size isn't checked to map the same way)")
     return data, ""
 
 
@@ -340,11 +340,11 @@ def convert(mod: SourceMod, files: dict, tags: TagResolver | None = None) -> Con
     if drawn:
         count = sum(len(v) for v in drawn.values())
         result.notes.append(
-            f"{count} armor item(s) are drawn when worn: an attachable on Bedrock's vanilla armor geometry wearing "
+            f"{count} armor item(s) get a worn look: an attachable on Bedrock's vanilla armor geometry wearing "
             f"the mod's own armor layer texture, copied unchanged (#274; {ATTACHABLE_SOURCES}; UV layout: "
             f"{UV_SOURCES}): " + " | ".join(f"{'; '.join(v)} ({k})" for k, v in sorted(drawn.items()))
-            + ". Unverified in game: the server doesn't draw, and Java's armor trims and the 0.01-0.1 differences "
-            "in how far Java and Bedrock puff the armor boxes out aren't matched.")
+            + ". Unverified in game (the server doesn't draw). Not matched: Java's armor trims, and the 0.01-0.1 "
+            "differences in how far Java and Bedrock inflate the armor boxes.")
     if defaults:
         result.notes.append(
             f"DEFAULT armor texture name used for {len(defaults)} item(s) ({_shown(defaults)}): no reader could "

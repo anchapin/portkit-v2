@@ -175,9 +175,9 @@ def test_attachable_in_vanilla_shape(tmp_path, toy_adapter):
     assert result.files["textures/models/armor/toy/plate_layer_1.png"] == _png(64, 32)
     assert {"assets/toy/textures/models/armor/plate_layer_1.png",
             "assets/toy/textures/models/armor/plate_layer_2.png"} <= result.consumed
-    note = next(n for n in result.notes if "drawn when worn" in n)
+    note = next(n for n in result.notes if "get a worn look" in n)
     assert "2 armor item(s)" in note and "toy look source" in note and "64x32" in note
-    assert "Unverified in game" in note
+    assert "Unverified in game" in note and "64x32" in note
 
 
 def test_suffix_and_equipment_assets(tmp_path, toy_adapter):
@@ -221,7 +221,7 @@ def test_default_name_only_when_the_file_is_there(tmp_path, toy_adapter):
     assert result.files["attachables/kyber_helmet.json"]["minecraft:attachable"]["description"]["textures"][
         "default"] == "textures/models/armor/toy/kyber_layer_1"
     assert any(n.startswith("DEFAULT armor texture name used for 1 item(s) (toy:kyber_helmet)") for n in result.notes)
-    assert any("DEFAULT texture name kyber_layer_N.png" in n for n in result.notes if "drawn when worn" in n)
+    assert any("DEFAULT texture name kyber_layer_N.png" in n for n in result.notes if "get a worn look" in n)
     # kyber_layer_2 isn't in the jar, and plain_boots has no material to try: neither is drawn.
     assert "attachables/kyber_leggings.json" not in result.files
     assert "attachables/plain_boots.json" not in result.files

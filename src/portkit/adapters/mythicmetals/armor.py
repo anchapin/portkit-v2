@@ -164,7 +164,9 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
         if len(kinds) == 1:
             types[field] = itemcode.Static(kinds[0].owner, kinds[0].name)
     bonuses = _mixin_bonuses(index)
-    renderers, _, understood = armorlook.fabric_renderers(index)
+    renderers, statics, understood = armorlook.fabric_renderers(index)
+    # Items named by a static aren't mapped to piece names here: refuse rather than miss one.
+    understood = understood and not statics
     found: dict[str, object] = {}
     for field, value in itemcode.static_values(armor).items():
         if not isinstance(value, itemcode.New) or len(value.args) < 2:

@@ -307,7 +307,9 @@ def _client_model(index: ClassIndex, cf, method) -> str | None:
                 if insn.arg[1].startswith(("java/", "net/minecraft/")):
                     continue
                 return f"its class {name} hands Forge client extensions it can't read ({insn.arg[1]})"
-            own = {m.name for m in made.methods} & CLIENT_MODEL_METHODS
+            own = set()
+            for _, link in _chain(index, made.name):
+                own |= {m.name for m in (link.methods if link else ())} & CLIENT_MODEL_METHODS
             if own:
                 return (f"its class {name} draws it with a model of its own "
                         f"({made.name.rsplit('/', 1)[-1]}.{', '.join(sorted(own))})")
