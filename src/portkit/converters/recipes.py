@@ -73,6 +73,8 @@ from pathlib import PurePosixPath
 from ..conditions import CONDITIONAL_TYPES, LoadContext, condition_keys
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
+from .recipe_unlock import ALWAYS_UNLOCKED, NEEDS_UNLOCK, advancement_index, unlock_entries, with_unlock
+from .recipe_unlock import criteria as unlock_criteria
 from .tags import MultiMembers, TagResolver
 
 
@@ -809,6 +811,13 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         identifiers[ident] = rel
         result.files[out_path] = value
 
+    advancements = advancement_index(mod.root)
+    unlocks = {"derived": 0, "no_advancement": 0, "fallback": 0}
+
+    def single_item(tag: str) -> str | None:
+        one = _item({"tag": tag}, tag_resolver)
+        return one.get("item") if one else None
+
     for path in sources:
         rel = result.claim(mod, path)
         key = PurePosixPath(path.relative_to(src).as_posix())
@@ -1048,6 +1057,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             result.unhandled.append(Unhandled(rel, "recipe", clash))
             continue
 
+        built: list[tuple[str, dict]] = []
         for suffix, ingredients in variants:
             variant = copy.deepcopy(body)
             variant["description"]["identifier"] = f"{identifier}{suffix}"
@@ -1062,6 +1072,28 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             else:
                 variant["ingredients"] = ingredients
                 variant["result"] = variant.pop("result")
+            built.append((suffix, variant))
+        if bedrock_type in NEEDS_UNLOCK:
+            # Bedrock 1.20.10+ crafting recipes need unlock data (#260): the
+            # Java recipe advancement's has_<item> items, else AlwaysUnlocked.
+            java_id = f"{mod.namespace}:{key.with_suffix('').as_posix()}"
+            found = unlock_criteria(advancements.get(java_id, []))
+            unlock = unlock_entries(found, [v for _, v in built], emitted, single_item)
+            if unlock:
+                unlocks["derived"] += 1
+            else:
+                unlock = ALWAYS_UNLOCKED
+                unlocks["no_advancement" if java_id not in advancements else "fallback"] += 1
+                if java_id in advancements:
+                    why = "; ".join(found.dropped) or (
+                        "its items and tags are not ones this addon ships or the recipe names")
+                    result.notes.append(
+                        f"{rel}: unlock AlwaysUnlocked (fallback): the Java advancement gives no "
+                        f"Bedrock unlock entry ({why})")
+            built = [(suffix, with_unlock(v, unlock)) for suffix, v in built]
+            for adv_rel, _ in advancements.get(java_id, []):
+                result.consumed.add(adv_rel)  # read for the recipe that shipped
+        for suffix, variant in built:
             write(rel, f"recipes/{name}{suffix}.json", f"{identifier}{suffix}", {
                 "format_version": "1.20.10",
                 bedrock_type: variant,
@@ -1139,6 +1171,12 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             result.consumed.add(source)  # the tag files were read, so they are owned
         if found.note:
             result.notes.append(found.note)
+    if unlocks["no_advancement"]:
+        result.notes.append(
+            f"recipe unlock: {unlocks['no_advancement']} crafting recipe(s) have no Java recipe "
+            "advancement, so Bedrock gets unlock AlwaysUnlocked (fallback); the recipe book shows "
+            "them from the start, and they craft either way"
+        )
     note = context.note() if own_context else None
     if note:
         result.notes.append(note)
