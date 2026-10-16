@@ -264,7 +264,8 @@ def forge_look(index: ClassIndex, cls: str, desc: str, args: list, material: Sta
     override = None
     for owner, cf in _chain(index, cls):
         if cf is None:
-            return None
+            return (f"its class chain reaches {owner.rsplit('/', 1)[-1]}, which isn't in the jar, so whether it "
+                    "draws the piece its own way can't be read")
         for method in cf.methods:
             if method.name == "getArmorTexture" and method.code is not None and override is None:
                 override = (cf, method)
@@ -281,7 +282,8 @@ def forge_look(index: ClassIndex, cls: str, desc: str, args: list, material: Sta
         fields = constructor_fields(index, cls, desc, args)
         where = resource_location(inline(index, (fields or {}).get(field)))
         if where is None:
-            return None
+            return (f"its class {name} formats its armor texture from this.{field}, whose value the constructor "
+                    "chain doesn't give as a constant")
         return ArmorLook("layer", where[0], where[1], "", (
             f"{name}.getArmorTexture formats \"{FORGE_TEXTURE_FORMAT}\" with this.{field} = "
             f"{where[0]}:{where[1]} (set by the constructor chain of {cls.rsplit('/', 1)[-1]}); "

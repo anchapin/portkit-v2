@@ -96,6 +96,8 @@ def test_forge_looks_that_are_not_read(index):
     assert "model of its own" in look("model_helmet") and "getHumanoidArmorModel" in look("model_helmet")
     # Client extensions that only draw a HUD overlay leave the armor model alone.
     assert isinstance(look("overlay_helmet"), itemcode.ArmorLook)
+    # A class chain that leaves the jar can't be read, and that is a reason, not a DEFAULT guess.
+    assert "isn't in the jar" in armorlook.forge_look(index, TOY + "Missing", "()V", [], None)
 
 
 def test_fabric_armor_renderers_are_found(index):
