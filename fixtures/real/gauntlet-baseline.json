@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-16T22:12:33+00:00",
+ "generated": "2026-10-16T23:06:25+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -9,7 +9,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 1136,
+   "residue": 1134,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -39,7 +39,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 965,
+   "residue": 963,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -49,7 +49,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 45,
+   "residue": 44,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -59,7 +59,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 646,
+   "residue": 644,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -79,7 +79,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 222,
+   "residue": 216,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -109,7 +109,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 380,
+   "residue": 378,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -129,7 +129,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 746,
+   "residue": 738,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -139,7 +139,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 286,
+   "residue": 285,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -169,7 +169,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 384,
+   "residue": 383,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -199,7 +199,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 48,
+   "residue": 46,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -229,7 +229,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 88,
+   "residue": 86,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -249,7 +249,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 187,
+   "residue": 184,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -269,7 +269,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 716,
+   "residue": 714,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -297,9 +297,9 @@
   "waystones": {
    "class": "content",
    "status": "ok",
-   "coverage": 8.97,
+   "coverage": 10.29,
    "files": 82,
-   "residue": 832,
+   "residue": 715,
    "errors": 0,
    "done": false
   },
@@ -316,81 +316,81 @@
   "quark": {
    "class": "content",
    "status": "ok",
-   "coverage": 26.88,
+   "coverage": 28.69,
    "files": 2195,
-   "residue": 5972,
+   "residue": 5455,
    "errors": 0,
    "done": false
   },
   "ae2": {
    "class": "content",
    "status": "ok",
-   "coverage": 18.48,
+   "coverage": 19.17,
    "files": 808,
-   "residue": 3564,
+   "residue": 3408,
    "errors": 0,
    "done": false
   },
   "twilight_forest": {
    "class": "content",
    "status": "ok",
-   "coverage": 22.66,
+   "coverage": 23.91,
    "files": 2215,
-   "residue": 7561,
+   "residue": 7050,
    "errors": 0,
    "done": false
   },
   "tinkers_construct": {
    "class": "content",
    "status": "ok",
-   "coverage": 49.47,
+   "coverage": 52.75,
    "files": 15275,
-   "residue": 15602,
+   "residue": 13682,
    "errors": 0,
    "done": false
   },
   "biomes_o_plenty": {
    "class": "content",
    "status": "ok",
-   "coverage": 38.36,
+   "coverage": 39.1,
    "files": 1205,
-   "residue": 1936,
+   "residue": 1877,
    "errors": 0,
    "done": false
   },
   "immersive_engineering": {
    "class": "content",
    "status": "ok",
-   "coverage": 23.66,
+   "coverage": 25.96,
    "files": 2285,
-   "residue": 7374,
+   "residue": 6517,
    "errors": 0,
    "done": false
   },
   "botania": {
    "class": "content",
    "status": "ok",
-   "coverage": 35.49,
+   "coverage": 46.08,
    "files": 3553,
-   "residue": 6459,
+   "residue": 4157,
    "errors": 0,
    "done": false
   },
   "storage_drawers": {
    "class": "content",
    "status": "ok",
-   "coverage": 37.99,
+   "coverage": 38.05,
    "files": 457,
-   "residue": 746,
+   "residue": 744,
    "errors": 0,
    "done": false
   },
   "iron_chests": {
    "class": "content",
    "status": "ok",
-   "coverage": 16.53,
+   "coverage": 17.45,
    "files": 41,
-   "residue": 207,
+   "residue": 194,
    "errors": 0,
    "done": false
   },
@@ -409,7 +409,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 52,
+   "residue": 51,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -417,9 +417,9 @@
   "natures_compass": {
    "class": "content",
    "status": "ok",
-   "coverage": 35.71,
+   "coverage": 51.55,
    "files": 50,
-   "residue": 90,
+   "residue": 47,
    "errors": 0,
    "done": false
   },
@@ -448,7 +448,7 @@
    "status": "ok",
    "coverage": 0.0,
    "files": 0,
-   "residue": 162,
+   "residue": 161,
    "errors": 0,
    "done": true,
    "outcome": "explained-empty"
@@ -466,18 +466,18 @@
   "comforts": {
    "class": "content",
    "status": "ok",
-   "coverage": 21.2,
+   "coverage": 21.3,
    "files": 85,
-   "residue": 316,
+   "residue": 314,
    "errors": 0,
    "done": false
   },
   "cooking_for_blockheads": {
    "class": "content",
    "status": "ok",
-   "coverage": 27.58,
-   "files": 428,
-   "residue": 1124,
+   "coverage": 28.37,
+   "files": 429,
+   "residue": 1083,
    "errors": 0,
    "done": false
   },
