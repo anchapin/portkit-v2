@@ -219,13 +219,17 @@ def _gson_rejects(text: str, exc: json.JSONDecodeError) -> bool:
     followed by another comma or by '}' inside an object
     (com.google.gson.stream.JsonReader.doPeek, gson 2.10.1); only that case is
     claimed here."""
-    if not exc.msg.startswith("Expecting property name"):
+    # Python names the case per version: "Expecting property name ..." (3.12),
+    # "Illegal trailing comma before end of object" (3.13+); both are in an object.
+    if not (exc.msg.startswith("Expecting property name") or "end of object" in exc.msg):
         return False
     pos = exc.pos
     if pos >= len(text) or text[pos] not in ",}":
         return False
     before = text[:pos].rstrip()
-    return before.endswith(",")
+    after = text[pos + 1:].lstrip()
+    # a comma followed by a comma or '}', wherever the parser points
+    return before.endswith(",") or (text[pos] == "," and after[:1] in (",", "}"))
 
 
 def _book_lines(bedrock: str, book_text: dict[str, dict[str, str]]) -> list[str]:
