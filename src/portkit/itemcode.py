@@ -687,16 +687,21 @@ def _run(cf: ClassFile, method, args: list, on_init):
     return None, props
 
 
-def built_object(cf: ClassFile, method: str, desc: str | None = None) -> New | None:
-    """The object a factory method (a registration lambda) builds and returns,
-    with its constructor arguments; the method's own parameters are
-    :class:`Param` values."""
+def factory(cf: ClassFile, method: str, desc: str | None = None) -> tuple[New | None, list[str]]:
+    """(the object a factory method (a registration lambda) builds and returns,
+    with its constructor arguments, or None; the Item.Properties calls it
+    makes on the way). The method's own parameters are :class:`Param` values."""
     m = cf.method(method, desc)
     if m is None:
-        return None
+        return None, []
     n = len(arg_types(m.desc))
-    value, _ = _run(cf, m, [Param(i) for i in range(n)], lambda *a: None)
-    return value if isinstance(value, New) and value.desc is not None else None
+    value, props = _run(cf, m, [Param(i) for i in range(n)], lambda *a: None)
+    return (value if isinstance(value, New) and value.desc is not None else None), props
+
+
+def built_object(cf: ClassFile, method: str, desc: str | None = None) -> New | None:
+    """The object a factory method builds (see :func:`factory`)."""
+    return factory(cf, method, desc)[0]
 
 
 def armor_item_args(index: ClassIndex, cls: str, desc: str, args: list,

@@ -47,7 +47,7 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
     found: dict[str, object] = {}
     for name in sorted(names):
         lam = itemcode.registration_lambda(registry, name)
-        built = itemcode.built_object(registry, lam) if lam else None
+        built, made = itemcode.factory(registry, lam) if lam else (None, [])
         if built is None:
             continue
         chain = itemcode.armor_item_args(index, built.cls, built.desc, built.args)
@@ -65,7 +65,7 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
             found[name] = (f"its class {built.cls.rsplit('/', 1)[-1]} decides some of its numbers in code "
                            f"({', '.join(itemcode.armor_overrides(index, built.cls)) or 'a superclass not in the jar'})")
             continue
-        if set(props) & itemcode.ARMOR_PROPERTY_CALLS or set(calls) & _PROPERTY_BUILDERS:
+        if set(props + made) & itemcode.ARMOR_PROPERTY_CALLS or set(calls) & _PROPERTY_BUILDERS:
             continue
         stats = itemcode.armor_material_enum(index, material.owner).get(material.name)
         cls = built.cls.rsplit("/", 1)[-1]

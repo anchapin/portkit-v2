@@ -152,7 +152,7 @@ def convert(mod: SourceMod, files: dict, tags: TagResolver | None = None) -> Con
         why = answer if isinstance(answer, str) else (
             "no reader for this mod's armor could state its slot, armor points, toughness, knockback "
             "resistance, durability and enchantability from the mod's code")
-        where = ", ".join(f"#{t}" for t in marked.get(ident, [])) or "the mod's code"
+        where = ", ".join(f"#{t}" for t in marked.get(ident, [])) or "its code builds it as an ArmorItem"
         model = f"assets/{mod.namespace}/models/item/{name}.json"
         source = model if (mod.root / model).is_file() else path
         result.unhandled.append(Unhandled(source, RESIDUE_KIND, (
