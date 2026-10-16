@@ -1015,7 +1015,8 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                     for slot, slot_tag in _SMITHING_SLOT_TAGS.items():
                         # Item definitions only: a block in a slot would need
                         # an item form of its own (left as it is).
-                        if emitted and (emitted.get(body.get(slot)) or ("",))[0] == "item":
+                        found = (emitted or {}).get(body.get(slot))
+                        if found and found[0] == "item" and isinstance(found[2].get("minecraft:item"), dict):
                             item_tags.setdefault(body[slot], set()).add(slot_tag)
             continue
         mapping = _SUPPORTED.get(java_type)
