@@ -24,8 +24,9 @@ rule, in the spirit of :mod:`portkit.agent.refs` and :mod:`portkit.agent.stats`:
   Java ``data/<ns>/trim_material/`` or ``trim_pattern/`` definition does not
   help (Java keys those by material or pattern name, e.g. ``steel.json``, with
   the item in its ``ingredient`` / ``template_item`` field, and Bedrock can't
-  use them at all). ``base`` is not gated here: a trimmable armour item,
-  vanilla or modded, is accepted by Bedrock's recipe matcher.
+  use them at all). ``base`` is not gated here; the validator rule
+  ``recipe.smithing_trim`` checks it (#272: BDS refuses a base that isn't
+  wearable armor carrying ``minecraft:trimmable_armors``).
 
 If a written trim violates the rule, :func:`finding` produces an
 ``agent.unresolved_trim`` validate error, and :func:`fabricated_trims` is the

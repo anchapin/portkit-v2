@@ -159,3 +159,16 @@ pinned commit, and the armor and tools that have durability in Bedrock Edition
 per [minecraft.wiki's Durability page](https://minecraft.wiki/w/Durability?oldid=3790798).
 It holds item identifiers and where each comes from, nothing else: no file
 content, definitions or numbers from either source.
+
+## Smithing trim slots (#272)
+
+`portkit/data/trim_items.py` lists, by hand, the Bedrock vanilla item ids each
+slot of a `recipe_smithing_trim` takes: the members of Bedrock's
+`minecraft:trim_templates`, `minecraft:trimmable_armors` and
+`minecraft:trim_materials` per
+[minecraft.wiki's Item tag (Bedrock Edition) page](https://minecraft.wiki/w/Item_tag_(Bedrock_Edition)?oldid=3758407),
+and resin brick per [its page](https://minecraft.wiki/w/Resin_Brick?oldid=3734929).
+The slot rules are quoted from
+[Mojang/bedrock-samples](https://github.com/Mojang/bedrock-samples)
+`documentation/Recipes.html` at the pinned commit. It holds item identifiers,
+tag names and where each comes from, nothing else.
