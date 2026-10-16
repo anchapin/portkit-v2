@@ -1,51 +1,51 @@
 {
   "fixtures": {
     "alexs_mobs": {
-      "coverage": 26.2,
+      "coverage": 28.9,
       "files": 1097,
-      "residue": 3096,
+      "residue": 2700,
       "errors": 0
     },
     "betterend": {
-      "coverage": 37.1,
+      "coverage": 37.7,
       "files": 3313,
-      "residue": 5607,
+      "residue": 5486,
       "errors": 0
     },
     "create": {
-      "coverage": 32.5,
+      "coverage": 40.9,
       "files": 4021,
-      "residue": 8334,
+      "residue": 5822,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 38.2,
+      "coverage": 41.0,
       "files": 903,
-      "residue": 1462,
+      "residue": 1299,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 43.5,
+      "coverage": 46.9,
       "files": 880,
-      "residue": 1141,
+      "residue": 995,
       "errors": 0
     },
     "mekanism": {
-      "coverage": 12.0,
+      "coverage": 15.7,
       "files": 1222,
-      "residue": 9000,
+      "residue": 6568,
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 49.8,
+      "coverage": 57.0,
       "files": 1871,
-      "residue": 1885,
+      "residue": 1414,
       "errors": 0
     },
     "silent_gear_1165": {
-      "coverage": 32.3,
+      "coverage": 36.3,
       "files": 1088,
-      "residue": 2282,
+      "residue": 1910,
       "errors": 0
     },
     "storage_drawers_1122": {
@@ -57,25 +57,25 @@
     "storage_drawers_1192": {
       "coverage": 41.2,
       "files": 268,
-      "residue": 382,
+      "residue": 383,
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 29.2,
+      "coverage": 29.9,
       "files": 1539,
-      "residue": 3726,
+      "residue": 3604,
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 48.6,
+      "coverage": 52.0,
       "files": 16576,
-      "residue": 17498,
+      "residue": 15285,
       "errors": 0
     },
     "waystones": {
-      "coverage": 32.7,
+      "coverage": 36.9,
       "files": 328,
-      "residue": 676,
+      "residue": 560,
       "errors": 0
     }
   }
