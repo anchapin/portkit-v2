@@ -36,6 +36,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from .converters.lang import KINDS as LANG_KINDS
 from .model import Unhandled
 
 OUTCOME = "explained-empty"
@@ -472,7 +473,7 @@ def _own_typed_data(root: Path | None, source: str, namespaces) -> bool:
 
 
 def _is_code_leftover(u: Unhandled, root: Path | None = None, namespaces=()) -> bool:
-    if u.kind in ("lang", "lang_code_string"):
+    if u.kind in LANG_KINDS:
         return True
     if u.kind != "unowned":
         return False
@@ -513,7 +514,7 @@ def explain_leftovers(unhandled: list[Unhandled], reasons: list[dict], root: Pat
         if not _is_code_leftover(u, root, namespaces):
             out.append(u)
             continue
-        if u.kind in ("lang", "lang_code_string"):
+        if u.kind in LANG_KINDS:
             lang_keys[u.source] = lang_keys.get(u.source, 0) + 1
             continue
         sub = _leftover_dir(u.source) or "data"

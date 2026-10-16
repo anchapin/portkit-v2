@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import codeonly
+from . import codeonly, ownership
+from .converters import lang
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
 from .converters import convert_all
@@ -502,6 +503,9 @@ def convert(
         # And a trim recipe whose base is the pack's own item that isn't armor
         # carrying minecraft:trimmable_armors (#272).
         withdraw_unacceptable_trims(result)
+        # Now that the pack's blocks, items and entities are final, its .lang
+        # keeps only the lines naming one of them (#277 lang).
+        lang.settle(result)
         shorten_paths(result)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}
         icon, icon_source, icon_note = resolve_icon(staged.icons, namespace)
@@ -529,6 +533,11 @@ def convert(
                 unhandled = codeonly.explain_leftovers(unhandled, reasons, staged.root, staged.namespaces)
                 outcome = codeonly.OUTCOME
                 codeonly.write_report(out_dir, codeonly.report(meta, reasons, unhandled, facts))
+        if outcome is None:
+            # A shipping mod's leftover models and textures: the jar's own
+            # references say whether residue owns them or only Java code
+            # draws them (#277 unowned).
+            unhandled = ownership.refine(unhandled, staged.root, result.consumed)
         if outcome is None and (out_dir / codeonly.REPORT_NAME).is_file():
             # An earlier run's report would make this tree read as explained-empty.
             (out_dir / codeonly.REPORT_NAME).unlink()
