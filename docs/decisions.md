@@ -27,9 +27,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-15: recipes are written in Bedrock's vanilla ids (GeyserMC/mappings), and a recipe naming an item the pack doesn't ship is residue
+## 2026-10-16: recipes are written in Bedrock's vanilla ids (GeyserMC/mappings), and a recipe naming an item the pack doesn't ship is residue
 
-- **Status:** pending review.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
 - **Decision:** two rules for the item ids a converted recipe names (#261).
   1. **Vanilla ids as Bedrock spells them.** A Java id becomes Bedrock's through
      GeyserMC/mappings `items.json` (pinned commit `81700ab5`, generated for Java
