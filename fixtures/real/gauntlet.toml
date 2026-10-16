@@ -1,0 +1,914 @@
+# The top-50 gauntlet (#277, harness #278): #277's 50 mods, one pinned jar each.
+# Corpus manifest format (fixtures/real/mods.toml); jars are downloaded and
+# sha512-checked, measured and discarded, never committed. Generated, not hand-edited:
+#   portkit gauntlet pin
+# Pinned 2026-10-16. Version rule (#278 pick 1): the newest build for Minecraft 1.21.1,
+# else 1.20.1, releases before pre-releases, on the loader the converter reads best
+# (1.21.1: neoforge, fabric, forge, quilt; 1.20.1: forge, fabric, neoforge, quilt).
+# `rule` says which branch picked the build; off-rule means neither version exists.
+# Modrinth first. CurseForge-only mods stay `unfetchable` here, file id and sha512
+# kept as metadata; a run with CURSEFORGE_API_KEY fetches them through the official
+# API only when allowModDistribution is true, never from the CDN directly and never
+# cached (#278 pick 2). `unfetchable` marks a jar that can't be fetched, with the reason.
+
+[[mod]]
+name = "jei"
+rank = 1
+title = "Just Enough Items (JEI)"
+project = "jei"
+host = "modrinth"
+version_id = "ufHUqt9b"
+version = "19.51.0.418"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "MIT"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/u6dRKJwZ/versions/ufHUqt9b/jei-1.21.1-neoforge-19.51.0.418.jar"
+sha512 = "a6ca3abc3080f6f41033a77cb955fefe9f9ebae795c33546227f555b2d31e8d4131cc705126d14a3fbabb31097fc0e876dc0bbeb05ad907a1b796f21e57527bf"
+listed_lib = false
+notes = "Modrinth 83684694 downloads (2026-10-16)"
+
+[[mod]]
+name = "sodium"
+rank = 2
+title = "Sodium"
+project = "sodium"
+host = "modrinth"
+version_id = "uMOpc5uV"
+version = "mc1.21.1-0.8.13-neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-Polyform-Shield-1.0.0"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/AANobbMI/versions/uMOpc5uV/sodium-neoforge-0.8.13%2Bmc1.21.1.jar"
+sha512 = "4f537696af95411e9daf15795fb5fcbc49913d488a96fa912fa8f1d7db408710995e8a1461190f3cd0f8217bf9e35e9539176592428ed587ca2d7aa84450a390"
+listed_lib = false
+notes = "Modrinth 246734513 downloads (2026-10-16)"
+
+[[mod]]
+name = "fabric_api"
+rank = 3
+title = "Fabric API"
+project = "fabric-api"
+host = "modrinth"
+version_id = "Mys3P7lK"
+version = "0.116.17+1.21.1"
+loader = "fabric"
+minecraft = "1.21.1"
+rule = "1.21.1 fabric release"
+license = "Apache-2.0"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/P7dR8mSH/versions/Mys3P7lK/fabric-api-0.116.17%2B1.21.1.jar"
+sha512 = "98c478217da19181f0e4df3ea6c2da6bdbda271c7544a4aea048513a49b444f1ff5b71dc0df6303017c48e8ff69b7bb6af6179bdf0d0e09ab3c1ee08411857a8"
+listed_lib = true
+notes = "Modrinth 280502422 downloads (2026-10-16)"
+
+[[mod]]
+name = "iris"
+rank = 4
+title = "Iris Shaders"
+project = "iris"
+host = "modrinth"
+version_id = "t3ruzodq"
+version = "1.8.12+1.21.1-neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/YL57xq9U/versions/t3ruzodq/iris-neoforge-1.8.12%2Bmc1.21.1.jar"
+sha512 = "57b8026a3c3c433cf6123d63dc6ce7e11f6d480a72926370db1fc7f2b06059bc16a753ecd7e7af659c19e90b592103196b0e89585ce4f0744a4ca433f59bcf1a"
+listed_lib = false
+notes = "Modrinth 191520846 downloads (2026-10-16)"
+
+[[mod]]
+name = "entityculling"
+rank = 5
+title = "Entity Culling"
+project = "entityculling"
+host = "modrinth"
+version_id = "eieYbWYb"
+version = "1.11.3"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-tr7zw-Protective-License"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/NNAgCjsB/versions/eieYbWYb/entityculling-neoforge-1.11.3-mc1.21.1.jar"
+sha512 = "93e83dd690b91d610be29451b34836c9daa7e08bd952f88ffa07c62d8774bbaac2ff0c6768d2cbf1b14f47d0b86f98cef9fd341e0d29bd37207eaf4aa2abea63"
+listed_lib = false
+notes = "Modrinth 183834380 downloads (2026-10-16)"
+
+[[mod]]
+name = "cloth_config"
+rank = 6
+title = "Cloth Config API"
+project = "cloth-config"
+host = "modrinth"
+version_id = "izKINKFg"
+version = "15.0.140+neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/9s6osm5g/versions/izKINKFg/cloth-config-15.0.140-neoforge.jar"
+sha512 = "aaf9b010955b8cd294e5a92f069985b18729fd5e2cf22d351f1dff9680f15488688803ec41e77e941cbde130ceb535014ca4c868047d80ab69c2d508e216654d"
+listed_lib = true
+notes = "Modrinth 180835594 downloads (2026-10-16)"
+
+[[mod]]
+name = "ferritecore"
+rank = 7
+title = "FerriteCore"
+project = "ferrite-core"
+host = "modrinth"
+version_id = "x7kQWVju"
+version = "7.0.3-neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "MIT"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/uXXizFIs/versions/x7kQWVju/ferritecore-7.0.3-neoforge.jar"
+sha512 = "19af89a2075bb10a63884fa853ebf84b02c79dc3242430ecdad056fd764fdcde367a7303276b329df01b0736e2ef264c5d80c7dc92c6aebd244f556a230bb417"
+listed_lib = false
+notes = "Modrinth 162347884 downloads (2026-10-16)"
+
+[[mod]]
+name = "modmenu"
+rank = 8
+title = "Mod Menu"
+project = "modmenu"
+host = "modrinth"
+version_id = "6lgOkclV"
+version = "11.0.5"
+loader = "fabric"
+minecraft = "1.21.1"
+rule = "1.21.1 fabric release"
+license = "MIT"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/mOgUt4GM/versions/6lgOkclV/modmenu-11.0.5.jar"
+sha512 = "92e8e96267ff18d320903090f2ad9b32408a218919f5a0d578e232ad774c89d49a34a8271806652be7d6283f24e98432bc4af7f95855e78b843f9100d68696c7"
+listed_lib = false
+notes = "Modrinth 156790573 downloads (2026-10-16)"
+
+[[mod]]
+name = "lithium"
+rank = 9
+title = "Lithium"
+project = "lithium"
+host = "modrinth"
+version_id = "DDUrRVCA"
+version = "mc1.21.1-0.15.4-neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/gvQqBUqZ/versions/DDUrRVCA/lithium-neoforge-0.15.4%2Bmc1.21.1.jar"
+sha512 = "2735da2088b88a8bdcd4ad02a2b6fffbfd3925557cefd4fa54b5477dfb9e582ea7f521300c060f57dff1325dd21bff276b7333363ad3371ed6893e3de9eca9cd"
+listed_lib = false
+notes = "Modrinth 138287417 downloads (2026-10-16)"
+
+[[mod]]
+name = "immediatelyfast"
+rank = 10
+title = "ImmediatelyFast"
+project = "immediatelyfast"
+host = "modrinth"
+version_id = "EJzmEPZV"
+version = "1.6.15+1.21.1-neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-or-later"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/5ZwdcRci/versions/EJzmEPZV/ImmediatelyFast-NeoForge-1.6.15%2B1.21.1.jar"
+sha512 = "c115cad7b060373fc597aae08c685e2d56f173b88b792a4a2c229e222f8da293b99865e9553cf716483d3c3d6a18f31c51c5dd55be22d4625ed2c962d7b94fd0"
+listed_lib = false
+notes = "Modrinth 133874953 downloads (2026-10-16)"
+
+[[mod]]
+name = "yacl"
+rank = 11
+title = "YetAnotherConfigLib (YACL)"
+project = "yacl"
+host = "modrinth"
+version_id = "7TVdVtxF"
+version = "3.8.2+1.21.1-neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-or-later"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/1eAoo2KR/versions/7TVdVtxF/yet_another_config_lib_v3-3.8.2%2B1.21.1-neoforge.jar"
+sha512 = "583de19b927ce8050c2b7d5e60b75accc69e325e5aac85c27994c82a9dec2e4e078343fa1d4c3a10d4bd7e0e524e0b3b246a18cf03db01e363a1e6f865adcf48"
+listed_lib = true
+notes = "Modrinth 132205510 downloads (2026-10-16)"
+
+[[mod]]
+name = "fabric_language_kotlin"
+rank = 12
+title = "Fabric Language Kotlin"
+project = "fabric-language-kotlin"
+host = "modrinth"
+version_id = "SKW1BTL3"
+version = "1.14.2+kotlin.2.4.21"
+loader = "fabric"
+minecraft = "1.21.1"
+rule = "1.21.1 fabric release"
+license = "Apache-2.0"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/Ha28R6CL/versions/SKW1BTL3/fabric-language-kotlin-1.14.2%2Bkotlin.2.4.21.jar"
+sha512 = "7fb475c4a7e7bdf8d0aca4b5798a58a354c51443d5b1fbde3e8cf34dfbf7191ef4238b5f07d08ec9490ec180b371624523326c3ad45d4ed2b2be541de9407e5d"
+listed_lib = true
+notes = "Modrinth 128762065 downloads (2026-10-16)"
+
+[[mod]]
+name = "xaeros_minimap"
+rank = 13
+title = "Xaero's Minimap"
+project = "xaeros-minimap"
+host = "modrinth"
+version_id = "irjR7dHk"
+version = "neoforge-1.21.1-26.6.0"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-All-Rights-Reserved"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/1bokaNcj/versions/irjR7dHk/xaerominimap-neoforge-1.21.1-26.6.0.jar"
+sha512 = "d56b93ddb921285624b491d6a85aba23748bec9974867399c881c257eb25a746df92a735473adf3a6875e0928a56ff78245d5238eb9207b0e45c3fec20c896dc"
+listed_lib = false
+notes = "Modrinth 118335571 downloads (2026-10-16)"
+
+[[mod]]
+name = "entity_texture_features"
+rank = 14
+title = "Entity Texture Features"
+project = "entitytexturefeatures"
+host = "modrinth"
+version_id = "lwNx1nD1"
+version = "7.2.6-neoforge-1.21"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/BVzZfTc1/versions/lwNx1nD1/entity_texture_features-7.2.6-1.21-neoforge.jar"
+sha512 = "0e349c235b509de605ef4175a60e87ee78eab208b554ebc1dfa756b18ab2b531ce4641bfdc1c4542cb3c24d45b81698ca1413fcd001d589d82cbad6cea346f46"
+listed_lib = false
+notes = "Modrinth 108540983 downloads (2026-10-16)"
+
+[[mod]]
+name = "architectury_api"
+rank = 15
+title = "Architectury API"
+project = "architectury-api"
+host = "modrinth"
+version_id = "1IiqEQGl"
+version = "13.0.11+neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/lhGA9TYQ/versions/1IiqEQGl/architectury-13.0.11-neoforge.jar"
+sha512 = "d9f7c3bb8162577dfb461ffdf04bd6a3563c7586934a0e2a744c14421beffb8286f0d88d4c758317003f20f99fe8072a39b9d675af061e036970d36db36027f0"
+listed_lib = true
+notes = "Modrinth 106085058 downloads (2026-10-16)"
+
+[[mod]]
+name = "sodium_extra"
+rank = 16
+title = "Sodium Extra"
+project = "sodium-extra"
+host = "modrinth"
+version_id = "ufpcXU9c"
+version = "mc1.21.1-0.9.4+neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/PtjYWJkn/versions/ufpcXU9c/sodium-extra-neoforge-0.9.4%2Bmc1.21.1.jar"
+sha512 = "b930a9c6364bdbac42da7175f9fa71360053cd046d2f1e9a99d712e5942299882bfb585e5b661490b791e219b5dd6b9f064fb94f169d7a32a9934c1dc2b85edf"
+listed_lib = false
+notes = "Modrinth 103735640 downloads (2026-10-16)"
+
+[[mod]]
+name = "xaeros_world_map"
+rank = 17
+title = "Xaero's World Map"
+project = "xaeros-world-map"
+host = "modrinth"
+version_id = "SnQ4SoDe"
+version = "neoforge-1.21.1-1.47.0"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-All-Rights-Reserved"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/NcUtCpym/versions/SnQ4SoDe/xaeroworldmap-neoforge-1.21.1-1.47.0.jar"
+sha512 = "4d2d78bc85afa002f682ef344b7284cf1baa4903cc5a11cd1d7bd260ac63952580ae717bab47079540ead633cdd5d8e4fdf230dc99a68bcb7a269500e7dada13"
+listed_lib = false
+notes = "Modrinth 103648803 downloads (2026-10-16)"
+
+[[mod]]
+name = "entity_model_features"
+rank = 18
+title = "Entity Model Features"
+project = "entity-model-features"
+host = "modrinth"
+version_id = "197m3VoU"
+version = "3.3.12-neoforge-1.21"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/4I1XuqiY/versions/197m3VoU/entity_model_features-3.3.12-1.21-neoforge.jar"
+sha512 = "b18bde755c6719c62579d65c96e6e768c99b25fba9f987dc843b2a64ce4d713ba2f8151da4a98efe76d854550f40356ac4fdfa952568cf1fb11771353dfc70e8"
+listed_lib = false
+notes = "Modrinth 103110610 downloads (2026-10-16)"
+
+[[mod]]
+name = "veinminer"
+rank = 19
+title = "VeinMiner"
+project = "veinminer"
+host = "modrinth"
+version_id = "syKekkIm"
+version = "2.11.2"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "AGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/OhduvhIc/versions/syKekkIm/veinminer-neoforge-2.11.2%2B1.21.1.jar"
+sha512 = "195fdfe9f1358e85218e770c953223825d102f54b5f607857b8893959cd2164a04c921987611a7933592ba89a83aa2bd8f3cec0b1fcf7d87a20b168f88b2cc05"
+listed_lib = false
+notes = "Modrinth 96636377 downloads (2026-10-16)"
+
+[[mod]]
+name = "appleskin"
+rank = 20
+title = "AppleSkin"
+project = "appleskin"
+host = "modrinth"
+version_id = "uAKA6Laj"
+version = "3.0.9+mc1.21"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "Unlicense"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/EsAfCjCV/versions/uAKA6Laj/appleskin-neoforge-mc1.21-3.0.9.jar"
+sha512 = "f4ea46273e407334b63e262e2555c9a8204f7b5e60f23f272fbaa83ad9e88800e0ee186aca840710df2dbe0a18b37758695fef2ae1a902c10b3706e3de772937"
+listed_lib = false
+notes = "Modrinth 96363555 downloads (2026-10-16)"
+
+[[mod]]
+name = "not_enough_animations"
+rank = 21
+title = "Not Enough Animations"
+project = "not-enough-animations"
+host = "modrinth"
+version_id = "VCuMsK45"
+version = "1.12.6"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-tr7zw-Protective-License"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/MPCX6s5C/versions/VCuMsK45/notenoughanimations-neoforge-1.12.6-mc1.21.1.jar"
+sha512 = "2b392f770cac669abcc796e836fc86579e29c1c70174f773fadbb747d8a49763fefd938835aeef8681a384aee9a7b6a8fa4684aaa1961159ccddea680e936acd"
+listed_lib = false
+notes = "Modrinth 92664755 downloads (2026-10-16)"
+
+[[mod]]
+name = "reeses_sodium_options"
+rank = 22
+title = "Reese's Sodium Options"
+project = "reeses-sodium-options"
+host = "modrinth"
+version_id = "XjF2IkL8"
+version = "mc1.21.1-2.2.4+neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "MIT"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/Bh37bMuy/versions/XjF2IkL8/reeses-sodium-options-neoforge-2.2.4%2Bmc1.21.1.jar"
+sha512 = "a99d41a41ca83376c4fa29ed22a99e98288a7e9a4749fbf6d3724b9804b8e66648e267c6851a53d040069fdc2d889f8205cbb444bee10a35be840d13fc9ed477"
+listed_lib = false
+notes = "Modrinth 86456928 downloads (2026-10-16)"
+
+[[mod]]
+name = "skin_layers_3d"
+rank = 23
+title = "3D Skin Layers"
+project = "3dskinlayers"
+host = "modrinth"
+version_id = "5s6lxsQW"
+version = "1.11.3"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-tr7zw-Protective-License"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/zV5r3pPn/versions/5s6lxsQW/skinlayers3d-neoforge-1.11.3-mc1.21.1.jar"
+sha512 = "7bf3064d6cd43b2991d7e51d9dd2a3f27c74cab6bbde80c7aa1fffe06a7935ef0b407b0514d789519f64e825ded71953e08c14f0b6aa530c5223d126d9b03912"
+listed_lib = false
+notes = "Modrinth 82750519 downloads (2026-10-16)"
+
+[[mod]]
+name = "modernfix"
+rank = 24
+title = "ModernFix"
+project = "modernfix"
+host = "modrinth"
+version_id = "7Jy58lnT"
+version = "5.27.26+mc1.21.1"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/nmDcB62a/versions/7Jy58lnT/modernfix-neoforge-5.27.26%2Bmc1.21.1.jar"
+sha512 = "37c76fc5bc72cfc1035260f891ffeb45b4f32651d2e490c5eb8c60f3b5686deca3145b32d4fab9036f65f5277b0ac66f4ad3855e52cd973e791b09e9c4b896d8"
+listed_lib = false
+notes = "Modrinth 82284263 downloads (2026-10-16)"
+
+[[mod]]
+name = "continuity"
+rank = 25
+title = "Continuity"
+project = "continuity"
+host = "modrinth"
+version_id = "eXGUs5sy"
+version = "3.0.0+1.21.neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/1IjD5062/versions/eXGUs5sy/continuity-3.0.0%2B1.21.neoforge.jar"
+sha512 = "320b6def6073ce0ffc0ce2bd7cdb66324467ea3e7cec05508f32d78f65c60ff3e155394b94c60f62e059404ec0ca3fc6112987a5764a8f85241d3026a2ee4935"
+listed_lib = false
+notes = "Modrinth 78168387 downloads (2026-10-16)"
+
+[[mod]]
+name = "geckolib"
+rank = 26
+title = "GeckoLib"
+project = "geckolib"
+host = "modrinth"
+version_id = "Grwn5rUB"
+version = "4.9.3"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "MIT"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/8BmcQJ2H/versions/Grwn5rUB/geckolib-neoforge-1.21.1-4.9.3.jar"
+sha512 = "8dfa5f8c57224a5e34e5098367ea9819ca6dc9c11357cd3062c16da3455c8bd1a483098af7383debc4b9ce8e4d7ab3fdc799b415644eb829da83eb72a7335dfd"
+listed_lib = true
+notes = "Modrinth 75166155 downloads (2026-10-16)"
+
+[[mod]]
+name = "simple_voice_chat"
+rank = 27
+title = "Simple Voice Chat"
+project = "simple-voice-chat"
+host = "modrinth"
+version_id = "2s7zUspF"
+version = "neoforge-1.21.1-2.6.22"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-All-Rights-Reserved"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/9eGKb6K1/versions/2s7zUspF/voicechat-neoforge-1.21.1-2.6.22.jar"
+sha512 = "309e3b18e299b2bccf9128dbb05c2603a9860f7cd68858d23f8fdb8265ea85ec7fb1655c95b87c0a9522ae1fd6380b26e4a4c31207f9c7af80870fcc6207abad"
+listed_lib = false
+notes = "Modrinth 74695780 downloads (2026-10-16)"
+
+[[mod]]
+name = "placeholder_api"
+rank = 28
+title = "Text Placeholder API"
+project = "placeholder-api"
+host = "modrinth"
+version_id = "U5bhVym2"
+version = "2.4.2+1.21"
+loader = "fabric"
+minecraft = "1.21.1"
+rule = "1.21.1 fabric release"
+license = "LGPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/eXts2L7r/versions/U5bhVym2/placeholder-api-2.4.2%2B1.21.jar"
+sha512 = "fc13d3a5c048dbaab86318edaf8b6c6b46ef9f1d367e8f063d19f5a9b0da66c5ae419d92c8c4608edc89a01eb44d91ffcf017fea73f39b222cbd85e82f70a233"
+listed_lib = true
+notes = "Modrinth 72526102 downloads (2026-10-16)"
+
+[[mod]]
+name = "jade"
+rank = 29
+title = "Jade"
+project = "jade"
+host = "modrinth"
+version_id = "eYz2YBGT"
+version = "15.10.6+neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "CC-BY-NC-SA-4.0"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/nvQzSEkH/versions/eYz2YBGT/Jade-1.21.1-NeoForge-15.10.6.jar"
+sha512 = "dad9755dce8d85d914fc4df2baa0211f13e5839a71c1925fdd01f69081a95e30a2934e6273f8b01f0169adebe7a9dae57a8d904de0c4cb36dc17369bb474f0f2"
+listed_lib = false
+notes = "Modrinth 72348591 downloads (2026-10-16)"
+
+[[mod]]
+name = "waystones"
+rank = 30
+title = "Waystones"
+project = "waystones"
+host = "modrinth"
+version_id = "6Z6MQ6os"
+version = "21.1.46+neoforge-1.21.1"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-All-Rights-Reserved"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/LOpKHB2A/versions/6Z6MQ6os/waystones-neoforge-1.21.1-21.1.46.jar"
+sha512 = "ca90b58d884d4bc2b08a870484ae7ede397e71d31eaaf01ff2603ad498d584763e099c2094e57031522385339705d2c011ed4910bf36efae688e64935b49ece9"
+listed_lib = false
+notes = "Modrinth 27144545 downloads (2026-10-16)"
+
+[[mod]]
+name = "journeymap"
+rank = 31
+title = "JourneyMap"
+project = "journeymap"
+host = "modrinth"
+version_id = "CtFE7hwT"
+version = "1.21.1-6.0.9+neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-All-Rights-Reserved"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/lfHFW1mp/versions/CtFE7hwT/journeymap-neoforge-1.21.1-6.0.9.jar"
+sha512 = "8900ee4cdb7d1ffb6559decdeec84ad479d04b2e7b01a60be9f6e328809af2bfd7a80077b7da0e49bc96261fe8fe274ba33c62f6c9f65302c783ed823c4ff746"
+listed_lib = false
+notes = "Modrinth 15320219 downloads (2026-10-16)"
+
+[[mod]]
+name = "quark"
+rank = 32
+title = "Quark"
+project = "quark"
+host = "modrinth"
+version_id = "18h0L19k"
+version = "4.1-487"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "CC-BY-NC-SA-3.0"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/qnQsVE2z/versions/18h0L19k/Quark-4.1-487.jar"
+sha512 = "0d1869d5d912e4f36d5e7c62acb9720cdb8c163911f09dad8f9eb3592bde4e1b25d664a8ed24d9002cb77ae6fd2f37768d3a97b779e7f9d84c567de83c9599f2"
+listed_lib = false
+notes = "Modrinth 26150619 downloads (2026-10-16)"
+
+[[mod]]
+name = "ae2"
+rank = 33
+title = "Applied Energistics 2"
+project = "ae2"
+host = "modrinth"
+version_id = "KDnFUmMm"
+version = "19.2.18"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-Multiple"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/XxWD5pD3/versions/KDnFUmMm/appliedenergistics2-19.2.18.jar"
+sha512 = "39bc4cf733a4321631e2637a1a6dfd3527135fdac1b572534e6fd1f9eab7a6dd92d56c5fa066263c95149c9b20cabdd1fd3dff80bea515381b1d2d754cad26c3"
+listed_lib = false
+notes = "Modrinth 6281705 downloads (2026-10-16)"
+
+[[mod]]
+name = "twilight_forest"
+rank = 34
+title = "The Twilight Forest"
+project = "the-twilight-forest"
+host = "curseforge"
+cf_mod_id = 227639
+version_id = "7797302"
+version = "Twilight Forest - MC 1.21.1 - 4.8.3345"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-2.1-only (code); CC-BY-NC-SA-4.0 (assets)"
+redistribution = "licences allow copying with attribution (assets non-commercial, share-alike); fetched only through the official CurseForge API with a key, only when allowModDistribution is true, fresh each run, never cached or committed (#278 pick 2)"
+sha512 = "371dd7079b174091363327df70ed64c84e8e36fcab49b4c33bbcbe39650f6bccc12d3e14818cdfbbaa519a999f64a0a92c03ec981f55a315b044dc7cb5c27ef4"
+listed_lib = false
+unfetchable = "CurseForge-only; awaiting official CurseForge API key (allowModDistribution must be true)"
+notes = "CurseForge project 227639; licence from https://github.com/TeamTwilight/twilightforest (LICENSE, ASSET_LICENSE)"
+
+[[mod]]
+name = "tinkers_construct"
+rank = 35
+title = "Tinkers' Construct"
+project = "tinkers-construct"
+host = "modrinth"
+version_id = "kJ9LD194"
+version = "3.11.2.166"
+loader = "forge"
+minecraft = "1.20.1"
+rule = "1.20.1 forge release"
+license = "MIT"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/rxIIYO6c/versions/kJ9LD194/TConstruct-1.20.1-3.11.2.166.jar"
+sha512 = "69da7399162b4de18b3eedf701f6013727ec4ae14b1b746265513bea6c4e88ad64ccb1187d3abca2387aafd37a91c21c56ce9b6fa7b0c26df17dfc1ac8d6a916"
+listed_lib = false
+notes = "Modrinth 3982385 downloads (2026-10-16)"
+
+[[mod]]
+name = "biomes_o_plenty"
+rank = 36
+title = "Biomes O' Plenty"
+project = "biomes-o-plenty"
+host = "modrinth"
+version_id = "zAvWfIlG"
+version = "18.0.0.592"
+loader = "forge"
+minecraft = "1.20.1"
+rule = "1.20.1 forge release"
+license = "LicenseRef-All-Rights-Reserved"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/HXF82T3G/versions/zAvWfIlG/BiomesOPlenty-1.20.1-18.0.0.592.jar"
+sha512 = "cc8aab089379484994f45224804d60bce78020880cdf595f36e0f1514d0decc4faab450ac26f304703311515aa548b75b24d339008fc0cf383b7dd0da853a9fc"
+listed_lib = false
+notes = "Modrinth 38618879 downloads (2026-10-16)"
+
+[[mod]]
+name = "immersive_engineering"
+rank = 37
+title = "Immersive Engineering"
+project = "immersiveengineering"
+host = "modrinth"
+version_id = "uNRARSH2"
+version = "12.4.2-194"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-Custom"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/tIm2nV03/versions/uNRARSH2/ImmersiveEngineering-1.21.1-12.4.2-194.jar"
+sha512 = "862523e84747a8b7eaa65f9b3c337fa832ef9efd0545c27f68e350e01f482c7a1242d0e4bdc2caff3d7eb033508b43a353fcd7150c9b544d0c05765ca2a551b3"
+listed_lib = false
+notes = "Modrinth 3679502 downloads (2026-10-16)"
+
+[[mod]]
+name = "botania"
+rank = 38
+title = "Botania"
+project = "botania"
+host = "modrinth"
+version_id = "npY4sRWF"
+version = "1.20.1-456-forge"
+loader = "forge"
+minecraft = "1.20.1"
+rule = "1.20.1 forge release"
+license = "LicenseRef-Botania-License"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/pfjLUfGv/versions/npY4sRWF/Botania-1.20.1-456-FORGE.jar"
+sha512 = "43b82e3e101bcd2f1441be5e1cf16c4631e497c7cd50abd8bdc87701281e512673a420cec16e0529a6ed6936aa2d545398e9fe39ed9a8f3d0d26601f940327fa"
+listed_lib = false
+notes = "Modrinth 4258250 downloads (2026-10-16)"
+
+[[mod]]
+name = "storage_drawers"
+rank = 39
+title = "Storage Drawers"
+project = "storagedrawers"
+host = "modrinth"
+version_id = "px0CCB06"
+version = "1.21.1-13.11.4"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "MIT"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/guitPqEi/versions/px0CCB06/StorageDrawers-neoforge-1.21.1-13.11.4.jar"
+sha512 = "df97b8b5053a902264a236a71e7585b78d9d48a0bce585033aa8b169896d775f6fda462cfc77431af79cc596ab356eb9642e0c69a205a46b02d4d6f7ab3e74e9"
+listed_lib = false
+notes = "Modrinth 4107414 downloads (2026-10-16)"
+
+[[mod]]
+name = "iron_chests"
+rank = 40
+title = "Iron Chests"
+project = "iron-chests"
+host = "modrinth"
+version_id = "YjbOtYwN"
+version = "1.20.1-14.4.4"
+loader = "forge"
+minecraft = "1.20.1"
+rule = "1.20.1 forge release"
+license = "GPL-3.0-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/P3iIrPH3/versions/YjbOtYwN/ironchest-1.20.1-14.4.4.jar"
+sha512 = "5d41daa11bbc5c98c98faf6641993a47bce92c56204cec745686396e4f912b67abbc29f9fefcc5fd89422c37c3b34c191bfcc6479b28d7a07886cd279c0d6d99"
+listed_lib = false
+notes = "Modrinth 2775358 downloads (2026-10-16)"
+
+[[mod]]
+name = "mouse_tweaks"
+rank = 41
+title = "Mouse Tweaks"
+project = "mouse-tweaks"
+host = "modrinth"
+version_id = "9I21YYxf"
+version = "1.21-2.26.1-neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "BSD-3-Clause"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/aC3cM3Vq/versions/9I21YYxf/MouseTweaks-neoforge-mc1.21-2.26.1.jar"
+sha512 = "f95c0cc881211ee0442434976775e07aae40b4a2ba4e3a85455bc57ca9d3c991e239cd98374a8abd442dc9c378dcd9001e2caa1bf69991d424b5652dd7f3483b"
+listed_lib = false
+notes = "Modrinth 62913654 downloads (2026-10-16)"
+
+[[mod]]
+name = "controlling"
+rank = 42
+title = "Controlling"
+project = "controlling"
+host = "modrinth"
+version_id = "FaNppCJJ"
+version = "19.0.5"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "MIT"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/xv94TkTM/versions/FaNppCJJ/Controlling-neoforge-1.21.1-19.0.5.jar"
+sha512 = "bd01b2a38a869ea38e5f2a8fcd601e67ea9b132b9883c6ae752bc35dff6e94f6d47b965e31c1ee5c2f6a1221653549680da779fcb5319d199aec261d221d179e"
+listed_lib = false
+notes = "Modrinth 41497543 downloads (2026-10-16)"
+
+[[mod]]
+name = "natures_compass"
+rank = 43
+title = "Nature's Compass"
+project = "natures-compass"
+host = "modrinth"
+version_id = "nFniEtJV"
+version = "1.21.1-3.4.0-neoforge"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "CC-BY-NC-SA-4.0"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/fPetb5Kh/versions/nFniEtJV/NaturesCompass-1.21.1-3.4.0-neoforge.jar"
+sha512 = "5314b536bcb9a594a9cf2bbd46c82468d17e1559bd6c00da9d91e96c0814f50416799a011705f0d184bd731dac3f03dec009c76fea3d02b3556a6013f9649014"
+listed_lib = false
+notes = "Modrinth 27024160 downloads (2026-10-16)"
+
+[[mod]]
+name = "clumps"
+rank = 44
+title = "Clumps"
+project = "clumps"
+host = "modrinth"
+version_id = "jo7lDoK4"
+version = "19.0.0.1"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "MIT"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/Wnxd13zP/versions/jo7lDoK4/Clumps-neoforge-1.21.1-19.0.0.1.jar"
+sha512 = "314d8d8e640d73041f27e0f3f2cad7aad8b4c77dbd7fb31700ef7760362261f77085eed5289555c725d99c3f47a114e7290cd608f39c9f0f12ef74958463bdcc"
+listed_lib = false
+notes = "Modrinth 41784219 downloads (2026-10-16)"
+
+[[mod]]
+name = "enchantment_descriptions"
+rank = 45
+title = "Enchantment Descriptions"
+project = "enchantment-descriptions"
+host = "modrinth"
+version_id = "IktklYWh"
+version = "21.1.11"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-2.1-only"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/UVtY3ZAC/versions/IktklYWh/enchdesc-neoforge-1.21.1-21.1.11.jar"
+sha512 = "b12eb7f5fe460b865d54c23aee04bb72ea47fd9681d29cf46d96ad672cbe8e5bb5cbce5b87baafc69146aee468c567cf6eeedc42fec08169fb4395c39ef92252"
+listed_lib = false
+notes = "Modrinth 39349173 downloads (2026-10-16)"
+
+[[mod]]
+name = "just_enough_resources"
+rank = 46
+title = "Just Enough Resources (JER)"
+project = "just-enough-resources-jer"
+host = "modrinth"
+version_id = "TgNFki8j"
+version = "1.6.0.17"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge pre-release"
+license = "LicenseRef-Dont-Be-a-Jerk"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/uEfK2CXF/versions/TgNFki8j/JustEnoughResources-NeoForge-1.21.1-1.6.0.17.jar"
+sha512 = "9a4f8c32e65d5f9451edcf1a584b22b9f590dab2cfb3efb68ef2b4c042d8ff39dcfdaddba0a9d615c7af4ecfa1cefda417c8972d7dcb54e574837ec81d6939b0"
+listed_lib = false
+notes = "Modrinth 7044438 downloads (2026-10-16)"
+
+[[mod]]
+name = "better_advancements"
+rank = 47
+title = "Better Advancements"
+project = "better-advancements"
+host = "modrinth"
+version_id = "zKOCnRdK"
+version = "0.6.0.73"
+loader = "forge"
+minecraft = "1.20.1"
+rule = "1.20.1 forge release"
+license = "LicenseRef-Dont-Be-a-Jerk"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/Q2OqKxDG/versions/zKOCnRdK/BetterAdvancements-Forge-1.20.1-0.6.0.73.jar"
+sha512 = "1279a47be84e5f24c2518bd75a276e09ed5262a96573657b48d4bf0160a7f3f6749a38f8d51200cd2883e9fd90dbb4a3cbca59c09ce1b998d212db98cb677dea"
+listed_lib = false
+notes = "Modrinth 27181905 downloads (2026-10-16)"
+
+[[mod]]
+name = "comforts"
+rank = 48
+title = "Comforts"
+project = "comforts"
+host = "modrinth"
+version_id = "3kpPjcTc"
+version = "9.0.5+1.21.1"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LGPL-3.0-or-later"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/SaCpeal4/versions/3kpPjcTc/comforts-neoforge-9.0.5%2B1.21.1.jar"
+sha512 = "e9de2952545e9e773a6e78fc501e8cd231ea19750c30404355b71df9928eb5bd0921a4429aeca9d0fa10e67717f77fcf7a2aae117ac953b8f7de246b0ad685e4"
+listed_lib = false
+notes = "Modrinth 23869136 downloads (2026-10-16)"
+
+[[mod]]
+name = "cooking_for_blockheads"
+rank = 49
+title = "Cooking for Blockheads"
+project = "cooking-for-blockheads"
+host = "modrinth"
+version_id = "MQCIy6VF"
+version = "21.1.24+neoforge-1.21.1"
+loader = "neoforge"
+minecraft = "1.21.1"
+rule = "1.21.1 neoforge release"
+license = "LicenseRef-All-Rights-Reserved"
+redistribution = "Modrinth CDN, measured and discarded, never committed (as the corpus, #21/#234)"
+url = "https://cdn.modrinth.com/data/vJnhuDde/versions/MQCIy6VF/cookingforblockheads-neoforge-1.21.1-21.1.24.jar"
+sha512 = "bec8bb71b9540fd33bd4e5d1e5f151abc03c4fb97f1477f690d222c9710eabed876e5b2380a37bfdbc24649e1f66d8c963f13e6e738a336e9a0fdc88012d8447"
+listed_lib = false
+notes = "Modrinth 1202670 downloads (2026-10-16)"
+
+[[mod]]
+name = "chisel"
+rank = 50
+title = "Chisel"
+project = "chisel"
+host = "curseforge"
+cf_mod_id = 235279
+version_id = "2915375"
+version = "Chisel - MC1.12.2-1.0.2.45"
+loader = "forge"
+minecraft = "1.12.2"
+rule = "off-rule: no 1.21.1 or 1.20.1 build; newest release"
+license = "GPL-2.0-only"
+redistribution = "GPL-2.0 allows copying; fetched only through the official CurseForge API with a key, only when allowModDistribution is true, fresh each run, never cached or committed (#278 pick 2)"
+sha512 = "c8b7b9e25e9a37cd35c78382c9143801ae9aadc8e2a873c95fd9df22c97d5ddd6c3d4fe855e14575cbc0a7204064c891c4a9025e352008ce59abf7b46b6a77b9"
+listed_lib = false
+unfetchable = "CurseForge-only; awaiting official CurseForge API key (allowModDistribution must be true)"
+notes = "CurseForge project 235279; licence from https://github.com/Chisel-Team/Chisel (repository licence)"

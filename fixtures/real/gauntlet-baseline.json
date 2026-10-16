@@ -1,0 +1,458 @@
+{
+ "schema": 1,
+ "kind": "gauntlet-baseline",
+ "generated": "2026-10-16T21:31:31+00:00",
+ "manifest": "fixtures/real/gauntlet.toml",
+ "mods": {
+  "jei": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 1143,
+   "errors": 1,
+   "done": false
+  },
+  "sodium": {
+   "class": "client-only",
+   "status": "ingest_error",
+   "coverage": null,
+   "files": null,
+   "residue": null,
+   "errors": null,
+   "done": false
+  },
+  "fabric_api": {
+   "class": "library",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 49,
+   "errors": 1,
+   "done": false
+  },
+  "iris": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 1000,
+   "errors": 1,
+   "done": false
+  },
+  "entityculling": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 45,
+   "errors": 1,
+   "done": false
+  },
+  "cloth_config": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 657,
+   "errors": 1,
+   "done": false
+  },
+  "ferritecore": {
+   "class": "performance/mixin-only",
+   "status": "ingest_error",
+   "coverage": null,
+   "files": null,
+   "residue": null,
+   "errors": null,
+   "done": false
+  },
+  "modmenu": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 388,
+   "errors": 1,
+   "done": false
+  },
+  "lithium": {
+   "class": "performance/mixin-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 612,
+   "errors": 1,
+   "done": false
+  },
+  "immediatelyfast": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 81,
+   "errors": 1,
+   "done": false
+  },
+  "yacl": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 405,
+   "errors": 1,
+   "done": false
+  },
+  "fabric_language_kotlin": {
+   "class": "library",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 16,
+   "errors": 1,
+   "done": false
+  },
+  "xaeros_minimap": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 759,
+   "errors": 1,
+   "done": false
+  },
+  "entity_texture_features": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 286,
+   "errors": 1,
+   "done": false
+  },
+  "architectury_api": {
+   "class": "library",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 383,
+   "errors": 1,
+   "done": false
+  },
+  "sodium_extra": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 305,
+   "errors": 1,
+   "done": false
+  },
+  "xaeros_world_map": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 391,
+   "errors": 1,
+   "done": false
+  },
+  "entity_model_features": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 582,
+   "errors": 1,
+   "done": false
+  },
+  "veinminer": {
+   "class": "library",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 337,
+   "errors": 1,
+   "done": false
+  },
+  "appleskin": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 69,
+   "errors": 1,
+   "done": false
+  },
+  "not_enough_animations": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 84,
+   "errors": 1,
+   "done": false
+  },
+  "reeses_sodium_options": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 192,
+   "errors": 1,
+   "done": false
+  },
+  "skin_layers_3d": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 89,
+   "errors": 1,
+   "done": false
+  },
+  "modernfix": {
+   "class": "performance/mixin-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 476,
+   "errors": 1,
+   "done": false
+  },
+  "continuity": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 191,
+   "errors": 1,
+   "done": false
+  },
+  "geckolib": {
+   "class": "library",
+   "status": "ingest_error",
+   "coverage": null,
+   "files": null,
+   "residue": null,
+   "errors": null,
+   "done": false
+  },
+  "simple_voice_chat": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 770,
+   "errors": 1,
+   "done": false
+  },
+  "placeholder_api": {
+   "class": "library",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 119,
+   "errors": 1,
+   "done": false
+  },
+  "jade": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 488,
+   "errors": 1,
+   "done": false
+  },
+  "waystones": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 8.97,
+   "files": 82,
+   "residue": 832,
+   "errors": 0,
+   "done": false
+  },
+  "journeymap": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 3080,
+   "errors": 1,
+   "done": false
+  },
+  "quark": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 26.88,
+   "files": 2195,
+   "residue": 5972,
+   "errors": 0,
+   "done": false
+  },
+  "ae2": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 18.48,
+   "files": 808,
+   "residue": 3564,
+   "errors": 0,
+   "done": false
+  },
+  "twilight_forest": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 22.66,
+   "files": 2215,
+   "residue": 7561,
+   "errors": 0,
+   "done": false
+  },
+  "tinkers_construct": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 49.47,
+   "files": 15275,
+   "residue": 15602,
+   "errors": 0,
+   "done": false
+  },
+  "biomes_o_plenty": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 38.36,
+   "files": 1205,
+   "residue": 1936,
+   "errors": 0,
+   "done": false
+  },
+  "immersive_engineering": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 23.66,
+   "files": 2285,
+   "residue": 7374,
+   "errors": 0,
+   "done": false
+  },
+  "botania": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 35.49,
+   "files": 3553,
+   "residue": 6459,
+   "errors": 0,
+   "done": false
+  },
+  "storage_drawers": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 37.99,
+   "files": 457,
+   "residue": 746,
+   "errors": 0,
+   "done": false
+  },
+  "iron_chests": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 16.53,
+   "files": 41,
+   "residue": 207,
+   "errors": 0,
+   "done": false
+  },
+  "mouse_tweaks": {
+   "class": "UI/info",
+   "status": "ingest_error",
+   "coverage": null,
+   "files": null,
+   "residue": null,
+   "errors": null,
+   "done": false
+  },
+  "controlling": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 52,
+   "errors": 1,
+   "done": false
+  },
+  "natures_compass": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 35.71,
+   "files": 50,
+   "residue": 90,
+   "errors": 0,
+   "done": false
+  },
+  "clumps": {
+   "class": "performance/mixin-only",
+   "status": "ingest_error",
+   "coverage": null,
+   "files": null,
+   "residue": null,
+   "errors": null,
+   "done": false
+  },
+  "enchantment_descriptions": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 204,
+   "errors": 1,
+   "done": false
+  },
+  "just_enough_resources": {
+   "class": "UI/info",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 305,
+   "errors": 1,
+   "done": false
+  },
+  "better_advancements": {
+   "class": "client-only",
+   "status": "ok",
+   "coverage": 0.0,
+   "files": 0,
+   "residue": 42,
+   "errors": 1,
+   "done": false
+  },
+  "comforts": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 21.2,
+   "files": 85,
+   "residue": 316,
+   "errors": 0,
+   "done": false
+  },
+  "cooking_for_blockheads": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 27.58,
+   "files": 428,
+   "residue": 1124,
+   "errors": 0,
+   "done": false
+  },
+  "chisel": {
+   "class": "content",
+   "status": "ok",
+   "coverage": 60.08,
+   "files": 2653,
+   "residue": 1763,
+   "errors": 7,
+   "done": false
+  }
+ }
+}

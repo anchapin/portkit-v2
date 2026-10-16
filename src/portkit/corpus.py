@@ -26,6 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "fixtures" / "real" / "mods.toml"
 _REQUIRED = ("name", "project", "version_id", "url", "sha512", "license")
+_REQUIRED_UNFETCHABLE = ("name", "project", "license")
 _USER_AGENT = "anchapin/portkit-v2 corpus fetch (github.com/anchapin/portkit-v2)"
 
 
@@ -47,6 +48,15 @@ class Mod:
     source: str = ""
     notes: str = ""
     optional: bool = False  # pinned, but only run when asked for (--include-optional, --fixture)
+    # The top-50 gauntlet (#278, fixtures/real/gauntlet.toml) adds these:
+    rank: int = 0  # #277's order
+    title: str = ""
+    host: str = ""  # modrinth | curseforge
+    rule: str = ""  # which branch of the version rule picked the build
+    redistribution: str = ""  # how the jar is fetched and whether it may be cached/redistributed
+    listed_lib: bool = False  # #277 marks it [lib]
+    cf_mod_id: int = 0  # CurseForge project id, for host = "curseforge" (official API only, #278 pick 2)
+    unfetchable: str = ""  # the reason, when the jar can't be fetched (then url/sha512/version_id may be empty)
 
     def path(self, cache: Path) -> Path:
         return Path(cache) / f"{self.name}-{self.sha512[:12]}.jar"
@@ -68,7 +78,8 @@ def load(manifest: Path = MANIFEST) -> list[Mod]:
     mods, seen = [], set()
     fields = set(Mod.__dataclass_fields__)
     for i, entry in enumerate(entries):
-        missing = [k for k in _REQUIRED if not entry.get(k)]
+        required = _REQUIRED_UNFETCHABLE if entry.get("unfetchable") else _REQUIRED
+        missing = [k for k in required if not entry.get(k)]
         if missing:
             raise CorpusError(f"{manifest}: mod #{i + 1} is missing {', '.join(missing)}")
         unknown = sorted(set(entry) - fields)
@@ -78,7 +89,15 @@ def load(manifest: Path = MANIFEST) -> list[Mod]:
             raise CorpusError(f"{manifest}: duplicate mod name {entry['name']!r}")
         if not isinstance(entry.get("optional", False), bool):
             raise CorpusError(f"{manifest}: mod {entry['name']!r} optional must be true or false")
-        if len(entry["sha512"]) != 128:
+        for key in ("listed_lib",):
+            if not isinstance(entry.get(key, False), bool):
+                raise CorpusError(f"{manifest}: mod {entry['name']!r} {key} must be true or false")
+        if not isinstance(entry.get("cf_mod_id", 0), int):
+            raise CorpusError(f"{manifest}: mod {entry['name']!r} cf_mod_id must be an integer")
+        if not isinstance(entry.get("rank", 0), int):
+            raise CorpusError(f"{manifest}: mod {entry['name']!r} rank must be an integer")
+        entry = {"version_id": "", "url": "", "sha512": "", **entry}
+        if not entry.get("unfetchable") and len(entry["sha512"]) != 128:
             raise CorpusError(f"{manifest}: mod {entry['name']!r} sha512 must be 128 hex chars")
         seen.add(entry["name"])
         mods.append(Mod(**entry))
@@ -114,6 +133,8 @@ def cached(mod: Mod, cache: Path | None = None) -> Path | None:
 
 def fetch(mod: Mod, cache: Path | None = None, opener=urllib.request.urlopen) -> tuple[Path, bool]:
     """Return (jar path, downloaded?). Raises CorpusError on a hash mismatch."""
+    if mod.unfetchable:
+        raise CorpusError(f"{mod.name}: unfetchable: {mod.unfetchable}")
     cache = Path(cache or cache_dir())
     hit = cached(mod, cache)
     if hit:

@@ -27,6 +27,74 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: the top-50 gauntlet pins one jar per mod by a version rule, classifies it from its own files, and is boarded weekly apart from the PR gate
+
+- **Status:** approved. Pick 2 decided by Alex (2026-10-16); picks 1 and
+  3-5 as proposed by Hark. PR #290 for #278.
+- **Decision:** #277's 50 mods are pinned in `fixtures/real/gauntlet.toml`
+  (corpus format; `portkit gauntlet pin`), run by the #234 gap-leaderboard
+  workflow (`set: gauntlet`, same shards, normalized reasons, trend, mct),
+  each jar profiled and classified from its own contents, and boarded in
+  `docs/gauntlet.md` with a cross-mod reason-class roll-up. The gauntlet
+  baseline is `fixtures/real/gauntlet-baseline.json`, separate from the
+  13-mod corpus baseline; the PR gate never runs the 50. Picks:
+  1. **Version rule:** the newest build for Minecraft 1.21.1, else 1.20.1,
+     releases before pre-releases, on the loader the converter reads best:
+     1.21.1 NeoForge, Fabric, Forge, Quilt; 1.20.1 Forge, Fabric, NeoForge,
+     Quilt. A mod with neither gets its newest release, marked off-rule.
+     Result: 44 on 1.21.1 (40 NeoForge, 4 Fabric), 5 on 1.20.1 Forge
+     (Tinkers', BOP, Botania, Iron Chests, Better Advancements), JER on a
+     1.21.1 NeoForge beta (it publishes no releases), Chisel off-rule on
+     1.12.2 (its newest build is a 1.16.5 alpha; no 1.20.1/1.21.1 exists).
+  2. **CurseForge fetch policy (decided, Alex 2026-10-16):** Modrinth first
+     (48 of 50 are there). Twilight Forest and Chisel are CurseForge-only and
+     stay `unfetchable` in the manifest ("CurseForge-only; awaiting official
+     CurseForge API key (allowModDistribution must be true)"), their
+     CurseForge project id, pinned file id and sha512 kept as metadata only.
+     They are fetched only through the official API (`api.curseforge.com/v1`,
+     `x-api-key`) when `CURSEFORGE_API_KEY` is set (the repository's Actions
+     secret), and only when the mod's `allowModDistribution` is true;
+     otherwise they stay unfetchable with that reason. CurseForge jars are
+     re-fetched each run into a temporary directory, never put in an Actions
+     cache, never committed. The secret goes only to the gauntlet's convert
+     step on this repository's scheduled and manual runs, never to
+     `pull_request` runs (so never to forks), and is never printed. Licences
+     from their source repositories (TF: LGPL-2.1 code, CC-BY-NC-SA-4.0
+     assets; Chisel: GPL-2.0).
+  3. **Board format:** one row per mod (rank, class, loader/MC, status,
+     coverage, files, residue, top three reason classes, validate, mct,
+     done), the roll-up ranked by mods then files with explained kinds
+     marked, a "next general work" list without them, class evidence beside
+     #277's [lib] mark, and the leaderboard's normalized reasons.
+     Reason class = residue kind; `unowned` split by directory three levels
+     deep. Done (#277 rule 6) = converted, no validator errors, every residue
+     kind in the residue agent's `SKIP_KINDS`.
+  4. **Cadence:** weekly (Mondays 09:17 UTC) and on demand; the sample
+     stays nightly. The committed board and baseline are updated by hand in
+     a PR from the run's artifact.
+  5. **Classes:** content, library, client-only, performance/mixin-only,
+     UI/info, first rule that holds, thresholds in `gauntlet.classify`.
+- **Why:** #277 needs one shared, reproducible view of all 50 so each
+  sub-issue is chosen by how many mods a gap blocks (rule 4). The loader
+  order follows what the converter has: NeoForge 1.21.1 jars need no
+  remapping and have their tag set; Forge 1.20.1 has SRG (no ambiguous ids)
+  and its tag set; Fabric needs intermediary (8-10 ambiguous ids per
+  version); Forge 1.21+ has neither (decisions 2026-10-15 #235, 2026-10-12
+  #160). A weekly board is enough for sub-issues that land a few times a
+  week, and the 50 include the heaviest jars we run.
+- **Rejected:** fetching the two CurseForge jars from cfwidget and
+  CurseForge's public CDN without a key (the first draft of pick 2): Overwolf
+  treats downloading from CurseForge's CDN outside its official API as
+  scraping, and an Actions cache on a public repository is readable by
+  anyone who opens a PR, so the jars must not sit in one; dropping
+  the two CurseForge mods (rule 4 needs Twilight Forest's worldgen); each
+  mod's newest build on any version (#234's rule: 26.x builds the converter
+  has no tag set or name table for); classifying from Modrinth categories
+  or descriptions (#278 says from the jar); a sixth "code-only gameplay"
+  class (VeinMiner reads as library; #279 treats both the same); running the
+  50 in the PR gate (slow; the 13-mod corpus stays the ratchet).
+- **Links:** #277, #278, #234 (PR #255), #235, #279.
+
 ## 2026-10-16: wearable mod armor is drawn when worn: an attachable on vanilla armor geometry wearing the mod's own layer texture, found from the mod's code
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). PR #276, merged 5e37982.

@@ -1,0 +1,327 @@
+{
+ "_comment": [
+  "#277's top-50 gauntlet, in the issue's order (#278). Read by portkit.gauntlet (THE_50).",
+  "modrinth: the Modrinth slug, checked against api.modrinth.com/v2/project/<slug> on 2026-10-16.",
+  "curseforge: the CurseForge slug, for mods not on Modrinth (search finds only unofficial ports and other mods);",
+  "their licence and licence_source are read from the mod's source repository; cf_mod_id is the CurseForge project id",
+  "the official API (api.curseforge.com/v1) addresses them by (#278 pick 2: official API with a key only).",
+  "listed_lib: #277 marks the mod [lib]; kept to compare with the class read from the jar."
+ ],
+ "mods": [
+  {
+   "rank": 1,
+   "name": "jei",
+   "title": "Just Enough Items (JEI)",
+   "modrinth": "jei"
+  },
+  {
+   "rank": 2,
+   "name": "sodium",
+   "title": "Sodium",
+   "modrinth": "sodium"
+  },
+  {
+   "rank": 3,
+   "name": "fabric_api",
+   "title": "Fabric API",
+   "modrinth": "fabric-api",
+   "listed_lib": true
+  },
+  {
+   "rank": 4,
+   "name": "iris",
+   "title": "Iris Shaders",
+   "modrinth": "iris"
+  },
+  {
+   "rank": 5,
+   "name": "entityculling",
+   "title": "Entity Culling",
+   "modrinth": "entityculling"
+  },
+  {
+   "rank": 6,
+   "name": "cloth_config",
+   "title": "Cloth Config API",
+   "modrinth": "cloth-config",
+   "listed_lib": true
+  },
+  {
+   "rank": 7,
+   "name": "ferritecore",
+   "title": "FerriteCore",
+   "modrinth": "ferrite-core"
+  },
+  {
+   "rank": 8,
+   "name": "modmenu",
+   "title": "Mod Menu",
+   "modrinth": "modmenu"
+  },
+  {
+   "rank": 9,
+   "name": "lithium",
+   "title": "Lithium",
+   "modrinth": "lithium"
+  },
+  {
+   "rank": 10,
+   "name": "immediatelyfast",
+   "title": "ImmediatelyFast",
+   "modrinth": "immediatelyfast"
+  },
+  {
+   "rank": 11,
+   "name": "yacl",
+   "title": "YetAnotherConfigLib (YACL)",
+   "modrinth": "yacl",
+   "listed_lib": true
+  },
+  {
+   "rank": 12,
+   "name": "fabric_language_kotlin",
+   "title": "Fabric Language Kotlin",
+   "modrinth": "fabric-language-kotlin",
+   "listed_lib": true
+  },
+  {
+   "rank": 13,
+   "name": "xaeros_minimap",
+   "title": "Xaero's Minimap",
+   "modrinth": "xaeros-minimap"
+  },
+  {
+   "rank": 14,
+   "name": "entity_texture_features",
+   "title": "Entity Texture Features",
+   "modrinth": "entitytexturefeatures"
+  },
+  {
+   "rank": 15,
+   "name": "architectury_api",
+   "title": "Architectury API",
+   "modrinth": "architectury-api",
+   "listed_lib": true
+  },
+  {
+   "rank": 16,
+   "name": "sodium_extra",
+   "title": "Sodium Extra",
+   "modrinth": "sodium-extra"
+  },
+  {
+   "rank": 17,
+   "name": "xaeros_world_map",
+   "title": "Xaero's World Map",
+   "modrinth": "xaeros-world-map"
+  },
+  {
+   "rank": 18,
+   "name": "entity_model_features",
+   "title": "Entity Model Features",
+   "modrinth": "entity-model-features"
+  },
+  {
+   "rank": 19,
+   "name": "veinminer",
+   "title": "VeinMiner",
+   "modrinth": "veinminer"
+  },
+  {
+   "rank": 20,
+   "name": "appleskin",
+   "title": "AppleSkin",
+   "modrinth": "appleskin"
+  },
+  {
+   "rank": 21,
+   "name": "not_enough_animations",
+   "title": "Not Enough Animations",
+   "modrinth": "not-enough-animations"
+  },
+  {
+   "rank": 22,
+   "name": "reeses_sodium_options",
+   "title": "Reese's Sodium Options",
+   "modrinth": "reeses-sodium-options"
+  },
+  {
+   "rank": 23,
+   "name": "skin_layers_3d",
+   "title": "3D Skin Layers",
+   "modrinth": "3dskinlayers"
+  },
+  {
+   "rank": 24,
+   "name": "modernfix",
+   "title": "ModernFix",
+   "modrinth": "modernfix"
+  },
+  {
+   "rank": 25,
+   "name": "continuity",
+   "title": "Continuity",
+   "modrinth": "continuity"
+  },
+  {
+   "rank": 26,
+   "name": "geckolib",
+   "title": "GeckoLib",
+   "modrinth": "geckolib",
+   "listed_lib": true
+  },
+  {
+   "rank": 27,
+   "name": "simple_voice_chat",
+   "title": "Simple Voice Chat",
+   "modrinth": "simple-voice-chat"
+  },
+  {
+   "rank": 28,
+   "name": "placeholder_api",
+   "title": "Text Placeholder API",
+   "modrinth": "placeholder-api",
+   "listed_lib": true
+  },
+  {
+   "rank": 29,
+   "name": "jade",
+   "title": "Jade",
+   "modrinth": "jade"
+  },
+  {
+   "rank": 30,
+   "name": "waystones",
+   "title": "Waystones",
+   "modrinth": "waystones"
+  },
+  {
+   "rank": 31,
+   "name": "journeymap",
+   "title": "JourneyMap",
+   "modrinth": "journeymap"
+  },
+  {
+   "rank": 32,
+   "name": "quark",
+   "title": "Quark",
+   "modrinth": "quark"
+  },
+  {
+   "rank": 33,
+   "name": "ae2",
+   "title": "Applied Energistics 2",
+   "modrinth": "ae2"
+  },
+  {
+   "rank": 34,
+   "name": "twilight_forest",
+   "title": "The Twilight Forest",
+   "curseforge": "the-twilight-forest",
+   "licence": "LGPL-2.1-only (code); CC-BY-NC-SA-4.0 (assets)",
+   "licence_source": "https://github.com/TeamTwilight/twilightforest (LICENSE, ASSET_LICENSE)",
+   "redistribution": "licences allow copying with attribution (assets non-commercial, share-alike); fetched only through the official CurseForge API with a key, only when allowModDistribution is true, fresh each run, never cached or committed (#278 pick 2)",
+   "cf_mod_id": 227639
+  },
+  {
+   "rank": 35,
+   "name": "tinkers_construct",
+   "title": "Tinkers' Construct",
+   "modrinth": "tinkers-construct"
+  },
+  {
+   "rank": 36,
+   "name": "biomes_o_plenty",
+   "title": "Biomes O' Plenty",
+   "modrinth": "biomes-o-plenty"
+  },
+  {
+   "rank": 37,
+   "name": "immersive_engineering",
+   "title": "Immersive Engineering",
+   "modrinth": "immersiveengineering"
+  },
+  {
+   "rank": 38,
+   "name": "botania",
+   "title": "Botania",
+   "modrinth": "botania"
+  },
+  {
+   "rank": 39,
+   "name": "storage_drawers",
+   "title": "Storage Drawers",
+   "modrinth": "storagedrawers"
+  },
+  {
+   "rank": 40,
+   "name": "iron_chests",
+   "title": "Iron Chests",
+   "modrinth": "iron-chests"
+  },
+  {
+   "rank": 41,
+   "name": "mouse_tweaks",
+   "title": "Mouse Tweaks",
+   "modrinth": "mouse-tweaks"
+  },
+  {
+   "rank": 42,
+   "name": "controlling",
+   "title": "Controlling",
+   "modrinth": "controlling"
+  },
+  {
+   "rank": 43,
+   "name": "natures_compass",
+   "title": "Nature's Compass",
+   "modrinth": "natures-compass"
+  },
+  {
+   "rank": 44,
+   "name": "clumps",
+   "title": "Clumps",
+   "modrinth": "clumps"
+  },
+  {
+   "rank": 45,
+   "name": "enchantment_descriptions",
+   "title": "Enchantment Descriptions",
+   "modrinth": "enchantment-descriptions"
+  },
+  {
+   "rank": 46,
+   "name": "just_enough_resources",
+   "title": "Just Enough Resources (JER)",
+   "modrinth": "just-enough-resources-jer"
+  },
+  {
+   "rank": 47,
+   "name": "better_advancements",
+   "title": "Better Advancements",
+   "modrinth": "better-advancements"
+  },
+  {
+   "rank": 48,
+   "name": "comforts",
+   "title": "Comforts",
+   "modrinth": "comforts"
+  },
+  {
+   "rank": 49,
+   "name": "cooking_for_blockheads",
+   "title": "Cooking for Blockheads",
+   "modrinth": "cooking-for-blockheads"
+  },
+  {
+   "rank": 50,
+   "name": "chisel",
+   "title": "Chisel",
+   "curseforge": "chisel",
+   "licence": "GPL-2.0-only",
+   "licence_source": "https://github.com/Chisel-Team/Chisel (repository licence)",
+   "redistribution": "GPL-2.0 allows copying; fetched only through the official CurseForge API with a key, only when allowModDistribution is true, fresh each run, never cached or committed (#278 pick 2)",
+   "cf_mod_id": 235279
+  }
+ ]
+}

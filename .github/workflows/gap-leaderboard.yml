@@ -6,11 +6,24 @@ name: gap-leaderboard
 # normalized reason, and publishes a ranked leaderboard (JSON + markdown) with
 # a trend against the previous successful run. Report-only: it never fails on
 # what it finds. See docs/gap-leaderboard.md.
+#
+# The same machinery runs the top-50 gauntlet (#277, harness #278) over
+# fixtures/real/gauntlet.toml: `set: gauntlet` on a manual run, and weekly on
+# Mondays. Its board job writes docs/gauntlet.md's content (the
+# gauntlet-board artifact); the board is committed by hand, as the baseline is.
+# Its two CurseForge-only mods are fetched only with the CURSEFORGE_API_KEY
+# secret, through the official API, never cached (#278 pick 2).
 on:
   schedule:
-    - cron: "41 8 * * *"
+    - cron: "41 8 * * *"   # the sample, nightly
+    - cron: "17 9 * * 1"   # the gauntlet, weekly (#278 pick 4)
   workflow_dispatch:
     inputs:
+      set:
+        description: "Which manifest: the random sample (#234) or the top-50 gauntlet (#278)"
+        type: choice
+        options: [sample, gauntlet]
+        default: sample
       mct:
         description: "Also count Mojang mct findings per mod (report-only, slower)"
         type: boolean
@@ -19,6 +32,9 @@ on:
 permissions:
   contents: read
   actions: read # to download the previous run's leaderboard for the trend
+
+env:
+  SET: ${{ github.event_name == 'workflow_dispatch' && inputs.set || (github.event.schedule == '17 9 * * 1' && 'gauntlet' || 'sample') }}
 
 jobs:
   shard:
@@ -48,9 +64,12 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .sample-cache
-          key: sample-${{ matrix.shard }}-${{ hashFiles('fixtures/sample/mods.toml') }}
+          # Modrinth jars only. "-v2": caches from before #278 pick 2 held
+          # CurseForge jars and are not restored; portkit also deletes any
+          # CurseForge jar it finds here before the cache is saved.
+          key: ${{ env.SET }}-v2-${{ matrix.shard }}-${{ hashFiles(env.SET == 'gauntlet' && 'fixtures/real/gauntlet.toml' || 'fixtures/sample/mods.toml') }}
           restore-keys: |
-            sample-${{ matrix.shard }}-
+            ${{ env.SET }}-v2-${{ matrix.shard }}-
 
       - uses: actions/cache@v4
         with:
@@ -76,14 +95,31 @@ jobs:
       # Fetches each jar (sha512-checked, cached), converts it in a child
       # process with a timeout, and records its residue by normalized reason.
       # A fetch failure, crash or timeout is a row in the shard, not a failure.
-      - name: Convert shard ${{ matrix.shard }}/${{ env.SHARDS }}
-        run: portkit gaps run --shard ${{ matrix.shard }}/$SHARDS $MCT_FLAG --out gap-shard-${{ matrix.shard }}.json
+      # The gauntlet also profiles and classifies each jar from its contents.
+      #
+      # CurseForge-only gauntlet mods (#278 pick 2): resolved only through the
+      # official API (api.curseforge.com/v1, x-api-key) with the repo secret
+      # CURSEFORGE_API_KEY, and fetched only when allowModDistribution is true.
+      # Those jars go to a temporary directory and are re-fetched every run,
+      # never into .sample-cache (an Actions cache any PR can read). The key is
+      # only given to the gauntlet set on this repo's own schedule/dispatch
+      # runs, never to pull_request runs (this workflow has no such trigger;
+      # the guard keeps it so if one is added), and portkit never prints it.
+      - name: Convert ${{ env.SET }} shard ${{ matrix.shard }}/${{ env.SHARDS }}
+        env:
+          CURSEFORGE_API_KEY: ${{ (env.SET == 'gauntlet' && github.event_name != 'pull_request') && secrets.CURSEFORGE_API_KEY || '' }}
+        run: |
+          if [ "$SET" = gauntlet ]; then
+            portkit gauntlet run --shard ${{ matrix.shard }}/$SHARDS $MCT_FLAG --out gauntlet-shard-${{ matrix.shard }}.json
+          else
+            portkit gaps run --shard ${{ matrix.shard }}/$SHARDS $MCT_FLAG --out gap-shard-${{ matrix.shard }}.json
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gap-shard-${{ matrix.shard }}
-          path: gap-shard-${{ matrix.shard }}.json
-          retention-days: 14
+          name: ${{ env.SET == 'gauntlet' && 'gauntlet' || 'gap' }}-shard-${{ matrix.shard }}
+          path: ${{ env.SET == 'gauntlet' && 'gauntlet' || 'gap' }}-shard-${{ matrix.shard }}.json
+          retention-days: ${{ env.SET == 'gauntlet' && 90 || 14 }}
 
   board:
     needs: shard
@@ -101,31 +137,54 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: gap-shard-*
+          pattern: ${{ env.SET == 'gauntlet' && 'gauntlet' || 'gap' }}-shard-*
           path: shards
           merge-multiple: true
 
-      # The trend compares against the newest successful run on this branch.
-      # The first run (or one whose predecessor's artifact expired) has none.
-      - name: Previous leaderboard
+      # The trend compares against the newest successful run on this branch
+      # that has this set's board (the sample and the gauntlet share the
+      # workflow). The first run (or one whose predecessor's artifact expired)
+      # has none.
+      - name: Previous board
         env:
           GH_TOKEN: ${{ github.token }}
+          ARTIFACT: ${{ env.SET == 'gauntlet' && 'gauntlet-board' || 'gap-leaderboard' }}
         run: |
-          prev=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow gap-leaderboard.yml \
-            --branch "$GITHUB_REF_NAME" --status success --limit 1 \
-            --json databaseId -q '.[0].databaseId' || true)
-          if [ -n "$prev" ]; then
-            gh run download "$prev" --repo "$GITHUB_REPOSITORY" -n gap-leaderboard -D previous || true
-          fi
-          ls previous 2>/dev/null || echo "no previous leaderboard"
+          for prev in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow gap-leaderboard.yml \
+              --branch "$GITHUB_REF_NAME" --status success --limit 20 \
+              --json databaseId -q '.[].databaseId' || true); do
+            if gh run download "$prev" --repo "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D previous 2>/dev/null; then
+              echo "previous: run $prev"; break
+            fi
+          done
+          ls previous 2>/dev/null || echo "no previous board"
+
+      - name: Gauntlet board
+        if: env.SET == 'gauntlet'
+        run: |
+          portkit gauntlet board shards/*.json --previous previous/gauntlet-board.json \
+            --json gauntlet-board.json --md gauntlet.md
+          cat gauntlet.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: env.SET == 'gauntlet'
+        with:
+          name: gauntlet-board
+          path: |
+            gauntlet-board.json
+            gauntlet.md
+            shards/
+          retention-days: 90
 
       - name: Leaderboard
+        if: env.SET != 'gauntlet'
         run: |
           portkit gaps board shards/*.json --previous previous/gap-leaderboard.json \
             --json gap-leaderboard.json --md gap-leaderboard.md
           cat gap-leaderboard.md >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
+        if: env.SET != 'gauntlet'
         with:
           name: gap-leaderboard
           path: |
