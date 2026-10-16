@@ -64,9 +64,12 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .sample-cache
-          key: ${{ env.SET }}-${{ matrix.shard }}-${{ hashFiles(env.SET == 'gauntlet' && 'fixtures/real/gauntlet.toml' || 'fixtures/sample/mods.toml') }}
+          # Modrinth jars only. "-v2": caches from before #278 pick 2 held
+          # CurseForge jars and are not restored; portkit also deletes any
+          # CurseForge jar it finds here before the cache is saved.
+          key: ${{ env.SET }}-v2-${{ matrix.shard }}-${{ hashFiles(env.SET == 'gauntlet' && 'fixtures/real/gauntlet.toml' || 'fixtures/sample/mods.toml') }}
           restore-keys: |
-            ${{ env.SET }}-${{ matrix.shard }}-
+            ${{ env.SET }}-v2-${{ matrix.shard }}-
 
       - uses: actions/cache@v4
         with:

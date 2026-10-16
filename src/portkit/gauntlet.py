@@ -317,6 +317,23 @@ def pin_curseforge(item: Listed, opener=urllib.request.urlopen, download=None, k
     return entry
 
 
+def purge_curseforge(mods, cache: Path) -> list[Path]:
+    """Delete any CurseForge mod's jar from the corpus cache (``<name>-*.jar``).
+
+    CurseForge jars are never cached (#278 pick 2), but a cache restored from
+    before that rule (or a hand-run fetch) could still hold one, and Actions
+    would save it again. Runs before every gauntlet run; returns what went.
+    """
+    gone = []
+    for mod in mods:
+        if getattr(mod, "host", "") != "curseforge" or not Path(cache).is_dir():
+            continue
+        for jar in Path(cache).glob(f"{mod.name}-*.jar"):
+            jar.unlink(missing_ok=True)
+            gone.append(jar)
+    return gone
+
+
 def gate_curseforge(mods, key: str | None = None, opener=urllib.request.urlopen, log=print):
     """Lift ``unfetchable`` from CurseForge mods the official API lets us fetch.
 

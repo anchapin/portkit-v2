@@ -971,6 +971,8 @@ def cmd_gauntlet(args) -> int:
         # CURSEFORGE_API_KEY and only when allowModDistribution is true
         # (#278 pick 2), into a temporary directory that is deleted after the
         # run, never into the corpus cache (which CI caches).
+        for jar in gauntlet.purge_curseforge(mods, corpus.cache_dir()):
+            print(f"removed a CurseForge jar from the corpus cache: {jar.name}")
         index, total = gaps.parse_shard(args.shard)
         here = {m.name for m in gaps.shard_of(mods, index, total)}
         gated, allow = gauntlet.gate_curseforge([m for m in mods if m.name in here])

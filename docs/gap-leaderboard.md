@@ -168,7 +168,9 @@ readable by anyone who opens a PR, so:
   with that reason. True: the pinned file's `downloadUrl` from
   `/v1/mods/{id}/files/{fileId}` is fetched, sha512-checked against the pin,
   into a temporary directory that is deleted after the run: re-fetched every
-  run, never in the Actions cache, never committed.
+  run, never in the Actions cache, never committed. Each run first deletes
+  any CurseForge jar it finds in the corpus cache, and the workflow's cache
+  keys moved to `<set>-v2-` so no cache from before this rule is restored.
 - The workflow passes the secret only to the gauntlet's convert step on this
   repository's own scheduled or manual runs, never to `pull_request` runs,
   and portkit never prints it. Each shard records what the API said under

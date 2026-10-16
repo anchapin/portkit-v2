@@ -213,6 +213,8 @@ def test_cli_gauntlet_run_fetches_curseforge_jars_outside_the_corpus_cache(tmp_p
         "cf_mod_id": 227639, "version_id": "7797302", "license": "LGPL", "sha512": sha,
         "unfetchable": gauntlet.CURSEFORGE_AWAITING}], "2026-10-16"))
     cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "twilight_forest-0123456789ab.jar").write_bytes(b"stale")  # from a pre-pick-2 cache
     monkeypatch.setenv("PORTKIT_CORPUS_CACHE", str(cache))
     monkeypatch.setenv("CURSEFORGE_API_KEY", "k-secret")
     monkeypatch.setattr(gauntlet, "_cf_get", lambda path, key, opener=None: (
@@ -233,6 +235,15 @@ def test_cli_gauntlet_run_fetches_curseforge_jars_outside_the_corpus_cache(tmp_p
     assert not where[0].exists()  # the temporary directory is gone after the run
     assert not cache.exists() or not any(cache.iterdir())
     assert "k-secret" not in out.read_text()
+
+
+def test_purge_curseforge_clears_stale_curseforge_jars_from_the_cache(tmp_path):
+    (tmp_path / "twilight_forest-371dd7079b17.jar").write_bytes(b"x")
+    (tmp_path / "jei-a6ca3abc3080.jar").write_bytes(b"y")
+    gone = gauntlet.purge_curseforge([_cf_mod(), _mod("jei")], tmp_path)
+    assert [p.name for p in gone] == ["twilight_forest-371dd7079b17.jar"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["jei-a6ca3abc3080.jar"]
+    assert gauntlet.purge_curseforge([_cf_mod()], tmp_path / "missing") == []
 
 
 def test_no_workflow_downloads_from_curseforge_directly_or_caches_its_jars():
