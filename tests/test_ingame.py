@@ -156,3 +156,16 @@ def test_with_experiments_keeps_everything_else():
 def test_bad_level_header():
     with pytest.raises(ValueError, match="header"):
         nbt.read_level(struct.pack("<ii", 10, 99) + b"\x0a")
+
+
+def test_cli(tree, tmp_path, capsys):
+    from portkit.cli import main
+
+    assert main(["ingame", "fetch-server", "--dir", str(tmp_path / "bds")]) == 2
+    assert "--accept-eula" in capsys.readouterr().err
+    assert main(["ingame", "pack", "--tree", str(tmp_path / "nowhere")]) == 2
+    assert main(["ingame", "run", "--tree", str(tree)]) == 2
+    out = tmp_path / "checks"
+    assert main(["ingame", "pack", "--tree", str(tree), "--out", str(out), "--name", "demo"]) == 0
+    assert "3 blocks, 1 items, 1 containers, 1 connection blocks" in capsys.readouterr().out
+    assert (out / "scripts" / "data.js").exists()

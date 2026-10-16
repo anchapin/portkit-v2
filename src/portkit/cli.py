@@ -1043,6 +1043,9 @@ def cmd_ingame(args) -> int:
             return 2
         print(f"bedrock-server {server.BDS_VERSION} -> {args.dir}")
         return 0
+    if not args.tree or not (Path(args.tree) / "behavior_pack").is_dir():
+        print(f"{args.action} needs --tree, a converted tree with behavior_pack/", file=sys.stderr)
+        return 2
     tree = Path(args.tree)
     name = args.name or tree.name
     if args.action == "pack":
