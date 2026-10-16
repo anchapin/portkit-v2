@@ -228,3 +228,24 @@ def test_mythicmetals_sets_from_its_bytecode():
     # MythicArmor.KYBER = new ArmorSet(KYBER, 21), ArmorSet.BASE_DURABILITY HELMET 12, BOOTS 13.
     assert found == {"kyber_axe": 889, "kyber_helmet": 252, "kyber_boots": 273, "banglum_sword": 260,
                      "mythril_pickaxe": 1564, "palladium_sword": 1234, "hallowed_sword": 1984}
+
+
+# --- the validator -----------------------------------------------------------------
+
+def test_validator_refuses_a_base_that_is_not_armor_or_a_tool(tmp_path):
+    import json as _json
+
+    from portkit.validate.report import ValidationReport
+    from portkit.validate.rules import _check_smithing_bases
+
+    pack = tmp_path / "behavior_pack"
+    for rel, body in _files().items():
+        (pack / rel).parent.mkdir(parents=True, exist_ok=True)
+        (pack / rel).write_text(_json.dumps(body))
+    report = ValidationReport()
+    _check_smithing_bases(report, pack, "behavior_pack")
+    found = sorted((f.path, f.rule, f.severity) for f in report.findings)
+    # blade and head lack durability, anvil is a block; knife and the vanilla base pass.
+    assert found == [("behavior_pack/recipes/better_anvil.json", "recipe.smithing_base", "error"),
+                     ("behavior_pack/recipes/better_blade.json", "recipe.smithing_base", "error"),
+                     ("behavior_pack/recipes/better_head.json", "recipe.smithing_base", "error")]

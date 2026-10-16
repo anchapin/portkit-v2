@@ -56,6 +56,10 @@ PROPERTIES = "net/minecraft/world/item/Item$Properties"
 ARMOR_TYPE_ORDER = ("HELMET", "CHESTPLATE", "LEGGINGS", "BOOTS")
 # Item.Properties calls that set an item's durability (Mojang names).
 DURABILITY_CALLS = frozenset({"durability", "defaultDurability"})
+# Methods an item class may override to decide its durability in code
+# (Forge/NeoForge IForgeItem/IItemExtension#getMaxDamage, #isDamageable;
+# Item#canBeDepleted): an item class declaring one is not read.
+DURABILITY_OVERRIDES = frozenset({"getMaxDamage", "isDamageable", "canBeDepleted"})
 
 VANILLA_SOURCES = {
     "tiered_item": ("Minecraft 1.21.1 net.minecraft.world.item.TieredItem#<init>(Tier, Item.Properties): "
@@ -351,9 +355,10 @@ def constructed(cf: ClassFile, method: str) -> tuple[str, list[Static]] | None:
 
 def sets_durability(index: ClassIndex, owner: str, stop: str = "net/minecraft/") -> bool | None:
     """Whether ``owner`` or one of its mod superclasses calls
-    ``Item.Properties#durability``/``defaultDurability`` anywhere (True), not
-    at all (False), or can't be read (None: a superclass missing from the jar
-    that isn't Minecraft's)."""
+    ``Item.Properties#durability``/``defaultDurability`` anywhere or declares a
+    method that decides durability in code (:data:`DURABILITY_OVERRIDES`)
+    (True), does neither (False), or can't be read (None: a superclass
+    missing from the jar that isn't Minecraft's)."""
     seen = set()
     cls = owner
     while cls and not cls.startswith(stop) and cls not in seen:
@@ -362,6 +367,8 @@ def sets_durability(index: ClassIndex, owner: str, stop: str = "net/minecraft/")
         if cf is None:
             return None
         for method in cf.methods:
+            if method.name in DURABILITY_OVERRIDES:
+                return True
             if method.code is None:
                 continue
             for insn in instructions(cf, method.code):

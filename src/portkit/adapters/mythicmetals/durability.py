@@ -127,7 +127,10 @@ def _tools(index: ClassIndex, names: frozenset) -> dict[str, tuple[int, str]]:
             maker_owner = value.cls if set_cf.method(call.name, call.desc) else TOOL_SET
             maker_cf = index.get(maker_owner)
             maker = maker_cf.method(call.name, call.desc) if maker_cf else None
-            built = [i.arg[1] for i in instructions(maker_cf, maker.code) if i.op == 0xBB] if maker and maker.code else []
+            body = instructions(maker_cf, maker.code) if maker and maker.code else []
+            if any(i.op == 0xB2 and i.arg.owner == TOOL_MATERIALS for i in body):
+                continue  # builds on a tier of its own, not the set's
+            built = [i.arg[1] for i in body if i.op == 0xBB]
             items = [c for c in built if c != itemcode.PROPERTIES and "attribute" not in c.lower()]
             if len(items) != 1 or itemcode.sets_durability(index, items[0]) is not False:
                 continue
