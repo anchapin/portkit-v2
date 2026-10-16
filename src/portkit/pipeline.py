@@ -13,7 +13,12 @@ from .conditions import (ConfigRequest, LoadContext, config_note, config_record,
                          resolve_config)
 from .converters import convert_all
 from .converters.blocks import EXPERIMENTS
-from .converters.recipes import drop_unshipped_recipes, equip_smithing_bases, withdraw_unequipped_smithing
+from .converters.recipes import (
+    drop_unshipped_recipes,
+    equip_smithing_bases,
+    withdraw_unacceptable_trims,
+    withdraw_unequipped_smithing,
+)
 from .data.mappings import attach as attach_mappings
 from .icon import resolve as resolve_icon
 from .ingest import ingest
@@ -473,6 +478,9 @@ def convert(
             result.files.update(equipped.files)
             result.notes.extend(equipped.notes)
         withdraw_unequipped_smithing(result)
+        # And a trim recipe whose base is the pack's own item that isn't armor
+        # carrying minecraft:trimmable_armors (#272).
+        withdraw_unacceptable_trims(result)
         shorten_paths(result)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}
         icon, icon_source, icon_note = resolve_icon(staged.icons, namespace)

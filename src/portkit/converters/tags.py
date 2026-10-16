@@ -137,6 +137,10 @@ class TagResolver:
         return self._shipped
 
     # -- tag files -------------------------------------------------------
+    def tag_file(self, tag: str) -> Path | None:
+        """The jar's own file for ``tag`` (``items/``, or 1.21's ``item/``), or None."""
+        return self._tag_file(tag)
+
     def _tag_file(self, tag: str) -> Path | None:
         ns, _, path = tag.partition(":")
         if not path:

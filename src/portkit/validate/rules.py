@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 from ..data import FETCH_COMMAND, bedrock_vanilla_sounds
+from ..data import trim_items
 from ..data.smithing_bases import vanilla_base_refusal
 from ..paths import MAX_PATH, MAX_SEGMENTS, too_long
 from ..png import dimensions
@@ -584,6 +585,7 @@ def validate_pack(pack_root: Path) -> ValidationReport:
 
     _check_scripts(report, pack_root, prefix)
     _check_smithing_bases(report, pack_root, prefix)
+    _check_smithing_trims(report, pack_root, prefix)
 
     for path in sorted((pack_root / "blocks").glob("*.json")):
         _check_block(report, path, f"{prefix}/blocks/{path.name}", pack_root)
@@ -626,7 +628,8 @@ def _definitions(pack_root: Path, folder: str, key: str) -> dict[str, dict]:
         except (ValueError, OSError, AttributeError):
             continue
         if isinstance(body, dict):
-            ident = (body.get("description") or {}).get("identifier")
+            description = body.get("description")
+            ident = description.get("identifier") if isinstance(description, dict) else None
             if isinstance(ident, str):
                 found[ident] = body.get("components") if isinstance(body.get("components"), dict) else {}
     return found
@@ -675,6 +678,63 @@ def _check_smithing_bases(report: ValidationReport, pack_root: Path, prefix: str
             report.add(rel, "recipe.smithing_base",
                        f"smithing base {base} is a block; Bedrock's smithing table takes only armor and tools "
                        "as the base")
+
+
+_TRIM_KEY = "minecraft:recipe_smithing_trim"
+
+
+def _check_smithing_trims(report: ValidationReport, pack_root: Path, prefix: str) -> None:
+    """Every trim recipe's slots are ones Bedrock takes, and no item's trim tag
+    puts an item Bedrock refuses into Mojang's own trim recipe (#272,
+    :mod:`portkit.data.trim_items`).
+
+    ``recipe.smithing_trim``: a slot's tag must be that slot's Bedrock tag; a
+    vanilla item must be in it (minecraft.wiki's Bedrock item tag lists); the
+    pack's own item can't be a template or an addition (an add-on can't
+    register a trim pattern or material; BDS 1.26.52.3 refuses it), and as the
+    base it must be wearable and carry ``minecraft:trimmable_armors``. Ids the
+    pack doesn't define are other rules' business.
+
+    ``item.trim_tag``: an item of the pack carrying ``minecraft:trim_templates``
+    or ``minecraft:trim_materials``, or ``minecraft:trimmable_armors`` without
+    ``minecraft:wearable``, puts an item Bedrock refuses into Mojang's own
+    ``minecraft:smithing_armor_trim``, which BDS then reports as an error.
+    """
+    items = _definitions(pack_root, "items", "minecraft:item")
+    for ident, components in sorted(items.items()):
+        if ident.startswith("minecraft:"):
+            continue
+        refusal = trim_items.item_tag_refusal(ident, components)
+        if refusal:
+            report.add(f"{prefix}/items", "item.trim_tag", refusal)
+    blocks = None
+    for path in sorted((pack_root / "recipes").glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        body = data.get(_TRIM_KEY) if isinstance(data, dict) else None
+        if not isinstance(body, dict):
+            continue
+        rel = f"{prefix}/recipes/{path.name}"
+        for slot in ("template", "base", "addition"):
+            found = trim_items.slot_value(body.get(slot))
+            if found is None:
+                continue  # an empty slot is _check_recipe's
+            kind, ident = found
+            if kind == "tag" or ident.startswith("minecraft:"):
+                refusal = trim_items.vanilla_refusal(slot, kind, ident)
+            else:
+                if blocks is None:
+                    blocks = _definitions(pack_root, "blocks", "minecraft:block")
+                if ident not in items and ident not in blocks:
+                    refusal = None  # not this pack's: other rules' business
+                elif slot != "base":
+                    refusal = trim_items.addon_refusal(slot, ident)
+                else:
+                    refusal = trim_items.addon_base_refusal(ident, items.get(ident))
+            if refusal:
+                report.add(rel, "recipe.smithing_trim", f"trim {refusal}")
 
 
 def _check_dependencies(report: ValidationReport, packs: list[Path]) -> None:

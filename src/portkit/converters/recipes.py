@@ -81,6 +81,7 @@ from ..conditions import CONDITIONAL_TYPES, LoadContext, condition_keys
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
 from ..data import java_items, vanilla_items
+from ..data import trim_items
 from ..data.smithing_bases import vanilla_base_refusal
 from .recipe_unlock import ALWAYS_UNLOCKED, NEEDS_UNLOCK, advancement_index, unlock_entries, with_unlock
 from .recipe_unlock import criteria as unlock_criteria
@@ -135,12 +136,8 @@ _FURNACE_TYPES = {
 # Types with a real Bedrock equivalent we deliberately do not attempt yet, so the
 # residue says why instead of "unsupported".
 _KNOWN_UNSUPPORTED = {
-    "minecraft:smithing_trim": (
-        "an armour trim; Bedrock has minecraft:recipe_smithing_trim, but its slots only "
-        "accept items carrying the trim_templates, trimmable_armors and trim_materials "
-        "tags, and a custom item tagged trim_materials has no effect, so whether this "
-        "trim can work on Bedrock is a judgment call"
-    ),
+    # minecraft:smithing_trim converts when Bedrock takes every slot, else it is
+    # residue with the slot's reason (_smithing_trim, #272).
     "minecraft:crafting_transmute": "transmute recipes have no Bedrock equivalent",
     # alloy_forgery:forging is machine_recipe residue with a per-recipe reason
     # (its adapter, portkit.adapters.alloy_forgery, #171/#245).
@@ -528,6 +525,101 @@ def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult,
     }
 
 
+TRIM = "minecraft:recipe_smithing_trim"
+
+
+def _trim_pattern_refusal(recipe: dict, template) -> str | None:
+    """Why Java 1.21.5+'s fixed ``pattern`` can't be said on Bedrock, or None.
+
+    Bedrock's trim recipe has no pattern field: the pattern is the template
+    item's. A vanilla pattern that is the vanilla template's own (``coast`` for
+    ``coast_armor_trim_smithing_template``) says nothing more; any other (a
+    mod's pattern, or a pattern fixed for a tag of templates) would change the
+    trim the player gets.
+    """
+    pattern = recipe.get("pattern")
+    if pattern is None:
+        return None
+    if not isinstance(pattern, str) or not pattern.startswith("minecraft:"):
+        return (f"pattern {pattern!r} is not a vanilla trim pattern, and a Bedrock add-on can't register "
+                f"one ({trim_items.PROBE_SOURCE})")
+    if isinstance(template, str) and template == f"{pattern}_armor_trim_smithing_template":
+        return None
+    return (f"pattern {pattern} is fixed by the recipe, and Bedrock's trim recipe has no pattern field "
+            f"(its pattern is the template's, {trim_items.MOJANG_SOURCE}), so it can't be said with "
+            f"template {template!r}")
+
+
+def _smithing_trim(recipe: dict, identifier: str, rel: str, result: ConversionResult,
+                   tags: TagResolver | None = None, unknown: set[str] | None = None,
+                   seen: set[str] | None = None) -> dict | None:
+    """A Java ``minecraft:smithing_trim`` as Bedrock's ``recipe_smithing_trim``, or None (#272).
+
+    Each slot is Java's slot tag (``#minecraft:trim_templates``,
+    ``#minecraft:trimmable_armor``, ``#minecraft:trim_materials``), written as
+    Bedrock's (``minecraft:trimmable_armors`` for the base), or one item. A
+    vanilla item must be in Bedrock's tag for its slot, and a mod item can't
+    be a template or an addition (:mod:`portkit.data.trim_items`); a mod base
+    is checked once the pack is final (:func:`withdraw_unacceptable_trims`).
+    Anything else is residue with the reason: never a crafting stand-in, and
+    no slot is invented (Alex, 2026-10-16, #268).
+    """
+    body: dict = {"description": {"identifier": identifier}, "tags": ["smithing_table"]}
+    for slot in ("template", "base", "addition"):
+        spec = _ingredient(recipe.get(slot))
+        if spec in (None, "", {}, []):
+            result.unhandled.append(Unhandled(
+                rel, "recipe", f"trim recipe has no {slot}, and Bedrock's smithing table needs all three "
+                f"({trim_items.MOJANG_SOURCE})"))
+            return None
+        if isinstance(spec, dict) and spec.get("tag") == trim_items.JAVA_SLOT_TAGS[slot]:
+            body[slot] = {"tag": trim_items.TRIM_SLOT_TAGS[slot]}
+            own = tags.own_share(spec["tag"]) if slot != "base" and tags is not None else []
+            if own:
+                result.notes.append(
+                    f"{rel}: {slot} tag {spec['tag']} is written as Bedrock's {trim_items.TRIM_SLOT_TAGS[slot]}, "
+                    f"which holds vanilla's members only: {', '.join(own)} from this mod can't be a trim "
+                    f"{'pattern' if slot == 'template' else 'material'} on Bedrock ({trim_items.PROBE_SOURCE})")
+            continue
+        item = _smithing_item(spec, tags)
+        if item is None:
+            if isinstance(spec, dict) and isinstance(spec.get("tag"), str):
+                why = (f"trim {slot} tag {spec['tag']} is not {trim_items.JAVA_SLOT_TAGS[slot]} and means more "
+                       f"than one item, and Bedrock's {slot} slot takes only items in "
+                       f"{trim_items.TRIM_SLOT_TAGS[slot]} ({trim_items.MOJANG_SOURCE})")
+            else:
+                why = f"trim {slot}: {_tag_reason(spec, tags)}"
+            result.unhandled.append(Unhandled(rel, "recipe", why))
+            return None
+        body[slot] = item
+    why = bedrock_ids(body, unknown, seen)
+    if why:
+        result.unhandled.append(Unhandled(rel, "recipe", why))
+        return None
+    refused = []
+    for slot in ("template", "base", "addition"):
+        found = trim_items.slot_value(body[slot])
+        if found is None or found[0] == "tag":
+            continue
+        ident = found[1]
+        if ident.startswith("minecraft:"):
+            refusal = trim_items.vanilla_refusal(slot, "item", ident)
+        elif slot != "base":
+            refusal = trim_items.addon_refusal(slot, ident)
+        else:
+            refusal = None  # checked on the final pack
+        if refusal:
+            refused.append(refusal)
+    pattern = _trim_pattern_refusal(recipe, body["template"])
+    if pattern:
+        refused.append(pattern)
+    if refused:
+        result.unhandled.append(Unhandled(
+            rel, "recipe", f"trim {'; '.join(refused)}: not written, and not rewritten as another recipe"))
+        return None
+    return body
+
+
 def bedrock_item(ident: str) -> tuple[str, int | None] | str:
     """A Java item id as Bedrock writes it: (id, data or None), or why it has none (#261).
 
@@ -886,6 +978,61 @@ def _member_suffix(member: str) -> str:
     return member.replace(":", "_").replace("/", "_")
 
 
+def _wearable(body) -> bool:
+    """Whether an emitted item definition is Bedrock armor (``minecraft:wearable``)."""
+    item = body.get("minecraft:item") if isinstance(body, dict) else None
+    components = item.get("components") if isinstance(item, dict) else None
+    return isinstance(components, dict) and isinstance(components.get("minecraft:wearable"), dict)
+
+
+def _trimmable_armor_tags(mod: SourceMod, emitted: dict | None, tags: TagResolver,
+                          item_tags: dict[str, set[str]], result: ConversionResult) -> None:
+    """Tag this mod's Java trimmable armor with Bedrock's ``minecraft:trimmable_armors`` (#272).
+
+    Java's ``#minecraft:trimmable_armor`` (with vanilla's 1.21 nesting of
+    ``#minecraft:head_armor`` and the rest, from the reference data; the jar's
+    own direct entries when that isn't cached) says which of the mod's items
+    vanilla's trim recipe takes. On Bedrock the same recipe takes items tagged
+    ``minecraft:trimmable_armors``, but only armor: BDS refuses Mojang's own
+    ``minecraft:smithing_armor_trim`` when a tagged item has no
+    ``minecraft:wearable`` (:mod:`portkit.data.trim_items`). So only an
+    emitted item that is wearable gets the tag; the others are counted in a
+    note. (A namespace with no recipe folder never gets here.)
+    """
+    java_tag = trim_items.JAVA_SLOT_TAGS["base"]
+    found = tags.members(java_tag)
+    own_file = tags.tag_file(java_tag)
+    if found is not None:
+        members, sources = found.members, list(found.sources)
+    else:
+        members = tags.own_share(java_tag)
+        sources = [own_file.relative_to(mod.root).as_posix()] if own_file is not None else []
+    members = [m for m in members if m.startswith(f"{mod.namespace}:")]
+    tagged, not_armor = [], []
+    for member in members:
+        hit = (emitted or {}).get(member)
+        if not hit or hit[0] != "item":
+            continue
+        if _wearable(hit[2]):
+            item_tags.setdefault(member, set()).add(trim_items.TRIM_SLOT_TAGS["base"])
+            tagged.append(member)
+        else:
+            not_armor.append(member)
+    where = ", ".join(sources) or java_tag
+    if tagged:
+        for source in sources:
+            result.consumed.add(source)
+        result.notes.append(
+            f"{len(tagged)} item(s) Java's #{java_tag} holds ({where}) carry Bedrock's "
+            f"{trim_items.TRIM_SLOT_TAGS['base']}, so vanilla's trim recipe takes them (#272)")
+    if not_armor:
+        shown = ", ".join(not_armor[:3]) + (f" and {len(not_armor) - 3} more" if len(not_armor) > 3 else "")
+        result.notes.append(
+            f"{len(not_armor)} item(s) Java's #{java_tag} holds ({where}: {shown}) aren't armor in this pack "
+            f"(no minecraft:wearable), so they don't carry {trim_items.TRIM_SLOT_TAGS['base']}: on an item "
+            f"that isn't armor the tag makes BDS refuse Mojang's own trim recipe ({trim_items.PROBE_SOURCE})")
+
+
 def convert(mod: SourceMod, emitted: dict | None = None,
             context: LoadContext | None = None,
             deferred: list | None = None) -> ConversionResult:
@@ -1019,6 +1166,22 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                         found = (emitted or {}).get(body.get(slot))
                         if found and found[0] == "item" and isinstance(found[2].get("minecraft:item"), dict):
                             item_tags.setdefault(body[slot], set()).add(slot_tag)
+            continue
+        if java_type == "minecraft:smithing_trim":
+            body = _smithing_trim(recipe, f"{mod.namespace}:{name}", rel, result, tag_resolver,
+                                  unknown_ids, vanilla_seen)
+            if body is not None:
+                out_path, ident = f"recipes/{name}.json", f"{mod.namespace}:{name}"
+                clash = taken(rel, [(out_path, ident)])
+                if clash:
+                    result.unhandled.append(Unhandled(rel, "recipe", clash))
+                    continue
+                write(rel, out_path, ident, {"format_version": "1.20.10", TRIM: body})
+                base = body.get("base")
+                found = (emitted or {}).get(base) if isinstance(base, str) else None
+                if found and found[0] == "item" and _wearable(found[2]):
+                    # The Java recipe is the evidence it takes the base slot (#263).
+                    item_tags.setdefault(base, set()).add(trim_items.TRIM_SLOT_TAGS["base"])
             continue
         mapping = _SUPPORTED.get(java_type)
         if mapping is None:
@@ -1312,6 +1475,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 f"({name}__<member>)"
             )
 
+    _trimmable_armor_tags(mod, emitted, tag_resolver, item_tags, result)
     for member, member_tags in sorted(item_tags.items()):
         kind, item_path, source_body = emitted[member]
         if kind == "block":
@@ -1583,6 +1747,51 @@ def withdraw_unequipped_smithing(result: ConversionResult) -> None:
             result.unhandled.append(Unhandled(source, "recipe", why))
     # Tags for recipes withdrawn here or by drop_unshipped_recipes.
     _drop_orphan_slot_tags(result)
+
+
+def withdraw_unacceptable_trims(result: ConversionResult) -> None:
+    """Withdraw every trim recipe whose base is the pack's own item but not one
+    Bedrock takes (#272).
+
+    Runs on the merged pack after :func:`withdraw_unequipped_smithing`. A
+    ``recipe_smithing_trim``'s template, addition and vanilla base were checked
+    when it was written (:func:`_smithing_trim`); a base that is the pack's own
+    item is checked here, on its final definition: it must be wearable armor
+    carrying ``minecraft:trimmable_armors``
+    (:func:`portkit.data.trim_items.addon_base_refusal`). Otherwise the recipe
+    goes back to the residue under its source recipe with the reason, and is
+    not rewritten as any other recipe (Alex, 2026-10-16, #268).
+    """
+    emitted = emitted_definitions(result.files)
+    residue_sources = {u.source for u in result.unhandled}
+    by_source: dict[str, list[str]] = {}
+    for path in sorted(result.files):
+        value = result.files[path]
+        if path.startswith("recipes/") and isinstance(value, dict) and isinstance(value.get(TRIM), dict):
+            by_source.setdefault(result.recipe_sources.get(path, path), []).append(path)
+    for source, paths in by_source.items():
+        refused = []
+        for path in paths:
+            found = trim_items.slot_value(result.files[path][TRIM].get("base"))
+            if found is None or found[0] != "item" or ":" not in found[1] or found[1].startswith("minecraft:"):
+                continue
+            hit = emitted.get(found[1])
+            if hit is None:
+                continue  # unshipped: drop_unshipped_recipes' business
+            item = hit[2].get("minecraft:item") if hit[0] == "item" else None
+            components = (item.get("components") or {}) if isinstance(item, dict) else None
+            refusal = trim_items.addon_base_refusal(found[1], components)
+            if refusal:
+                refused.append(refusal)
+        if not refused:
+            continue
+        for path in paths:
+            del result.files[path]
+        why = f"trim {'; '.join(sorted(set(refused)))}: not written, and not rewritten as another recipe"
+        if source in residue_sources:
+            result.notes.append(f"{source}: {why}")
+        else:
+            result.unhandled.append(Unhandled(source, "recipe", why))
 
 
 def _drop_orphan_slot_tags(result: ConversionResult) -> None:
