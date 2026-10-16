@@ -937,6 +937,87 @@ def cmd_gaps(args) -> int:
     return 0
 
 
+def cmd_gauntlet(args) -> int:
+    """``portkit gauntlet pin|run|board``: the top-50 gauntlet (#277, #278)."""
+    from datetime import date
+
+    from . import corpus, gaps, gauntlet
+
+    manifest = Path(args.manifest) if args.manifest else gauntlet.MANIFEST
+    if args.action == "pin":
+        entries = gauntlet.pin()
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(gauntlet.render_manifest(entries, date.today().isoformat()))
+        bad = [e["name"] for e in entries if e.get("unfetchable")]
+        print(f"gauntlet written: {manifest} ({len(entries)} mods, {len(bad)} unfetchable)")
+        return 0
+    if args.action == "run":
+        try:
+            mods = corpus.select(corpus.load(manifest), args.fixture or (), include_optional=True)
+            gaps.parse_shard(args.shard)
+        except (OSError, ValueError, corpus.CorpusError) as exc:
+            print(f"cannot read the gauntlet: {exc}", file=sys.stderr)
+            return 2
+        mct_exe = None
+        if args.mct:
+            from .validate import mct
+
+            mct_exe = mct.find_mct()
+            if mct_exe is None:
+                print("note: --mct asked for, but `mct` is not on PATH; skipping it")
+        where = manifest.resolve()
+        label = str(where.relative_to(gaps_root())) if where.is_relative_to(gaps_root()) else str(manifest)
+        doc = gaps.run_shard(mods, shard=args.shard, manifest=label,
+                             fetch=lambda mod: corpus.fetch(mod)[0], timeout=args.timeout,
+                             mct_exe=mct_exe, profile=gauntlet.profile_and_classify)
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(doc, indent=1) + "\n")
+        print(f"shard written: {out} ({len(doc['mods'])} mods)")
+        return 0
+
+    shards = []
+    for path in args.shards:
+        try:
+            shards.append(json.loads(Path(path).read_text()))
+        except (OSError, ValueError) as exc:
+            print(f"cannot read shard {path}: {exc}", file=sys.stderr)
+            return 2
+
+    def _optional_json(path, what):
+        if not path:
+            return None
+        p = Path(path)
+        if not p.is_file():
+            print(f"note: no {what} at {p}")
+            return None
+        try:
+            return json.loads(p.read_text())
+        except ValueError as exc:
+            print(f"note: {what} unreadable: {exc}")
+            return None
+
+    previous = _optional_json(args.previous, "previous board")
+    baseline = _optional_json(args.baseline or gauntlet.BASELINE, "gauntlet baseline")
+    try:
+        listed = corpus.load(manifest) if manifest.is_file() else None
+        result = gauntlet.board(shards, previous, baseline, listed)
+    except (ValueError, corpus.CorpusError) as exc:
+        print(f"cannot build the gauntlet board: {exc}", file=sys.stderr)
+        return 2
+    Path(args.json).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.json).write_text(json.dumps(result, indent=1) + "\n")
+    md = gauntlet.render_markdown(result, top=args.top)
+    if args.md:
+        Path(args.md).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.md).write_text(md)
+    if args.bank:
+        Path(args.bank).write_text(json.dumps(gauntlet.baseline_of(result), indent=1) + "\n")
+        print(f"baseline banked: {args.bank}")
+    print(md if not args.md else f"gauntlet board written: {args.json}, {args.md}")
+    return 0
+
+
 def gaps_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -1380,6 +1461,25 @@ def main(argv=None) -> int:
     p.add_argument("--md", metavar="PATH", help="board: leaderboard markdown (default: print it)")
     p.add_argument("--top", type=int, default=50, help="board: reasons shown in the markdown (default 50)")
     p.set_defaults(func=cmd_gaps)
+
+    p = sub.add_parser("gauntlet", help="the top-50 gauntlet (#277): pin the 50 jars, run them, build docs/gauntlet.md (#278)")
+    p.add_argument("action", choices=["pin", "run", "board"])
+    p.add_argument("shards", nargs="*", metavar="SHARD_JSON", help="board: the shard files to merge")
+    p.add_argument("--manifest", metavar="PATH", help="gauntlet manifest (default fixtures/real/gauntlet.toml)")
+    p.add_argument("--shard", metavar="I/N", help="run: only every N-th mod starting at I (default 1/1)")
+    p.add_argument("--fixture", action="append", metavar="NAME", help="run: only these mods (repeatable)")
+    p.add_argument("--timeout", type=float, default=900.0, metavar="S",
+                   help="run: seconds per mod conversion before it counts as timed out (default 900)")
+    p.add_argument("--mct", action="store_true", help="run: also count mct findings per mod (report-only)")
+    p.add_argument("--out", default="gauntlet-shard.json", metavar="PATH", help="run: shard file to write")
+    p.add_argument("--previous", metavar="PATH", help="board: the previous board JSON, for the trend")
+    p.add_argument("--baseline", metavar="PATH",
+                   help="board: banked baseline to compare coverage with (default fixtures/real/gauntlet-baseline.json)")
+    p.add_argument("--bank", metavar="PATH", help="board: also write this board as the baseline to PATH")
+    p.add_argument("--json", default="gauntlet-board.json", metavar="PATH", help="board: board JSON")
+    p.add_argument("--md", metavar="PATH", help="board: board markdown, e.g. docs/gauntlet.md (default: print it)")
+    p.add_argument("--top", type=int, default=25, help="board: reason classes shown (default 25)")
+    p.set_defaults(func=cmd_gauntlet)
 
     p = sub.add_parser(
         "reference",

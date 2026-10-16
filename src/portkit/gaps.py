@@ -188,11 +188,14 @@ def _child(jar: str, out: str, result: str) -> int:
 
 def run_shard(mods, *, shard: str | None = None, manifest: str = "", fetch=None,
               timeout: float = DEFAULT_TIMEOUT, mct_exe: str | None = None,
-              convert=convert_one, log=print) -> dict:
+              convert=convert_one, log=print, profile=None) -> dict:
     """Fetch and convert one shard of the sample; returns the shard document.
 
     ``fetch(mod) -> Path`` raises on failure (corpus.CorpusError); a mod that
-    can't be fetched is recorded as ``fetch_failed``, not dropped.
+    can't be fetched is recorded as ``fetch_failed``, not dropped, and one the
+    manifest marks ``unfetchable`` is recorded as such without a fetch.
+    ``profile(jar) -> dict``, when given, reads the jar itself (the gauntlet's
+    classification, #278) and is stored on the mod's record.
     """
     index, total = parse_shard(shard)
     chosen = shard_of(list(mods), index, total)
@@ -201,12 +204,24 @@ def run_shard(mods, *, shard: str | None = None, manifest: str = "", fetch=None,
     for mod in chosen:
         meta = {"project": mod.project, "version": mod.version, "loader": mod.loader,
                 "minecraft": mod.minecraft, "license": mod.license}
+        for extra in ("rank", "title", "host", "rule", "listed_lib"):
+            if getattr(mod, extra, None):
+                meta[extra] = getattr(mod, extra)
+        if getattr(mod, "unfetchable", ""):
+            doc["mods"][mod.name] = {**meta, "status": "unfetchable", "detail": mod.unfetchable[:300]}
+            log(f"{mod.name}: unfetchable: {mod.unfetchable}")
+            continue
         try:
             jar = fetch(mod)
         except Exception as exc:  # noqa: BLE001 - a fetch failure is a row, not a crash
             doc["mods"][mod.name] = {**meta, "status": "fetch_failed", "detail": str(exc)[:300]}
             log(f"{mod.name}: fetch failed: {exc}")
             continue
+        if profile is not None:
+            try:
+                meta["profile"] = profile(jar)
+            except Exception as exc:  # noqa: BLE001 - an unreadable jar is a row, not a crash
+                meta["profile"] = {"class": "?", "evidence": [f"profile failed: {str(exc)[:200]}"]}
         work = Path(tempfile.mkdtemp(prefix="portkit-gaps-"))
         try:
             record = convert(Path(jar), work, timeout)
@@ -252,6 +267,8 @@ def _status_reason(record: dict) -> tuple[str, str] | None:
         return "conversion", "conversion timed out"
     if status == "ingest_error":
         return "conversion", f"cannot ingest: {normalize(record.get('detail', ''))}"
+    if status == "unfetchable":
+        return "fetch", "jar unfetchable"
     return None
 
 
