@@ -1,51 +1,51 @@
 {
   "fixtures": {
     "alexs_mobs": {
-      "coverage": 26.5,
-      "files": 1110,
-      "residue": 3083,
+      "coverage": 26.2,
+      "files": 1097,
+      "residue": 3096,
       "errors": 0
     },
     "betterend": {
-      "coverage": 40.0,
-      "files": 3558,
-      "residue": 5346,
+      "coverage": 37.5,
+      "files": 3339,
+      "residue": 5565,
       "errors": 0
     },
     "create": {
-      "coverage": 33.7,
-      "files": 4185,
-      "residue": 8226,
+      "coverage": 32.5,
+      "files": 4013,
+      "residue": 8335,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 38.3,
-      "files": 906,
-      "residue": 1459,
+      "coverage": 38.2,
+      "files": 903,
+      "residue": 1462,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 43.7,
-      "files": 883,
-      "residue": 1138,
+      "coverage": 43.5,
+      "files": 880,
+      "residue": 1141,
       "errors": 0
     },
     "mekanism": {
-      "coverage": 12.7,
-      "files": 1302,
-      "residue": 8918,
+      "coverage": 12.0,
+      "files": 1222,
+      "residue": 8996,
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 47.7,
-      "files": 1753,
-      "residue": 1922,
+      "coverage": 47.3,
+      "files": 1736,
+      "residue": 1938,
       "errors": 0
     },
     "silent_gear_1165": {
-      "coverage": 34.6,
-      "files": 1180,
-      "residue": 2235,
+      "coverage": 32.3,
+      "files": 1088,
+      "residue": 2282,
       "errors": 0
     },
     "storage_drawers_1122": {
@@ -55,21 +55,21 @@
       "errors": 0
     },
     "storage_drawers_1192": {
-      "coverage": 45.5,
-      "files": 304,
-      "residue": 364,
+      "coverage": 41.2,
+      "files": 268,
+      "residue": 382,
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 29.9,
-      "files": 1577,
-      "residue": 3690,
+      "coverage": 29.2,
+      "files": 1539,
+      "residue": 3726,
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 48.9,
-      "files": 16649,
-      "residue": 17429,
+      "coverage": 48.6,
+      "files": 16576,
+      "residue": 17498,
       "errors": 0
     },
     "waystones": {

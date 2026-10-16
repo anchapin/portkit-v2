@@ -233,9 +233,10 @@ def test_load_conditions_gate_a_bare_tag_recipe(tmp_path, reference):
 
 def test_the_validator_flags_a_hash_item(tmp_path, fixtures_dir):
     src = tmp_path / "src"
-    shutil.copytree(fixtures_dir / "agent_mod" / "input", src)
+    # recipes_mod: every recipe ships (agent_mod's recipes are all residue since #261)
+    shutil.copytree(fixtures_dir / "recipes_mod" / "input", src)
     result = convert(src, tmp_path / "out", emit_addon=False)
-    path = next((result.tree / "behavior_pack" / "recipes").glob("*.json"))
+    path = result.tree / "behavior_pack" / "recipes" / "iron_frame.json"
     body = json.loads(path.read_text())
     (key,) = [k for k in body if k.startswith("minecraft:recipe_")]
     recipe = body[key]

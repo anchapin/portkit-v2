@@ -62,6 +62,13 @@ holding a tag, or anything but plain item ids, stays residue.
 
 Anything else stays residue, and the reason names any members this conversion
 did not emit. A recipe is never narrowed to part of a tag.
+
+Item ids (#261): every vanilla id a written recipe names is Bedrock's
+(:func:`bedrock_item`, from GeyserMC/mappings: ``minecraft:bricks`` ->
+``minecraft:brick_block``, ``minecraft:red_bed`` -> ``minecraft:bed`` data 14),
+and once the whole pack is converted a recipe naming a mod item the pack doesn't
+ship goes back to residue (:func:`drop_unshipped_recipes`): Bedrock refuses a
+recipe naming an item it doesn't know.
 """
 from __future__ import annotations
 
@@ -73,7 +80,7 @@ from pathlib import PurePosixPath
 from ..conditions import CONDITIONAL_TYPES, LoadContext, condition_keys
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
-from ..data import vanilla_items
+from ..data import java_items, vanilla_items
 from .recipe_unlock import ALWAYS_UNLOCKED, NEEDS_UNLOCK, advancement_index, unlock_entries, with_unlock
 from .recipe_unlock import criteria as unlock_criteria
 from .tags import MultiMembers, TagResolver
@@ -507,6 +514,118 @@ def _smithing(recipe: dict, identifier: str, rel: str, result: ConversionResult,
     }
 
 
+def bedrock_item(ident: str) -> tuple[str, int | None] | str:
+    """A Java item id as Bedrock writes it: (id, data or None), or why it has none (#261).
+
+    A bare id is Java's ``minecraft:`` one (a ResourceLocation's default
+    namespace; Supplementaries writes ``"item": "black_dye"``). A vanilla id the
+    Java -> Bedrock table (:mod:`portkit.data.java_items`, GeyserMC/mappings)
+    renames becomes Bedrock's: ``minecraft:bricks`` -> ``minecraft:brick_block``,
+    ``minecraft:red_bed`` -> ``minecraft:bed`` with data 14. ``data`` is set only
+    when Bedrock's id stands for several Java items. A Java id that shares its
+    Bedrock id and data with another Java item (``tipped_arrow`` is plain
+    ``arrow``) has none: writing it would make or take the other item. Every
+    other id (a mod's, or a vanilla id the table doesn't rename) is returned as
+    it is, and so is everything when the table isn't cached.
+    """
+    ident = ident if ":" in ident else f"minecraft:{ident}"
+    if not ident.startswith("minecraft:"):
+        return ident, None
+    table = java_items.table()
+    if table is None:
+        return ident, None
+    if ident in table.ambiguous:
+        shared = ", ".join(table.ambiguous[ident])
+        return (f"Java {ident} has no Bedrock id of its own: Bedrock writes it the same as "
+                f"{shared} ({java_items.REPO}), so a recipe naming it would make or take that "
+                f"item instead")
+    got = table.lookup(ident)
+    if got is None:
+        return ident, None
+    vanilla = vanilla_items.ids()
+    if vanilla is not None and got[0] not in vanilla:
+        return (f"Java {ident} is Bedrock {got[0]} ({java_items.REPO}), which isn't in Bedrock's "
+                f"vanilla item list")
+    return got
+
+
+# Recipe body keys holding one item, as a bare id string (furnace, smithing) or
+# an {"item": id} object (crafting results).
+_ITEM_SLOTS = ("input", "output", "template", "base", "addition", "result")
+
+
+def bedrock_ids(body: dict, unknown: set[str] | None = None,
+                seen: set[str] | None = None) -> str | None:
+    """Rewrite every item id ``body`` names to Bedrock's (see :func:`bedrock_item`),
+    in place. Returns why the recipe can't be written, or None.
+
+    A slot that takes a bare id string (Bedrock's furnace and smithing) can't
+    carry a data value, so an item that needs one there is a reason. Vanilla
+    ids Bedrock's item list doesn't have and the table doesn't rename are kept
+    as written and added to ``unknown``; every vanilla id named is added to
+    ``seen``.
+    """
+    vanilla = vanilla_items.ids()
+    table = java_items.table()
+
+    def mapped(ident: str):
+        got = bedrock_item(ident)
+        if seen is not None and not isinstance(got, str) and got[0].startswith("minecraft:"):
+            seen.add(got[0])
+        if (unknown is not None and table is not None and not isinstance(got, str) and got[0].startswith("minecraft:")
+                and vanilla is not None and got[0] not in vanilla):
+            unknown.add(got[0])
+        return got
+
+    def one(value):
+        if isinstance(value, str):
+            got = mapped(value)
+            if isinstance(got, str):
+                return None, got
+            if got[1] is not None:
+                return None, (f"{value} is Bedrock {got[0]} with data {got[1]}, which a slot "
+                              "holding a bare item id can't say")
+            return got[0], None
+        if isinstance(value, dict) and isinstance(value.get("item"), str):
+            got = mapped(value["item"])
+            if isinstance(got, str):
+                return None, got
+            out = {"item": got[0]}
+            if got[1] is not None:
+                out["data"] = got[1]
+            out.update((k, v) for k, v in value.items() if k != "item" and not (k == "data" and "data" in out))
+            return out, None
+        return value, None
+
+    def many(values):
+        out = []
+        for value in values:
+            new, why = one(value)
+            if why:
+                return None, why
+            out.append(new)
+        return out, None
+
+    key = body.get("key")
+    if isinstance(key, dict):
+        new, why = many(list(key.values()))
+        if why:
+            return why
+        body["key"] = dict(zip(key, new))
+    if isinstance(body.get("ingredients"), list):
+        new, why = many(body["ingredients"])
+        if why:
+            return why
+        body["ingredients"] = new
+    for slot in _ITEM_SLOTS:
+        if slot in body:
+            new, why = one(body[slot])
+            if why:
+                return why
+            body[slot] = new
+    return None
+
+
 def emitted_definitions(files: dict) -> dict[str, tuple[str, str, dict]]:
     """identifier -> (kind, path, body) for every block and item definition in ``files``.
 
@@ -811,9 +930,17 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         owners[out_path] = rel
         identifiers[ident] = rel
         result.files[out_path] = value
+        result.recipe_sources[out_path] = rel
 
     advancements = advancement_index(mod.root)
     unlocks = {"derived": 0, "no_advancement": 0, "fallback": 0}
+
+    unknown_ids: set[str] = set()  # vanilla ids neither Bedrock's list nor the table knows
+    vanilla_seen: set[str] = set()  # every vanilla id a written recipe names
+
+    def unlock_item(item: str) -> tuple[str, int | None] | None:
+        got = bedrock_item(item)
+        return None if isinstance(got, str) else got
 
     def single_item(tag: str) -> str | None:
         one = _item({"tag": tag}, tag_resolver)
@@ -861,6 +988,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             converted = _smithing(recipe, f"{mod.namespace}:{name}", rel, result, tag_resolver)
             if converted is not None:
                 body_key, body = converted
+                why = bedrock_ids(body, unknown_ids, vanilla_seen)
+                if why:
+                    result.unhandled.append(Unhandled(rel, "recipe", why))
+                    continue
                 out_path, ident = f"recipes/{name}.json", f"{mod.namespace}:{name}"
                 clash = taken(rel, [(out_path, ident)])
                 if clash:
@@ -1059,6 +1190,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             continue
 
         built: list[tuple[str, dict]] = []
+        no_id = None
         for suffix, ingredients in variants:
             variant = copy.deepcopy(body)
             variant["description"]["identifier"] = f"{identifier}{suffix}"
@@ -1073,7 +1205,14 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             else:
                 variant["ingredients"] = ingredients
                 variant["result"] = variant.pop("result")
+            # Java's vanilla ids as Bedrock spells them (#261).
+            no_id = bedrock_ids(variant, unknown_ids, vanilla_seen)
+            if no_id:
+                break
             built.append((suffix, variant))
+        if no_id:
+            result.unhandled.append(Unhandled(rel, "recipe", no_id))
+            continue
         if bedrock_type in NEEDS_UNLOCK:
             # Bedrock 1.20.10+ crafting recipes need unlock data (#260): the
             # Java recipe advancement's has_<item> items, else AlwaysUnlocked.
@@ -1082,7 +1221,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             granting = [(r, a) for r, a in advancements.get(java_id, []) if context.gate(a).passes is True]
             found = unlock_criteria(granting)
             unlock = unlock_entries(found, [v for _, v in built], emitted, single_item,
-                                    vanilla_items.ids())
+                                    vanilla_items.ids(), unlock_item)
             if unlock:
                 unlocks["derived"] += 1
             else:
@@ -1178,6 +1317,17 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             result.consumed.add(source)  # the tag files were read, so they are owned
         if found.note:
             result.notes.append(found.note)
+    if unknown_ids:
+        result.notes.append(
+            f"recipes name vanilla id(s) {', '.join(sorted(unknown_ids))}, which are not in "
+            "Bedrock's vanilla item list and which the Java -> Bedrock table doesn't rename "
+            "(an id a later Java version renamed, or one Bedrock knows by an alias); kept as "
+            "written")
+    if java_items.table() is None and vanilla_items.ids() is not None and vanilla_seen:
+        # (Without either list the unlock fallback note already says to fetch.)
+        result.notes.append(
+            f"recipes keep Java's vanilla item ids: the Java -> Bedrock item table isn't "
+            f"cached, run `{FETCH_COMMAND}`")
     if unlocks["no_advancement"]:
         result.notes.append(
             f"recipe unlock: {unlocks['no_advancement']} crafting recipe(s) have no Java recipe "
@@ -1188,3 +1338,94 @@ def convert(mod: SourceMod, emitted: dict | None = None,
     if note:
         result.notes.append(note)
     return result
+
+
+def _named_items(body: dict) -> list[str]:
+    """Every item id a written Bedrock recipe body names in its inputs and result
+    (its unlock entries are checked on their own, see :func:`drop_unshipped_recipes`)."""
+    found: list[str] = []
+
+    def walk(value):
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, dict) and isinstance(value.get("item"), str):
+            found.append(value["item"])
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+
+    key = body.get("key")
+    if isinstance(key, dict):
+        walk(list(key.values()))
+    for slot in ("ingredients", *_ITEM_SLOTS):
+        if slot in body:
+            walk(body[slot])
+    return found
+
+
+def _recipe_body(value) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    for key, body in value.items():
+        if key.startswith("minecraft:recipe_") and isinstance(body, dict):
+            return body
+    return None
+
+
+def drop_unshipped_recipes(result: ConversionResult) -> None:
+    """Withdraw every recipe naming a mod's item the pack doesn't ship (#261).
+
+    Runs on the merged pack, once every namespace converted and blocks whose
+    textures didn't convert were withdrawn (:func:`portkit.pipeline.drop_untextured`):
+    an item another namespace of the jar ships counts, and one withdrawn
+    after the recipes converted doesn't. Bedrock Dedicated Server refuses a
+    recipe naming an item it doesn't know ("The Item: cluttered:heart_cake is
+    missing or invalid, can't make the recipe" / "Recipe result malformed",
+    #238 in-game runs), so shipping it does nothing for the player; it goes
+    back to the residue under its source recipe, naming the items, and every
+    file written from that source goes with it (a recipe is never narrowed to
+    part of a tag). An unlock entry naming such an item (a recipe's own
+    inputs all ship) is dropped; with none left the unlock is
+    ``AlwaysUnlocked``, labelled in the notes. Vanilla ids are not checked
+    here (see :func:`bedrock_ids`).
+    """
+    shipped = set(emitted_definitions(result.files))
+    residue_sources = {u.source for u in result.unhandled}
+
+    def missing(item: str) -> bool:
+        return ":" in item and not item.startswith("minecraft:") and item not in shipped
+
+    by_source: dict[str, list[str]] = {}
+    for path in sorted(result.files):
+        if path.startswith("recipes/") and _recipe_body(result.files[path]) is not None:
+            by_source.setdefault(result.recipe_sources.get(path, path), []).append(path)
+    for source, paths in by_source.items():
+        named = sorted({i for p in paths for i in _named_items(_recipe_body(result.files[p])) if missing(i)})
+        if named:
+            for path in paths:
+                del result.files[path]
+            shown = ", ".join(named[:5]) + (f" and {len(named) - 5} more" if len(named) > 5 else "")
+            why = (f"names {shown}, which the pack doesn't ship (see {'their' if len(named) > 1 else 'its'} "
+                   f"own residue entry); not written, since Bedrock refuses a recipe naming an item "
+                   f"it doesn't know")
+            if source in residue_sources:
+                # Already residue on its own account (a station recipe the
+                # stove refused too): one entry per source, the rest in a note.
+                result.notes.append(f"{source}: crafting form {why}")
+            else:
+                result.unhandled.append(Unhandled(source, "recipe", why))
+            continue
+        for path in paths:
+            body = _recipe_body(result.files[path])
+            unlock = body.get("unlock")
+            if not isinstance(unlock, list):
+                continue
+            kept = [e for e in unlock
+                    if not (isinstance(e, dict) and isinstance(e.get("item"), str) and missing(e["item"]))]
+            if len(kept) == len(unlock):
+                continue
+            dropped = sorted(e["item"] for e in unlock if e not in kept)
+            body["unlock"] = kept or copy.deepcopy(ALWAYS_UNLOCKED)
+            result.notes.append(
+                f"{path}: unlock entry {', '.join(dropped)} dropped, the pack doesn't ship it"
+                + ("" if kept else "; unlock AlwaysUnlocked (fallback)"))

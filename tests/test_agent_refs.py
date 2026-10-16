@@ -150,6 +150,7 @@ def test_vanilla_ids_are_taken_on_faith_and_aux_values_stripped(tmp_path):
     out = tmp_path / "out"
     convert(AGENT_MOD, out)
     rel = "behavior_pack/recipes/x.json"
+    (out / rel).parent.mkdir(exist_ok=True)  # agent_mod ships no recipe of its own (#261)
     (out / rel).write_text(json.dumps({"minecraft:recipe_shapeless": {
         "ingredients": [{"item": "minecraft:dye:4"}, {"tag": "minecraft:planks"}, {"item": "examplemod:steel_ingot:0"}],
         "result": {"item": "othermod:gizmo"},

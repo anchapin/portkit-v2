@@ -33,9 +33,9 @@ Rule, in order:
    component or NBT condition is dropped, which can only make the unlock
    narrower than Java's, never broader.
 2. An item is kept when this conversion emits it, or when it is a vanilla id
-   Bedrock has (Mojang's item list, :mod:`portkit.data.vanilla_items`; Java's
-   ``minecraft:oak_trapdoor`` is not one, Bedrock calls it
-   ``minecraft:trapdoor``). A tag is kept when the converted recipe takes that
+   Bedrock has (Mojang's item list, :mod:`portkit.data.vanilla_items`), after
+   the Java -> Bedrock rename (#261, :func:`portkit.converters.recipes.bedrock_item`:
+   Java's ``minecraft:oak_trapdoor`` unlocks as Bedrock's ``minecraft:trapdoor``). A tag is kept when the converted recipe takes that
    same tag; a tag that means one item (the recipe converter's own rule) is
    that item, under the same check. Anything else is dropped: BDS refuses the
    whole recipe when an unlock names an item it doesn't know ("has an invalid
@@ -199,10 +199,14 @@ def recipe_refs(body: dict) -> tuple[set[str], set[str]]:
 
 
 def unlock_entries(found: Criteria, bodies: list[dict], emitted, single_item,
-                   vanilla: frozenset[str] | None) -> list[dict]:
+                   vanilla: frozenset[str] | None, to_bedrock=None) -> list[dict]:
     """Bedrock unlock entries for ``found``, given every body written from the
     Java recipe. ``single_item(tag)`` is the one item a tag means, or None;
-    ``vanilla`` is Bedrock's vanilla item ids (None: not known, so none kept)."""
+    ``vanilla`` is Bedrock's vanilla item ids (None: not known, so none kept).
+    ``to_bedrock(item)``, when given, is a vanilla Java id's Bedrock (id, data)
+    or None (#261): Java ``minecraft:oak_trapdoor`` unlocks as Bedrock
+    ``minecraft:trapdoor``, and Java ``minecraft:nether_brick`` (the item) is
+    never read as Bedrock's ``minecraft:nether_brick`` (the block)."""
     tags: set[str] = set()
     for body in bodies:
         tags |= recipe_refs(body)[1]
@@ -214,19 +218,28 @@ def unlock_entries(found: Criteria, bodies: list[dict], emitted, single_item,
         if entry not in out:
             out.append(entry)
 
-    def known(item: str) -> bool:
-        return item in emitted or item in vanilla
+    def entry(item: str) -> dict | None:
+        if item in emitted:
+            return {"item": item}
+        if to_bedrock is not None and item.startswith("minecraft:"):
+            got = to_bedrock(item)
+            if got is None or got[0] not in vanilla:
+                return None
+            return {"item": got[0]} if got[1] is None else {"item": got[0], "data": got[1]}
+        return {"item": item} if item in vanilla else None
 
     for item in found.items:
-        if known(item):
-            add({"item": item})
+        got = entry(item)
+        if got:
+            add(got)
     for tag in found.tags:
         if tag in tags:
             add({"tag": tag})
             continue
         one = single_item(tag)
-        if one and known(one):
-            add({"item": one})
+        got = entry(one) if one else None
+        if got:
+            add(got)
     return out
 
 

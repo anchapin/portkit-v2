@@ -52,6 +52,18 @@ def test_a_missing_item_icon_is_an_error(tmp_path):
 def test_an_undeclared_recipe_result_is_a_warning_not_an_error(tmp_path):
     """A refused definition is already on the residue list: don't fail twice."""
     tree = _convert(tmp_path, "recipes_mod")
+    # The converter withdraws such a recipe itself (#261); one written later
+    # (by the agent, or by hand) still meets the validator.
+    (tree / "behavior_pack" / "recipes" / "extra.json").write_text(json.dumps({
+        "format_version": "1.20.10",
+        "minecraft:recipe_shapeless": {
+            "description": {"identifier": "examplemod:extra"},
+            "tags": ["crafting_table"],
+            "ingredients": [{"item": "minecraft:stick"}],
+            "unlock": {"context": "AlwaysUnlocked"},
+            "result": {"item": "examplemod:undeclared"},
+        },
+    }))
     report = validate_tree(tree)
     assert report.ok
     warnings = [f for f in report.findings if f.rule == "xref.item"]
