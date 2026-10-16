@@ -13,7 +13,7 @@ from .conditions import (ConfigRequest, LoadContext, config_note, config_record,
                          resolve_config)
 from .converters import convert_all
 from .converters.blocks import EXPERIMENTS
-from .converters.recipes import drop_unshipped_recipes
+from .converters.recipes import drop_unshipped_recipes, equip_smithing_bases, withdraw_unequipped_smithing
 from .data.mappings import attach as attach_mappings
 from .icon import resolve as resolve_icon
 from .ingest import ingest
@@ -463,6 +463,16 @@ def convert(
         # Last, once every namespace's blocks and items are final: a recipe
         # naming one the pack doesn't ship would be refused by Bedrock (#261).
         drop_unshipped_recipes(result)
+        # Then the smithing recipes left: each namespace's bases get the
+        # durability its mod's code gives them, and a recipe whose base Bedrock
+        # still won't take as armor or a tool (none could be read, or a block)
+        # goes back to the residue (#268).
+        for ns in selected:
+            equipped = equip_smithing_bases(
+                SourceMod.from_metadata(staged.root, ns, meta, classes=staged.classes), result.files)
+            result.files.update(equipped.files)
+            result.notes.extend(equipped.notes)
+        withdraw_unequipped_smithing(result)
         shorten_paths(result)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}
         icon, icon_source, icon_note = resolve_icon(staged.icons, namespace)

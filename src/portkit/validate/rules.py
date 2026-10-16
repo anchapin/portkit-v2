@@ -582,6 +582,7 @@ def validate_pack(pack_root: Path) -> ValidationReport:
         _check_recipe(report, path, f"{prefix}/recipes/{path.name}")
 
     _check_scripts(report, pack_root, prefix)
+    _check_smithing_bases(report, pack_root, prefix)
 
     for path in sorted((pack_root / "blocks").glob("*.json")):
         _check_block(report, path, f"{prefix}/blocks/{path.name}", pack_root)
@@ -613,6 +614,58 @@ def validate_pack(pack_root: Path) -> ValidationReport:
         _check_lang(report, lang, f"{prefix}/texts/en_US.lang")
 
     return report
+
+
+def _definitions(pack_root: Path, folder: str, key: str) -> dict[str, dict]:
+    """identifier -> components of each definition under ``folder`` (unreadable ones skipped)."""
+    found = {}
+    for path in sorted((pack_root / folder).rglob("*.json")):
+        try:
+            body = json.loads(path.read_text(encoding="utf-8")).get(key)
+        except (ValueError, OSError, AttributeError):
+            continue
+        if isinstance(body, dict):
+            ident = (body.get("description") or {}).get("identifier")
+            if isinstance(ident, str):
+                found[ident] = body.get("components") if isinstance(body.get("components"), dict) else {}
+    return found
+
+
+def _check_smithing_bases(report: ValidationReport, pack_root: Path, prefix: str) -> None:
+    """A smithing recipe's base from this pack is armor or a tool (#268).
+
+    Mojang bedrock-samples documentation/Recipes.html, recipe_smithing_transform:
+    the base's "only accepted items are armor and tools"; BDS 1.26.52.3 refuses
+    a base without minecraft:durability ("base item is not a piece of armor or
+    equipment", #263). Checked for bases the pack defines (a block, or an item
+    without durability); vanilla bases and ids the pack doesn't define are
+    other rules' business."""
+    recipes = sorted((pack_root / "recipes").glob("*.json"))
+    if not recipes:
+        return
+    items = blocks = None
+    for path in recipes:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        body = data.get("minecraft:recipe_smithing_transform") if isinstance(data, dict) else None
+        base = body.get("base") if isinstance(body, dict) else None
+        if not isinstance(base, str) or base.startswith("minecraft:"):
+            continue
+        if items is None:
+            items = _definitions(pack_root, "items", "minecraft:item")
+            blocks = _definitions(pack_root, "blocks", "minecraft:block")
+        rel = f"{prefix}/recipes/{path.name}"
+        if base in items:
+            if not isinstance(items[base].get("minecraft:durability"), dict):
+                report.add(rel, "recipe.smithing_base",
+                           f"smithing base {base} has no minecraft:durability; Bedrock's smithing table takes "
+                           "only armor and tools as the base")
+        elif base in blocks:
+            report.add(rel, "recipe.smithing_base",
+                       f"smithing base {base} is a block; Bedrock's smithing table takes only armor and tools "
+                       "as the base")
 
 
 def _check_dependencies(report: ValidationReport, packs: list[Path]) -> None:

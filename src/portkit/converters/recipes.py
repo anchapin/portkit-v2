@@ -1449,3 +1449,159 @@ def drop_unshipped_recipes(result: ConversionResult) -> None:
             result.notes.append(
                 f"{path}: unlock entry {', '.join(dropped)} dropped, the pack doesn't ship it"
                 + ("" if kept else "; unlock AlwaysUnlocked (fallback)"))
+
+
+SMITHING = "minecraft:recipe_smithing_transform"
+# Why a smithing base needs minecraft:durability (#263, #268).
+_SMITHING_BASE_RULE = (
+    "Bedrock's smithing table takes only armor and tools as the base (Mojang bedrock-samples "
+    "documentation/Recipes.html, recipe_smithing_transform), and BDS 1.26.52.3 refuses a base "
+    "without minecraft:durability (\"base item is not a piece of armor or equipment\", #263)"
+)
+
+
+def _smithing_bases(files: dict) -> set[str]:
+    """Identifiers the written smithing recipes in ``files`` take as their base."""
+    bases = set()
+    for path, value in files.items():
+        if path.startswith("recipes/") and isinstance(value, dict):
+            body = value.get(SMITHING)
+            if isinstance(body, dict) and isinstance(body.get("base"), str):
+                bases.add(body["base"])
+    return bases
+
+
+def _durability(body) -> bool:
+    item = body.get("minecraft:item") if isinstance(body, dict) else None
+    components = (item or {}).get("components") if isinstance(item, dict) else None
+    return isinstance(components, dict) and isinstance(components.get("minecraft:durability"), dict)
+
+
+def equip_smithing_bases(mod: SourceMod, files: dict) -> ConversionResult:
+    """Give this namespace's smithing bases the durability its code gives them (#268).
+
+    Runs on the merged pack (``files``), once :func:`drop_unshipped_recipes`
+    withdrew what it does, so only recipes that ship count.
+
+    A mod item a written ``recipe_smithing_transform`` takes as its base is a
+    tool or armor to Bedrock only with ``minecraft:durability``. Java keeps that
+    number in code, so each adapter's ``item_durability`` hook reads it (from
+    the mod's bytecode, :mod:`portkit.itemcode`) with its source; such an item
+    gets ``minecraft:durability`` and one per stack (Java can't stack an item
+    with max_damage either: minecraft.wiki Data component format, 24w12a). An
+    item already carrying durability (an adapter wrote it) is left as it is,
+    and a base nobody can read is left for :func:`withdraw_unequipped_smithing`.
+    """
+    result = ConversionResult()
+    emitted = emitted_definitions(files)
+    wanted: dict[str, tuple[str, dict]] = {}
+    prefix = f"{mod.namespace}:"
+    for base in sorted(_smithing_bases(files)):
+        found = emitted.get(base)
+        if not base.startswith(prefix) or not found or found[0] != "item":
+            continue
+        path, body = found[1], found[2]
+        if path.startswith("items/") and not _durability(body):
+            wanted[path[len("items/"):-len(".json")]] = (path, body)
+    if not wanted:
+        return result
+    from ..adapters import item_durabilities
+
+    answers = item_durabilities(mod, frozenset(wanted))
+    done = []
+    for name, (durability, source) in sorted(answers.items()):
+        path, body = wanted[name]
+        if not isinstance(durability, int) or durability <= 0:
+            continue
+        item = copy.deepcopy(body)
+        components = item["minecraft:item"].setdefault("components", {})
+        components["minecraft:max_stack_size"] = 1
+        components["minecraft:durability"] = {"max_durability": durability}
+        result.files[path] = item
+        done.append(f"{mod.namespace}:{name} {durability} ({source})")
+    if done:
+        result.notes.append(
+            "smithing bases carry the durability the mod's code gives them, one per stack, so "
+            "Bedrock's smithing table takes them as armor or tools (#268): " + "; ".join(done)
+            + ". Attack damage, mining speed, armor points, enchantability and repair are not written.")
+    return result
+
+
+def withdraw_unequipped_smithing(result: ConversionResult) -> None:
+    """Withdraw every smithing recipe whose base Bedrock won't take (#268).
+
+    Runs on the merged pack after :func:`drop_unshipped_recipes` and
+    :func:`equip_smithing_bases`. A
+    ``recipe_smithing_transform`` whose base is a mod item without
+    ``minecraft:durability`` (no durability could be read from the mod's code)
+    or a mod block is refused by Bedrock (see ``_SMITHING_BASE_RULE``), so it
+    goes back to the residue under its source recipe with the reason. It is
+    not rewritten as a crafting recipe (Alex, 2026-10-16: that would drop the
+    smithing table and what the upgrade carries over). Vanilla bases are not
+    checked here. The smithing slot tags an item carried only for a recipe
+    that was withdrawn (here or by :func:`drop_unshipped_recipes`) are taken
+    off it again.
+    """
+    emitted = emitted_definitions(result.files)
+    residue_sources = {u.source for u in result.unhandled}
+    by_source: dict[str, list[str]] = {}
+    for path in sorted(result.files):
+        value = result.files[path]
+        if path.startswith("recipes/") and isinstance(value, dict) and isinstance(value.get(SMITHING), dict):
+            by_source.setdefault(result.recipe_sources.get(path, path), []).append(path)
+    for source, paths in by_source.items():
+        refused = []
+        for path in paths:
+            base = result.files[path][SMITHING].get("base")
+            if not isinstance(base, str) or ":" not in base or base.startswith("minecraft:"):
+                continue
+            found = emitted.get(base)
+            if found is None:
+                continue  # unshipped: drop_unshipped_recipes' business
+            if found[0] != "item":
+                refused.append(f"{base} is a block")
+            elif not _durability(found[2]):
+                refused.append(f"{base} has no durability (none could be read from the mod's code)")
+        if not refused:
+            continue
+        for path in paths:
+            del result.files[path]
+        why = (f"smithing base {'; '.join(sorted(set(refused)))}: not written, since {_SMITHING_BASE_RULE}; "
+               "not rewritten as a crafting recipe, which would drop the smithing table and what the upgrade "
+               "carries over")
+        if source in residue_sources:
+            result.notes.append(f"{source}: {why}")
+        else:
+            result.unhandled.append(Unhandled(source, "recipe", why))
+    # Tags for recipes withdrawn here or by drop_unshipped_recipes.
+    _drop_orphan_slot_tags(result)
+
+
+def _drop_orphan_slot_tags(result: ConversionResult) -> None:
+    """Take a smithing slot tag off every item no written smithing recipe names
+    in that slot any more."""
+    used: dict[str, set[str]] = {tag: set() for tag in _SMITHING_SLOT_TAGS.values()}
+    for path, value in result.files.items():
+        if path.startswith("recipes/") and isinstance(value, dict) and isinstance(value.get(SMITHING), dict):
+            for slot, tag in _SMITHING_SLOT_TAGS.items():
+                if isinstance(value[SMITHING].get(slot), str):
+                    used[tag].add(value[SMITHING][slot])
+    for path in sorted(result.files):
+        body = result.files[path]
+        if not path.startswith("items/") or not isinstance(body, dict) or not isinstance(body.get("minecraft:item"), dict):
+            continue
+        item = body["minecraft:item"]
+        ident = (item.get("description") or {}).get("identifier")
+        components = item.get("components")
+        tags = ((components or {}).get("minecraft:tags") or {}).get("tags") if isinstance(components, dict) else None
+        if not isinstance(tags, list):
+            continue
+        kept = [t for t in tags if t not in used or ident in used[t]]
+        if len(kept) == len(tags):
+            continue
+        item = copy.deepcopy(item)
+        if kept:
+            item["components"]["minecraft:tags"] = {"tags": kept}
+        else:
+            del item["components"]["minecraft:tags"]
+        result.files[path] = {**body, "minecraft:item": item}
