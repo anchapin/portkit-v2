@@ -29,7 +29,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-16: a mod with nothing Bedrock can hold is explained-empty: no pack, a report of reason classes read from the jar
 
-- **Status:** proposed (Hark), PR for #279.
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order); pick 1 is
+  the default Alex suggested (no pack, an explained-empty report). PR #291 for #279.
 - **Decision:** when a conversion ships no file, every residue entry is of an
   explained kind (`SKIP_KINDS`) or a leftover only the mod's code reads, and
   the jar's own facts name at least one reason class, the outcome is
