@@ -1013,7 +1013,9 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 write(rel, out_path, ident, {"format_version": "1.20.10", body_key: body})
                 if body_key == "minecraft:recipe_smithing_transform":
                     for slot, slot_tag in _SMITHING_SLOT_TAGS.items():
-                        if emitted and body.get(slot) in emitted:
+                        # Item definitions only: a block in a slot would need
+                        # an item form of its own (left as it is).
+                        if emitted and (emitted.get(body.get(slot)) or ("",))[0] == "item":
                             item_tags.setdefault(body[slot], set()).add(slot_tag)
             continue
         mapping = _SUPPORTED.get(java_type)
