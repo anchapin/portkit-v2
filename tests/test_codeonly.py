@@ -219,3 +219,9 @@ def test_board_counts_explained_empty_and_rolls_up_its_reasons():
     assert "1 of them explained-empty" in md and "## Why nothing converts" in md
     assert "| explained-empty | no pack | yes |" in md
     assert gauntlet.baseline_of(b)["mods"]["perf"]["outcome"] == "explained-empty"
+
+
+def test_a_narrowed_run_never_decides_explained_empty(tmp_path):
+    jar = _screen_mod(tmp_path, files={"assets/codemod/textures/gui/b.png": "png"})
+    res = convert(jar, tmp_path / "out", namespace="codemod")
+    assert res.outcome is None and not res.report.ok  # tree.empty, as before

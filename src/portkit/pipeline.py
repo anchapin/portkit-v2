@@ -447,6 +447,9 @@ def convert(
     unknown = sorted(chosen - set(EXPERIMENTS))
     if unknown:
         raise ValueError(f"unknown Bedrock experiment(s) {', '.join(unknown)}; known: {', '.join(EXPERIMENTS)}")
+    # A run narrowed to one namespace (--namespace) speaks for that namespace
+    # only, so it never decides the whole mod is explained-empty (#279).
+    narrowed = namespace is not None
     with tempfile.TemporaryDirectory(prefix="portkit-ingest-") as staging:
         staged = ingest(Path(source), Path(staging))
         # An explicit namespace narrows the run to that one; otherwise every
@@ -518,7 +521,7 @@ def convert(
         # classes in explained-empty.json, and its lang/asset leftovers filed
         # as code_only residue.
         outcome, reasons = None, []
-        if not result.files:
+        if not result.files and not narrowed:
             facts = codeonly.facts(Path(source), classes=staged.classes)
             explained, _ = codeonly.decide(result.files, unhandled, facts, staged.root, staged.namespaces)
             if explained:
