@@ -14,9 +14,6 @@ name: ingame
 # 2026-10-15, #238). Manual dispatch only, report-only: not a PR gate.
 on:
   workflow_dispatch:
-  # TEMPORARY (#238 branch runs): removed before the final head.
-  push:
-    branches: [hark/issue-238-ingame]
 
 jobs:
   ingame:
