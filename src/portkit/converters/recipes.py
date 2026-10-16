@@ -62,6 +62,13 @@ holding a tag, or anything but plain item ids, stays residue.
 
 Anything else stays residue, and the reason names any members this conversion
 did not emit. A recipe is never narrowed to part of a tag.
+
+Item ids (#261): every vanilla id a written recipe names is Bedrock's
+(:func:`bedrock_item`, from GeyserMC/mappings: ``minecraft:bricks`` ->
+``minecraft:brick_block``, ``minecraft:red_bed`` -> ``minecraft:bed`` data 14),
+and once the whole pack is converted a recipe naming a mod item the pack doesn't
+ship goes back to residue (:func:`drop_unshipped_recipes`): Bedrock refuses a
+recipe naming an item it doesn't know.
 """
 from __future__ import annotations
 

@@ -33,9 +33,9 @@ Rule, in order:
    component or NBT condition is dropped, which can only make the unlock
    narrower than Java's, never broader.
 2. An item is kept when this conversion emits it, or when it is a vanilla id
-   Bedrock has (Mojang's item list, :mod:`portkit.data.vanilla_items`; Java's
-   ``minecraft:oak_trapdoor`` is not one, Bedrock calls it
-   ``minecraft:trapdoor``). A tag is kept when the converted recipe takes that
+   Bedrock has (Mojang's item list, :mod:`portkit.data.vanilla_items`), after
+   the Java -> Bedrock rename (#261, :func:`portkit.converters.recipes.bedrock_item`:
+   Java's ``minecraft:oak_trapdoor`` unlocks as Bedrock's ``minecraft:trapdoor``). A tag is kept when the converted recipe takes that
    same tag; a tag that means one item (the recipe converter's own rule) is
    that item, under the same check. Anything else is dropped: BDS refuses the
    whole recipe when an unlock names an item it doesn't know ("has an invalid

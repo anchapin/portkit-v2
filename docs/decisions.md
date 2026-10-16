@@ -27,6 +27,68 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-15: recipes are written in Bedrock's vanilla ids (GeyserMC/mappings), and a recipe naming an item the pack doesn't ship is residue
+
+- **Status:** pending review.
+- **Decision:** two rules for the item ids a converted recipe names (#261).
+  1. **Vanilla ids as Bedrock spells them.** A Java id becomes Bedrock's through
+     GeyserMC/mappings `items.json` (pinned commit `81700ab5`, generated for Java
+     26.3 / Bedrock 1.26.50; `portkit.data.java_items`): `minecraft:bricks` ->
+     `minecraft:brick_block`, `lily_pad` -> `waterlily`, `oak_button` ->
+     `wooden_button`, `terracotta` -> `hardened_clay`, `magma_block` -> `magma`,
+     `oak_trapdoor` -> `trapdoor`, `red_nether_bricks` -> `red_nether_brick`,
+     `end_stone_bricks` -> `end_bricks`, `nether_brick` (the item) -> `netherbrick`.
+     When one Bedrock id stands for several Java items (beds, banners) the
+     recipe slot carries Geyser's data value, written as vanilla Bedrock writes
+     it (`{"item": "minecraft:bed", "data": 14}`; bedrock-samples
+     `behavior_pack/recipes/chest_boat.json` writes `"data": 0` the same way).
+     The rewrite is used only when the target is in Bedrock's own item list
+     (bedrock-samples `mojang-items.json`). Covers crafting keys, ingredients and
+     results, furnace input/output, smithing slots, and unlock entries. A bare
+     Java id (`"black_dye"`) is Java's `minecraft:` one.
+  2. **Only shipped items.** After every namespace converted and blocks whose
+     textures didn't convert were withdrawn, a recipe naming a mod item the pack
+     doesn't ship is removed and goes back to residue under its source recipe
+     (`kind: recipe`, "names X, which the pack doesn't ship ..."); every file
+     written from that source goes with it. An unlock entry naming such an item
+     is dropped (AlwaysUnlocked, labelled, if none is left).
+- **Why:** Bedrock Dedicated Server refuses both kinds ("The Item: X is missing
+  or invalid, can't make the recipe" / "Recipe result malformed", in-game runs
+  #238/#260), so a broken recipe ships nothing for the player and hides the gap
+  from the residue. Residue names the missing item, which the agent can act on
+  once that item converts. Geyser's table is the Java -> Bedrock map a
+  production proxy uses, from a generator that reads both games; no id is
+  guessed.
+- **Not mapped (stay residue, with the reason):** a Java id whose Bedrock id
+  *and* data another Java item shares (`tipped_arrow` and `spectral_arrow` are
+  plain `arrow`; every explorer map is `filled_map`; `knowledge_book`,
+  `debug_stick`, `furnace_minecart`), since writing it would make or take the
+  other item; a target missing from Bedrock's item list (`light` ->
+  `light_block`); a data value in a slot that holds a bare id (furnace,
+  smithing).
+- **Kept as written, with a note:** a vanilla id neither Bedrock's list nor the
+  table knows. Today that is Java 1.21.1's `minecraft:chain` (Java 1.21.9 renamed
+  it `iron_chain`, so Geyser's 26.3 table has no entry); BDS 1.26.52.3 loaded
+  those recipes without an error in the #260 runs, so dropping them would lose
+  working recipes.
+- **Licence:** GeyserMC/mappings is MIT, and says it doesn't relicense
+  Minecraft's own data; like Mojang's lists it is fetched by `portkit reference
+  fetch`, sha256-pinned, cached, never vendored (`src/portkit/data/NOTICE.md`).
+- **Rejected:** keeping a recipe whose items are missing (BDS drops it with two
+  errors); rewriting it to a different emitted id (no source says which);
+  narrowing a tag expansion to the members that ship (a recipe is never
+  narrowed, #160); mapping with a hand-written table (unsourced); checking mod
+  items at recipe time only (another namespace of the jar, or a converter that
+  runs later, can ship an item; a block withdrawn for its texture afterwards,
+  like `tconstruct:blazewood`, can't).
+- **Fixtures:** recipes_mod, simple_block_mod, smithing_mod and
+  two_namespace_mod named items they never declared, so their recipes would have
+  failed in game; each now ships those items (item/generated or cube_all models),
+  and two_namespace_mod's ingots are `steel_ingot` / `brass_ingot` (two
+  namespaces' `items/ingot.json` would collide). agent_mod's sword recipe is a
+  fourth residue group, waiting for the sword.
+- **Links:** #261, #260, #238.
+
 ## 2026-10-15: converted crafting recipes carry `unlock` read from the Java recipe advancement; AlwaysUnlocked is the labelled fallback
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
