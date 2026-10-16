@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-16: wearable mod armor is drawn when worn: an attachable on vanilla armor geometry wearing the mod's own layer texture, found from the mod's code
 
-- **Status:** proposed (PR for #274, second slice).
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). PR #276, merged 5e37982.
 - **Decision:** a wearable mod armor piece (#275) gets a Bedrock attachable when the mod's code says which texture Java draws it with, and that texture is one 64x32 png in the jar (#274). No texture is drawn, recoloured or guessed (#87).
   1. **Shape** (Mojang bedrock-samples@46ba6ea9 `resource_pack/attachables/diamond_helmet.json`, `_chestplate`, `_leggings`, `_boots`): format 1.8.0, materials `armor` / `armor_enchanted`, textures `<the mod's layer>` + `textures/misc/enchanted_actor_glint`, geometry `geometry.humanoid.armor.helmet` / `chestplate` / `leggings` / `boots`, `parent_setup` `variable.<helmet|chest|leg|boot>_layer_visible = 0.0;`, `controller.render.armor`. Only vanilla ids are referenced; no Mojang file is copied. Vanilla's second, player-only attachable (`<id>.player`, `geometry.player.armor.*` with an offset animation) is not written: the issue scoped the humanoid geometry, and one attachable per item is what the held-model path does too.
   2. **Texture, from the mod's code** (`portkit.armorlook`, generic readers; the adapters say which applies):
