@@ -61,6 +61,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   porting one generation for all mods (wrong for the other); keeping the
   refusal.
 - **Links:** #236, PR #258, #257 (first slice).
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order; PR #258).
 
 ## 2026-10-15: the vanilla parents random mods name most (orientable, cross, carpet, button, fence gate, cube_top and friends) are read from the fetched templates
 
