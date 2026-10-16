@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from ...converters.recipes import CODE_RECIPE, FLUID_RECIPE, MACHINE_RECIPE, NO_BEDROCK_FLUID
 from .. import Adapter
+from .armor import item_armor
 from .durability import item_durability
 
 
@@ -190,4 +191,5 @@ ADAPTER = Adapter(
     },
     # The copper diving gear's durability, the netherite upgrade's base (#268).
     item_durability=item_durability,
+    item_armor=item_armor,
 )

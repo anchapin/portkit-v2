@@ -50,6 +50,14 @@ Hooks, and the core seam that asks each one:
   with :mod:`portkit.itemcode`, and the citation. Asked by
   :func:`portkit.converters.recipes.equip_smithing_bases` (#268); a name with
   no answer is left for the core to withdraw its recipe.
+- ``item_armor``: ``(SourceMod, names) -> {name: ArmorPiece | reason}``, for
+  the namespace's emitted item names: each armor item's
+  :class:`portkit.itemcode.ArmorPiece` (type, armor points, durability,
+  enchantability, toughness, knockback resistance and the citation), read from
+  the mod's bytecode with :mod:`portkit.itemcode`, or a string saying why an
+  item the adapter knows is armor can't be read. Asked by
+  :func:`portkit.converters.armor.convert` (#274) right after the item
+  converter, so the recipe converter sees which items are wearable.
 
 """
 from __future__ import annotations
@@ -128,6 +136,7 @@ class Adapter:
     books: BookReader | None = None
     station: StationHooks | None = None
     item_durability: Callable[["SourceMod", frozenset], Mapping[str, tuple[int, str]]] | None = None
+    item_armor: Callable[["SourceMod", frozenset], Mapping[str, object]] | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -218,6 +227,25 @@ def item_durabilities(mod: "SourceMod", names: frozenset) -> dict[str, tuple[int
         if a.item_durability is not None:
             for name, answer in a.item_durability(mod, names).items():
                 if name in names:
+                    found.setdefault(name, answer)
+    return found
+
+
+def item_armors(mod: "SourceMod", names: frozenset) -> dict[str, object]:
+    """``{item name: ArmorPiece | reason}`` the adapters' ``item_armor`` hooks
+    read for ``mod``'s ``names``; the first adapter (registry order) to give a
+    piece wins over a reason, and the first reason over none."""
+    from ..itemcode import ArmorPiece
+
+    found: dict[str, object] = {}
+    for a in ADAPTERS:
+        if a.item_armor is not None:
+            for name, answer in a.item_armor(mod, names).items():
+                if name not in names:
+                    continue
+                if isinstance(answer, ArmorPiece) and not isinstance(found.get(name), ArmorPiece):
+                    found[name] = answer
+                elif isinstance(answer, str):
                     found.setdefault(name, answer)
     return found
 

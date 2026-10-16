@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from ...converters.recipes import CODE_RECIPE
 from .. import Adapter
+from .armor import item_armor
 from .durability import item_durability
 
 
@@ -50,4 +51,5 @@ ADAPTER = Adapter(
     },
     # Its tool and armor sets' durability, the smithing upgrades' bases (#268).
     item_durability=item_durability,
+    item_armor=item_armor,
 )
