@@ -22,7 +22,8 @@ Bedrock's own recipes take the same items (bedrock-samples
 Rule, in order:
 
 1. The advancements of the jar (``data/*/advancement[s]/**``) that reward the
-   recipe. Each one must be one OR group (``requirements`` with a single list,
+   recipe and whose own load conditions hold (an advancement Java doesn't load
+   grants nothing). Each one must be one OR group (``requirements`` with a single list,
    or a single criterion); anything else (an AND of criteria, which Bedrock's
    unlock list can't say) is not used. In the group, ``recipe_unlocked``
    criteria are skipped (they are satisfied by the reward itself), and each

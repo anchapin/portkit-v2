@@ -1078,15 +1078,17 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             # Bedrock 1.20.10+ crafting recipes need unlock data (#260): the
             # Java recipe advancement's has_<item> items, else AlwaysUnlocked.
             java_id = f"{mod.namespace}:{key.with_suffix('').as_posix()}"
-            found = unlock_criteria(advancements.get(java_id, []))
+            # An advancement Java wouldn't load (its own load conditions) unlocks nothing.
+            granting = [(r, a) for r, a in advancements.get(java_id, []) if context.gate(a).passes is True]
+            found = unlock_criteria(granting)
             unlock = unlock_entries(found, [v for _, v in built], emitted, single_item,
                                     vanilla_items.ids())
             if unlock:
                 unlocks["derived"] += 1
             else:
                 unlock = ALWAYS_UNLOCKED
-                unlocks["no_advancement" if java_id not in advancements else "fallback"] += 1
-                if java_id in advancements:
+                unlocks["no_advancement" if not granting else "fallback"] += 1
+                if granting:
                     why = "; ".join(found.dropped) or (
                         "its items and tags are neither shipped by this addon nor Bedrock vanilla "
                         "ids nor tags the recipe takes")
@@ -1097,7 +1099,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                         f"Bedrock unlock entry ({why})")
             built = [(suffix, with_unlock(v, unlock)) for suffix, v in built]
             for adv_rel, _ in advancements.get(java_id, []):
-                result.consumed.add(adv_rel)  # read for the recipe that shipped
+                result.consumed.add(adv_rel)  # read (and gated) for the recipe that shipped
         for suffix, variant in built:
             write(rel, f"recipes/{name}{suffix}.json", f"{identifier}{suffix}", {
                 "format_version": "1.20.10",

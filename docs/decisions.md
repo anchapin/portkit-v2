@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-16: converted crafting recipes carry `unlock` read from the Java recipe advancement; AlwaysUnlocked is the labelled fallback
+## 2026-10-15: converted crafting recipes carry `unlock` read from the Java recipe advancement; AlwaysUnlocked is the labelled fallback
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order).
 - **Decision:** every `minecraft:recipe_shaped` and `minecraft:recipe_shapeless`

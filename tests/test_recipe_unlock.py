@@ -224,3 +224,12 @@ def test_vanilla_items_derive_and_fetch_check_the_pin(tmp_path, monkeypatch):
     monkeypatch.delenv("PORTKIT_VANILLA_ITEMS")
     monkeypatch.setenv("PORTKIT_REFERENCE_CACHE", str(tmp_path))
     assert vanilla_items.ids() == frozenset({"minecraft:acacia_boat", "minecraft:trapdoor"})
+
+
+def test_an_advancement_java_would_not_load_is_not_used(tmp_path):
+    gated = adv("examplemod:waystone", {"has_stone": has({"items": "minecraft:stone"})})
+    gated["fabric:load_conditions"] = [{"condition": "fabric:all_mods_loaded", "values": ["othermod"]}]
+    mod = build(tmp_path, {"waystone": SHAPED}, {"waystone": gated})
+    mod = SourceMod(root=mod.root, namespace=mod.namespace, loader="fabric")
+    result = recipes.convert(mod)
+    assert body_of(result, "recipes/waystone.json")["unlock"] == ALWAYS_UNLOCKED
