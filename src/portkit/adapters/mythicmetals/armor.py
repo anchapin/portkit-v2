@@ -30,7 +30,7 @@ that decides a number in code is not answered.
 from __future__ import annotations
 
 from ... import itemcode
-from ...bytecode import ClassIndex, Handle, Ref, instructions
+from ...bytecode import ClassIndex, instructions
 from ...model import SourceMod
 from .durability import ARMOR, ARMOR_SET, _field_makers, _suffix_fields
 
@@ -58,21 +58,18 @@ def _base_durability(base) -> dict[str, int]:
     return out
 
 
-def _lambda_sets(index: ClassIndex, indy) -> bool:
-    """Whether a customizing lambda (``Consumer<Item.Properties>``) calls an
-    Item.Properties method that sets durability or attributes (unreadable: True)."""
-    for arg in getattr(indy, "args", ()):
-        if isinstance(arg, Handle):
-            ref = arg.ref
-            if ref.owner == itemcode.PROPERTIES:
-                return ref.name in itemcode.ARMOR_PROPERTY_CALLS
-            cf = index.get(ref.owner)
-            method = cf.method(ref.name, ref.desc) if cf else None
-            if method is None or method.code is None:
-                return True
-            return any(isinstance(i.arg, Ref) and i.arg.owner == itemcode.PROPERTIES
-                       and i.arg.name in itemcode.ARMOR_PROPERTY_CALLS for i in instructions(cf, method.code))
-    return False
+def _settings(index: ClassIndex, args: list) -> tuple[str, ...] | None:
+    """The mod data components a set's customizing lambdas add, or None when
+    one sets durability or attributes (or can't be followed)."""
+    components: list[str] = []
+    for arg in args:
+        if not hasattr(arg, "bootstrap"):
+            continue
+        calls = itemcode.properties_calls(index, arg)
+        if calls is None or set(calls) & itemcode.ARMOR_PROPERTY_CALLS:
+            return None
+        components += [c.split(" ", 1)[1] for c in calls if c.startswith("component ")]
+    return tuple(components)
 
 
 def _mixin_bonuses(index: ClassIndex) -> dict[str, str]:
@@ -158,8 +155,9 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
                 or set_cf.method("baseArmorItem") is not None and value.cls != ARMOR_SET:
             continue
         material, mult = value.args[0], value.args[1]
+        settings = _settings(index, value.args)
         if not isinstance(material, itemcode.Static) or material.owner != MATERIALS or not isinstance(mult, int) \
-                or mult <= 0 or any(_lambda_sets(index, a) for a in value.args if hasattr(a, "bootstrap")):
+                or mult <= 0 or settings is None:
             continue
         for suffix, slot in suffixes.items():
             name = field.lower() + suffix
@@ -188,6 +186,8 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
                 base=" ".join(f"{k} {v}" for k, v in per_type.items()))
             extra = tuple(f"the data component {c.rsplit('/', 1)[-1]} its class {cls.rsplit('/', 1)[-1]} adds"
                           for c in components)
+            extra += tuple(f"the data component {c.rsplit('/', 1)[-1]} MythicArmor.{field}'s settings add"
+                           for c in settings)
             if built_material.name in bonuses:
                 extra += (bonuses[built_material.name],)
             got = itemcode.armor_piece(stats, built_kind, durability, source, extra)

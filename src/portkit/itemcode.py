@@ -570,12 +570,21 @@ def resolve_static(index: ClassIndex, value):
 _THIS = Param(-1)
 
 
+class _Returned:
+    def __repr__(self) -> str:
+        return "RETURNED"
+
+
+RETURNED = _Returned()  # what :func:`_run` gives for a void method that ran to its ``return``
+
+
 def _run(cf: ClassFile, method, args: list, on_init):
     """Run ``method`` with ``args`` (no branches) on a small stack machine.
 
     ``on_init(owner, desc, call_args)`` is called for ``invokespecial <init>``
     on ``this`` and its answer returned. Otherwise the value of the first
-    ``areturn`` is returned. None when the body does something not modelled.
+    ``areturn`` is returned, or :data:`RETURNED` at a void ``return``. None
+    when the body does something not modelled.
     Item.Properties calls are recorded in ``props`` (their receiver passes
     through; ``component`` with a mod's own component type is recorded as
     ``component <owner>.<field>``), and a call taking an ``ArmorMaterial`` and returning a
@@ -670,7 +679,7 @@ def _run(cf: ClassFile, method, args: list, on_init):
                 if op == 0xB5:
                     del stack[-2:]
                 else:
-                    return None, props
+                    return RETURNED, props
             else:
                 return None, props
     except (IndexError, ValueError):
@@ -715,7 +724,7 @@ def armor_item_args(index: ClassIndex, cls: str, desc: str, args: list,
         return armor_item_args(index, owner, init_desc, call_args, _depth + 1)
 
     found, props = _run(cf, cf.method("<init>", desc), list(args), on_init)
-    if found is None:
+    if not isinstance(found, tuple):
         return None
     material, kind, more, item_desc = found
     return material, kind, props + more, item_desc
@@ -824,3 +833,21 @@ def enchantment_overrides(index: ClassIndex, owner: str) -> list[str]:
         found |= {m.name for m in cf.methods if m.name in ENCHANTMENT_OVERRIDES}
         cls = cf.super_name
     return sorted(found)
+
+
+def properties_calls(index: ClassIndex, indy) -> list[str] | None:
+    """The Item.Properties calls a customizing lambda (``Consumer<Item.Properties>``,
+    an ``invokedynamic`` value) makes, as :func:`_run` records them; None when
+    its body can't be followed."""
+    for arg in getattr(indy, "args", ()):
+        if isinstance(arg, Handle):
+            ref = arg.ref
+            if ref.owner == PROPERTIES:
+                return [ref.name]
+            cf = index.get(ref.owner)
+            method = cf.method(ref.name, ref.desc) if cf else None
+            if method is None:
+                return None
+            value, props = _run(cf, method, [Param(i) for i in range(len(arg_types(ref.desc)))], lambda *a: None)
+            return props if value is RETURNED else None
+    return []
