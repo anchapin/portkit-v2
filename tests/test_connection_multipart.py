@@ -140,7 +140,7 @@ def test_a_part_that_cannot_turn_is_residue_naming_it(tmp_path):
     assert "blocks/pane.json" not in result.files
     reason = result.unhandled[-1].reason
     assert reason.startswith("connection multipart part 2 (examplemod:block/side)")
-    assert "uvlock re-maps the uv on the up face differently" in reason
+    assert "uvlock re-maps the uv on the up face differently before MC 1.21.5" in reason
 
 
 def test_pane_and_bars_templates_are_read():

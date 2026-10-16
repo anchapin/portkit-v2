@@ -19,13 +19,16 @@ def _close(a, b):
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: f"{c['face']}-x{c['x']}y{c['y']}-{c['uv']}-r{c['rotation']}")
 def test_the_port_matches_java(case):
-    found, why = models.uvlock_uv(case["face"], case["uv"], case["rotation"], case["x"], case["y"])
-    agree = _close(case["v1_21_1"], case["v1_21_8"])
-    if not agree:
-        assert found is None and "differently in MC 1.20.1/1.21.1" in why
-        return
-    uv, rotation = found
-    assert _close(models._uv_vertices(uv, rotation), case["v1_21_1"])
+    args = (case["face"], case["uv"], case["rotation"], case["x"], case["y"])
+    for minecraft, key in (("1.20.1", "v1_21_1"), ("1.21.1", "v1_21_1"), ("1.21.4", "v1_21_1"),
+                           ("1.21.5", "v1_21_8"), ("1.21.8", "v1_21_8"), ("26.1", "v1_21_8")):
+        (uv, rotation), why = models.uvlock_uv(*args, minecraft=minecraft)
+        assert why == "" and _close(models._uv_vertices(uv, rotation), case[key]), minecraft
+    found, why = models.uvlock_uv(*args)
+    if _close(case["v1_21_1"], case["v1_21_8"]):
+        assert _close(models._uv_vertices(*found), case["v1_21_1"])
+    else:
+        assert found is None and "declares no game version" in why
 
 
 def test_most_plain_uvs_are_taken():
@@ -33,9 +36,19 @@ def test_most_plain_uvs_are_taken():
     assert plain and all(models.uvlock_uv(c["face"], c["uv"], 0, c["x"], c["y"])[0] for c in plain)
 
 
-def test_a_mirrored_uv_java_versions_disagree_on_is_refused():
+def test_a_mirrored_uv_java_versions_disagree_on_is_refused_without_a_version():
     found, why = models.uvlock_uv("up", [1, 0, 0, 1], 0, 0, 90)
-    assert found is None and "MC 1.21.8" in why
+    assert found is None and "declares no game version" in why
+    assert models.uvlock_uv("up", [1, 0, 0, 1], 0, 0, 90, minecraft="1.20.1")[0]
+
+
+def test_the_declared_version_rides_in_from_block_conversion():
+    token = models.UVLOCK_GAME.set("1.21.8")
+    try:
+        assert models.uvlock_uv("up", [1, 0, 0, 1], 0, 0, 90)[0]
+    finally:
+        models.UVLOCK_GAME.reset(token)
+    assert models.UVLOCK_GAME.get() is None
 
 
 def test_a_position_derived_uv_lands_as_the_position_derived_uv_there():

@@ -18,6 +18,7 @@ wrong is the failure mode this project exists to avoid.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import math
 from pathlib import Path
@@ -864,12 +865,34 @@ def _signum(value: float) -> int:
     return (value > 0) - (value < 0)
 
 
+# The game version whose uvlock applies, set by blocks.convert from the mod's
+# declared version (SourceMod.minecraft) for the length of one conversion.
+UVLOCK_GAME: contextvars.ContextVar[str | None] = contextvars.ContextVar("uvlock_game", default=None)
+# recomputeUVs is in Mojang's mappings up to MC 1.21.4 (FaceBakery, BlockMath
+# #getUVLockTransform; 1.16.5, 1.19.2, 1.20.1 decompile to the same body); from
+# 1.21.5 they name ModelState#faceTransformation / #inverseFaceTransformation
+# and BlockMath#getFaceTransformation instead (client.txt of 1.21.4 / 1.21.5).
+UVLOCK_PER_VERTEX_SINCE = "1.21.5"
+
+
 def uvlock_uv(face: str, uv: list, rotation: int, x_degrees: int,
-              y_degrees: int) -> tuple[tuple[list[float], int] | None, str]:
+              y_degrees: int, minecraft: str | None = None) -> tuple[tuple[list[float], int] | None, str]:
     """The (uv, rotation) Java's uvlock gives ``face`` under a blockstate x/y
     turn, still on the face as declared (the box then turns rigidly), or why
-    not. FaceBakery#recomputeUVs, taken only where the MC 1.21.8 per-vertex
-    mapping gives the same texture (see the comment above)."""
+    not (see the comment above).
+
+    ``minecraft`` is the game version the mod declares (default: the one
+    UVLOCK_GAME holds): before 1.21.5 recomputeUVs applies, from 1.21.5 the
+    per-vertex mapping. With no declared version a face is taken only where
+    the two agree."""
+    from ..data.tags import version_key
+
+    if minecraft is None:
+        minecraft = UVLOCK_GAME.get()
+    declared = version_key(minecraft) if minecraft else None
+    generation = None
+    if declared is not None:
+        generation = "per_vertex" if declared >= version_key(UVLOCK_PER_VERTEX_SINCE) else "recompute"
     try:
         u0, v0, u1, v1 = (float(c) for c in uv)
         rotation = int(rotation or 0)
@@ -888,13 +911,23 @@ def uvlock_uv(face: str, uv: list, rotation: int, x_degrees: int,
     new_rotation = (-int(math.floor(degrees / 90 + 0.5)) * 90) % 360
     recomputed = [nu0, nv0, nu1, nv1]
     per_vertex = [_uv_map(matrix, u, v) for u, v in _uv_vertices([u0, v0, u1, v1], rotation)]
-    if _uv_vertices(recomputed, new_rotation) != per_vertex:
-        return None, (
-            f"uvlock re-maps the uv on the {face} face differently in MC 1.20.1/1.21.1 "
-            "(FaceBakery#recomputeUVs) and MC 1.21.8 (per-vertex face transformation), "
-            "so which one Java shows depends on the game version"
-        )
-    return ([_tidy(c) for c in recomputed], new_rotation), ""
+    if generation == "recompute" or _uv_vertices(recomputed, new_rotation) == per_vertex:
+        return ([_tidy(c) for c in recomputed], new_rotation), ""
+    if generation == "per_vertex":
+        us = sorted({p[0] for p in per_vertex})
+        vs = sorted({p[1] for p in per_vertex})
+        lo_u, hi_u, lo_v, hi_v = us[0], us[-1], vs[0], vs[-1]
+        for candidate in ([lo_u, lo_v, hi_u, hi_v], [hi_u, lo_v, lo_u, hi_v],
+                          [lo_u, hi_v, hi_u, lo_v], [hi_u, hi_v, lo_u, lo_v]):
+            for turn in (0, 90, 180, 270):
+                if _uv_vertices(candidate, turn) == per_vertex:
+                    return ([_tidy(c) for c in candidate], turn), ""
+        return None, f"uvlock maps the uv on the {face} face to no rectangle"  # pragma: no cover
+    return None, (
+        f"uvlock re-maps the uv on the {face} face differently before MC 1.21.5 "
+        "(FaceBakery#recomputeUVs) and from it (per-vertex face transformation), "
+        "and the mod declares no game version"
+    )
 
 
 def _tidy(value: float):

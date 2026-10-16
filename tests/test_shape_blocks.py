@@ -214,7 +214,7 @@ def test_uvlock_maps_a_hand_set_uv_as_java_does():
 def test_uvlock_refuses_a_uv_java_versions_bake_differently():
     element = {"from": [0, 0, 0], "to": [16, 8, 16], "faces": {"up": {"texture": "#s", "uv": [1, 0, 0, 1]}}}
     turned, why = models.turn_locked(element, 0, 90)
-    assert turned is None and "MC 1.21.8" in why
+    assert turned is None and "declares no game version" in why
 
 
 # -- recognising the shapes --------------------------------------------------
