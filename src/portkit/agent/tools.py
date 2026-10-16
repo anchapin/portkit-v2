@@ -404,6 +404,8 @@ Rules:
 - A ``minecraft:recipe_smithing_trim`` only applies on Bedrock when its
   ``template`` and ``addition`` are vanilla ``minecraft:`` items or tags. A
   Bedrock add-on can't apply a mod's trim pattern or trim material, so if
-  either side names a mod id, write nothing and decline: the recipe would
-  validate, but the trim would do nothing in game.
+  either side names a mod id, write nothing and decline: Bedrock refuses the
+  recipe. Its ``base`` must be armor: the tag ``minecraft:trimmable_armors``,
+  vanilla trimmable armor, or the pack's item with ``minecraft:wearable`` and
+  that tag.
 """

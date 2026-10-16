@@ -27,6 +27,32 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: a smithing trim recipe converts only when Bedrock takes every slot, else it is residue; mod armor gets minecraft:trimmable_armors only when it is wearable
+
+- **Status:** proposed (Hark; policy is Alex's 2026-10-16 decision on #268).
+- **Decision:** Java `minecraft:smithing_trim` converts to Bedrock `minecraft:recipe_smithing_trim` when Bedrock takes each of its three slots, checked against cited Bedrock data (`portkit.data.trim_items`, #272). Until now it was residue as "a judgment call". Any slot that fails sends the recipe to the residue under its source with the cited reason. It is never rewritten as a crafting recipe, and no slot is invented.
+  1. **Tags.** Java's slot tags `#minecraft:trim_templates`, `#minecraft:trimmable_armor` and `#minecraft:trim_materials` become Bedrock's `minecraft:trim_templates`, `minecraft:trimmable_armors` and `minecraft:trim_materials`. Any other tag that means more than one item is refused. When the mod adds its own items to Java's template or material tag, a note says those items can't be a trim pattern or material on Bedrock.
+  2. **Vanilla items** must be in Bedrock's tag for their slot, per minecraft.wiki [Item tag (Bedrock Edition)](https://minecraft.wiki/w/Item_tag_(Bedrock_Edition)?oldid=3758407): 18 templates, 25 trimmable armors and 10 materials, plus resin brick ([Resin Brick](https://minecraft.wiki/w/Resin_Brick?oldid=3734929)). All 54 ids are checked against bedrock-samples' `mojang-items.json` (test, `-m realmods`). Copper armor and the elytra aren't in the list, so they are refused, even though BDS loads a recipe naming them.
+  3. **A mod item** can't be a template or an addition, because an add-on can't register a trim pattern or material. A mod base must have `minecraft:wearable` and carry `minecraft:trimmable_armors`. It gets the tag when the Java recipe names it as the base (as for transform slot tags, #263), and the base is checked on the final pack (`withdraw_unacceptable_trims`, after #268's pass).
+  4. **A fixed Java 1.21.5+ `pattern`** converts only when it is the vanilla template's own pattern. Bedrock's trim recipe has no pattern field.
+  5. **Java trimmable armor.** A mod item in Java's `#minecraft:trimmable_armor` gets `minecraft:trimmable_armors` only when it is wearable in the pack. Membership comes from the jar's file plus vanilla's 1.21 `#head/chest/leg/foot_armor` nesting from the reference data, cited in a note, and the tag files count as consumed only when an item was tagged. The other items are counted in a note.
+  6. **Validator.** Rule `recipe.smithing_trim` checks every slot of every trim recipe in the pack, the agent's included. Rule `item.trim_tag` flags any pack item carrying `minecraft:trim_templates` or `minecraft:trim_materials`, or carrying `minecraft:trimmable_armors` without `minecraft:wearable`.
+- **Why:** Mojang bedrock-samples@46ba6ea9 `documentation/Recipes.html`, Smithing Trim Recipe: the base's "only accepted items are armors", and each slot's items "must have" `minecraft:trimmable_armors` / `trim_templates` / `trim_materials` "to be accepted into the respective UI slot". Mojang's `smithing_armor_trim.json` takes those three tags. A BDS 1.26.52.3 probe on a throwaway branch (ingame runs 38936397375, 38937251687) confirmed it with content-log ERRORs:
+  - a base that isn't armor is refused ("should be an armor, but isn't"): stick, netherite sword, wolf armor, diamond horse armor, carved pumpkin, a tag of planks, and an add-on item without `minecraft:wearable` even when it carries `minecraft:trimmable_armors`;
+  - an add-on item is refused as a template or addition even with the tag ("Did you register it in the Trim Pattern Registry?");
+  - an add-on item tagged `trim_templates`, or tagged `trimmable_armors` without being wearable, makes BDS refuse Mojang's own `minecraft:smithing_armor_trim`. That is why the converter never writes those tags on such items.
+  - A wearable add-on item, tagged or not, loads clean.
+- **Measured (corpus + deco):** no `smithing_trim` recipes in the 13 corpus mods or the 13 deco jars (seafoam_dyeable included). Java trimmable-armor members: Mythic Metals 96 (direct), Create 4 (cardboard armor, direct), BetterEnd 16 and Mekanism 8 (via the 1.21 nesting). Tinkers' Construct adds 16 items to Java `trim_materials` and ships 17 `trim_material` files. The converter writes no `minecraft:wearable`, so no item is tagged today. The change is a guard: packs are unchanged and the reports gain the note above.
+- **Supersedes in part:** the 2026-10-12 agent-trim entry's "`base` is not gated". The agent gate (`agent.unresolved_trim`) still checks only template and addition, and the base is now checked by `recipe.smithing_trim`, because BDS refuses a base that isn't armor.
+- **Rejected:**
+  - Keeping trims as residue: a validated trim on vanilla or wearable armor works on Bedrock.
+  - Tagging every Java trimmable member: on non-wearable items the tag breaks Mojang's own trim recipe in BDS.
+  - Tagging mod items `trim_materials` from Java's tag (Tinkers): an add-on can't register a material, and BDS refuses such items.
+  - Accepting copper armor or elytra on BDS load alone: load acceptance only shows "is armor", not that the item is in the slot's tag.
+  - Writing `minecraft:wearable` for mod armor: that needs a cited slot and protection, which is armor conversion's job.
+  - A crafting downgrade (Alex, 2026-10-16, #268).
+- **Links:** #272, #270 / PR #271, #268 / PR #269, #263, #86.
+
 ## 2026-10-16: a vanilla smithing base must be armor or a tool in Bedrock's vanilla data, else its recipe is residue
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order; the policy is Alex's 2026-10-16 decision on #268). PR #271, merged e169ba3.
@@ -4275,6 +4301,10 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   modded trim, and Bedrock accepts it); accepting any mod `addition` as "the
   mod's call" (the sweep finding is why this guard exists).
 - **Links:** #86, supersedes #150.
+- **Superseded in part by:** 2026-10-16 (#272): `base` is now checked by the
+  validator rule `recipe.smithing_trim` (BDS refuses a base that isn't
+  wearable armor carrying `minecraft:trimmable_armors`); this agent gate is
+  unchanged.
 
 ## 2026-10-12: agent-written block properties and map colours need a source
 
