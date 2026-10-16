@@ -1,0 +1,28 @@
+# Extra packs for the in-game checks (#238), beside the corpus in
+# fixtures/real/mods.toml. Same format and rules: jars are downloaded and
+# sha512-checked, never committed. Pins copied from the deco-mods spike
+# (2026-10-14), whose seven packs the deco set measures.
+
+[[mod]]
+name = "cluttered"
+project = "cluttered"
+version_id = "xzERbfOO"
+version = "3.0.3-1.21.1"
+loader = "neoforge"
+minecraft = "1.21,1.21.1"
+license = "GPL-3.0-or-later"
+url = "https://cdn.modrinth.com/data/UnAEo77V/versions/xzERbfOO/cluttered-%5BNeoForge%5D-3.0.3-1.21.1.jar"
+sha512 = "90f88b9fe70bc37d6d36b574fc5bd90d13e3b440717c1a468104bc8d6a3b55a221e117a8273620ecfc3d90dd5f2f9fc182acb1021995bb5cb54e47217919d32e"
+notes = "deco: 594 blocks; connection multiparts (#221) and, under upcoming_creator_features, 74 containers (#226)"
+
+[[mod]]
+name = "night_lights"
+project = "nightlights"
+version_id = "VRPk6eWv"
+version = "1.3.0"
+loader = "neoforge"
+minecraft = "1.21.1"
+license = "LGPL-3.0-only"
+url = "https://cdn.modrinth.com/data/s7pMb898/versions/VRPk6eWv/nightlights-neoforge-1.3.0.jar"
+sha512 = "aebb7921ebcef7cf4700d21f533fd0b1f0fe22b0e42ebf73bcc664892ecdd984023ea8878010197f1374d60d388467d377c0b3fd828c52b2ce59acf5a0d8ab93"
+notes = "deco: small light-block set"

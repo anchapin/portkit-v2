@@ -1,0 +1,80 @@
+name: ingame
+
+# In-game checks (#238): convert a few corpus and deco packs, install each with
+# a generated check behavior pack on Mojang's Bedrock Dedicated Server, and run
+# the Script API checks headlessly (every block places, every item spawns,
+# container slot counts #226, connection states #221). A run fails on a failed
+# check or a content-log error; the server output, content log and report are
+# uploaded per pack.
+#
+# The server is downloaded from minecraft.net here, sha256-checked against the
+# pin in src/portkit/ingame/server.py, and never cached, committed or uploaded.
+# Downloading it means agreeing to the Minecraft EULA and the Microsoft Privacy
+# Statement; `--accept-eula` below is that agreement (docs/decisions.md,
+# 2026-10-15, #238). Manual dispatch only, report-only: not a PR gate.
+on:
+  workflow_dispatch:
+
+jobs:
+  ingame:
+    # BDS ships for x86-64 Linux and needs Ubuntu 22.04 or later.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: farmers_delight_neoforge, manifest: fixtures/real/mods.toml }
+          - { name: waystones, manifest: fixtures/real/mods.toml }
+          - { name: supplementaries, manifest: fixtures/real/mods.toml }
+          - { name: cluttered, manifest: fixtures/ingame/mods.toml }
+          - { name: night_lights, manifest: fixtures/ingame/mods.toml }
+          - { name: cluttered, manifest: fixtures/ingame/mods.toml, experiment: upcoming_creator_features }
+    name: ${{ matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
+    env:
+      PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache
+      PORTKIT_REFERENCE_CACHE: ${{ github.workspace }}/.reference-cache
+      RUN_NAME: ${{ matrix.name }}${{ matrix.experiment && '-experiment' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Fetch the pack's jar (sha512-checked)
+        run: portkit corpus fetch --manifest ${{ matrix.manifest }} --fixture ${{ matrix.name }}
+
+      - uses: actions/cache@v4
+        with:
+          path: .reference-cache
+          key: reference-${{ hashFiles('src/portkit/data/__init__.py', 'src/portkit/data/tags.py', 'src/portkit/data/mappings.py', 'src/portkit/data/models.py') }}
+
+      - name: Fetch reference data (sha256-checked)
+        run: portkit reference fetch
+
+      - name: Convert
+        run: |
+          jar=$(ls "$PORTKIT_CORPUS_CACHE"/${{ matrix.name }}-*.jar)
+          portkit convert "$jar" "tree/$RUN_NAME" --no-addon ${{ matrix.experiment && format('--experiment {0}', matrix.experiment) || '' }}
+
+      - name: Fetch Bedrock Dedicated Server (pinned, sha256-checked; agrees to the Minecraft EULA)
+        run: portkit ingame fetch-server --dir "$RUNNER_TEMP/bds" --accept-eula
+
+      - name: In-game checks
+        run: |
+          portkit ingame run --server "$RUNNER_TEMP/bds" --tree "tree/$RUN_NAME" --name "$RUN_NAME" \
+            --out "ingame/$RUN_NAME" --work "$RUNNER_TEMP/run" \
+            ${{ matrix.experiment && format('--experiment {0}', matrix.experiment) || '' }}
+
+      # The report, the server's output and its content log: never the server.
+      - name: Upload report and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingame-${{ env.RUN_NAME }}
+          path: ingame/${{ env.RUN_NAME }}
+          if-no-files-found: ignore
