@@ -1,4 +1,4 @@
-"""Create (#245): why its recipe types stay residue.
+"""Create (#245): why its recipe types stay residue; its smithing bases' durability (#268).
 
 Create mc1.20.1-6.0.8 rotation-powered processing recipes (``machine_recipe``,
 #173), spout filling and drain emptying (``fluid_recipe``, #174), and the
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from ...converters.recipes import CODE_RECIPE, FLUID_RECIPE, MACHINE_RECIPE, NO_BEDROCK_FLUID
 from .. import Adapter
+from .durability import item_durability
 
 
 # What Bedrock lacks for a Create machine, said once at the end of each reason.
@@ -187,4 +188,6 @@ ADAPTER = Adapter(
         **{t: (MACHINE_RECIPE, r) for t, r in MACHINE_RECIPES.items()},
         **{t: (CODE_RECIPE, r) for t, r in CODE_RECIPES.items()},
     },
+    # The copper diving gear's durability, the netherite upgrade's base (#268).
+    item_durability=item_durability,
 )

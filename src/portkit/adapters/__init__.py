@@ -44,6 +44,12 @@ Hooks, and the core seam that asks each one:
   :mod:`portkit.converters.stations` (``station_blocks``, ``station_loot``,
   ``station_textures``, ``station_lang_keys``, ``convert``) asks every
   adapter's hook in registry order.
+- ``item_durability``: ``(SourceMod, names) -> {name: (durability, source)}``,
+  for item names (``items/<name>.json``) a converted smithing recipe takes as
+  its base: the durability the mod's code gives each, read from its bytecode
+  with :mod:`portkit.itemcode`, and the citation. Asked by
+  :func:`portkit.converters.recipes.equip_smithing_bases` (#268); a name with
+  no answer is left for the core to withdraw its recipe.
 
 """
 from __future__ import annotations
@@ -121,6 +127,7 @@ class Adapter:
     item_models: Callable[["SourceMod"], Callable[[dict], bool] | None] | None = None
     books: BookReader | None = None
     station: StationHooks | None = None
+    item_durability: Callable[["SourceMod", frozenset], Mapping[str, tuple[int, str]]] | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -200,6 +207,19 @@ def item_model_owners(mod: "SourceMod") -> list[Callable[[dict], bool]]:
 def book_readers() -> list[BookReader]:
     """The adapters' ``books`` hooks, in registry order."""
     return [a.books for a in ADAPTERS if a.books is not None]
+
+
+def item_durabilities(mod: "SourceMod", names: frozenset) -> dict[str, tuple[int, str]]:
+    """``{item name: (durability, source)}`` the adapters' ``item_durability``
+    hooks read for ``mod``'s ``names``; the first adapter (registry order) to
+    answer a name wins."""
+    found: dict[str, tuple[int, str]] = {}
+    for a in ADAPTERS:
+        if a.item_durability is not None:
+            for name, answer in a.item_durability(mod, names).items():
+                if name in names:
+                    found.setdefault(name, answer)
+    return found
 
 
 def station_hooks() -> list[StationHooks]:

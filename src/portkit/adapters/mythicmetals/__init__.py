@@ -1,4 +1,4 @@
-"""Mythic Metals (#245): why its recipe types stay residue.
+"""Mythic Metals (#245): why its recipe types stay residue; its smithing bases' durability (#268).
 
 Mythic Metals 0.24.6 Tidesinger smithing, Midas folding and upgrade recipes
 (``code_recipe``, #180): their station or result is the mod's Java code. Moved
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from ...converters.recipes import CODE_RECIPE
 from .. import Adapter
+from .durability import item_durability
 
 
 CODE_RECIPES = {
@@ -47,4 +48,6 @@ ADAPTER = Adapter(
     recipe_reasons={
         **{t: (CODE_RECIPE, r) for t, r in CODE_RECIPES.items()},
     },
+    # Its tool and armor sets' durability, the smithing upgrades' bases (#268).
+    item_durability=item_durability,
 )
