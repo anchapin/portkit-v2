@@ -55,16 +55,16 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   Hence: the CI download is an acceptance on the repo owner's behalf (pick 1),
   and the zip is neither committed, cached nor put in an artifact.
 - **Found on the first runs (develop 9c44ef0 converter, Actions run
-  38838745295):** every check passes on all six packs (place 1,752, items
-  385, block items 1,752, containers 74/74 at the converted slot counts,
-  connection 37/37), and every pack fails on content-log errors: (a) every
+  38838745295):** every check passes on all six runs (five packs, Cluttered
+  counted once below: place 1,018, items 385, block items 1,018, containers
+  74/74 at the converted slot counts, connection 37/37), and every run fails on content-log errors: (a) every
   converted recipe is logged "1.20+ Recipes require unlock data" (format
-  1.20.10 without `unlock`; 2,408 recipes over the six runs); (b) 301 recipes
+  1.20.10 without `unlock`; 2,408 recipes over the five packs); (b) 301 recipes
   name an item the pack doesn't ship ("missing or invalid" + "Recipe result
   malformed": Cluttered 262 over 199 ids, Supplementaries 36, Farmer's Delight
   3), including two vanilla ids with different Bedrock names
-  (`minecraft:bricks`, `minecraft:white_bed`); (c) 29 blocks mix opaque and
-  transparent `material_instances` (Supplementaries 22, Farmer's Delight 6,
+  (`minecraft:bricks`, `minecraft:white_bed`); (c) blocks mixing opaque and
+  transparent `material_instances`, 29 errors (Supplementaries 22, Farmer's Delight 6,
   Waystones' warp plate); (d) Farmer's Delight's netherite knife smithing
   recipe: "base item is not a piece of armor or equipment".
 - **Why:** almost every converter PR ended "unverified in game"; the server
