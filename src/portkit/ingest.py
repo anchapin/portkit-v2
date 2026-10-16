@@ -31,6 +31,10 @@ METADATA_NAMES = (
     "pack.mcmeta",
 )
 
+# The files that make a jar a mod even when it ships no resources (#279).
+LOADER_METADATA = ("fabric.mod.json", "quilt.mod.json", "META-INF/mods.toml",
+                   "META-INF/neoforge.mods.toml", "mcmod.info")
+
 _MAX_MEMBERS = 50_000
 _MAX_TOTAL_BYTES = 512 * 1024 * 1024
 _MAX_ICON_BYTES = 8 * 1024 * 1024
@@ -64,6 +68,11 @@ class Ingested:
         if not self.namespaces:
             raise IngestError(f"no mod namespace found under {self.root}")
         return self.namespaces[0]
+
+    @property
+    def code_only(self) -> bool:
+        """A mod with no assets/ or data/ namespace of its own (#279)."""
+        return not self.namespaces
 
     def residue(self) -> list[Unhandled]:
         """Residue that ingestion itself can see, before any converter runs."""
@@ -191,10 +200,14 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
                 icons[rel] = zf.read(info)
 
     found = _namespaces(workdir)
-    if not found:
+    if not found and not set(metadata) & set(LOADER_METADATA):
+        # A code-only mod (no assets/ or data/ tree) still ingests: it is a
+        # mod, its loader metadata says so, and the pipeline reports it as
+        # explained-empty (#279). A jar with neither is not a mod at all.
         raise IngestError(
-            f"{jar_path.name} has no assets/<namespace> or data/<namespace> tree; "
-            "nothing to convert"
+            f"{jar_path.name} has no assets/<namespace> or data/<namespace> tree and no loader "
+            "metadata (fabric.mod.json, quilt.mod.json, mods.toml, neoforge.mods.toml, mcmod.info); "
+            "it is not a mod, nothing to convert"
         )
     return Ingested(
         root=workdir,

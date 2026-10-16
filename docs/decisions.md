@@ -27,6 +27,68 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: a mod with nothing Bedrock can hold is explained-empty: no pack, a report of reason classes read from the jar
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order); pick 1 is
+  the default Alex suggested (no pack, an explained-empty report). PR #291 for #279.
+- **Decision:** when a conversion ships no file, every residue entry is of an
+  explained kind (`SKIP_KINDS`) or a leftover only the mod's code reads, and
+  the jar's own facts name at least one reason class, the outcome is
+  **explained-empty** (`portkit.codeonly`). Picks:
+  1. **No pack.** No behavior/resource pack and no `.mcaddon` are written;
+     `explained-empty.json` (outcome, reason classes with evidence and why
+     Bedrock can't carry each, residue by kind, the facts) goes where the
+     packs would have. `validate_tree` reports a tree holding a well-formed
+     report and no packs as `tree.explained_empty` (severity info), not
+     `tree.empty`; mct is skipped for it. A later run that ships a pack
+     deletes a stale report.
+  2. **Leftovers.** For an explained-empty mod, lang residue (per-key
+     `lang` and `lang_code_string` lines, folded to one entry per file),
+     `unowned` assets outside `blockstates/`, `items/` and `sounds`, and
+     `unowned` loader data (`data/<ns>/neoforge|forge|fabric|quilt/`) whose
+     every file is typed with the mod's own namespace become `code_only`
+     residue, a new explained kind. A leftover blockstate, item definition,
+     sound or any other `data/` file keeps the mod out of explained-empty
+     (a converter gap, not an explanation), and so does any unexplained
+     residue kind.
+  3. **Reason classes**, from jar facts only (mixin configs; superclasses
+     and constant-pool references in Mojang names through the #235 table;
+     string constants and file paths for resource formats; nested jars):
+     `mixin_patch`, `client_rendering` (10+ classes calling
+     `net/minecraft/client/renderer/`, shader files, OptiFine CTM, CEM/EMF
+     `.jem`/`.jpm`, random/emissive entity textures, built-in resource
+     packs), `gui_screen`, `hud_overlay`, `config_screen`, `keybind`,
+     `networking`, `commands`, `gameplay_hooks`, `library_api`,
+     `nested_modules`, and `java_code` for code with none of these shapes
+     ("N classes of Java code with no content files").
+  4. **Ingest.** A jar with no `assets/` or `data/` tree ingests when it
+     carries loader metadata (fabric.mod.json, quilt.mod.json, mods.toml,
+     neoforge.mods.toml, mcmod.info); its pack identity is its declared mod
+     id. A jar with neither is still refused ("not a mod").
+  5. **Gauntlet classes** (amends #278 pick 5): library also when the jar
+     defines an event API (10+ `*Event(s)` classes in 100+, no textures) or
+     is passive (50+ classes, mixins under 5%, no game, input, screen or HUD
+     event, no keybind registration, not client-only); the code-only library
+     rule no longer fires on a jar that hooks gameplay events; a one-sided
+     jar whose code is screens (a screen class, under 10 classes calling the
+     world renderer) is UI/info, not client-only; a new class **gameplay
+     code** for code hooking block/player/living events with no screen, HUD
+     or renderer code. Done (#277 rule 6) is unchanged: an explained-empty
+     mod is done because it is validator-clean and all its residue kinds are
+     explained.
+- **Why:** half of #277's 50 ship no convertible content; an empty pack the
+  validator rejects told the user nothing, and their leftovers read as
+  converter gaps. A pack of only lang text would be keys no Bedrock screen
+  shows (the text belongs to Java screens, tooltips and config), so shipping
+  it would install something that does nothing. Deciding from jar facts
+  keeps the rule general (no mod names in core).
+- **Rejected:** a lang-only (or icon-only) pack: installs dead text, and
+  needs the validator to accept a content-free pack; leaving `tree.empty`
+  as an error: counts every code-only mod as failing; deciding from the
+  mod's description or a list of names: not general, and the core lint
+  forbids mod names.
+- **Links:** #279, #277, #278.
+
 ## 2026-10-16: the top-50 gauntlet pins one jar per mod by a version rule, classifies it from its own files, and is boarded weekly apart from the PR gate
 
 - **Status:** approved. Pick 2 decided by Alex (2026-10-16); picks 1 and

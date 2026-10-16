@@ -511,8 +511,20 @@ def _manifest_attr(zf: zipfile.ZipFile, key: str) -> list[str]:
     return []
 
 
+# Code facts kept on a profile (portkit.codeonly.facts, #279): the numbers
+# classify reads, not the event lists.
+_CODE_KEYS = ("classes", "screens", "widgets", "render", "blaze3d", "key_registration", "key_mappings",
+              "payloads", "network", "config_screen", "hud", "commands", "event_classes", "gameplay_events",
+              "events", "mixins")
+
+
 def profile(jar: Path | str) -> dict:
-    """What the jar holds, read from its own files (no description, no host)."""
+    """What the jar holds, read from its own files (no description, no host).
+
+    A jar with no content files also gets its code facts (``code``, from
+    :func:`portkit.codeonly.facts`): screens, renderer calls, keybinds,
+    events, which separate a library from a UI or gameplay mod (#279).
+    """
     with zipfile.ZipFile(jar) as zf:
         names = [n for n in zf.namelist() if not n.endswith("/")]
         counts = {k: sum(1 for n in names if p.match(n)) for k, p in _PATTERNS.items()}
@@ -521,7 +533,13 @@ def profile(jar: Path | str) -> dict:
         counts["api_classes"] = sum(1 for n in names if _API_CLASS.search(n))
         namespaces = sorted({n.split("/")[1] for n in names if _ASSETS.match(n) or _DATA.match(n)})
         meta = _metadata(zf, names)
-    return {"counts": counts, "namespaces": namespaces, **meta}
+    prof = {"counts": counts, "namespaces": namespaces, **meta}
+    if not any(counts.get(k) for k in _CONTENT_KEYS):
+        from . import codeonly
+
+        facts = codeonly.facts(Path(jar))
+        prof["code"] = {k: facts.get(k) for k in _CODE_KEYS}
+    return prof
 
 
 def _metadata(zf: zipfile.ZipFile, names: list[str]) -> dict:
@@ -592,7 +610,7 @@ def _metadata(zf: zipfile.ZipFile, names: list[str]) -> dict:
 _FLAG_TEXT = {"language_adapter": "provides a language adapter",
               "modmenu_library_badge": "Mod Menu badge \"library\""}
 
-CLASSES = ("content", "library", "client-only", "performance/mixin-only", "UI/info")
+CLASSES = ("content", "library", "client-only", "performance/mixin-only", "gameplay code", "UI/info")
 
 
 def classify(prof: dict) -> tuple[str, list[str]]:
@@ -603,43 +621,69 @@ def classify(prof: dict) -> tuple[str, list[str]]:
     library     the jar says it is one (a language adapter, Mod Menu's
                 "library" badge), is a bundle of nested module jars (5+ of
                 them and at most 10 classes of its own), keeps most of its
-                classes in an ``api`` package, or is code only: 100+ classes,
-                no textures, lang or sounds, and few mixins (under 10% of its
-                classes), i.e. code other mods or the server call.
+                classes in an ``api`` package, defines an event API (10+
+                ``*Event(s)`` classes in 100+), is code only (100+ classes,
+                no textures, lang or sounds, few mixins, and no gameplay
+                event hooks of its own), or is passive (50+ classes, mixins
+                under 5%, hooks no game, input, screen or HUD event and
+                registers no keybind, and doesn't declare client-only), i.e.
+                code other mods call. The last two need the code facts
+                (``prof["code"]``, #279).
     client-only the jar declares it runs on one side (Fabric environment
                 "client", NeoForge clientSideOnly, a minecraft dependency on
-                side CLIENT, or Forge/NeoForge displayTest IGNORE_ALL_VERSION).
+                side CLIENT, or Forge/NeoForge displayTest IGNORE_ALL_VERSION)
+                and its code reaches the world renderer, or has no screens:
+                rendering, not GUI.
+    UI/info     (one-sided) a client-side jar whose code is screens: at least
+                one screen class and under 10 classes calling the world
+                renderer (#279).
     performance/mixin-only
                 mixins are at least 10% of its classes, and it has at most 10
                 lang files, 8 textures, no sounds and no shaders.
+    gameplay code
+                code that hooks gameplay events (blocks broken, players or
+                living entities acting) with no screen, HUD or renderer code
+                of its own (#279).
     UI/info     everything else: screens, overlays, tooltips, keybinds.
     """
+    from .codeonly import library_evidence
+
     c, flags = prof["counts"], set(prof.get("flags") or ())
     content = [f"{k} {c[k]}" for k in _CONTENT_KEYS if c.get(k)]
     if content:
         return "content", content
+    code = prof.get("code") or {}
     classes = c.get("classes", 0)
     mixins = sum((prof.get("mixin_classes") or {}).values())
     share = mixins / classes if classes else 0.0
-    lib = [_FLAG_TEXT[f] for f in sorted(flags & set(_FLAG_TEXT))]
-    if c.get("nested_jars", 0) >= 5 and classes <= 10:
-        lib.append(f"bundles {c['nested_jars']} nested jars, {classes} classes of its own")
-    if classes and c.get("api_classes", 0) * 2 >= classes:
-        lib.append(f"api classes {c['api_classes']}/{classes}")
+    facts = {**code, "flags": sorted(flags), "classes": classes, "nested_jars": c.get("nested_jars", 0),
+             "api_classes": c.get("api_classes", 0), "mixins": mixins, "environment": prof.get("environment"),
+             "textures": c.get("textures", 0)}
+    lib = library_evidence(facts) if code else [
+        e for e in library_evidence({**facts, "events": ["?"]})]  # no code facts: never "passive"
+    hooks = bool(code.get("gameplay_events")) and code.get("event_classes", 0) < 10
     if (classes >= 100 and not c.get("textures") and not c.get("lang") and not c.get("sounds")
-            and share < 0.10):
+            and share < 0.10 and not hooks):
         lib.append(f"code only: {classes} classes, no textures, lang or sounds, {mixins} mixin(s)")
     if lib:
         return "library", lib
-    if prof.get("environment") == "client":
-        return "client-only", ["declares client-only"]
-    if "display_test_ignore_all" in flags:
-        return "client-only", ["one-sided: displayTest IGNORE_ALL_VERSION"]
+    one_sided = ("declares client-only" if prof.get("environment") == "client" else
+                 "one-sided: displayTest IGNORE_ALL_VERSION" if "display_test_ignore_all" in flags else "")
+    if one_sided:
+        if code.get("screens") and code.get("render", 0) < 10:
+            return "UI/info", [one_sided, f"{code['screens']} screen class(es), {code.get('render', 0)} "
+                                          "class(es) calling the world renderer"]
+        return "client-only", [one_sided]
     if (prof.get("mixin_configs") and share >= 0.10 and c.get("lang", 0) <= 10
             and c.get("textures", 0) <= 8 and not c.get("sounds") and not c.get("shaders")):
         return "performance/mixin-only", [f"{mixins} mixin(s) in {classes} classes "
                                           f"({len(prof['mixin_configs'])} config(s))",
                                           f"lang {c.get('lang', 0)}, textures {c.get('textures', 0)}"]
+    if (code.get("gameplay_events") and not code.get("screens") and not code.get("hud")
+            and code.get("render", 0) < 10):
+        events = code["gameplay_events"]
+        return "gameplay code", ["hooks " + ", ".join(events[:3]) + (" …" if len(events) > 3 else ""),
+                                 f"no screens, HUD or renderer code; {classes} classes"]
     return "UI/info", [f"textures {c.get('textures', 0)} (gui {c.get('gui_textures', 0)})",
                        f"lang {c.get('lang', 0)}", f"{mixins} mixin(s) in {classes} classes",
                        f"environment {prof.get('environment')}"]
@@ -723,7 +767,8 @@ def board(shards: list[dict], previous: dict | None = None, baseline: dict | Non
                "residue": rec.get("residue"), "errors": rec.get("errors"), "valid": rec.get("valid"),
                "mct": rec.get("mct"), "seconds": rec.get("seconds"), "done": is_done, "done_why": why,
                "reason_classes": dict(sorted(per_class.items(), key=lambda kv: (-kv[1]["files"], kv[0]))),
-               "counts": prof.get("counts", {}), "listed_lib": rec.get("listed_lib", False)}
+               "counts": prof.get("counts", {}), "listed_lib": rec.get("listed_lib", False),
+               "outcome": rec.get("outcome"), "explained_by": rec.get("reason_classes") or []}
         base = base_mods.get(name)
         if base is not None and row["coverage"] is not None and base.get("coverage") is not None:
             row["coverage_vs_baseline"] = round(row["coverage"] - base["coverage"], 2)
@@ -745,12 +790,22 @@ def board(shards: list[dict], previous: dict | None = None, baseline: dict | Non
             r["trend"] = {"new": True} if old is None else {"mods": r["mods"] - old["mods"],
                                                             "files": r["files"] - old["files"]}
     mods.sort(key=lambda m: (m["rank"] or 999, m["name"]))
+    # Why nothing converts, across the explained-empty mods (#279).
+    empty_roll: dict[str, dict] = {}
+    for m in mods:
+        for r in m["explained_by"]:
+            slot = empty_roll.setdefault(r["class"], {"reason_class": r["class"], "mods": 0, "mod_names": []})
+            slot["mods"] += 1
+            slot["mod_names"].append(m["name"])
+    explained_empty = sorted(empty_roll.values(), key=lambda r: (-r["mods"], r["reason_class"]))
     ok = [m for m in mods if m["status"] == "ok" and m["coverage"] is not None]
     return {
         "schema": SCHEMA, "kind": "gauntlet-board", "generated": lb["generated"],
         "manifest": lb["manifest"], "mods_total": len(mods), "statuses": lb["statuses"],
         "classes": {k: classes[k] for k in (*CLASSES, *sorted(set(classes) - set(CLASSES))) if classes.get(k)},
         "done": sum(1 for m in mods if m["done"]),
+        "explained_empty": sum(1 for m in mods if m.get("outcome") == "explained-empty"),
+        "explained_empty_rollup": explained_empty,
         "mean_coverage": round(sum(m["coverage"] for m in ok) / len(ok), 2) if ok else None,
         "rollup": ranked, "mods": mods, "leaderboard": lb,
         "baseline_generated": (baseline or {}).get("generated"),
@@ -763,7 +818,8 @@ def baseline_of(b: dict) -> dict:
             "manifest": b["manifest"],
             "mods": {m["name"]: {"class": m["class"], "status": m["status"], "coverage": m["coverage"],
                                  "files": m["files"], "residue": m["residue"], "errors": m["errors"],
-                                 "done": m["done"]} for m in b["mods"]}}
+                                 "done": m["done"], **({"outcome": m["outcome"]} if m.get("outcome") else {})}
+                     for m in b["mods"]}}
 
 
 def _cell(text) -> str:
@@ -776,12 +832,16 @@ def _mct(m) -> str:
         return ""
     if "failed" in mct:
         return "failed"
+    if "skipped" in mct:
+        return "no pack"
     return f"{mct.get('error', 0)}/{mct.get('warning', 0)}"
 
 
 def _validate(m) -> str:
     if m["status"] != "ok":
         return ""
+    if m.get("outcome") == "explained-empty" and not m.get("errors"):
+        return "explained-empty"
     return "clean" if not m.get("errors") else f"{m['errors']} error(s)"
 
 
@@ -794,7 +854,9 @@ def render_markdown(b: dict, top: int = 25) -> str:
     cls = ", ".join(f"{k} {v}" for k, v in b["classes"].items())
     lines += [f"Generated {b['generated']}: {b['mods_total']} mods ({st}).",
               f"Classes, read from each jar's contents: {cls}.",
-              f"Done under #277 rule 6 (converted, validator clean, every residue explained): {b['done']} of {b['mods_total']}.",
+              f"Done under #277 rule 6 (converted, validator clean, every residue explained): {b['done']} of {b['mods_total']}"
+              + (f", {b['explained_empty']} of them explained-empty (nothing convertible, no pack; #279)."
+                 if b.get("explained_empty") else "."),
               "Mean coverage of converted mods: " + (f"{b['mean_coverage']}%." if b["mean_coverage"] is not None else "n/a."),
               ""]
     if b.get("baseline_generated"):
@@ -815,6 +877,14 @@ def render_markdown(b: dict, top: int = 25) -> str:
     for i, r in enumerate(work, 1):
         lines.append(f"{i}. `{r['reason_class']}`: {r['mods']} mods, {r['files']} files "
                      f"(most in {', '.join(r['mod_names'][:3])})")
+    if b.get("explained_empty_rollup"):
+        lines += ["", "## Why nothing converts (explained-empty, #279)", "",
+                  "Mods with nothing Bedrock can hold get no pack and an `explained-empty.json` naming the "
+                  "reason classes read from the jar (`portkit.codeonly`); their lang and asset leftovers are "
+                  "`code_only` residue. A mod counts under every class its jar shows.", "",
+                  "| reason class | mods | mods |", "|---|---:|---|"]
+        for r in b["explained_empty_rollup"]:
+            lines.append(f"| {r['reason_class']} | {r['mods']} | {_cell(', '.join(r['mod_names']))} |")
     lines += ["", "## Mods", "",
               "Coverage is the share of the jar's source files the converter wrote output for. "
               "mct is Mojang's validator, errors/warnings, report-only.", "",

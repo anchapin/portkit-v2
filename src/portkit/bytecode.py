@@ -83,6 +83,9 @@ class ClassFile:
     methods: list[Method]
     pool: list
     bootstrap: list = field(default_factory=list)
+    # The class's access flags (JVMS 4.1): 0x0200 interface, 0x0400 abstract,
+    # 0x2000 annotation, 0x4000 enum.
+    access: int = 0
 
     def method(self, name: str, desc: str | None = None) -> Method | None:
         for m in self.methods:
@@ -225,7 +228,7 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
     def cls(idx: int) -> str | None:
         return utf(pool[idx][1]) if idx else None
 
-    _access, this, sup = struct.unpack_from(">HHH", data, pos)
+    access, this, sup = struct.unpack_from(">HHH", data, pos)
     pos += 6
     (n,) = struct.unpack_from(">H", data, pos)
     pos += 2
@@ -276,7 +279,7 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
                 args = struct.unpack_from(f">{nargs}H", body, p)
                 p += 2 * nargs
                 bootstrap.append((ref, args))
-    return ClassFile(cls(this), cls(sup), interfaces, fields, methods, pool, bootstrap)
+    return ClassFile(cls(this), cls(sup), interfaces, fields, methods, pool, bootstrap, access)
 
 
 # --- Instructions -----------------------------------------------------------

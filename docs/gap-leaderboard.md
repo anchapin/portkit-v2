@@ -179,16 +179,43 @@ readable by anyone who opens a PR, so:
   code, CC-BY-NC-SA-4.0 assets; Chisel: GPL-2.0).
 
 **Classes.** One per jar, the first rule that holds, from its own files
-(never its description): **content** (blockstates, item definitions,
-recipes, loot tables, worldgen or structures); **library** (a language
-adapter, Mod Menu's "library" badge, a bundle of 5+ nested jars with at most
-10 classes of its own, most classes in an `api` package, or code only: 100+
-classes with no textures, lang or sounds and few mixins); **client-only**
-(declared: Fabric environment `client`, NeoForge `clientSideOnly`, a
-minecraft dependency on side `CLIENT`, or `displayTest="IGNORE_ALL_VERSION"`);
-**performance/mixin-only** (mixins are 10%+ of its classes, at most 10 lang
-files and 8 textures, no sounds or shaders); **UI/info** (the rest). The
-board's evidence table shows why, next to #277's `[lib]` mark.
+(never its description); `portkit.gauntlet.classify` has the thresholds.
+**content** (blockstates, item definitions, recipes, loot tables, worldgen or
+structures); **library** (a language adapter, Mod Menu's "library" badge, a
+bundle of 5+ nested jars with at most 10 classes of its own, most classes in
+an `api` package, an event API (10+ `*Event(s)` classes in 100+, no textures
+of its own), code only (100+ classes with no textures, lang or sounds, few
+mixins and no gameplay event hooks), or passive (50+ classes, mixins under
+5%, no game, input, screen or HUD event and no keybind, not client-only));
+**client-only** (declared one-sided: Fabric environment `client`, NeoForge
+`clientSideOnly`, a minecraft dependency on side `CLIENT`, or
+`displayTest="IGNORE_ALL_VERSION"`, and rendering rather than screens);
+**UI/info** for a one-sided jar whose code is screens (a screen class and
+under 10 classes calling the world renderer); **performance/mixin-only**
+(mixins are 10%+ of its classes, at most 10 lang files and 8 textures, no
+sounds or shaders); **gameplay code** (hooks block, player or living-entity
+events, no screen, HUD or renderer code); **UI/info** (the rest). The code
+facts (screens, renderer calls, keybinds, events) come from
+`portkit.codeonly.facts` and are read only for jars with no content files.
+The board's evidence table shows why, next to #277's `[lib]` mark.
+
+**Explained-empty (#279).** A mod with nothing Bedrock can hold is not an
+empty pack. When a conversion ships no file, every residue entry is of an
+explained kind or a leftover only the mod's code reads (lang; assets outside
+blockstates, item definitions and sounds; loader data typed with the mod's
+own codec), and the jar's facts name at least one reason class, the outcome
+is **explained-empty**: no pack and no `.mcaddon` are written,
+`explained-empty.json` (reason classes, evidence, why Bedrock can't carry
+each) goes where the packs would have, the leftovers become `code_only`
+residue (an explained kind, one entry per file), and `portkit validate`
+reports the tree as `tree.explained_empty` (info) instead of `tree.empty`.
+mct is skipped for it. The reason classes (`portkit.codeonly.REASONS`):
+`mixin_patch`, `client_rendering` (world renderer calls, shaders, CTM,
+CEM/EMF `.jem`/`.jpm`, random/emissive entity textures, built-in resource
+packs), `gui_screen`, `hud_overlay`, `config_screen`, `keybind`,
+`networking`, `commands`, `gameplay_hooks`, `library_api`,
+`nested_modules`, and `java_code` for code of none of those shapes. A jar with no `assets/` or `data/` tree now ingests when it
+carries loader metadata.
 
 **Reason classes and done.** A reason class is a residue kind; files no
 converter claims (`unowned`) are split by directory (`unowned

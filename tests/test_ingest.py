@@ -89,12 +89,23 @@ def test_zip_slip_members_are_refused(tmp_path, fixtures_dir):
     assert staged.namespace == "examplemod"
 
 
-def test_jar_without_resources_is_an_error(tmp_path):
+def test_jar_without_resources_or_metadata_is_an_error(tmp_path):
     jar = tmp_path / "codeonly.jar"
     with zipfile.ZipFile(jar, "w") as zf:
         zf.writestr("com/example/Main.class", b"\xca\xfe\xba\xbe")
-    with pytest.raises(IngestError, match="nothing to convert"):
+    with pytest.raises(IngestError, match="not a mod, nothing to convert"):
         from_jar(jar, tmp_path / "staging")
+
+
+def test_code_only_mod_ingests(tmp_path):
+    """#279: a mod with loader metadata but no assets/ or data/ tree ingests."""
+    jar = tmp_path / "codeonly.jar"
+    with zipfile.ZipFile(jar, "w") as zf:
+        zf.writestr("META-INF/neoforge.mods.toml", 'modLoader="javafml"\n[[mods]]\nmodId="codeonly"\n')
+        zf.writestr("com/example/Main.class", b"\xca\xfe\xba\xbe")
+    staged = from_jar(jar, tmp_path / "staging")
+    assert staged.namespaces == [] and staged.code_only
+    assert staged.class_count == 1
 
 
 def test_non_zip_is_an_error(tmp_path):
