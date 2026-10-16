@@ -60,7 +60,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   (leaves Cataclysm's 1.20.1 murals as residue although their Java is known);
   porting one generation for all mods (wrong for the other); keeping the
   refusal.
-- **Links:** #236, PR (this one), #257 (first slice).
+- **Links:** #236, PR #258, #257 (first slice).
 
 ## 2026-10-15: the vanilla parents random mods name most (orientable, cross, carpet, button, fence gate, cube_top and friends) are read from the fetched templates
 
