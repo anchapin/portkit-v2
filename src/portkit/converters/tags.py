@@ -22,6 +22,13 @@ A tag's membership is the union of everyone who writes to it:
    If exactly one of this mod's items carries the conventional name
    (``steel_ingot``), that is the only item the tag can mean on Bedrock.
 
+A Forge or NeoForge tag file may also carry ``"remove"``, a list in the
+``values`` syntax whose entries leave the merged tag again (Forge's extension
+on the vanilla syntax: docs.minecraftforge.net 1.20.x "Tags"; NeoForge keeps
+it: docs.neoforged.net "Tags"). Fabric's tag loader doesn't read the key, so
+on Fabric and Quilt it is ignored; on a jar that declares no loader the
+membership is unknown (#293).
+
 Nested ``#tag`` entries are resolved the same way, recursively. Anything that
 still leaves more than one item stays residue for :meth:`TagResolver.resolve`,
 and the reason lists the members, so the agent starts from the membership
@@ -98,6 +105,33 @@ def _is_shared(tag: str) -> bool:
     return tag.partition(":")[0] in SHARED_NAMESPACES
 
 
+# Loaders whose tag loader honours a tag file's "remove" list (#293).
+REMOVE_LOADERS = frozenset({"forge", "neoforge"})
+IGNORE_REMOVE_LOADERS = frozenset({"fabric", "quilt"})
+
+
+def entry_ref(entry) -> str | None:
+    """The id (or ``#tag``) a tag file entry names: a string or ``{"id": ...}``."""
+    ref = entry.get("id") if isinstance(entry, dict) else entry
+    return ref if isinstance(ref, str) else None
+
+
+def removals(data, loader: str | None) -> list:
+    """The ``remove`` entries of a parsed tag file that ``loader`` applies.
+
+    Raises ValueError when the file removes entries and the loader is unknown,
+    so whether they leave the tag can't be said."""
+    found = data.get("remove") if isinstance(data, dict) else None
+    if not isinstance(found, list) or not found:
+        return []
+    if loader in REMOVE_LOADERS:
+        return found
+    if loader in IGNORE_REMOVE_LOADERS:
+        return []
+    raise ValueError("its tag file removes entries (\"remove\"), which Forge and NeoForge apply and "
+                     "Fabric ignores, and the jar doesn't declare its loader")
+
+
 class TagResolver:
     def __init__(self, mod: SourceMod, reference: TagReference | None = None):
         self.mod = mod
@@ -106,6 +140,7 @@ class TagResolver:
         self._shipped: set[str] | None = None
         self._cache: dict[str, TagResolution] = {}
         self._full_cache: dict[str, _Membership | _NotKnown] = {}
+        self._removed: dict[str, list] = {}  # tag -> its file's applied "remove" entries
 
     # -- what the addon can contain --------------------------------------
     def mod_items(self) -> set[str]:
@@ -179,6 +214,10 @@ class TagResolver:
             sources.append(str(path.relative_to(self.mod.root)))
             entries.extend(data.get("values") or [])
             replace = data.get("replace") is True
+            try:
+                self._removed[tag] = removals(data, self.mod.loader)
+            except ValueError as exc:
+                raise _Unknown(str(exc)) from exc
         if not _is_shared(tag) or replace:
             if path is None:
                 raise _Unknown("the mod ships no tag file for it")
@@ -216,6 +255,23 @@ class TagResolver:
                 raise _Unknown(f"it includes {ref}, whose membership isn't known: {exc}") from exc
             from_ref = from_ref or nested_ref
             members.extend(m for m in nested if m not in members)
+        for entry in self._removed.get(tag, []):
+            ref = entry_ref(entry)
+            if ref is None:
+                continue
+            if not ref.startswith("#"):
+                members = [m for m in members if m != ref]
+                continue
+            inner = ref[1:]
+            ns = inner.partition(":")[0]
+            if not _is_shared(inner) and ns != self.mod.namespace and ns not in self._shipped_namespaces():
+                continue  # another mod's tag: none of its members are in the addon anyway
+            try:
+                gone, nested_ref = self._expand(inner, {tag, inner}, sources, [])
+            except _Unknown as exc:
+                raise _Unknown(f"it removes {ref}, whose membership isn't known: {exc}") from exc
+            from_ref = from_ref or nested_ref
+            members = [m for m in members if m not in gone]
         return members, from_ref
 
     def _full(self, tag: str) -> _Membership | _NotKnown:
@@ -239,10 +295,15 @@ class TagResolver:
             data = json.loads(path.read_text())
         except json.JSONDecodeError:
             return []
+        try:
+            gone = {entry_ref(e) for e in removals(data, self.mod.loader)}
+        except ValueError:
+            return []
         found = []
         for entry in (data.get("values") or []) if isinstance(data, dict) else []:
-            ref = entry.get("id") if isinstance(entry, dict) else entry
-            if isinstance(ref, str) and ref.startswith(f"{self.mod.namespace}:") and self._available(ref):
+            ref = entry_ref(entry)
+            if (ref is not None and ref not in gone and ref.startswith(f"{self.mod.namespace}:")
+                    and self._available(ref)):
                 found.append(ref)
         return found
 

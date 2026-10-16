@@ -381,7 +381,14 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
     components = body.get("components") or {}
     if not components:
         report.add(rel, "block.components", "block has no components")
-    custom = [c for c in components if ":" in c and not c.startswith("minecraft:")]
+    # A tag:<name> component adds a block tag; it isn't a custom component
+    # (learn.microsoft.com, Block Documentation - tag:). Block format 1.26.20
+    # removed it (bedrock.dev Block Format History) (#293).
+    custom = [c for c in components if ":" in c and not c.startswith(("minecraft:", "tag:"))]
+    tagged = [c for c in components if c.startswith("tag:")]
+    if tagged and _format_tuple(data.get("format_version")) >= (1, 26, 20):
+        report.add(rel, "block.tag_component",
+                   f"component {tagged[0]!r}: block format 1.26.20 removed tag:* components")
     if custom and _format_tuple(data.get("format_version")) < _CUSTOM_COMPONENT_FORMAT:
         report.add(rel, "block.custom_component",
                    f"custom component {custom[0]!r} needs block format_version 1.21.90 or later")
