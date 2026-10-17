@@ -92,8 +92,12 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
         elif fn is loot.convert:
             # A feast's loot table is read per serving count by its station
             # (#177 feasts), so it waits like a station recipe.
+            # Blocks and items ran first: a table is put on its converted
+            # block, its block-state conditions read against the block's
+            # states (#299).
             converted = fn(mod, context=context, deferred=deferred_loot,
-                           station_tables=stations.station_loot(mod))
+                           station_tables=stations.station_loot(mod), blocks=result.files,
+                           java_states=result.java_states)
         elif fn is lang.convert:
             # Strings a station runtime shows (the waystone menu, #178) ship
             # under their Java key.

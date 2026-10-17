@@ -107,6 +107,13 @@ class ConversionResult:
     # recipe withdrawn after every namespace converted goes back to residue
     # under its own source.
     recipe_sources: dict[str, str] = field(default_factory=dict)
+    # Converted block id -> Java blockstate property -> value -> the Bedrock
+    # permutation test (``q.block_state(...)``) that is that state, or None for
+    # a Java state the converted block can't be in (a slab's type=double). Set
+    # by the block converter that chose the mapping; the loot converter decides
+    # a function's block-state conditions with it (#299). A property it
+    # doesn't name has no known mapping.
+    java_states: dict[str, dict[str, dict[str, str | None]]] = field(default_factory=dict)
 
     def claim(self, mod: "SourceMod", path: Path) -> str:
         """Record a source file as looked at and return its relative path."""
@@ -169,6 +176,7 @@ class ConversionResult:
         merged.notes = [*self.notes, *other.notes]
         merged.stations = {**self.stations, **other.stations}
         merged.recipe_sources = {**other.recipe_sources, **self.recipe_sources}
+        merged.java_states = {**self.java_states, **other.java_states}
         return merged
 
     @property

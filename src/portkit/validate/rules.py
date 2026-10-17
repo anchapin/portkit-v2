@@ -354,6 +354,13 @@ def _format_tuple(value) -> tuple[int, ...]:
         return ()
 
 
+# Vanilla Bedrock loot tables a pack's block may name without shipping them:
+# the vanilla behavior pack's own (Mojang/bedrock-samples@46ba6ea9
+# behavior_pack/loot_tables/empty.json, the drop-nothing table station
+# adapters already name).
+_VANILLA_LOOT_TABLES = frozenset({"loot_tables/empty.json"})
+
+
 def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path) -> None:
     data = _load(report, path, rel)
     if data is None:
@@ -381,6 +388,21 @@ def _check_block(report: ValidationReport, path: Path, rel: str, pack_root: Path
     components = body.get("components") or {}
     if not components:
         report.add(rel, "block.components", "block has no components")
+    # minecraft:loot is a path relative to the behavior pack, at most 256
+    # characters (learn.microsoft.com, Block Components Documentation -
+    # minecraft:loot). A table that isn't there leaves the block dropping
+    # nothing, so a missing file is an error (#299).
+    for where, comps in [("components", components)] + [
+            (f"permutations[{i}].components", p.get("components") or {})
+            for i, p in enumerate(body.get("permutations") or []) if isinstance(p, dict)]:
+        loot = comps.get("minecraft:loot") if isinstance(comps, dict) else None
+        if loot is None:
+            continue
+        if not isinstance(loot, str) or not loot or len(loot) > 256:
+            report.add(rel, "block.loot", f"{where}.minecraft:loot must be a pack path of at most 256 characters")
+        elif loot not in _VANILLA_LOOT_TABLES and not (pack_root / loot).is_file():
+            report.add(rel, "block.loot", f"{where}.minecraft:loot names {loot}, which the pack doesn't ship; "
+                       "the block would drop nothing")
     # A tag:<name> component adds a block tag; it isn't a custom component
     # (learn.microsoft.com, Block Documentation - tag:). Block format 1.26.20
     # removed it (bedrock.dev Block Format History) (#293).

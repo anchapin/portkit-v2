@@ -2241,6 +2241,13 @@ def _convert_slab(mod: SourceMod, result: ConversionResult, rel: str, name: str,
         result.claim(mod, double_path)
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = _slab_definition(mod.namespace, name, identifier, instances, boxes)
+    # Java's slab states as the converted block has them (#299): bottom and
+    # top are the vertical_half trait's values; a double slab can't exist.
+    result.java_states[f"{mod.namespace}:{name}"] = {"type": {
+        "bottom": "q.block_state('minecraft:vertical_half') == 'bottom'",
+        "top": "q.block_state('minecraft:vertical_half') == 'top'",
+        "double": None,
+    }}
     result.notes.append(
         f"{name}: bottom and top slab via Bedrock's vertical_half trait; Java's double slab "
         f"(type=double, {double_ref}) has no data-driven Bedrock form, so a second slab "

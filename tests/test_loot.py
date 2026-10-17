@@ -193,3 +193,186 @@ def test_the_pipeline_files_a_code_drawn_blocks_table_with_its_block(tmp_path):
     assert kinds["assets/examplemod/blockstates/chest.json"] == "code_drawn_block"
     assert kinds["data/examplemod/loot_table/blocks/chest.json"] == "owned_by_residue"
     assert "owned_by_residue" in SKIP_KINDS
+
+
+# --- #299: function-level conditions and minecraft:loot on the block ---------
+
+SLAB = "examplemod:steel_slab"
+SLAB_STATES = {"type": {
+    "bottom": "q.block_state('minecraft:vertical_half') == 'bottom'",
+    "top": "q.block_state('minecraft:vertical_half') == 'top'",
+    "double": None,
+}}
+
+
+def _block(ident, components=None):
+    return {"format_version": "1.20.20", "minecraft:block": {
+        "description": {"identifier": ident}, "components": dict(components or {"minecraft:friction": 0.6})}}
+
+
+def _slab_table(block=SLAB):
+    return pool({"type": "minecraft:item", "name": block}, SURVIVES, functions=[
+        {"function": "minecraft:set_count", "add": False, "count": 2.0,
+         "conditions": [{"condition": "minecraft:block_state_property", "block": block,
+                         "properties": {"type": "double"}}]},
+        {"function": "minecraft:explosion_decay"}])
+
+
+def test_a_slab_count_for_a_double_slab_bedrock_cannot_have_never_applies(tmp_path):
+    """Java's set_count 2 only applies when type=double; the converted slab is
+    never double, so it drops one, and that is the default: nothing to wire."""
+    blocks = {"blocks/steel_slab.json": _block(SLAB)}
+    result = loot.convert(build(tmp_path, {"steel_slab": _slab_table()}), blocks=blocks,
+                          java_states={SLAB: SLAB_STATES})
+    assert result.unhandled == []
+    entry = result.files["loot_tables/blocks/steel_slab.json"]["pools"][0]["entries"][0]
+    assert entry == {"type": "item", "name": SLAB, "functions": [{"function": "explosion_decay"}]}
+    assert "blocks/steel_slab.json" not in result.files
+
+
+def test_a_conditioned_function_is_never_applied_unconditionally(tmp_path):
+    # No converted block to test the state of: refused, not set_count 2.
+    result = loot.convert(build(tmp_path, {"steel_slab": _slab_table()}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "type=double" in reason and "set_count" in reason
+
+
+def test_a_block_without_that_state_refuses_the_table(tmp_path):
+    blocks = {"blocks/steel_slab.json": _block(SLAB)}
+    result = loot.convert(build(tmp_path, {"steel_slab": _slab_table()}), blocks=blocks, java_states={})
+    assert result.files == {}
+    assert "carries no Bedrock state for type" in result.unhandled[0].reason
+
+
+def test_a_function_condition_other_than_block_state_is_refused(tmp_path):
+    table = pool(ITEM, SURVIVES, functions=[{"function": "minecraft:set_count", "count": 3,
+                                             "conditions": [{"condition": "minecraft:random_chance", "chance": 0.5}]}])
+    blocks = {"blocks/steel_block.json": _block("examplemod:steel_block")}
+    result = loot.convert(build(tmp_path, {"steel_block": table}), blocks=blocks)
+    assert result.files == {}
+    assert "random_chance" in result.unhandled[0].reason
+
+
+def test_counts_per_reachable_state_go_on_permutations(tmp_path):
+    petals = "examplemod:petals"
+    states = {"amount": {"1": "q.block_state('examplemod:amount') == 1",
+                         "2": "q.block_state('examplemod:amount') == 2"}}
+    table = pool({"type": "minecraft:item", "name": petals}, SURVIVES, functions=[
+        {"function": "minecraft:set_count", "count": n,
+         "conditions": [{"condition": "minecraft:block_state_property", "block": petals,
+                         "properties": {"amount": str(n)}}]} for n in (1, 2)])
+    blocks = {"blocks/petals.json": _block(petals)}
+    result = loot.convert(build(tmp_path, {"petals": table}), blocks=blocks, java_states={petals: states})
+    assert result.unhandled == []
+    block = result.files["blocks/petals.json"]["minecraft:block"]
+    assert block["components"]["minecraft:loot"] == "loot_tables/blocks/petals.json"
+    assert block["permutations"] == [{"condition": "q.block_state('examplemod:amount') == 2",
+                                      "components": {"minecraft:loot": "loot_tables/blocks/petals.state1.json"}}]
+    counts = [result.files[p]["pools"][0]["entries"][0]["functions"][0]
+              for p in ("loot_tables/blocks/petals.json", "loot_tables/blocks/petals.state1.json")]
+    assert counts == [{"function": "set_count", "count": 1}, {"function": "set_count", "count": 2}]
+
+
+def test_a_block_that_drops_another_item_names_its_table(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "examplemod:root"}, SURVIVES,
+                 functions=[{"function": "minecraft:set_count", "count": 4}])
+    blocks = {"blocks/root_block.json": _block("examplemod:root_block"),
+              "items/root.json": {"minecraft:item": {"description": {"identifier": "examplemod:root"}}}}
+    result = loot.convert(build(tmp_path, {"root_block": table}), blocks=blocks)
+    assert result.unhandled == []
+    block = result.files["blocks/root_block.json"]
+    assert block["minecraft:block"]["components"]["minecraft:loot"] == "loot_tables/blocks/root_block.json"
+    assert block["minecraft:block"]["components"]["minecraft:friction"] == 0.6
+    assert result.files["loot_tables/blocks/root_block.json"]["pools"][0]["entries"][0] == {
+        "type": "item", "name": "examplemod:root",
+        "functions": [{"function": "set_count", "count": 4}, {"function": "explosion_decay"}]}
+    # The input is not changed in place.
+    assert "minecraft:loot" not in blocks["blocks/root_block.json"]["minecraft:block"]["components"]
+    assert any("minecraft:loot" in n for n in result.notes)
+
+
+def test_a_drop_of_an_item_the_pack_lacks_is_not_wired(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "examplemod:gone"}, SURVIVES)
+    blocks = {"blocks/box.json": _block("examplemod:box")}
+    result = loot.convert(build(tmp_path, {"box": table}), blocks=blocks)
+    assert result.files == {}
+    assert "examplemod:gone" in result.unhandled[0].reason
+
+
+def test_a_drop_of_air_waits_for_the_empty_table_pick(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "minecraft:air"}, SURVIVES)
+    blocks = {"blocks/pot.json": _block("examplemod:pot")}
+    result = loot.convert(build(tmp_path, {"pot": table}), blocks=blocks)
+    assert result.files == {}
+    assert "minecraft:air" in result.unhandled[0].reason and "#299" in result.unhandled[0].reason
+
+
+def test_a_block_that_already_has_minecraft_loot_is_left_alone(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "minecraft:dirt"}, SURVIVES)
+    blocks = {"blocks/soil.json": _block("examplemod:soil", {"minecraft:loot": "loot_tables/empty.json"})}
+    result = loot.convert(build(tmp_path, {"soil": table}), blocks=blocks)
+    assert "blocks/soil.json" not in result.files
+    assert "loot_tables/blocks/soil.json" in result.files
+
+
+def test_vanilla_drops_use_bedrock_ids(tmp_path, monkeypatch):
+    from portkit.converters import recipes
+
+    monkeypatch.setattr(recipes, "bedrock_item",
+                        lambda ident: ("minecraft:noteblock", None) if ident == "minecraft:note_block" else (ident, None))
+    table = pool({"type": "minecraft:item", "name": "minecraft:note_block"}, SURVIVES)
+    blocks = {"blocks/horn.json": _block("examplemod:horn")}
+    result = loot.convert(build(tmp_path, {"horn": table}), blocks=blocks)
+    assert result.files["loot_tables/blocks/horn.json"]["pools"][0]["entries"][0]["name"] == "minecraft:noteblock"
+    assert result.files["blocks/horn.json"]["minecraft:block"]["components"]["minecraft:loot"] == (
+        "loot_tables/blocks/horn.json")
+
+
+def test_a_vanilla_drop_bedrock_spells_with_data_gets_set_data(tmp_path, monkeypatch):
+    from portkit.converters import recipes
+
+    monkeypatch.setattr(recipes, "bedrock_item", lambda ident: ("minecraft:banner", 15)
+                        if ident == "minecraft:white_banner" else (ident, None))
+    table = pool({"type": "minecraft:item", "name": "minecraft:white_banner"}, SURVIVES)
+    blocks = {"blocks/flag.json": _block("examplemod:flag")}
+    result = loot.convert(build(tmp_path, {"flag": table}), blocks=blocks)
+    entry = result.files["loot_tables/blocks/flag.json"]["pools"][0]["entries"][0]
+    assert entry["functions"] == [{"function": "set_data", "data": 15}, {"function": "explosion_decay"}]
+
+
+def test_a_vanilla_drop_bedrock_has_no_id_for_is_refused(tmp_path, monkeypatch):
+    from portkit.converters import recipes
+
+    monkeypatch.setattr(recipes, "bedrock_item", lambda ident: "no Bedrock id of its own")
+    table = pool({"type": "minecraft:item", "name": "minecraft:tipped_arrow"}, SURVIVES)
+    result = loot.convert(build(tmp_path, {"quiver": table}))
+    assert result.files == {}
+    assert "no Bedrock id" in result.unhandled[0].reason
+
+
+def test_the_validator_wants_a_block_loot_table_to_exist(tmp_path):
+    from portkit.validate.rules import validate_pack
+
+    pack = tmp_path / "behavior_pack"
+    (pack / "blocks").mkdir(parents=True)
+    (pack / "blocks" / "a.json").write_text(json.dumps(_block("ex:a", {"minecraft:loot": "loot_tables/blocks/a.json"})))
+    (pack / "blocks" / "b.json").write_text(json.dumps(_block("ex:b", {"minecraft:loot": "loot_tables/empty.json"})))
+    report = validate_pack(pack)
+    loot_findings = [f for f in report.findings if f.rule == "block.loot"]
+    assert [f.path for f in loot_findings] == ["behavior_pack/blocks/a.json"]
+    (pack / "loot_tables" / "blocks").mkdir(parents=True)
+    (pack / "loot_tables" / "blocks" / "a.json").write_text(
+        json.dumps({"pools": [{"rolls": 1, "entries": [{"type": "item", "name": "ex:a"}]}]}))
+    assert [f for f in validate_pack(pack).findings if f.rule == "block.loot"] == []
+
+
+def test_a_shortened_table_path_moves_the_blocks_reference():
+    from portkit.model import ConversionResult
+    from portkit.paths import shorten_paths
+
+    long = "loot_tables/blocks/" + "x" * 120 + ".json"
+    result = ConversionResult(files={long: {"pools": []},
+                                     "blocks/x.json": _block("ex:x", {"minecraft:loot": long})})
+    renames = shorten_paths(result)
+    assert result.files["blocks/x.json"]["minecraft:block"]["components"]["minecraft:loot"] == renames[long]

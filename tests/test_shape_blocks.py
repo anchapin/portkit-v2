@@ -400,3 +400,24 @@ def test_end_to_end_the_shapes_leave_no_model_unowned(tmp_path, templates):
     unowned = [u for u in out.unhandled if u.kind == "unowned"]
     assert not any("models" in u.source for u in unowned), unowned
 
+
+
+def test_a_slab_records_its_java_states_and_its_double_count_never_applies(tmp_path, templates):
+    """#299: the slab converter says which Java slab states the block has (a
+    double slab can't exist on Bedrock), and the loot converter reads it: Java's
+    set_count 2 for type=double never applies, so the slab drops one of itself,
+    Bedrock's default, and the block gets no minecraft:loot."""
+    from portkit.converters import convert_all
+
+    root = _shape_mod(tmp_path, stairs=False, wall=False, pillar=False)
+    _write(root, "data/examplemod/loot_table/blocks/stone_slab.json", {"pools": [{"rolls": 1, "entries": [{
+        "type": "minecraft:item", "name": "examplemod:stone_slab",
+        "functions": [{"function": "minecraft:set_count", "add": False, "count": 2.0, "conditions": [{
+            "condition": "minecraft:block_state_property", "block": "examplemod:stone_slab",
+            "properties": {"type": "double"}}]}, {"function": "minecraft:explosion_decay"}]}]}]})
+    result = convert_all(SourceMod(root=root, namespace="examplemod"))
+    assert result.java_states["examplemod:stone_slab"]["type"]["double"] is None
+    entry = result.files["loot_tables/blocks/stone_slab.json"]["pools"][0]["entries"][0]
+    assert entry == {"type": "item", "name": "examplemod:stone_slab", "functions": [{"function": "explosion_decay"}]}
+    assert "minecraft:loot" not in result.files["blocks/stone_slab.json"]["minecraft:block"]["components"]
+    assert not [u for u in result.unhandled if "loot_table" in u.source]
