@@ -187,3 +187,17 @@ test("placed already powered, the upper half's onPlace opens it silently", () =>
   assert.equal(lower.permutation.getState(S.open), true);
   assert.deepEqual(w.sounds, []);
 });
+
+test("an update for a door already gone (air in its place) changes nothing", () => {
+  const w = world();
+  const { lower, upper } = placeDoor(w, handId, { x: 0, y: 64, z: 0 });
+  for (const b of [lower, upper]) {
+    b.typeId = "minecraft:air";
+    b.permutation = _permutation("minecraft:air");
+    b.setPermutation = () => { throw new Error("Failed to set property on block 'minecraft:air'"); };
+  }
+  component.onRedstoneUpdate({ block: lower, powerLevel: 0 });
+  component.onPlace({ block: upper });
+  component.onPlayerInteract({ block: lower });
+  assert.deepEqual(w.sounds, []);
+});

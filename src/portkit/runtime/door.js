@@ -79,6 +79,18 @@ function clickOf(player, loc) {
   }
 }
 
+// The event's block is a place, read when the handler runs: a door removed in
+// the same tick (broken, or replaced by a command) reads as what replaced it,
+// and its redstone update still arrives (BDS 1.26.52, ingame run 39040957501:
+// `fill ... air` over a door sent onRedstoneUpdate for the air left behind).
+function stillDoor(table, block) {
+  try {
+    return block.isValid !== false && table.doors[block.typeId] !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 function stateOf(table, block) {
   const perm = block.permutation;
   return { open: perm.getState(table.states.open), powered: perm.getState(table.states.powered) };
@@ -98,7 +110,9 @@ function parts(block) {
 }
 
 function apply(table, block, next) {
+  const typeId = block.typeId;
   for (const b of parts(block)) {
+    if (b.typeId !== typeId) continue;
     b.setPermutation(b.permutation
       .withState(table.states.open, next.open)
       .withState(table.states.powered, next.powered));
@@ -137,6 +151,7 @@ export function registerDoors(table) {
         event.permutationToPlace = perm.withState(table.states.hinge, side);
       },
       onPlace: (event) => {
+        if (!stillDoor(table, event.block)) return;
         // Java places a door open when it is powered already; the last part
         // placed (the upper half) reads both.
         if (event.block.permutation.getState(PART) !== 1) return;
@@ -144,12 +159,14 @@ export function registerDoors(table) {
         if (next) apply(table, event.block, { ...next, sound: false });
       },
       onPlayerInteract: (event) => {
+        if (!stillDoor(table, event.block)) return;
         const door = table.doors[event.block.typeId];
         if (!door) return;
         const next = use(stateOf(table, event.block), door.hand);
         if (next) apply(table, event.block, next);
       },
       onRedstoneUpdate: (event) => {
+        if (!stillDoor(table, event.block)) return;
         const power = Math.max(event.powerLevel ?? 0, powerOf(event.block));
         const next = powerChange(stateOf(table, event.block), power > 0);
         if (next) apply(table, event.block, next);
