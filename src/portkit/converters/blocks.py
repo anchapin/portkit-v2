@@ -1529,6 +1529,16 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
         except json.JSONDecodeError as exc:
             result.unhandled.append(Unhandled(rel, "block", f"invalid JSON: {exc}"))
             continue
+        drawn_read: list = []
+        drawn_by_code = (None if name in (stations or {}) or name not in loaded
+                         else _code_drawn_reason(mod, loaded[name], drawn_read))
+        if drawn_by_code is not None:
+            # The models are claimed as the single-model path claimed them
+            # before #296, so the move from `block` changes no count.
+            for model_file in drawn_read:
+                result.claim(mod, model_file)
+            result.unhandled.append(Unhandled(rel, CODE_DRAWN, drawn_by_code))
+            continue
         if name in water_why:
             result.unhandled.append(Unhandled(rel, "block", water_why[name]))
             continue
@@ -2399,6 +2409,104 @@ def _coded_facing_variants(blockstate: dict) -> tuple[str | None, dict | None, b
     if len(seen) != 1 or len(uvlocks) != 1:
         return None, None, False
     return seen.pop(), turns, uvlocks.pop()
+
+
+# A blockstate whose every model draws nothing (#296): no elements, no
+# vanilla parent and no custom loader anywhere up its chain, and no texture
+# but "particle". Java's block model renderer bakes quads from a model's
+# elements (or its parent's), so such a model bakes none; what the player
+# sees is drawn by the mod's code: a block-entity renderer (chests, signs,
+# hanging signs, beds, hammocks), the fluid renderer (a mod's fluid blocks)
+# or a baked model the code swaps in. A Bedrock block definition has no
+# renderer to hand that to, and drawing a stand-in would invent the look
+# (#87), so the block is `code_drawn_block` residue: an explained kind.
+CODE_DRAWN = "code_drawn_block"
+
+
+def _blockstate_models(blockstate: dict) -> list[str]:
+    """Every model reference a blockstate names, variants and multipart."""
+    found: list[str] = []
+
+    def add(entry) -> None:
+        if isinstance(entry, list):
+            for item in entry:
+                add(item)
+        elif isinstance(entry, dict) and isinstance(entry.get("model"), str):
+            found.append(entry["model"])
+
+    variants = blockstate.get("variants")
+    if isinstance(variants, dict):
+        for entry in variants.values():
+            add(entry)
+    for part in blockstate.get("multipart") or []:
+        if isinstance(part, dict):
+            add(part.get("apply"))
+    return found
+
+
+def _draws_nothing(mod: SourceMod, reference: str, read: list | None = None) -> str | None:
+    """The particle texture of a model that bakes no quads, else None.
+
+    Returns "" for a model with no texture at all. Follows the parent chain
+    inside the mod only: a vanilla parent, a parent from another namespace
+    or a missing file means the chain isn't fully read here, so None. The
+    model files read are appended to ``read``.
+    """
+    textures: dict = {}
+    ref = reference
+    for _ in range(models._MAX_PARENT_DEPTH):
+        path = models.model_path(mod, ref)
+        if path is None or not path.is_file():
+            return None
+        try:
+            model = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return None
+        if read is not None:
+            read.append(path)
+        if not isinstance(model, dict) or "loader" in model or model.get("elements"):
+            return None
+        own = model.get("textures") or {}
+        if not isinstance(own, dict):
+            return None
+        textures = {**own, **textures}
+        parent = model.get("parent")
+        if parent is None:
+            break
+        if not isinstance(parent, str) or models.normalize(parent).startswith("minecraft:"):
+            return None
+        ref = parent
+    else:
+        return None
+    if set(textures) - {"particle"}:
+        return None
+    particle = textures.get("particle")
+    return particle if isinstance(particle, str) else ""
+
+
+def _code_drawn_reason(mod: SourceMod, blockstate: dict,
+                       read: list | None = None) -> str | None:
+    """Why a blockstate is drawn by Java code alone, or None if a model draws.
+
+    The model files read are appended to ``read``."""
+    refs = _blockstate_models(blockstate)
+    if not refs:
+        return None
+    particles: set[str] = set()
+    for ref in dict.fromkeys(refs):
+        particle = _draws_nothing(mod, ref, read)
+        if particle is None:
+            return None
+        if particle:
+            particles.add(particle)
+    count = len(set(refs))
+    shown = ", ".join(sorted(particles)[:3]) + (", ..." if len(particles) > 3 else "")
+    return (
+        f"every model the blockstate names ({count}) bakes no quads: no elements, no vanilla parent, "
+        f"no custom loader, only a particle texture{f' ({shown})' if shown else ''}, so Java draws "
+        "this block in mod code (a block-entity renderer, the fluid renderer or a model the code "
+        "swaps in), which a Bedrock block definition can't carry"
+    )
 
 
 def _load_blockstates(src) -> dict:

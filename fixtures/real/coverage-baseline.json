@@ -15,7 +15,7 @@
     "create": {
       "coverage": 40.9,
       "files": 4021,
-      "residue": 5818,
+      "residue": 5817,
       "errors": 0
     },
     "farmers_delight_fabric": {
@@ -67,7 +67,7 @@
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 52.0,
+      "coverage": 52.1,
       "files": 16583,
       "residue": 15274,
       "errors": 0

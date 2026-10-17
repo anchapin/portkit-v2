@@ -161,6 +161,11 @@ SKIP_KINDS = {
     "tag_unread": ("no data file of the jar reads the tag (only the mod's Java code or other mods would) and "
                    "Bedrock has no tag of that name its own systems read, or it names only vanilla entries an "
                    "add-on can't re-tag; writing it onto items would change nothing"),
+    # #296 block residue: a block Java draws only in code (portkit.converters.blocks).
+    "code_drawn_block": ("every model the blockstate names bakes no quads (only a particle texture), so the "
+                         "block is drawn by the mod's Java code (a block-entity renderer, the fluid renderer or "
+                         "a model swapped in at runtime); a Bedrock block definition has no renderer to hand "
+                         "that to, and a stand-in geometry would invent the look"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }

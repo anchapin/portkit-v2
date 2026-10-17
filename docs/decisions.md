@@ -27,6 +27,17 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-16: a block whose every model bakes no quads is `code_drawn_block` residue, explained from the jar's models
+
+- **Decision:** a blockstate is `code_drawn_block` residue, an explained kind in the residue agent's `SKIP_KINDS`, when every model it names (all variants, random lists and multipart applies) bakes no quads. Such a model has no `elements`, no `loader`, and no vanilla (`minecraft:`) parent anywhere up its chain inside the mod, and has no texture except `particle`. The reason names the particle textures. A chain that leaves the mod (another namespace's parent, a missing file) is not read as drawing nothing, so the block stays on its old path. One drawing model keeps the whole block on its old path too. Station blocks are skipped (their adapters decide). The models are claimed the way the refusing single-model path claimed them before, so the change moves entries from `block` to `code_drawn_block`. The one other count change is in AE2: a parent model that was `owned_by_residue` is now claimed with its block (-1 residue file). No pack byte changes.
+- **Why:** this is the biggest cross-mod sub-reason of the `block` class (#296: 9 of the 13 content mods, 338 files: chests, signs and hanging signs, beds, hammocks and sleeping bags, mod fluid blocks). Java's block model renderer bakes a model's elements, or its parent's, so a particle-only model draws nothing. The player sees the mod's code instead: a block-entity renderer, the fluid renderer, or a baked model swapped in at runtime. A Bedrock block definition has no renderer to hand that to, and a stand-in geometry would invent the look (#87). This follows the explain-from-the-jar rule of #279/#292/#293.
+- **Rejected:**
+  - A box or chest-shaped stand-in geometry: invented.
+  - Converting the block as an invisible block: it would ship a block the player can't see, where Java shows one.
+  - Not claiming the models: honest about the files, but 4 Botania models a shipped item also names would turn `unowned`, and coverage would drop with no change in game.
+  - Naming the renderer from bytecode (BlockEntityRenderer registration, LiquidBlock, `getRenderShape`): more specific, but the model alone already proves Java's model renderer draws nothing. It is a possible refinement.
+- **Links:** #296, #277, #87, #279, #292, #293.
+
 ## 2026-10-16: leftover data tags become Bedrock block and item tags where Bedrock reads them, else they are explained from the jar
 
 - **Decision:** A Java tag file no converter read (#293) goes one of four ways, decided from the jar's own files (`portkit.datatags`):
