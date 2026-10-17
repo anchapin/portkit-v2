@@ -13,9 +13,9 @@
       "errors": 0
     },
     "create": {
-      "coverage": 41.1,
-      "files": 4033,
-      "residue": 5785,
+      "coverage": 41.4,
+      "files": 4060,
+      "residue": 5754,
       "errors": 0
     },
     "farmers_delight_fabric": {
@@ -43,9 +43,9 @@
       "errors": 0
     },
     "silent_gear_1165": {
-      "coverage": 36.7,
-      "files": 1105,
-      "residue": 1905,
+      "coverage": 36.8,
+      "files": 1109,
+      "residue": 1901,
       "errors": 0
     },
     "storage_drawers_1122": {
