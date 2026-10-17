@@ -732,7 +732,7 @@ def decide_guards(guards, context) -> str | None:
                     "(portkit/data/config_flag_defaults.json)")
         kind = str(entry.get("condition"))
         arg = entry.get("argument")
-        verdict = context._flag(kind, {"type": kind, **({arg: g.gate.name} if arg else {})})
+        verdict = context.flag_verdict(kind, arg, g.gate.name)
         if verdict.passes is None:
             return f"attached only when {g.label}: {verdict.reason()}"
         if verdict.passes != g.sense:
