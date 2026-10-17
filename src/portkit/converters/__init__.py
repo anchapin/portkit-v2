@@ -97,7 +97,7 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
             # states (#299).
             converted = fn(mod, context=context, deferred=deferred_loot,
                            station_tables=stations.station_loot(mod), blocks=result.files,
-                           java_states=result.java_states)
+                           java_states=result.java_states, paired=result.paired_halves)
         elif fn is lang.convert:
             # Strings a station runtime shows (the waystone menu, #178) ship
             # under their Java key.

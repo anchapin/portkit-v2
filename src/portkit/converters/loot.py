@@ -448,6 +448,49 @@ def _java_silk_drop(data: dict, block_id: str) -> str | None:
     return name if count == 1 else f"{count} {name}"
 
 
+def _paired_test(condition, block: str, prop: str) -> bool:
+    """The condition is ``block_state_property`` ``{prop: "lower"}`` on ``block``."""
+    return (isinstance(condition, dict) and condition.get("condition") in _BLOCK_STATE
+            and condition.get("block") in (None, block)
+            and condition.get("properties") == {prop: "lower"})
+
+
+def fold_paired_half(data: dict, block: str, prop: str) -> dict:
+    """``data`` with its ``{prop: "lower"}`` block-state conditions dropped, for a
+    block written on Bedrock's two-part multi_block trait (#296).
+
+    Java runs the lower half's table whichever half the player breaks (the
+    upper half's break takes the lower half with drops: ``updateShape``
+    answers air and ``Block#updateOrDestroy`` destroys it dropping), so a pool
+    or entry gated on half=lower drops once per broken door. Bedrock runs only
+    the broken part's table (wiki.bedrock.dev Multi-Blocks, Destruction), so
+    for whichever part is broken the test holds. Any other half test is left
+    for convert_table to refuse."""
+    def entry(e):
+        if not isinstance(e, dict):
+            return e
+        e = dict(e)
+        if isinstance(e.get("conditions"), list):
+            e["conditions"] = [c for c in e["conditions"] if not _paired_test(c, block, prop)]
+        if isinstance(e.get("children"), list):
+            e["children"] = [entry(c) for c in e["children"]]
+        return e
+
+    out = dict(data)
+    pools = []
+    for pool in data.get("pools") or []:
+        if isinstance(pool, dict):
+            pool = dict(pool)
+            if isinstance(pool.get("conditions"), list):
+                pool["conditions"] = [c for c in pool["conditions"] if not _paired_test(c, block, prop)]
+            if isinstance(pool.get("entries"), list):
+                pool["entries"] = [entry(e) for e in pool["entries"]]
+        pools.append(pool)
+    if "pools" in data:
+        out["pools"] = pools
+    return out
+
+
 def convert_table(data: dict, block: str | None = None,
                   states: dict | None = None,
                   approx: list[str] | None = None) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
@@ -698,7 +741,7 @@ def _silk_note(java: str | None) -> str | None:
 
 def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list | None = None,
             station_tables: set[str] | None = None, blocks: dict | None = None,
-            java_states: dict | None = None) -> ConversionResult:
+            java_states: dict | None = None, paired: dict | None = None) -> ConversionResult:
     """Convert the mod's block loot tables.
 
     A table whose own load conditions (``neoforge:conditions``,
@@ -753,6 +796,8 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
             block_id = f"{mod.namespace}:{name}"
             block_path = by_id.get(block_id)
             approx: list[str] = []
+            if block_path and block_id in (paired or {}):
+                data = fold_paired_half(data, block_id, paired[block_id])
             cases, reason = convert_table(data, block_id if block_path else None,
                                           (java_states or {}).get(block_id, {}) if block_path else None,
                                           approx)

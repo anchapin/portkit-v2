@@ -85,6 +85,14 @@ TEMPLATES = (
     "block/template_fence_gate", "block/template_fence_gate_open",
     "block/template_fence_gate_wall", "block/template_fence_gate_wall_open",
     "block/ladder",
+    # #296 doors: vanilla's eight door templates (introduced in 1.19; the
+    # 1.16-1.18 door_bottom/door_bottom_rh/door_top/door_top_rh names are not
+    # read). Identical (parent, textures, elements) in mcmeta's 1.19, 1.19.2,
+    # 1.19.3, 1.19.4, 1.20.1, 1.21.1, 1.21.8 and 26.1 summaries (2026-10-17).
+    "block/door_bottom_left", "block/door_bottom_left_open",
+    "block/door_bottom_right", "block/door_bottom_right_open",
+    "block/door_top_left", "block/door_top_left_open",
+    "block/door_top_right", "block/door_top_right_open",
 )
 
 # Templates whose boxes changed between game versions: the first version whose
@@ -98,7 +106,7 @@ SINCE = {
 
 # sha256 of the derived JSON (see derive). `python -m portkit.data.models --pin`
 # prints it; bump it together with COMMIT.
-SHA256 = "1cd9d731f649d596b954e8e5b6373104c8e37e62d6037d2f4cc5ac0fe716b611"
+SHA256 = "a668bf199fbf67498d876f11a43ec8d619190510ee9e6c5b45bb387aacd4000e"
 
 
 def derive(summary: bytes) -> bytes:

@@ -18,6 +18,24 @@ entry `scripts/portkit/main.js` that wires the two.
   `useWithoutItem` was read from bytecode to flip that boolean on every way
   through it (`portkit.blockcode.read_state_blocks`); the converter writes the
   table (`scripts/portkit/data/<namespace>_toggle.js`).
+- `door_core.js`: not a station: the pure rules of a door (#296), no
+  imports (tested with node, `tests/js/door_core.test.mjs`): vanilla
+  `DoorBlock#getHinge` (neighbouring doors, then blocks, then where the player
+  clicked), a use (only when the door's `BlockSetType` opens by hand) and a
+  change of redstone power (`neighborChanged`: open = powered, the sound when
+  open changes).
+- `door.js`: its Bedrock binding (`@minecraft/server` 2.5.0, the first stable
+  version with `BlockCustomComponent.onRedstoneUpdate`; the first line
+  `// portkit-requires: @minecraft/server 2.5.0` makes the pack declare it,
+  `pack.script_version`). One custom component per namespace:
+  `beforeOnPlayerPlace` picks the hinge, `onPlayerInteract` opens and closes,
+  `onRedstoneUpdate` (the block's `minecraft:redstone_consumer`, min_power 0)
+  follows the power, `onPlace` opens a door placed already powered. The block
+  is on `minecraft:multi_block`, whose parts must keep equal states, so every
+  change is written to both parts. The converter writes the table
+  (`scripts/portkit/data/<namespace>_doors.js`: per door whether a hand opens
+  it and its sounds) only for doors whose code was read as vanilla
+  `DoorBlock`, or the labelled DEFAULT wooden door (`converters/doors.py`).
 - `book_core.js`: not a station: what one page of a guide book shows (#182):
   title, text and the page's buttons as translation keys, back to its parent;
   no imports.

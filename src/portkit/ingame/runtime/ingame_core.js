@@ -105,6 +105,45 @@ export function dropVerdict(expect, got) {
   return { ok: problems.length === 0, problems };
 }
 
+// The paired check's layer (#296 multi_block doors and two-tall plants): eight
+// apart like the drops (room for a redstone block beside each and its drop),
+// a new layer four up every 64.
+export const PAIRED_Y = 40;
+export const PAIRED_PART = "minecraft:multi_block_part";
+
+/** Where the i-th paired block's lower part goes. */
+export function pairedSlot(i) {
+  const per = AREA / DROP_SPACING;
+  const k = i % (per * per);
+  return {
+    x: (k % per) * DROP_SPACING + 2,
+    y: PAIRED_Y + Math.floor(i / (per * per)) * 4,
+    z: Math.floor(k / per) * DROP_SPACING + 2,
+  };
+}
+
+/**
+ * Whether the two parts read back as one block: `lower` and `upper` are
+ * {typeId, part} as read (part undefined when the state is absent).
+ */
+export function pairedVerdict(id, lower, upper) {
+  const problems = [];
+  if (lower.typeId !== id || lower.part !== 0) problems.push(`lower reads ${lower.typeId} part ${lower.part}`);
+  if (upper.typeId !== id || upper.part !== 1) problems.push(`upper reads ${upper.typeId} part ${upper.part}`);
+  return { ok: problems.length === 0, problems };
+}
+
+/** A door's two halves after a power change: both `want` open and powered. */
+export function doorVerdict(want, halves) {
+  const problems = [];
+  halves.forEach((h, i) => {
+    const name = i === 0 ? "lower" : "upper";
+    if (h.open !== want) problems.push(`${name} open=${h.open}, expected ${want}`);
+    if (h.powered !== want) problems.push(`${name} powered=${h.powered}, expected ${want}`);
+  });
+  return { ok: problems.length === 0, problems };
+}
+
 /** The container check's verdict: the slot count the converter wrote. */
 export function containerVerdict(expected, size) {
   if (size === undefined) return { ok: false, problems: ["no minecraft:inventory component"] };

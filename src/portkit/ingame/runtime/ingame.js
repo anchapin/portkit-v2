@@ -19,11 +19,20 @@
 //              tool and tier tags) gives, for each tool that tells the gate
 //              apart (and a bare hand), what the converter expects: asked of
 //              world.getLootTableManager().generateLootFromBlockPermutation
+//   paired     a block on the multi_block trait (#296: doors, two-tall
+//              plants): placed by script with every part set, both parts read
+//              back; a door is powered by a redstone block beside its lower
+//              half (both halves open) and unpowered (both close); the upper
+//              part broken with `setblock ... air destroy` takes the lower
+//              with it and leaves exactly one drop. Reported, not asserted:
+//              what placing the lower part alone and the setblock command
+//              leave above it.
 // Content-log errors are the runner's to count (it reads the server output).
 import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
-  AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, Tally, connectionVerdict,
-  connectionSlot, containerVerdict, describe, dropSlot, dropVerdict, line, slot,
+  AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, PAIRED_PART, Tally, connectionVerdict,
+  connectionSlot, containerVerdict, describe, doorVerdict, dropSlot, dropVerdict, line,
+  pairedSlot, pairedVerdict, slot,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
 
@@ -56,7 +65,7 @@ async function run() {
   dim.runCommand(`tickingarea add 0 0 0 ${AREA - 1} 0 ${AREA - 1} portkit_ingame true`);
   say("START", {
     blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length,
-    tool_drops: (CHECKS.tool_drops ?? []).length,
+    tool_drops: (CHECKS.tool_drops ?? []).length, paired: (CHECKS.paired ?? []).length,
   });
   if (!(await loaded(dim))) {
     say("ERROR", { detail: "the ticking area never loaded" });
@@ -188,6 +197,100 @@ async function run() {
     } catch (err) {
       fail("tool_drop", `${id} ${tool ?? "hand"}`, describe(err));
     }
+  }
+
+  // paired: one block at a time (#296)
+  const PAIRED = CHECKS.paired ?? [];
+  const read = (at) => {
+    const b = dim.getBlock(at);
+    let part;
+    try {
+      part = b?.permutation.getState(PAIRED_PART);
+    } catch {
+      part = undefined;
+    }
+    return { typeId: b?.typeId, part };
+  };
+  const clear = async (at) => {
+    dim.runCommand(`fill ${at.x} ${at.y} ${at.z} ${at.x + 1} ${at.y + 1} ${at.z} air`);
+    await system.waitTicks(2);
+    for (const e of itemsNear(at)) e.remove();
+  };
+  const half = (at, states) => {
+    const perm = dim.getBlock(at).permutation;
+    return { open: perm.getState(states.open), powered: perm.getState(states.powered) };
+  };
+  for (let i = 0; i < PAIRED.length; i++) {
+    const { id, expect, door } = PAIRED[i];
+    const at = pairedSlot(i);
+    const up = { x: at.x, y: at.y + 1, z: at.z };
+    const seen = { id };
+    try {
+      dim.getBlock({ x: at.x, y: at.y - 1, z: at.z }).setPermutation(BlockPermutation.resolve("minecraft:stone"));
+      // 1. the lower part alone (what the place check did)
+      await clear(at);
+      dim.getBlock(at).setPermutation(BlockPermutation.resolve(id));
+      await system.waitTicks(2);
+      seen.lower_only = { lower: read(at), upper: read(up) };
+      // 2. the setblock command
+      await clear(at);
+      try {
+        dim.runCommand(`setblock ${at.x} ${at.y} ${at.z} ${id}`);
+        await system.waitTicks(2);
+        seen.setblock = { lower: read(at), upper: read(up) };
+      } catch (err) {
+        seen.setblock = { error: describe(err) };
+      }
+      // 3. every part set by script: the check
+      await clear(at);
+      dim.getBlock(at).setPermutation(BlockPermutation.resolve(id, { [PAIRED_PART]: 0 }));
+      dim.getBlock(up).setPermutation(BlockPermutation.resolve(id, { [PAIRED_PART]: 1 }));
+      await system.waitTicks(2);
+      seen.both = { lower: read(at), upper: read(up) };
+      const placed = pairedVerdict(id, seen.both.lower, seen.both.upper);
+      if (placed.ok) tally.record("paired_place", id, true);
+      else fail("paired_place", id, placed.problems.join("; "));
+      if (placed.ok && door) {
+        const beside = { x: at.x + 1, y: at.y, z: at.z };
+        dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:redstone_block"));
+        await system.waitTicks(4);
+        seen.powered = [half(at, door), half(up, door)];
+        const on = doorVerdict(true, seen.powered);
+        if (on.ok) tally.record("door_power", id, true);
+        else fail("door_power", id, on.problems.join("; "));
+        dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:air"));
+        await system.waitTicks(4);
+        seen.unpowered = [half(at, door), half(up, door)];
+        const off = doorVerdict(false, seen.unpowered);
+        if (off.ok) tally.record("door_unpower", id, true);
+        else fail("door_unpower", id, off.problems.join("; "));
+        seen.still_paired = pairedVerdict(id, read(at), read(up)).ok;
+      }
+      // 4. break the upper part as a player would; the lower goes with it
+      if (placed.ok) {
+        for (const e of itemsNear(at)) e.remove();
+        dim.runCommand(`setblock ${up.x} ${up.y} ${up.z} air destroy`);
+        await system.waitTicks(10);
+        seen.after_break = { lower: read(at), upper: read(up) };
+        if (seen.after_break.lower.typeId === id) fail("paired_break", id, "the lower part stayed");
+        else tally.record("paired_break", id, true);
+        const got = [];
+        for (const e of itemsNear(at)) {
+          const stack = e.getComponent("minecraft:item")?.itemStack;
+          if (stack) got.push({ item: stack.typeId, count: stack.amount });
+          e.remove();
+        }
+        seen.drop = got;
+        if (expect) {
+          const verdict = dropVerdict(expect, got);
+          if (verdict.ok) tally.record("paired_drop", id, true);
+          else fail("paired_drop", id, verdict.problems.join("; "));
+        }
+      }
+    } catch (err) {
+      fail("paired", id, describe(err));
+    }
+    say("PAIRED", seen);
   }
 
   // item: each id spawned as an item entity, read back, removed

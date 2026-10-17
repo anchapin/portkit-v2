@@ -175,6 +175,14 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             f'import toggleTable from "./data/{mod.namespace}_toggle.js";\n'
             "registerToggles(toggleTable);\n"
         )
+    # Doors (#296: blocks.convert wrote the table and the fixed runtime).
+    from .doors import door_table_path
+    if door_table_path(mod.namespace) in files:
+        entries.append(
+            'import { registerDoors } from "./door.js";\n'
+            f'import doorTable from "./data/{mod.namespace}_doors.js";\n'
+            "registerDoors(doorTable);\n"
+        )
     entries.extend(extra_entries or [])
     if entries:
         result.files[ENTRY] = (

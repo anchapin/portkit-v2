@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  PAIRED_Y, doorVerdict, pairedSlot, pairedVerdict,
   AREA, CONNECTION_STATES, DROP_BATCH, DROP_Y, Tally, connectionSlot, connectionVerdict, containerVerdict,
   describe, dropSlot, dropVerdict, line, slot,
 } from "../../src/portkit/ingame/runtime/ingame_core.js";
@@ -93,4 +94,30 @@ test("drop verdict: counts summed per item, extras and shortfalls fail", () => {
     ["dropped 0 demo:living_root, expected 4", "dropped 1 demo:root, expected 0"]);
   assert.deepEqual(dropVerdict([], []), { ok: true, problems: [] });
   assert.equal(dropVerdict([], [{ item: "minecraft:dirt", count: 1 }]).ok, false);
+});
+
+test("paired slots: eight apart in x and z, a layer four up every 64, inside the area", () => {
+  const seen = new Set();
+  for (let i = 0; i < 128; i++) {
+    const at = pairedSlot(i);
+    assert.ok(at.x >= 0 && at.x + 1 < AREA && at.z >= 0 && at.z < AREA, JSON.stringify(at));
+    assert.ok(!seen.has(`${at.x},${at.y},${at.z}`));
+    seen.add(`${at.x},${at.y},${at.z}`);
+  }
+  assert.deepEqual(pairedSlot(0), { x: 2, y: PAIRED_Y, z: 2 });
+  assert.deepEqual(pairedSlot(1), { x: 10, y: PAIRED_Y, z: 2 });
+  assert.equal(pairedSlot(64).y, PAIRED_Y + 4);
+});
+
+test("paired verdict: both parts the block, part 0 below part 1", () => {
+  assert.deepEqual(pairedVerdict("d:x", { typeId: "d:x", part: 0 }, { typeId: "d:x", part: 1 }), { ok: true, problems: [] });
+  const lone = pairedVerdict("d:x", { typeId: "d:x", part: 0 }, { typeId: "minecraft:air", part: undefined });
+  assert.equal(lone.ok, false);
+  assert.match(lone.problems[0], /upper reads minecraft:air/);
+});
+
+test("door verdict: both halves open and powered together", () => {
+  assert.equal(doorVerdict(true, [{ open: true, powered: true }, { open: true, powered: true }]).ok, true);
+  const half = doorVerdict(false, [{ open: false, powered: false }, { open: true, powered: false }]);
+  assert.deepEqual(half.problems, ["upper open=true, expected false"]);
 });

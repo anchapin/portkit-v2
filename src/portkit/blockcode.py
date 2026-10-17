@@ -1046,6 +1046,11 @@ class Machine:
         # The block takes the settings as they are now (BlockBehaviour copies
         # hasCollision, and each state its light, when it is built), so a
         # later change to a shared Properties doesn't reach it.
+        if ref.owner.startswith(_VANILLA_BLOCK_PACKAGE):
+            # The vanilla block constructor the block reached and what it was
+            # given (a door's BlockSetType, #296): the first one called is
+            # the most derived vanilla class's.
+            obj.fields.setdefault("__vanilla_ctor", (ref.owner, ref.desc, tuple(args[1:])))
         if ref.desc.startswith(f"(L{_PROPERTIES};") and len(args) > 1:
             obj.fields.setdefault("__props", _snapshot(args[1]))
         elif ref.owner.startswith(_VANILLA_BLOCK_PACKAGE) and len(props_at) == 1 \
