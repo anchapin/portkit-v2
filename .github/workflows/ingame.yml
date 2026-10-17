@@ -40,6 +40,8 @@ jobs:
           # (Create passes every drop and tool_drop check too, run 38996897674, but has one unrelated
           # smithing content-log error, so it isn't in the matrix yet.)
           - { name: ae2, manifest: fixtures/real/gauntlet.toml }
+          # Recipes written once per combination of a vanilla-only tag over several slots (#302 pick 1: blastbrick, c:bricks x4).
+          - { name: immersive_engineering, manifest: fixtures/real/gauntlet.toml }
     name: ${{ matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
     env:
       PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache

@@ -1142,7 +1142,7 @@ def _combinations(rest: list[int], multis: dict, positions: list, ingredients: l
                     continue
                 for member in dict.fromkeys(pick[cell] for cell in cells if by_cell[cell] == i):
                     key[symbol_of[(i, member)]] = {"item": member}
-            suffix = "__" + "__".join(_member_suffix(pick[cell]) for cell in cells)
+            suffix = "__" + "__".join(_vanilla_suffix(pick[cell]) for cell in cells)
             shaped[suffix] = (new_rows, key)
             one = list(ingredients)
             for i in rest:
@@ -1157,8 +1157,14 @@ def _combinations(rest: list[int], multis: dict, positions: list, ingredients: l
         if order in seen:
             continue
         seen.add(order)
-        variants.append(("__" + "__".join(_member_suffix(m) for m in choice), one))
+        variants.append(("__" + "__".join(_vanilla_suffix(m) for m in choice), one))
     return variants, shaped
+
+
+def _vanilla_suffix(member: str) -> str:
+    """A vanilla member's path for a combination's name: every member is
+    ``minecraft:``, so the namespace adds nothing but length."""
+    return _member_suffix(member.removeprefix("minecraft:"))
 
 
 def _member_suffix(member: str) -> str:

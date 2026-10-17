@@ -218,16 +218,16 @@ def test_a_vanilla_only_tag_over_several_slots_is_written_once_per_combination(t
     result = recipes.convert(_mod(tmp_path, _shaped("forge:chests/wooden", ("G G",))), emitted={})
     files = _recipe_files(result)
     assert result.unhandled == []
-    assert set(files) == {"recipes/thing__minecraft_chest__minecraft_chest.json",
-                          "recipes/thing__minecraft_chest__minecraft_trapped_chest.json",
-                          "recipes/thing__minecraft_trapped_chest__minecraft_trapped_chest.json"}
-    same = files["recipes/thing__minecraft_chest__minecraft_chest.json"]["minecraft:recipe_shaped"]
+    assert set(files) == {"recipes/thing__chest__chest.json",
+                          "recipes/thing__chest__trapped_chest.json",
+                          "recipes/thing__trapped_chest__trapped_chest.json"}
+    same = files["recipes/thing__chest__chest.json"]["minecraft:recipe_shaped"]
     assert same["pattern"] == ["G G"] and same["key"] == {"G": {"item": "minecraft:chest"}}
-    mixed = files["recipes/thing__minecraft_chest__minecraft_trapped_chest.json"]["minecraft:recipe_shaped"]
+    mixed = files["recipes/thing__chest__trapped_chest.json"]["minecraft:recipe_shaped"]
     (left, _, right) = mixed["pattern"][0]
     assert left != right and " " not in (left, right)
     assert mixed["key"] == {left: {"item": "minecraft:chest"}, right: {"item": "minecraft:trapped_chest"}}
-    assert mixed["description"]["identifier"] == "examplemod:thing__minecraft_chest__minecraft_trapped_chest"
+    assert mixed["description"]["identifier"] == "examplemod:thing__chest__trapped_chest"
     assert any("once per combination" in n for n in result.notes)
 
 
