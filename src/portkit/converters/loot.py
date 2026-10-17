@@ -6,10 +6,10 @@ flatter version of the same idea and do not have most of it.
 
 The shape that carries almost every modded decorative block is: one pool, one
 roll, one item entry, drops itself, survives explosions. That converts. A table
-that reaches for fortune, silk touch, alternatives or a random count is refused
-with the condition or function that defeated it named in the reason, because a
-block that silently drops the wrong thing is worse than one the report tells you
-to finish by hand.
+that reaches for fortune, a random count or a condition Bedrock can't test is
+refused with the condition or function that defeated it named in the reason.
+Silk Touch, shears and tool tier are approximated with Bedrock's match_tool
+and each approximation is a report note (#299, see the tools section below).
 """
 from __future__ import annotations
 
@@ -90,10 +90,12 @@ def _constant_count(function: dict) -> int | None:
 
 _BLOCK_STATE = ("minecraft:block_state_property", "block_state_property")
 
-# Java's drop of air is a drop of nothing. Whether a block that drops nothing
-# gets an empty Bedrock table is open on #299, so such a table is never wired
-# onto its block (see wire).
+# Java's drop of air is a drop of nothing: a converted block whose table drops
+# nothing names Bedrock's vanilla empty table (Alex, #299 pick 2).
 AIR = ("minecraft:air", "air")
+# Bedrock's vanilla drop-nothing table (Mojang/bedrock-samples@46ba6ea9
+# behavior_pack/loot_tables/empty.json): a block may name it without shipping it.
+EMPTY_TABLE = "loot_tables/empty.json"
 
 _NEVER = "\0never"
 
@@ -187,10 +189,270 @@ def _table_for(name: str, functions: list[dict], explosion_decay: bool) -> tuple
     return {"pools": [{"rolls": 1, "entries": [bedrock_entry]}]}, None
 
 
+# -- tools (#299) -----------------------------------------------------------
+#
+# Java branches block drops on the tool: Silk Touch, shears, a tool type. Alex
+# decided (2026-10-16, #299) to approximate these rather than refuse them,
+# because a block that mostly drops the right thing beats one that drops itself:
+#
+# * Silk Touch. Bedrock never reads a block's minecraft:loot when it is broken
+#   with Silk Touch: the block drops itself (wiki.bedrock.dev Tool-Based
+#   Destruction, "It is impossible to prevent a block from dropping itself when
+#   mined using an item with the Silk Touch enchantment"; Ore Loot Tables,
+#   "Won't be dropped if using Silk Touch"). So the table only ever runs
+#   without Silk Touch: a Java Silk Touch test is false there, its negation
+#   true. When Java's Silk Touch drop is the block itself that is exact; when
+#   it isn't, the table says so in an approximation note.
+# * Shears and tool types become Bedrock's ``match_tool`` condition with
+#   ``minecraft:match_tool_filter_any`` on Bedrock's own item tags
+#   (learn.microsoft.com, Loot and Trade Table Conditions, match_tool;
+#   Vanilla Item Tags, Tool tags: minecraft:is_shears, is_pickaxe, ...). A Java
+#   tag or tool ability also takes other mods' tools; on Bedrock only items
+#   carrying the Bedrock tag (the vanilla ones) count, which is noted.
+# * Tool tier: a block in Java's needs_<tier>_tool tags drops (in vanilla's
+#   requiresCorrectToolForDrops blocks) only for its mineable tool of that tier
+#   or better. Bedrock custom blocks have no such rule (Tool-Based Destruction,
+#   "There is no proper way to specify which tools are required"), so the
+#   table gets a match_tool test on the tool and tier tags. It never gives more
+#   than Java: copper and golden tiers, mod tools and explosions get nothing.
+
+SILK = "silk"
+# Java tool tests -> Bedrock item tag (learn.microsoft.com, Vanilla Item Tags).
+_SHEARS = "minecraft:is_shears"
+_JAVA_TOOL_TAGS = {
+    "forge:shears": _SHEARS, "c:shears": _SHEARS, "c:tools/shears": _SHEARS, "c:tools/shear": _SHEARS,
+    "minecraft:pickaxes": "minecraft:is_pickaxe", "minecraft:axes": "minecraft:is_axe",
+    "minecraft:shovels": "minecraft:is_shovel", "minecraft:hoes": "minecraft:is_hoe",
+    "minecraft:swords": "minecraft:is_sword",
+}
+# Loader tool abilities that only shears perform among vanilla items
+# (NeoForge ItemAbilities.SHEARS_*, Forge ToolActions.SHEARS_*).
+_SHEAR_ABILITIES = {"shears_dig", "shears_harvest", "shears_carve", "shears_disarm", "shears_trim"}
+_ABILITY_CONDITIONS = {"forge:can_tool_perform_action": "action", "neoforge:can_item_perform_ability": "ability"}
+
+# A tool test: None never holds, [] always holds, otherwise every set in the
+# list holds for some tag in it (an AND of ORs over Bedrock item tags).
+_ALWAYS: list = []
+
+
+class _Refused(Exception):
+    pass
+
+
+def _silk(predicate: dict) -> bool:
+    """The predicate is exactly 'has Silk Touch' (any level from 1)."""
+    rest = {k: v for k, v in predicate.items() if k not in ("enchantments", "predicates")}
+    if rest:
+        return False
+    found = []
+    for e in predicate.get("enchantments") or []:
+        found.append((e.get("enchantment"), e.get("levels")))
+    for key, value in (predicate.get("predicates") or {}).items():
+        if key != "minecraft:enchantments":
+            return False
+        for e in value if isinstance(value, list) else [value]:
+            found.append((e.get("enchantments"), e.get("levels")))
+    if len(found) != 1:
+        return False
+    name, levels = found[0]
+    if name not in ("minecraft:silk_touch", "silk_touch"):
+        return False
+    if levels is None:
+        return True
+    if isinstance(levels, int):
+        return levels == 1
+    return isinstance(levels, dict) and levels.get("min", 1) <= 1 and "max" not in levels
+
+
+def _tool_tags(predicate: dict, approx: list[str]) -> frozenset:
+    if set(predicate) - {"items", "tag"}:
+        raise _Refused(f"the drop depends on the tool used, in a way Bedrock's match_tool can't test "
+                       f"({json.dumps(predicate, sort_keys=True)})")
+    refs = []
+    items = predicate.get("items")
+    refs += items if isinstance(items, list) else ([items] if items else [])
+    if predicate.get("tag"):
+        refs.append("#" + predicate["tag"])
+    tags = set()
+    for ref in refs:
+        if ref in ("minecraft:shears", "shears"):
+            tags.add(_SHEARS)
+            continue
+        bedrock = _JAVA_TOOL_TAGS.get(ref[1:]) if isinstance(ref, str) and ref.startswith("#") else None
+        if bedrock is None:
+            raise _Refused(f"the drop depends on the tool {ref!r}, which has no Bedrock item tag to test")
+        tags.add(bedrock)
+        approx.append(f"Java's tool tag {ref} also takes other mods' tools; on Bedrock only items tagged "
+                      f"{bedrock} (the vanilla ones) count")
+    if not tags:
+        raise _Refused("the drop depends on the tool used, but the match_tool test names no tool")
+    return frozenset(tags)
+
+
+def _tool_test(condition: dict, silk_world: bool, approx: list[str]):
+    """A Java loot condition as a tool test (see _ALWAYS), in Bedrock's table
+    (``silk_world`` False: the table never runs under Silk Touch) or in
+    Java's world under a Silk Touch tool that is no other tool tested."""
+    name = condition.get("condition")
+    if name in ("minecraft:match_tool", "match_tool"):
+        predicate = condition.get("predicate") or {}
+        if _silk(predicate):
+            return _ALWAYS if silk_world else None
+        tags = _tool_tags(predicate, approx)
+        return None if silk_world else [tags]
+    if name in _ABILITY_CONDITIONS:
+        if condition.get(_ABILITY_CONDITIONS[name]) not in _SHEAR_ABILITIES:
+            raise _Refused(f"the drop depends on a tool ability ({name} "
+                           f"{condition.get(_ABILITY_CONDITIONS[name])!r}) with no Bedrock item tag to test")
+        approx.append(f"Java's {name} shears test also takes other mods' shears; on Bedrock only items "
+                      f"tagged {_SHEARS} (vanilla shears) count")
+        return None if silk_world else [frozenset({_SHEARS})]
+    if name in ("minecraft:inverted", "inverted"):
+        inner = _tool_test(condition.get("term") or {}, silk_world, approx)
+        if inner is None:
+            return _ALWAYS
+        if inner == _ALWAYS:
+            return None
+        raise _Refused("the drop depends on NOT using a tool (an inverted match_tool); "
+                       "Bedrock can't test that a tool is absent")
+    if name in ("minecraft:any_of", "any_of", "minecraft:alternative", "alternative"):
+        terms = [_tool_test(t, silk_world, approx) for t in condition.get("terms") or []]
+        if any(t == _ALWAYS for t in terms):
+            return _ALWAYS
+        held = [t for t in terms if t is not None]
+        if not held:
+            return None
+        if any(len(t) != 1 for t in held):
+            raise _Refused("the drop depends on a mix of tool tests Bedrock's match_tool can't combine")
+        return [frozenset().union(*(t[0] for t in held))]
+    if name in ("minecraft:all_of", "all_of"):
+        out: list = []
+        for t in condition.get("terms") or []:
+            test = _tool_test(t, silk_world, approx)
+            if test is None:
+                return None
+            out += [s for s in test if s not in out]
+        return out
+    raise _Refused(_reason_for_condition(condition))
+
+
+def _and(a, b):
+    if a is None or b is None:
+        return None
+    return a + [s for s in b if s not in a]
+
+
+def _conditions(conditions: list, silk_world: bool, approx: list[str]):
+    """(tool test, explosion decay) for a pool's or entry's conditions."""
+    test, decay = _ALWAYS, False
+    for condition in conditions or []:
+        if condition.get("condition") in (_EXPLOSION, "survives_explosion"):
+            decay = True
+            continue
+        test = _and(test, _tool_test(condition, silk_world, approx))
+    return test, decay
+
+
+def _drop(data: dict, silk_world: bool, approx: list[str]):
+    """The table's one drop as (tool test, item entry, pool functions,
+    explosion decay), None when it drops nothing (every pool's tool test fails
+    or there are no pools); raises _Refused otherwise."""
+    pools = data.get("pools")
+    if pools is not None and not isinstance(pools, list):
+        raise _Refused("the table's pools are unreadable")
+    found = []
+    for pool in pools or []:
+        rolls = pool.get("rolls", 1)
+        if not isinstance(rolls, (int, float)) or int(rolls) != 1:
+            raise _Refused("the pool rolls a variable number of times")
+        test, decay = _conditions(pool.get("conditions"), silk_world, approx)
+        if test is None:
+            continue
+        drops = []
+        entries = pool.get("entries") or []
+        for entry in entries:
+            try:
+                drops += _entry_drops(entry, test, decay, silk_world, approx)
+            except _Refused:
+                if len(entries) > 1:
+                    raise _Refused(f"the pool has {len(entries)} entries; only a single drop is unambiguous")
+                raise
+        if len(drops) > 1:
+            raise _Refused(f"the pool has {len(pool.get('entries') or [])} entries; only a single drop is unambiguous")
+        found += [(t, e, pool.get("functions") or [], d) for t, e, d in drops]
+    if len(found) > 1:
+        raise _Refused(f"table has {len(pools)} pools; Bedrock block drops are a single pool")
+    return found[0] if found else None
+
+
+def _entry_drops(entry: dict, test, decay: bool, silk_world: bool, approx: list[str]) -> list:
+    entry_type = entry.get("type")
+    if entry_type in ("minecraft:alternatives", "alternatives"):
+        own, own_decay = _conditions(entry.get("conditions"), silk_world, approx)
+        test = _and(test, own)
+        if test is None:
+            return []
+        # The first child whose conditions hold. A child that may or may not
+        # hold (a tool test) can only be the last one Bedrock reaches: the
+        # ones after it would need "and not that tool".
+        children = entry.get("children") or []
+        for i, child in enumerate(children):
+            if child.get("type") not in _SUPPORTED_ENTRY_TYPES:
+                raise _Refused("the drop picks between alternatives (usually silk touch) that aren't plain item drops")
+            child_test, child_decay = _conditions(child.get("conditions"), silk_world, approx)
+            if child_test is None:
+                continue
+            if child_test != _ALWAYS and any(
+                    _conditions(c.get("conditions"), silk_world, [])[0] is not None
+                    for c in children[i + 1:]):
+                raise _Refused("the drop picks between alternatives (usually silk touch): a tool-specific drop "
+                               "and another one, and Bedrock can't test that a tool is absent")
+            return [(_and(test, child_test), child, decay or own_decay or child_decay)]
+        return []
+    if entry_type not in _SUPPORTED_ENTRY_TYPES:
+        raise _Refused(f"entry type {entry_type!r} is not a plain item drop")
+    own, own_decay = _conditions(entry.get("conditions"), silk_world, approx)
+    test = _and(test, own)
+    return [] if test is None else [(test, entry, decay or own_decay)]
+
+
+def _match_tool(tags: frozenset) -> dict:
+    return {"condition": "match_tool", "minecraft:match_tool_filter_any": sorted(tags)}
+
+
+def _java_silk_drop(data: dict, block_id: str) -> str | None:
+    """None when Java drops the block itself, once, under Silk Touch (a tool
+    no other test names); otherwise what it drops there, in words."""
+    try:
+        drop = _drop(data, True, [])
+    except _Refused:
+        return "what its table gives there (not read)"
+    if drop is None:
+        return "nothing"
+    _, entry, functions, _ = drop
+    name = entry.get("name")
+    if name in AIR:
+        return "nothing"
+    count = 1
+    for function in list(functions) + list(entry.get("functions") or []):
+        fname = function.get("function")
+        if fname in ("minecraft:explosion_decay", "explosion_decay"):
+            continue
+        if fname in ("minecraft:set_count", "set_count") and not function.get("conditions") \
+                and _constant_count(function) is not None and not function.get("add"):
+            count = _constant_count(function)
+            continue
+        return f"{name} (with {fname})"
+    if name == block_id and count == 1:
+        return None
+    return name if count == 1 else f"{count} {name}"
+
+
 def convert_table(data: dict, block: str | None = None,
-                  states: dict | None = None) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
+                  states: dict | None = None,
+                  approx: list[str] | None = None) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
     """Return ([(permutation condition or None, Bedrock table), ...], None), or
-    (None, why the table is refused).
+    (None, why the table is refused). ``[]`` is a table that drops nothing.
 
     One table (condition None) is the usual answer. A function whose own
     ``conditions`` test the block's state (#299) is decided per Bedrock state
@@ -200,42 +462,39 @@ def convert_table(data: dict, block: str | None = None,
     ``q.block_state`` test of the permutation that uses it. A function
     condition that can't be decided refuses the table: it is never applied
     unconditionally, and never dropped silently.
+
+    Tool tests (Silk Touch, shears, tool tags) are translated as the comment
+    above says; each approximation is appended to ``approx``.
     """
+    approx = [] if approx is None else approx
     pools = data.get("pools")
     if not isinstance(pools, list) or not pools:
-        return None, "table has no pools, so it drops nothing"
-    if len(pools) > 1:
+        return [], None
+    live = 0
+    for pool in pools:
+        try:
+            live += _conditions(pool.get("conditions") if isinstance(pool, dict) else None, False, []) [0] is not None
+        except _Refused:
+            live += 1
+    if live > 1:
         return None, f"table has {len(pools)} pools; Bedrock block drops are a single pool"
-
-    pool = pools[0]
-    rolls = pool.get("rolls", 1)
-    if not isinstance(rolls, (int, float)) or int(rolls) != 1:
-        return None, "the pool rolls a variable number of times"
-
-    entries = pool.get("entries") or []
-    if len(entries) != 1:
-        return None, f"the pool has {len(entries)} entries; only a single drop is unambiguous"
-
-    entry = entries[0]
-    entry_type = entry.get("type")
-    if entry_type not in _SUPPORTED_ENTRY_TYPES:
-        if entry_type in ("minecraft:alternatives", "alternatives"):
-            return None, "the drop picks between alternatives (usually silk touch)"
-        return None, f"entry type {entry_type!r} is not a plain item drop"
+    try:
+        drop = _drop(data, False, approx)
+    except _Refused as exc:
+        return None, str(exc)
+    if drop is None:
+        return [], None
+    test, entry, pool_functions, explosion_decay = drop
 
     name = entry.get("name")
     if not isinstance(name, str) or ":" not in name:
         return None, f"entry names {name!r}, which is not a namespaced item"
-
-    explosion_decay = False
-    for condition in list(pool.get("conditions") or []) + list(entry.get("conditions") or []):
-        if condition.get("condition") == _EXPLOSION:
-            explosion_decay = True
-            continue
-        return None, _reason_for_condition(condition)
+    if name in AIR:
+        # Java's drop of air is a drop of nothing (#299 pick 2).
+        return [], None
 
     guarded: list[tuple[dict, dict[str, str]]] = []
-    for function in list(pool.get("functions") or []) + list(entry.get("functions") or []):
+    for function in list(pool_functions) + list(entry.get("functions") or []):
         wanted: dict[str, str] | None = {}
         if function.get("conditions"):
             wanted, why = _function_guard(function, block, states)
@@ -248,7 +507,7 @@ def convert_table(data: dict, block: str | None = None,
     props = sorted({p for _, wanted in guarded for p in wanted})
     choices = []
     for prop in props:
-        reachable = [(prop, v) for v, test in (states or {}).get(prop, {}).items() if test is not None]
+        reachable = [(prop, v) for v, test_ in (states or {}).get(prop, {}).items() if test_ is not None]
         if not reachable:
             return None, f"no Bedrock state of the converted block {block} has a {prop} value to test"
         choices.append(reachable)
@@ -259,8 +518,10 @@ def convert_table(data: dict, block: str | None = None,
         table, why = _table_for(name, active, explosion_decay)
         if table is None:
             return None, why
-        test = " && ".join(states[p][v] for p, v in case)
-        tables.setdefault(json.dumps(table, sort_keys=True), (table, []))[1].append(test)
+        if test:
+            table["pools"][0]["entries"][0]["conditions"] = [_match_tool(tags) for tags in test]
+        key = " && ".join(states[p][v] for p, v in case)
+        tables.setdefault(json.dumps(table, sort_keys=True), (table, []))[1].append(key)
     if len(tables) == 1:
         return [(None, next(iter(tables.values()))[0])], None
     return [(" || ".join(f"({t})" for t in tests) if len(tests) > 1 else tests[0], table)
@@ -269,8 +530,11 @@ def convert_table(data: dict, block: str | None = None,
 
 def _drops_itself(table: dict, block: str) -> bool:
     """The table is Bedrock's default for a block: one of itself (explosion decay aside)."""
-    entry = table["pools"][0]["entries"][0]
-    if entry.get("name") != block:
+    entries = table["pools"][0]["entries"]
+    if len(entries) != 1:
+        return False
+    entry = entries[0]
+    if entry.get("name") != block or entry.get("conditions"):
         return False
     for function in entry.get("functions") or []:
         if function.get("function") == "explosion_decay":
@@ -289,18 +553,21 @@ def _bedrock_names(cases: list[tuple[str | None, dict]]) -> tuple[list | None, s
 
     out = []
     for condition, table in cases:
-        entry = dict(table["pools"][0]["entries"][0])
-        got = bedrock_item(entry["name"])
-        if isinstance(got, str):
-            return None, f"the drop can't be written for Bedrock: {got}"
-        ident, data = got
-        entry["name"] = ident
-        if data is not None:
-            functions = [f for f in entry.get("functions") or [] if f.get("function") != "explosion_decay"]
-            functions.append({"function": "set_data", "data": data})
-            functions += [f for f in entry.get("functions") or [] if f.get("function") == "explosion_decay"]
-            entry["functions"] = functions
-        out.append((condition, {"pools": [{"rolls": 1, "entries": [entry]}]}))
+        entries = []
+        for entry in table["pools"][0]["entries"]:
+            entry = dict(entry)
+            got = bedrock_item(entry["name"])
+            if isinstance(got, str):
+                return None, f"the drop can't be written for Bedrock: {got}"
+            ident, data = got
+            entry["name"] = ident
+            if data is not None:
+                functions = [f for f in entry.get("functions") or [] if f.get("function") != "explosion_decay"]
+                functions.append({"function": "set_data", "data": data})
+                functions += [f for f in entry.get("functions") or [] if f.get("function") == "explosion_decay"]
+                entry["functions"] = functions
+            entries.append(entry)
+        out.append((condition, {"pools": [{"rolls": 1, "entries": entries}]}))
     return out, None
 
 
@@ -331,13 +598,11 @@ def _definitions(files: dict) -> tuple[dict[str, str], set[str]]:
 def _wire_refusal(cases: list[tuple[str | None, dict]], obtainable: set[str]) -> str | None:
     """Why a table can't be put on its block, or None."""
     for _, table in cases:
-        name = table["pools"][0]["entries"][0]["name"]
-        if name in AIR:
-            return ("the table drops minecraft:air, i.e. the block drops nothing; whether such a block "
-                    "gets an empty Bedrock table is an open pick on #299, so it isn't wired")
-        if not name.startswith("minecraft:") and name not in obtainable:
-            return (f"the block drops {name}, which this pack doesn't define (see that identifier's own "
-                    f"residue entry), so the table can't be wired onto the block")
+        for entry in table["pools"][0]["entries"]:
+            name = entry["name"]
+            if not name.startswith("minecraft:") and name not in obtainable:
+                return (f"the block drops {name}, which this pack doesn't define (see that identifier's own "
+                        f"residue entry), so the table can't be wired onto the block")
     return None
 
 
@@ -360,6 +625,75 @@ def _wire(block: dict, name: str, cases: list[tuple[str | None, dict]], files: d
         body.setdefault("permutations", [])
         body["permutations"] += [{"condition": c, "components": {"minecraft:loot": p}} for c, p in paths[1:]]
     return block
+
+
+# Java tier tag -> the Bedrock tier tags of that tier or better (Java's order
+# stone < iron < diamond < netherite; minecraft.wiki "Tag (Java Edition)",
+# needs_*_tool; Forge 1.20.1 forge:needs_netherite_tool). Bedrock's golden and
+# copper tiers are left out: Java's golden tools are wood level, and leaving
+# copper out can only give less (learn.microsoft.com, Vanilla Item Tags, Tier tags).
+_TIERS = {
+    "minecraft:needs_stone_tool": ("minecraft:stone_tier", "minecraft:iron_tier",
+                                   "minecraft:diamond_tier", "minecraft:netherite_tier"),
+    "minecraft:needs_iron_tool": ("minecraft:iron_tier", "minecraft:diamond_tier", "minecraft:netherite_tier"),
+    "minecraft:needs_diamond_tool": ("minecraft:diamond_tier", "minecraft:netherite_tier"),
+    "forge:needs_netherite_tool": ("minecraft:netherite_tier",),
+}
+# Java mineable tag -> Bedrock tool item tag (Vanilla Item Tags, Tool tags).
+_MINEABLE = {
+    "minecraft:mineable/pickaxe": "minecraft:is_pickaxe",
+    "minecraft:mineable/axe": "minecraft:is_axe",
+    "minecraft:mineable/shovel": "minecraft:is_shovel",
+    "minecraft:mineable/hoe": "minecraft:is_hoe",
+}
+
+
+def _tier_index(mod: SourceMod) -> dict[str, tuple[str, list[str], tuple[str, ...]]]:
+    """block id -> (Java tier tag, Bedrock tool tags of its mineable tags, Bedrock
+    tiers that drop it), from the jar's own block tags (#293's reader)."""
+    from ..datatags import jar_members
+
+    dirs = ("blocks", "block")
+    loader = getattr(mod, "loader", None)
+    tools: dict[str, list[str]] = {}
+    for java, bedrock in _MINEABLE.items():
+        for member in jar_members(mod.root, java, dirs, loader) or []:
+            tools.setdefault(member, []).append(bedrock)
+    out: dict[str, tuple[str, list[str], tuple[str, ...]]] = {}
+    for java, tiers in _TIERS.items():
+        for member in jar_members(mod.root, java, dirs, loader) or []:
+            have = out.get(member)
+            if have is None or len(tiers) < len(have[2]):
+                out[member] = (java, sorted(tools.get(member, [])), tiers)
+    return out
+
+
+def _gate(cases: list[tuple[str | None, dict]], tools: list[str],
+          tiers: tuple[str, ...]) -> list[tuple[str | None, dict]]:
+    """Each table's drop only for one of ``tools`` of one of ``tiers`` (an
+    entry per tool: a vanilla tool is one type, so at most one holds)."""
+    out = []
+    for condition, table in cases:
+        entries = []
+        for entry in table["pools"][0]["entries"]:
+            for tool in tools:
+                gated = json.loads(json.dumps(entry))
+                gated["conditions"] = list(gated.get("conditions") or []) + [{
+                    "condition": "match_tool",
+                    "minecraft:match_tool_filter_all": ["minecraft:is_tool", tool],
+                    "minecraft:match_tool_filter_any": list(tiers)}]
+                entries.append(gated)
+        out.append((condition, {"pools": [{"rolls": 1, "entries": entries}]}))
+    return out
+
+
+def _silk_note(java: str | None) -> str | None:
+    """The approximation a wired table has under Silk Touch (Java's drop there
+    from :func:`_java_silk_drop`), or None when Java drops the block itself too."""
+    if java is None:
+        return None
+    return (f"with Silk Touch Bedrock drops the block itself (it ignores minecraft:loot under Silk Touch), "
+            f"where Java drops {java}")
 
 
 def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list | None = None,
@@ -389,7 +723,10 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
     if context is None:
         context = LoadContext(mod)
     by_id, obtainable = _definitions(blocks or {})
+    tiers = _tier_index(mod) if by_id else {}
     wired: list[str] = []
+    emptied: list[str] = []
+    approximated: list[str] = []
     for dirname in _TABLE_DIRS:
         src = mod.data / dirname / "blocks"
         if not src.is_dir():
@@ -415,33 +752,85 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
                 continue
             block_id = f"{mod.namespace}:{name}"
             block_path = by_id.get(block_id)
+            approx: list[str] = []
             cases, reason = convert_table(data, block_id if block_path else None,
-                                          (java_states or {}).get(block_id, {}) if block_path else None)
-            if cases is not None:
+                                          (java_states or {}).get(block_id, {}) if block_path else None,
+                                          approx)
+            if cases:
                 cases, reason = _bedrock_names(cases)
             if cases is None:
                 result.unhandled.append(Unhandled(rel, "loot", reason or "unsupported loot table"))
                 continue
+            block = (blocks or {}).get(block_path) if block_path else None
+
+            if cases == []:
+                # Java drops nothing here (no pools, a drop of air, or only
+                # under Silk Touch): the converted block names Bedrock's
+                # vanilla empty table (#299 pick 2).
+                if block_path is None:
+                    result.unhandled.append(Unhandled(rel, "loot", (
+                        "the table drops nothing (no pools, a drop of minecraft:air, or a drop only under "
+                        "Silk Touch) and the pack has no converted block to point at Bedrock's empty table")))
+                    continue
+                if not _has_loot(block):
+                    wired_block = json.loads(json.dumps(block))
+                    wired_block["minecraft:block"].setdefault("components", {})["minecraft:loot"] = EMPTY_TABLE
+                    result.files[block_path] = wired_block
+                    emptied.append(block_id)
+                    note = _silk_note(_java_silk_drop(data, block_id))
+                    if note:
+                        approx.append(note)
+                if approx:
+                    approximated.append(block_id)
+                    result.notes.append(f"{rel}: approximated loot (#299): " + "; ".join(dict.fromkeys(approx)))
+                continue
+
+            gate = tiers.get(block_id) if block_path else None
+            if gate is not None:
+                java_tier, tools, tier_tags = gate
+                if not tools:
+                    result.unhandled.append(Unhandled(rel, "loot", (
+                        f"the block is in {java_tier} but in no mineable tag, so no tool drops it in Java; "
+                        f"Bedrock can't gate a drop on that (#299)")))
+                    continue
+                cases = _gate(cases, tools, tier_tags)
+                approx.append(
+                    f"{java_tier}: drops only for a vanilla {'/'.join(t.split('_', 1)[1] for t in tools)} of "
+                    f"{'/'.join(t.split(':')[1].removesuffix('_tier') for t in tier_tags)} tier "
+                    f"(Bedrock tool and tier item tags); mod tools, copper tools and explosions get nothing, and with "
+                    f"Silk Touch any tool drops the block itself (Bedrock ignores minecraft:loot under Silk Touch)")
 
             if block_path is None or (len(cases) == 1 and _drops_itself(cases[0][1], block_id)):
                 result.files[f"loot_tables/blocks/{name}.json"] = cases[0][1]
-                continue
-            block = (blocks or {}).get(block_path)
-            if _has_loot(block):
+            elif _has_loot(block):
                 # An adapter or station already decided this block's drops.
                 result.files[f"loot_tables/blocks/{name}.json"] = cases[0][1]
-                continue
-            why = _wire_refusal(cases, obtainable)
-            if why:
-                result.unhandled.append(Unhandled(rel, "loot", why))
-                continue
-            result.files[block_path] = _wire(block, name, cases, result.files)
-            wired.append(block_id)
+            else:
+                why = _wire_refusal(cases, obtainable)
+                if why:
+                    result.unhandled.append(Unhandled(rel, "loot", why))
+                    continue
+                result.files[block_path] = _wire(block, name, cases, result.files)
+                wired.append(block_id)
+                note = _silk_note(_java_silk_drop(data, block_id))
+                if note:
+                    approx.append(note)
+            if approx:
+                approximated.append(block_id)
+                result.notes.append(f"{rel}: approximated loot (#299): " + "; ".join(dict.fromkeys(approx)))
     if wired:
         result.notes.append(
             f"{len(wired)} block(s) drop what their Java loot table gives through minecraft:loot (#299; "
-            f"another item, a count, or a drop decided per block state), e.g. {', '.join(wired[:3])}; "
+            f"another item, a count, a tool test, or a drop decided per block state), e.g. {', '.join(wired[:3])}; "
             "a block whose table drops itself keeps Bedrock's default, which is the same drop")
+    if emptied:
+        result.notes.append(
+            f"{len(emptied)} block(s) drop nothing, as in Java, through Bedrock's vanilla {EMPTY_TABLE} "
+            f"(#299), e.g. {', '.join(emptied[:3])}")
+    if approximated:
+        result.notes.append(
+            f"{len(approximated)} block loot table(s) are approximated (#299; each has its own note above): "
+            f"e.g. {', '.join(approximated[:3])}")
     note = context.note() if own_context else None
     if note:
         result.notes.append(note)

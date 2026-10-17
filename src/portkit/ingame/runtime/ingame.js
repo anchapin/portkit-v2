@@ -3,7 +3,7 @@
 // DONE so the runner stops the server. Generated per converted pack: the ids
 // come from ./data.js, written by portkit.ingame.testpack.
 //
-// Checks (stable @minecraft/server 2.0.0, no experiments):
+// Checks (stable @minecraft/server 2.2.0, no experiments):
 //   place      every block resolves and sets in the world, and reads back
 //   item       every item (and every block's item) builds and spawns as an
 //              item entity carrying the same id
@@ -15,6 +15,10 @@
 //   drop       a block whose minecraft:loot the converter wired (#299),
 //              broken with `setblock ... air destroy`, leaves exactly the
 //              items its table gives (item entities counted around it)
+//   tool_drop  a wired table that gates its drop on match_tool (#299: shears,
+//              tool and tier tags) gives, for each tool that tells the gate
+//              apart (and a bare hand), what the converter expects: asked of
+//              world.getLootTableManager().generateLootFromBlockPermutation
 // Content-log errors are the runner's to count (it reads the server output).
 import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
@@ -50,7 +54,10 @@ async function loaded(dim) {
 async function run() {
   const dim = world.getDimension("overworld");
   dim.runCommand(`tickingarea add 0 0 0 ${AREA - 1} 0 ${AREA - 1} portkit_ingame true`);
-  say("START", { blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length });
+  say("START", {
+    blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length,
+    tool_drops: (CHECKS.tool_drops ?? []).length,
+  });
   if (!(await loaded(dim))) {
     say("ERROR", { detail: "the ticking area never loaded" });
     say("DONE", {});
@@ -164,6 +171,22 @@ async function run() {
       } catch (err) {
         fail("drop", id, describe(err));
       }
+    }
+  }
+
+  // tool_drop: the server's own loot roll for the block with each tool
+  const loot = world.getLootTableManager();
+  for (const { id, tool, expect } of CHECKS.tool_drops ?? []) {
+    try {
+      const held = tool ? new ItemStack(tool, 1) : undefined;
+      const stacks = loot.generateLootFromBlockPermutation(BlockPermutation.resolve(id), held) ?? [];
+      const got = stacks.map((s) => ({ item: s.typeId, count: s.amount }));
+      const verdict = dropVerdict(expect, got);
+      say("TOOL_DROP", { id, tool, expect, got });
+      if (verdict.ok) tally.record("tool_drop", `${id} ${tool ?? "hand"}`, true);
+      else fail("tool_drop", `${id} ${tool ?? "hand"}`, verdict.problems.join("; "));
+    } catch (err) {
+      fail("tool_drop", `${id} ${tool ?? "hand"}`, describe(err));
     }
   }
 

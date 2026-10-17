@@ -1188,7 +1188,7 @@ def cmd_ingame(args) -> int:
         print(
             f"check pack -> {args.out}: {len(checks.blocks)} blocks, {len(checks.items)} items, "
             f"{len(checks.containers)} containers, {len(checks.connections)} connection blocks, "
-            f"{len(checks.drops)} drops"
+            f"{len(checks.drops)} drops, {len(checks.tool_drops)} tool drops"
         )
         return 0
     if not args.server:
