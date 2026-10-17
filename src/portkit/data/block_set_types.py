@@ -1,4 +1,4 @@
-"""Vanilla ``BlockSetType`` facts a door needs (#296): whether a hand opens it and
+"""Vanilla ``BlockSetType`` facts a door or trapdoor needs (#296): whether a hand opens it and
 the sound it makes, keyed by the vanilla constant a mod's door is built with
 (``new DoorBlock(BlockSetType.OAK, properties)``).
 
@@ -51,6 +51,25 @@ SOUNDS: dict[str, tuple[str, str]] = {
     "CHERRY_WOOD": ("open.cherry_wood_door", "close.cherry_wood_door"),
     "NETHER_WOOD": ("open.nether_wood_door", "close.nether_wood_door"),
     "BAMBOO_WOOD": ("open.bamboo_wood_door", "close.bamboo_wood_door"),
+}
+
+# Java trapdoor sound family -> Bedrock (open, close) sound definitions, from
+# the same block_sounds families (``trapdoor.open`` / ``trapdoor.close``:
+# wood -> open.wooden_trapdoor / close.wooden_trapdoor and so on). The
+# trapdoor sounds follow the door's family for every constant: 1.21.1
+# ``BlockSetType#<clinit>`` passes IRON_TRAPDOOR_* for iron, gold, stone and
+# polished blackstone, COPPER_TRAPDOOR_* for copper, CHERRY_WOOD_, NETHER_WOOD_
+# and BAMBOO_WOOD_TRAPDOOR_* for cherry, crimson/warped and bamboo, and the
+# one-argument constructor WOODEN_TRAPDOOR_* (read 2026-10-17 from the same
+# jar and mappings). Vanilla Bedrock's copper family plays
+# ``open_trapdoor.copper`` for both open and close.
+TRAPDOOR_SOUNDS: dict[str, tuple[str, str]] = {
+    "WOODEN": ("open.wooden_trapdoor", "close.wooden_trapdoor"),
+    "IRON": ("open.iron_trapdoor", "close.iron_trapdoor"),
+    "COPPER": ("open_trapdoor.copper", "open_trapdoor.copper"),
+    "CHERRY_WOOD": ("open.cherry_wood_trapdoor", "close.cherry_wood_trapdoor"),
+    "NETHER_WOOD": ("open.nether_wood_trapdoor", "close.nether_wood_trapdoor"),
+    "BAMBOO_WOOD": ("open.bamboo_wood_trapdoor", "close.bamboo_wood_trapdoor"),
 }
 
 CLASS = "net/minecraft/world/level/block/state/properties/BlockSetType"

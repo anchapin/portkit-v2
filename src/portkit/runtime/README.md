@@ -36,6 +36,17 @@ entry `scripts/portkit/main.js` that wires the two.
   (`scripts/portkit/data/<namespace>_doors.js`: per door whether a hand opens
   it and its sounds) only for doors whose code was read as vanilla
   `DoorBlock`, or the labelled DEFAULT wooden door (`converters/doors.py`).
+- `trapdoor.js`: the Bedrock binding of a trapdoor (#296), on the door's
+  rules in `door_core.js` (vanilla `TrapDoorBlock#useWithoutItem` and
+  `#neighborChanged` are `DoorBlock`'s for one block); `@minecraft/server`
+  2.5.0 like `door.js`. `onPlayerInteract` opens and closes when its
+  `BlockSetType` lets a hand, `onRedstoneUpdate` follows the power, `onPlace`
+  opens a trapdoor placed already powered. Placement is the block's own traits
+  (`vertical_half`, `cardinal_direction`), so there is no
+  `beforeOnPlayerPlace`. The converter writes the table
+  (`scripts/portkit/data/<namespace>_trapdoors.js`) only for trapdoors read as
+  vanilla `TrapDoorBlock`, or the labelled DEFAULT wooden trapdoor
+  (`converters/trapdoors.py`).
 - `book_core.js`: not a station: what one page of a guide book shows (#182):
   title, text and the page's buttons as translation keys, back to its parent;
   no imports.
