@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-17T17:39:25+00:00",
+ "generated": "2026-10-17T18:13:26+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -301,7 +301,7 @@
    "files": 328,
    "residue": 550,
    "errors": 0,
-   "done": false
+   "done": true
   },
   "journeymap": {
    "class": "UI/info",
