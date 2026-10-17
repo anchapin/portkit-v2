@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-17T01:42:28+00:00",
+ "generated": "2026-10-17T02:19:52+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -352,9 +352,9 @@
   "biomes_o_plenty": {
    "class": "content",
    "status": "ok",
-   "coverage": 39.55,
-   "files": 1224,
-   "residue": 1871,
+   "coverage": 45.0,
+   "files": 1351,
+   "residue": 1651,
    "errors": 0,
    "done": false
   },
@@ -417,9 +417,9 @@
   "natures_compass": {
    "class": "content",
    "status": "ok",
-   "coverage": 51.55,
+   "coverage": 52.08,
    "files": 50,
-   "residue": 47,
+   "residue": 46,
    "errors": 0,
    "done": false
   },
