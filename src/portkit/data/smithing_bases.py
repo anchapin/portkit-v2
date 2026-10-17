@@ -86,3 +86,58 @@ def vanilla_base_refusal(ident: str) -> str | None:
         return None
     return (f"{ident} is not armor or a tool to Bedrock (no vanilla smithing recipe of Mojang's "
             f"takes it as the base, {MOJANG_SOURCE}, and it has no durability, {WIKI_SOURCE})")
+
+
+# The template and addition slots (#305). learn.microsoft.com, Recipe
+# Documentation - Smithing Transform Recipe: the addition's items "must have the
+# minecraft:transform_materials tag", the template's "must have the
+# minecraft:transform_templates tag", to be accepted into the slot (Mojang
+# bedrock-samples documentation/Recipes.html says the same). BDS 1.26.52.3
+# refuses the recipe otherwise ("addition item must have the
+# 'minecraft:transform_materials' tag", ingame run 38996897674). The pack's own
+# item carries the tag its recipe puts it under (portkit.converters.recipes);
+# a vanilla item can't be given one, so only Bedrock's own members are taken:
+# minecraft.wiki Item tag (Bedrock Edition), which lists exactly one member of
+# each (MS Learn: the addition's "only accepted item is minecraft:netherite_ingot").
+MS_LEARN_SOURCE = "learn.microsoft.com, Recipe Documentation - Smithing Transform Recipe"
+TAG_WIKI_REVISION = 3758407
+TAG_WIKI_SOURCE = f"minecraft.wiki Item tag (Bedrock Edition) (oldid={TAG_WIKI_REVISION})"
+
+# Bedrock slot -> the item tag that slot takes.
+TRANSFORM_SLOT_TAGS = {
+    "template": "minecraft:transform_templates",
+    "base": "minecraft:transformable_items",
+    "addition": "minecraft:transform_materials",
+}
+
+# Bedrock slot -> {vanilla id carrying that slot's tag: where that comes from}.
+VANILLA_TRANSFORM_ITEMS: dict[str, dict[str, str]] = {
+    "template": {"minecraft:netherite_upgrade_smithing_template": f"{TAG_WIKI_SOURCE}: minecraft:transform_templates"},
+    "addition": {"minecraft:netherite_ingot": f"{TAG_WIKI_SOURCE}: minecraft:transform_materials"},
+}
+
+
+def vanilla_slot_refusal(slot: str, ident: str) -> str | None:
+    """Why Bedrock won't take vanilla ``ident`` as a smithing transform's
+    ``slot`` ("template" or "addition"), or None if it will."""
+    if ident in VANILLA_TRANSFORM_ITEMS[slot]:
+        return None
+    tag = TRANSFORM_SLOT_TAGS[slot]
+    return (f"{slot} {ident} does not carry {tag} in Bedrock (its only member is "
+            f"{next(iter(VANILLA_TRANSFORM_ITEMS[slot]))}, {TAG_WIKI_SOURCE}), and the {slot} slot takes only "
+            f"items with that tag ({MS_LEARN_SOURCE})")
+
+
+def addon_slot_refusal(slot: str, ident: str, kind: str, components: dict | None) -> str | None:
+    """Why the pack's own ``ident`` can't fill a smithing transform's ``slot``
+    ("template" or "addition"), or None. ``kind`` is its definition kind
+    ("item", "block" or "block_and_item"; an item's ``components`` given)."""
+    tag = TRANSFORM_SLOT_TAGS[slot]
+    if kind == "block":
+        return (f"{slot} {ident} is a block with no item definition, so it can't carry {tag}, which the "
+                f"{slot} slot takes ({MS_LEARN_SOURCE})")
+    found = components.get("minecraft:tags") if isinstance(components, dict) else None
+    tags = found.get("tags") if isinstance(found, dict) else None
+    if isinstance(tags, list) and tag in tags:
+        return None
+    return f"{slot} {ident} does not carry {tag}, which the {slot} slot takes ({MS_LEARN_SOURCE})"
