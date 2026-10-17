@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-17T19:13:26+00:00",
+ "generated": "2026-10-17T22:09:51+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -343,9 +343,9 @@
   "tinkers_construct": {
    "class": "content",
    "status": "ok",
-   "coverage": 53.11,
-   "files": 15349,
-   "residue": 13552,
+   "coverage": 53.12,
+   "files": 15351,
+   "residue": 13549,
    "errors": 0,
    "done": false
   },

@@ -146,10 +146,11 @@ def test_modifiers_with_anything_but_vanilla_ores_are_left_alone(tmp_path):
     _ore(tmp_path, "ore", NETHERRACK)
     _placed(tmp_path, "ore", _standard())
     _placed(tmp_path, "coded", [{"type": "examplemod:config_filter"}, *_standard()], feature="examplemod:ore")
-    _write(tmp_path, "data/examplemod/worldgen/configured_feature/geode.json", {"type": "minecraft:geode", "config": {}})
-    _placed(tmp_path, "geode", _standard())
+    # A feature of the mod's own type (geodes and patches are read since #281 slice 3).
+    _write(tmp_path, "data/examplemod/worldgen/configured_feature/tree.json", {"type": "examplemod:tree", "config": {}})
+    _placed(tmp_path, "tree", _standard())
     _modifier(tmp_path, "coded", ["examplemod:coded"])
-    _modifier(tmp_path, "mixed", ["examplemod:ore", "examplemod:geode"])
+    _modifier(tmp_path, "mixed", ["examplemod:ore", "examplemod:tree"])
     out = _convert(tmp_path)
     assert out.files == {} and out.unhandled == [] and out.consumed == set()
 

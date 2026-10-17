@@ -39,6 +39,13 @@
 //              with the feature placed in it by Dimension.placeFeature (on
 //              BDS 1.26.52 it returned false for a converted ore feature that
 //              the world itself generates)
+//   geode      a geode feature the converter wrote (#281 slice 3). Asserted
+//              (geode_generate): the check pack's test-only copy of the rule
+//              (portkit_check:, no scatter_chance) places it in every chunk;
+//              fresh chunks of its dimension (the Overworld only in a
+//              generated world) are scanned for its inner and alternate inner
+//              layer blocks, at least one per rule. Reported: the
+//              minecraft:block_face of each inner placement block found.
 // Content-log errors are the runner's to count (it reads the server output).
 import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
@@ -80,6 +87,7 @@ async function run() {
     blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length,
     tool_drops: (CHECKS.tool_drops ?? []).length, paired: (CHECKS.paired ?? []).length,
     trapdoors: (CHECKS.trapdoors ?? []).length, ores: (CHECKS.ores ?? []).length,
+    geodes: (CHECKS.geodes ?? []).length,
   });
   if (!(await loaded(dim))) {
     say("ERROR", { detail: "the ticking area never loaded" });
@@ -442,6 +450,76 @@ async function run() {
       fail("ore_generate", name, describe(err));
     }
     say("ORE_DIMENSION", seen);
+  }
+
+  // geode_generate (#281 slice 3): the check pack's test-only copy of each
+  // geode rule places the converted geode feature once per chunk; fresh chunks
+  // of its dimension are loaded and the blocks only a geode lays (its inner
+  // and alternate inner layer) counted, at least one asserted, with the
+  // minecraft:block_face states of the inner placements found reported.
+  const geodes = CHECKS.geodes ?? [];
+  const geodeDims = [...new Set(geodes.map((o) => o.dimension).filter((d) => d && (d !== "overworld" || generated)))];
+  for (const name of geodeDims) {
+    const there = world.getDimension(name);
+    const g = GEN_ORIGIN + 2 * GEN_SIZE;
+    const seen = { dimension: name, origin: g };
+    try {
+      there.runCommand(`tickingarea add ${g} 0 ${g} ${g + GEN_SIZE - 1} 0 ${g + GEN_SIZE - 1} portkit_geode_${name}`);
+      let ready = false;
+      for (let tick = 0; tick < 1200 && !ready; tick += 10) {
+        try {
+          ready = Boolean(there.getBlock({ x: g, y: 0, z: g }) && there.getBlock({ x: g + GEN_SIZE - 1, y: 0, z: g + GEN_SIZE - 1 }));
+        } catch {
+          ready = false;
+        }
+        if (!ready) await system.waitTicks(10);
+      }
+      if (!ready) throw new Error(`the ${name} ticking area never loaded`);
+      await system.waitTicks(40);
+      const range = there.heightRange;
+      for (const geode of geodes.filter((o) => o.dimension === name)) {
+        const span = scanRange(geode.y, range.min, range.max - 1);
+        const row = { rule: geode.rule, check_rule: geode.check_rule, y: span };
+        if (span === null) {
+          fail("geode_generate", geode.rule, `height range ${geode.y} is outside the ${name}`);
+        } else {
+          const counts = {};
+          const faces = {};
+          let n = 0;
+          for (let x = g; x < g + GEN_SIZE; x++) {
+            for (let z = g; z < g + GEN_SIZE; z++) {
+              for (let y = span[0]; y <= span[1]; y++) {
+                const block = there.getBlock({ x, y, z });
+                const id = block?.typeId;
+                if (geode.blocks.includes(id) || geode.buds.includes(id)) {
+                  counts[id] = (counts[id] ?? 0) + 1;
+                  if (geode.buds.includes(id)) {
+                    let face;
+                    try {
+                      face = block.permutation.getState("minecraft:block_face");
+                    } catch {
+                      face = undefined;
+                    }
+                    const key = `${id}=${face ?? "none"}`;
+                    faces[key] = (faces[key] ?? 0) + 1;
+                  }
+                }
+                if (++n % 8192 === 0) await system.waitTicks(1);
+              }
+            }
+          }
+          row.counts = counts;
+          row.faces = faces;
+          const verdict = oreVerdict(counts, geode.blocks);
+          if (verdict.ok) tally.record("geode_generate", geode.rule, true);
+          else fail("geode_generate", geode.rule, verdict.problems.join("; "));
+        }
+        say("GEODE_GENERATE", row);
+      }
+    } catch (err) {
+      fail("geode_generate", name, describe(err));
+    }
+    say("GEODE_DIMENSION", seen);
   }
 
   // item: each id spawned as an item entity, read back, removed

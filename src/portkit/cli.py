@@ -1184,11 +1184,12 @@ def cmd_ingame(args) -> int:
     tree = Path(args.tree)
     name = args.name or tree.name
     if args.action == "pack":
-        checks = testpack.write_test_pack(tree / "behavior_pack", Path(args.out), name)
+        checks = testpack.write_test_pack(tree / "behavior_pack", Path(args.out), name, world=args.world)
         print(
             f"check pack -> {args.out}: {len(checks.blocks)} blocks, {len(checks.items)} items, "
             f"{len(checks.containers)} containers, {len(checks.connections)} connection blocks, "
-            f"{len(checks.drops)} drops, {len(checks.tool_drops)} tool drops"
+            f"{len(checks.drops)} drops, {len(checks.tool_drops)} tool drops, {len(checks.ores)} ores, "
+            f"{len(checks.geodes)} geodes"
         )
         return 0
     if not args.server:

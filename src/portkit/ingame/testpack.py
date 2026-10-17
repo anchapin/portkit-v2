@@ -86,6 +86,7 @@ class Checks:
     paired: list[dict] = field(default_factory=list)
     trapdoors: list[dict] = field(default_factory=list)
     ores: list[dict] = field(default_factory=list)
+    geodes: list[dict] = field(default_factory=list)
     # "flat" (the default check world) or "default": a generated Overworld,
     # where only the ore checks run and the Overworld's ores are generated too.
     world: str = "flat"
@@ -102,6 +103,7 @@ class Checks:
             "paired": self.paired,
             "trapdoors": self.trapdoors,
             "ores": self.ores,
+            "geodes": self.geodes,
         }
 
 
@@ -359,6 +361,70 @@ def _ore_checks(behavior_pack: Path) -> list[dict]:
     return out
 
 
+_GEODE_LAYERS = ("inner_layer", "alternate_inner_layer")
+CHECK_NAMESPACE = "portkit_check"
+
+
+def _geode_checks(behavior_pack: Path) -> list[dict]:
+    """One row per feature rule placing a ``minecraft:geode_feature`` of the
+    pack (#281 slice 3): ``blocks`` its inner and alternate inner layer (the
+    blocks only a geode lays), ``buds`` its inner placements, ``y`` the rule's
+    height range widened by the geode's ``max_radius``, and ``check_rule`` the
+    test-only rule :func:`geode_rule_files` writes: the same rule placing the
+    same feature in every chunk (no ``scatter_chance``), so a few fresh chunks
+    are enough to see the world generate it."""
+    geodes: dict[str, dict] = {}
+    for path in sorted((behavior_pack / "features").glob("*.json")):
+        body = (_read_json(path) or {}).get("minecraft:geode_feature")
+        if not isinstance(body, dict):
+            continue
+        ident = (body.get("description") or {}).get("identifier")
+        blocks = [body.get(k) for k in _GEODE_LAYERS]
+        buds = [b.get("name") if isinstance(b, dict) else b for b in body.get("inner_placements") or []]
+        radius = body.get("max_radius")
+        if isinstance(ident, str) and all(isinstance(b, str) for b in blocks + buds) and isinstance(radius, int):
+            geodes[ident] = {"blocks": list(dict.fromkeys(blocks)), "buds": list(dict.fromkeys(buds)),
+                             "radius": radius}
+    out = []
+    for path in sorted((behavior_pack / "feature_rules").glob("*.json")):
+        rule = (_read_json(path) or {}).get("minecraft:feature_rules")
+        if not isinstance(rule, dict):
+            continue
+        desc = rule.get("description") or {}
+        geode = geodes.get(desc.get("places_feature"))
+        y = (rule.get("distribution") or {}).get("y")
+        span = y.get("extent") if isinstance(y, dict) else [y, y] if isinstance(y, int) else None
+        if geode is None or not isinstance(desc.get("identifier"), str) or not isinstance(span, list):
+            continue
+        tags = _tags((rule.get("conditions") or {}).get("minecraft:biome_filter"))
+        dims = {_DIMENSION_TAGS.get(t, "overworld") for t in tags} or {"overworld"}
+        r = geode["radius"]
+        out.append({"rule": desc["identifier"], "feature": desc["places_feature"],
+                    "blocks": geode["blocks"], "buds": geode["buds"],
+                    "dimension": dims.pop() if len(dims) == 1 else None,
+                    "y": [min(span) - r, max(span) + r],
+                    "check_rule": f"{CHECK_NAMESPACE}:{path.stem}"})
+    return out
+
+
+def geode_rule_files(behavior_pack: Path, geodes: list[dict]) -> dict[str, dict]:
+    """The check pack's test-only feature rules (#281 slice 3): each geode
+    rule of the pack copied under ``portkit_check:``, its ``scatter_chance``
+    dropped, so its feature is placed once in every chunk. Test-only: never
+    part of the conversion."""
+    out = {}
+    for row in geodes:
+        name = row["check_rule"].split(":", 1)[1]
+        rule = (_read_json(behavior_pack / "feature_rules" / f"{name}.json") or {}).get("minecraft:feature_rules")
+        if not isinstance(rule, dict):
+            continue
+        rule = json.loads(json.dumps(rule))
+        rule["description"]["identifier"] = row["check_rule"]
+        (rule.get("distribution") or {}).pop("scatter_chance", None)
+        out[f"feature_rules/{name}.json"] = {"format_version": "1.13.0", "minecraft:feature_rules": rule}
+    return out
+
+
 def read_checks(behavior_pack: Path) -> Checks:
     """What to check in a converted behavior pack, in a stable (sorted) order."""
     checks = Checks()
@@ -404,11 +470,14 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks.paired.sort(key=lambda d: d["id"])
     checks.trapdoors.sort(key=lambda d: d["id"])
     checks.ores = _ore_checks(behavior_pack)
+    checks.geodes = _geode_checks(behavior_pack)
     return checks
 
 
-def manifest(name: str) -> dict:
-    """The check pack's manifest: uuids derived from its name, so reruns match."""
+def manifest(name: str, data: bool = False) -> dict:
+    """The check pack's manifest: uuids derived from its name, so reruns match.
+    ``data``: the pack also carries data (the test-only geode rules), so it
+    gets a ``data`` module too."""
     def uid(part: str) -> str:
         return str(uuid.uuid5(_NS, f"{name}/{part}"))
 
@@ -429,7 +498,7 @@ def manifest(name: str) -> dict:
                 "version": [1, 0, 0],
                 "entry": "scripts/ingame.js",
             }
-        ],
+        ] + ([{"type": "data", "uuid": uid("data"), "version": [1, 0, 0]}] if data else []),
         "dependencies": [{"module_name": "@minecraft/server", "version": SERVER_MODULE}],
     }
 
@@ -438,15 +507,20 @@ def write_test_pack(behavior_pack: Path, out: Path, name: str, world: str = "fla
     """Write the check pack for ``behavior_pack`` into ``out``; return its checks.
 
     ``world="default"``: the run's world is a generated Overworld (#281), so
-    only the ore checks go in (the others lay out blocks on the flat world)."""
+    only the ore and geode checks go in (the others lay out blocks on the
+    flat world)."""
     checks = read_checks(behavior_pack)
     if world != "flat":
-        checks = Checks(ores=checks.ores, world=world)
+        checks = Checks(ores=checks.ores, geodes=checks.geodes, world=world)
+    rules = geode_rule_files(behavior_pack, checks.geodes)
     if out.exists():
         shutil.rmtree(out)
     scripts = out / "scripts"
     scripts.mkdir(parents=True)
-    (out / "manifest.json").write_text(json.dumps(manifest(name), indent=2) + "\n")
+    (out / "manifest.json").write_text(json.dumps(manifest(name, data=bool(rules)), indent=2) + "\n")
+    for rel, body in rules.items():
+        (out / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out / rel).write_text(json.dumps(body, indent=2) + "\n")
     for file in SCRIPT_FILES:
         shutil.copyfile(RUNTIME / file, scripts / file)
     (scripts / "data.js").write_text(
