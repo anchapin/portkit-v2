@@ -87,6 +87,7 @@ class FeatureResult:
     notes: list[str] = field(default_factory=list)
     # One row per converted rule, for the in-game check (#281).
     ores: list[dict] = field(default_factory=list)
+    geodes: list[dict] = field(default_factory=list)
 
 
 class _Refused(Exception):
@@ -118,6 +119,18 @@ def _placements(pf: dict) -> list[dict]:
 def _in_slice(root: Path, ident: str) -> tuple[str, str, dict, dict] | None:
     """(placed rel, configured rel, placed, configured) for a placed feature
     of a vanilla ore with vanilla placements, else None."""
+    found = _read_placed(root, ident)
+    if found is None:
+        return None
+    prel, crel, pf, cf = found
+    if cf.get("type") != "minecraft:ore":
+        return None
+    if any(p.get("type") not in _VANILLA_PLACEMENTS for p in _placements(pf)):
+        return None
+    return prel, crel, pf, cf
+
+
+def _read_placed(root: Path, ident) -> tuple[str, str, dict, dict] | None:
     if not isinstance(ident, str):
         return None
     ns, path = _split(ident)
@@ -125,14 +138,96 @@ def _in_slice(root: Path, ident: str) -> tuple[str, str, dict, dict] | None:
     pf = _read(root / prel)
     if not isinstance(pf, dict) or not isinstance(pf.get("feature"), str):
         return None
-    if any(p.get("type") not in _VANILLA_PLACEMENTS for p in _placements(pf)):
-        return None
     cns, cpath = _split(pf["feature"])
     crel = f"data/{cns}/worldgen/configured_feature/{cpath}.json"
     cf = _read(root / crel)
-    if not isinstance(cf, dict) or cf.get("type") != "minecraft:ore":
+    if not isinstance(cf, dict):
         return None
     return prel, crel, pf, cf
+
+
+def _vanilla_placements(placements) -> bool:
+    """Every placement modifier is Minecraft's own (a ``minecraft:`` type):
+    a mod's placement type is its code, left for ``code_worldgen``."""
+    if not isinstance(placements, list):
+        return False
+    return all(isinstance(p, dict) and isinstance(p.get("type"), str) and p["type"].startswith("minecraft:")
+               for p in placements)
+
+
+def _patch_files(root: Path, cf: dict, seen: set[str], coded: set[str], depth: int = 0) -> bool:
+    """Whether ``cf`` is wholly the plant patch family (``ref.PATCH_TYPES``,
+    selectors of them) with Minecraft's placements, nested features of the
+    mod's own types aside: those (a feature or placement type in a namespace
+    other than ``minecraft``, i.e. the mod's code) go into ``coded``, the
+    configured and placed feature files it names by id into ``seen``."""
+    if depth > 8 or not isinstance(cf, dict):
+        return False
+    kind = cf.get("type")
+    if depth and isinstance(kind, str) and ":" in kind and not kind.startswith("minecraft:"):
+        coded.add(kind)
+        return True
+    config = cf.get("config")
+    if not isinstance(config, dict):
+        return False
+    if kind == "minecraft:simple_block":
+        return True
+    if kind in ref.PATCH_TYPES:
+        return _patch_placed(root, config.get("feature"), seen, coded, depth)
+    if kind in ref.SELECTOR_TYPES:
+        entries = config.get("features")
+        if not isinstance(entries, list) or not entries:
+            return False
+        placed = [e.get("feature") if kind == "minecraft:random_selector" and isinstance(e, dict) else e
+                  for e in entries]
+        if kind == "minecraft:random_selector":
+            placed.append(config.get("default"))
+        return all(_patch_placed(root, p, seen, coded, depth) for p in placed)
+    return False
+
+
+def _patch_placed(root: Path, placed, seen: set[str], coded: set[str], depth: int) -> bool:
+    if isinstance(placed, str):
+        ns, path = _split(placed)
+        rel = f"data/{ns}/worldgen/placed_feature/{path}.json"
+        seen.add(rel)
+        placed = _read(root / rel)
+    if not isinstance(placed, dict) or not isinstance(placed.get("placement", []), list):
+        return False
+    for p in placed.get("placement", []):
+        kind = p.get("type") if isinstance(p, dict) else None
+        if not isinstance(kind, str):
+            return False
+        if not kind.startswith("minecraft:"):
+            coded.add(kind)
+    feature = placed.get("feature")
+    if isinstance(feature, str):
+        ns, path = _split(feature)
+        rel = f"data/{ns}/worldgen/configured_feature/{path}.json"
+        seen.add(rel)
+        feature = _read(root / rel)
+    return _patch_files(root, feature, seen, coded, depth + 1)
+
+
+def _classify(root: Path, ident) -> tuple[str, tuple[str, str, dict, dict], set[str], set[str]] | None:
+    """(kind, (placed rel, configured rel, placed, configured), nested files,
+    nested code types) for a placed feature this module reads: ``ore`` (:func:`_in_slice`),
+    ``geode`` (a vanilla ``minecraft:geode`` with Minecraft's placements) or
+    ``patch`` (the plant patch family, nested features included); else None."""
+    found = _in_slice(root, ident)
+    if found is not None:
+        return "ore", found, set(), set()
+    found = _read_placed(root, ident)
+    if found is None or not _vanilla_placements(found[2].get("placement", [])):
+        return None
+    kind = found[3].get("type")
+    if kind == "minecraft:geode":
+        return "geode", found, set(), set()
+    nested: set[str] = set()
+    coded: set[str] = set()
+    if kind in ref.PATCH_TYPES | ref.SELECTOR_TYPES and _patch_files(root, found[3], nested, coded):
+        return "patch", found, nested - {found[0], found[1]}, coded
+    return None
 
 
 def _int(value, what: str) -> int:
@@ -217,6 +312,8 @@ def _distribution(pf: dict, dimension: str) -> dict:
             if seen_count and iterations != 1:
                 raise _Refused("a rarity filter after a count above 1: Java rolls it per vein, Bedrock's "
                                "scatter_chance once for all iterations")
+        elif kind != "minecraft:biome":
+            raise _Refused(f"placement `{kind}` has no Bedrock scatter parameter here")
     if y is None:
         raise _Refused("no height_range placement: the vein would sit at the chunk's origin height")
     if iterations < 1:
@@ -284,6 +381,143 @@ def _replace_rules(cf: dict, blocks: set[str]) -> tuple[list[dict], int, float]:
     return rules, size, float(discard)
 
 
+def _int_range(value, what: str) -> tuple[int, int]:
+    """A constant or ``minecraft:uniform`` int provider as (min, max)."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value, value
+    if isinstance(value, dict) and value.get("type") == "minecraft:constant":
+        v = _int(value.get("value"), what)
+        return v, v
+    if isinstance(value, dict) and value.get("type") == "minecraft:uniform":
+        inner = value.get("value") if isinstance(value.get("value"), dict) else value
+        lo = _int(inner.get("min_inclusive"), what)
+        hi = _int(inner.get("max_inclusive"), what)
+        if lo > hi:
+            raise _Refused(f"{what} {lo}..{hi} is empty")
+        return lo, hi
+    raise _Refused(f"{what} is {json.dumps(value)[:80]}, not a constant or uniform whole number")
+
+
+def _number(value, what: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise _Refused(f"{what} is {json.dumps(value)}, not a number")
+    return value
+
+
+_GEODE_LAYERS = (("filling_provider", "filler"), ("inner_layer_provider", "inner_layer"),
+                 ("alternate_inner_layer_provider", "alternate_inner_layer"),
+                 ("middle_layer_provider", "middle_layer"), ("outer_layer_provider", "outer_layer"))
+
+
+def _geode_block(name, blocks: set[str], what: str) -> str:
+    if not isinstance(name, str):
+        raise _Refused(f"{what} names no block")
+    if name not in blocks and name not in ref.GEODE_VANILLA_BLOCKS:
+        raise _Refused(f"{what} `{name}` isn't a block the pack ships or a vanilla block with the same "
+                       "Bedrock id")
+    return name
+
+
+def _geode(cf: dict, blocks: set[str]) -> tuple[dict, list[str]]:
+    """The Bedrock ``minecraft:geode_feature`` body for a Java geode, and the
+    Java fields it can't carry (pick 1) with their values, for the notes.
+
+    Mapping (Java: minecraft.wiki "Amethyst Geode" oldid 3811952, Config;
+    Bedrock: bedrock-samples documentation/Features.html and
+    MicrosoftDocs/minecraft-creator Features/minecraftGeode_feature.md):
+    the five ``*_provider`` blocks -> ``filler``, ``inner_layer``,
+    ``alternate_inner_layer``, ``middle_layer``, ``outer_layer``;
+    ``inner_placements`` -> ``inner_placements`` (block names, pick 2);
+    ``outer_wall_distance``, ``distribution_points``, ``point_offset`` (int
+    providers) -> ``min_``/``max_`` of the same name; ``crack.*``,
+    ``noise_multiplier``, ``use_potential_placements_chance``,
+    ``use_alternate_layer0_chance``, ``placements_require_layer0_alternate``
+    and ``invalid_blocks_threshold`` -> the fields of the same name;
+    ``min_gen_offset``/``max_gen_offset`` -m/m -> ``max_radius`` m (pick 1).
+    Every field must be written in the jar: a Java default is never assumed."""
+    config = cf.get("config")
+    if not isinstance(config, dict):
+        raise _Refused("the geode has no config")
+    need = {"blocks", "layers", "crack", "noise_multiplier", "use_potential_placements_chance",
+            "use_alternate_layer0_chance", "placements_require_layer0_alternate", "outer_wall_distance",
+            "distribution_points", "point_offset", "min_gen_offset", "max_gen_offset", "invalid_blocks_threshold"}
+    missing = sorted(need - set(config))
+    if missing:
+        raise _Refused(f"the geode leaves {', '.join(missing)} to Java's defaults, which aren't read here")
+    blk = config["blocks"]
+    if not isinstance(blk, dict):
+        raise _Refused("the geode's blocks are not an object")
+    body: dict = {}
+    for java, bedrock in _GEODE_LAYERS:
+        provider = blk.get(java)
+        if not isinstance(provider, dict) or provider.get("type") != "minecraft:simple_state_provider":
+            raise _Refused(f"{java} {json.dumps(provider)[:80]} is not a simple_state_provider (one block)")
+        state = provider.get("state")
+        if not isinstance(state, dict) or state.get("Properties"):
+            raise _Refused(f"{java} sets block-state properties {json.dumps(state)[:80]}")
+        body[bedrock] = _geode_block(state.get("Name"), blocks, java)
+    placements = blk.get("inner_placements")
+    if not isinstance(placements, list) or not placements:
+        raise _Refused("the geode has no inner_placements")
+    names = []
+    for state in placements:
+        if not isinstance(state, dict):
+            raise _Refused("an inner placement is not a block state")
+        props = state.get("Properties") or {}
+        # Java's GeodeFeature.place sets FACING to the side it places on and
+        # WATERLOGGED from the fluid there (1.20.1 client jar, class dku, read
+        # through Mojang's client mappings), so those two are not the data's.
+        other = sorted(set(props) - {"facing", "waterlogged"}) if isinstance(props, dict) else ["?"]
+        if other:
+            raise _Refused(f"inner placement `{state.get('Name')}` sets block-state properties {other}")
+        names.append(_geode_block(state.get("Name"), blocks, "inner placement"))
+    body["inner_placements"] = names
+    for java in ("outer_wall_distance", "distribution_points", "point_offset"):
+        lo, hi = _int_range(config[java], java)
+        body[f"min_{java}"], body[f"max_{java}"] = lo, hi
+    lo, hi = _int(config["min_gen_offset"], "min_gen_offset"), _int(config["max_gen_offset"], "max_gen_offset")
+    if lo != -hi or hi < 1:
+        raise _Refused(f"gen offsets {lo}..{hi} are not one radius about the start, which Bedrock's single "
+                       "max_radius can't express")
+    body["max_radius"] = hi
+    crack = config["crack"]
+    if not isinstance(crack, dict) or set(crack) != {"generate_crack_chance", "base_crack_size",
+                                                      "crack_point_offset"}:
+        raise _Refused(f"the geode's crack {json.dumps(crack)[:80]} doesn't name its three fields")
+    body["crack_point_offset"] = _int(crack["crack_point_offset"], "crack_point_offset")
+    body["generate_crack_chance"] = _number(crack["generate_crack_chance"], "generate_crack_chance")
+    body["base_crack_size"] = _number(crack["base_crack_size"], "base_crack_size")
+    body["noise_multiplier"] = _number(config["noise_multiplier"], "noise_multiplier")
+    for name in ("use_potential_placements_chance", "use_alternate_layer0_chance"):
+        body[name] = _number(config[name], name)
+    flag = config["placements_require_layer0_alternate"]
+    if not isinstance(flag, bool):
+        raise _Refused(f"placements_require_layer0_alternate is {json.dumps(flag)}")
+    body["placements_require_layer0_alternate"] = flag
+    body["invalid_blocks_threshold"] = _int(config["invalid_blocks_threshold"], "invalid_blocks_threshold")
+    for name, (a, b) in ref.GEODE_RANGES.items():
+        if not a <= body[name] <= b:
+            raise _Refused(f"{name} {body[name]} is outside Bedrock's range {a}..{b}")
+    for a, b in (("min_outer_wall_distance", "max_outer_wall_distance"),
+                 ("min_distribution_points", "max_distribution_points"), ("min_point_offset", "max_point_offset")):
+        if body[a] > body[b]:
+            raise _Refused(f"{a} {body[a]} is above {b} {body[b]}")
+    layers = config["layers"]
+    if not isinstance(layers, dict):
+        raise _Refused("the geode's layers are not an object")
+    dropped = [f"layers {json.dumps(layers, sort_keys=True)} (Bedrock has no layer thickness field; Java's defaults "
+               f"are {json.dumps(ref.JAVA_GEODE_DEFAULTS['layers'], sort_keys=True)})",
+               f"min_gen_offset/max_gen_offset {lo}/{hi}, a Chebyshev cutoff about the start, written as "
+               f"max_radius {hi}"]
+    for name in ("cannot_replace", "invalid_blocks"):
+        if blk.get(name) is not None:
+            dropped.append(f"{name} {json.dumps(blk.get(name))} (Bedrock has no such field)")
+    if any(isinstance(st.get("Properties"), dict) and "facing" in st["Properties"] for st in placements):
+        dropped.append("the inner placements' facing, which Java turns to the side each one grows on; Bedrock "
+                       "places the named blocks in their default state (pick 2)")
+    return body, dropped
+
+
 def _shipped_blocks(files: dict) -> set[str]:
     out = set()
     for path, body in files.items():
@@ -303,9 +537,11 @@ def _file_name(ident: str, taken: set[str], suffix: str = "") -> str:
 
 
 def convert(root: Path, files: dict, namespaces: set[str], code: list | None = None) -> FeatureResult:
-    """Ore features the jar's Forge/NeoForge biome modifiers add, converted;
-    and those its Fabric code adds (``code``: :class:`portkit.biomecode.CodeAttachment`
-    rows, read from the bytecode), each shaped like a modifier."""
+    """Ore and geode features the jar's Forge/NeoForge biome modifiers add,
+    converted, and its plant patches filed as residue with the reason; and
+    the same for those its Fabric code adds (``code``:
+    :class:`portkit.biomecode.CodeAttachment` rows, read from the bytecode),
+    each shaped like a modifier."""
     root = Path(root)
     out = FeatureResult()
     blocks = _shipped_blocks(files)
@@ -337,23 +573,30 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
         if doc.get("type") not in _ADD:
             continue
         feats = _as_list(doc.get("features"))
-        found = [_in_slice(root, f) for f in feats]
+        found = [_classify(root, f) for f in feats]
         if not feats or any(x is None for x in found):
-            continue  # not wholly ores: left for the other passes
+            continue  # not wholly ores, geodes and patches: left for the other passes
         plans.append((rel, doc, list(zip(feats, found)), None))
         for f in feats:
             adds_per_pf[f] = adds_per_pf.get(f, 0) + 1
-    for k, c in enumerate(code):
+    for c in code:
         if c.removal:
             continue
-        found = _in_slice(root, c.feature)
+        found = _classify(root, c.feature)
         if found is None:
-            continue  # not a vanilla ore with vanilla placements: left for the other passes
+            continue  # not a feature this module reads: left for the other passes
         plans.append((c.source, c.doc, [(c.feature, found)], c))
         adds_per_pf[c.feature] = adds_per_pf.get(c.feature, 0) + 1
+    # A remove modifier naming only features read here is residue of its own:
+    # the Bedrock rule can't subtract the biomes it names (pick 6).
+    removals = []
+    for rel, doc in modifiers:
+        feats = _as_list(doc.get("features"))
+        if doc.get("type") in _REMOVE and feats and all(_classify(root, f) is not None for f in feats):
+            removals.append(rel)
 
     converted_cf: set[str] = set()
-    refused: dict[str, tuple[str, str]] = {}  # placed rel -> (reason, configured rel)
+    refused: dict[str, tuple[str, str, set[str], str]] = {}  # placed rel -> (reason, configured rel, nested, kind)
     empty_modifiers: list[str] = []
     for rel, doc, entries, from_code in plans:
         if from_code is None:
@@ -361,9 +604,10 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
             mod_name = _MODIFIER.match(rel).group(3)
         else:
             mod_name = re.sub(r"[^a-z0-9_]", "_", from_code.source.split(" ")[0].rsplit(".", 1)[-1].lower())
-        rules_before = len(out.ores)
-        for ident, (prel, crel, pf, cf) in entries:
-            out.consumed |= {prel, crel}
+        rules_before = len(out.files)
+        for ident, (kind, (prel, crel, pf, cf), nested, coded) in entries:
+            out.consumed |= {prel, crel} | nested
+            approximated: list[str] = []
             try:
                 if ident in removed:
                     raise _Refused(f"`{removed[ident]}` removes it from some biomes, which a Bedrock feature rule "
@@ -371,12 +615,24 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
                 if from_code is not None and from_code.refused:
                     raise _Refused(f"attached in code by {from_code.source}: {from_code.refused}")
                 step = doc.get("step")
-                passname = ref.STEPS.get(step)
+                if kind == "patch" and coded:
+                    raise _Refused(f"it places features through the mod's own types ({', '.join(sorted(coded))}), "
+                                   "which are its code")
+                if kind == "patch":
+                    _biomes(doc.get("biomes"))
+                    raise _Refused(f"a plant patch (`{cf.get('type')}`): Java scatters `tries` placements with "
+                                   "xz_spread/y_spread offsets and per-block conditions, which no corpus mod's "
+                                   "patch has reached a Bedrock mapping for yet (#281 slice 3 pick 5)")
+                passname = (ref.GEODE_STEPS if kind == "geode" else ref.STEPS).get(step)
                 if passname is None:
-                    raise _Refused(f"generation step `{step}` isn't an ore step (underground_ores, "
-                                   "underground_decoration)")
+                    raise _Refused(f"generation step `{step}` isn't one this slice maps for a {kind} "
+                                   f"({', '.join(ref.GEODE_STEPS if kind == 'geode' else ref.STEPS)})")
                 biome_filter, dimension = _biomes(doc.get("biomes"))
-                rules, size, discard = _replace_rules(cf, blocks)
+                if kind == "geode":
+                    body, approximated = _geode(cf, blocks)
+                    rules = None
+                else:
+                    rules, size, discard = _replace_rules(cf, blocks)
                 dist = _distribution(pf, dimension)
                 y = dist["y"]
                 lo, hi = (y, y) if isinstance(y, int) else y["extent"]
@@ -384,21 +640,28 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
                 if lo < b_lo or hi > b_hi:
                     raise _Refused(f"heights {lo}..{hi} reach outside Bedrock's {dimension} ({b_lo}..{b_hi})")
             except _Refused as why:
-                refused[prel] = (str(why), crel)
+                refused[prel] = (str(why), crel, nested, kind)
                 continue
             if crel not in feature_names:
                 fname = _file_name(pf["feature"], taken_features)
                 feature_id = f"{_split(pf['feature'])[0]}:{fname}"
                 feature_names[crel] = feature_id
-                body = {"description": {"identifier": feature_id}, "count": size, "replace_rules": rules}
-                if discard:
-                    body["discard_chance_on_air_exposure"] = discard
-                out.files[f"features/{fname}.json"] = {"format_version": FEATURE_FORMAT,
-                                                       "minecraft:ore_feature": body}
+                if kind == "geode":
+                    out.files[f"features/{fname}.json"] = {
+                        "format_version": FEATURE_FORMAT,
+                        "minecraft:geode_feature": {"description": {"identifier": feature_id}, **body}}
+                    out.notes.append(f"approximated geode (#281 pick 1): `{pf['feature']}` written as Bedrock's "
+                                     "minecraft:geode_feature without " + "; ".join(approximated) + ".")
+                else:
+                    body = {"description": {"identifier": feature_id}, "count": size, "replace_rules": rules}
+                    if discard:
+                        body["discard_chance_on_air_exposure"] = discard
+                    out.files[f"features/{fname}.json"] = {"format_version": FEATURE_FORMAT,
+                                                           "minecraft:ore_feature": body}
             converted_cf.add(crel)
             if from_code is not None:
                 out.consumed |= from_code.consumed
-                out.notes.append(f"Ore `{ident}`: attached to biomes {', '.join(doc['biomes'])} at "
+                out.notes.append(f"{kind.capitalize()} `{ident}`: attached to biomes {', '.join(doc['biomes'])} at "
                                  f"{doc['step']} by {from_code.source}.")
             suffix = "_feature_rules" if adds_per_pf.get(ident, 0) <= 1 else f"__{mod_name}_feature_rules"
             rname = _file_name(ident, taken_rules, suffix)
@@ -411,31 +674,43 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
                     "distribution": dist,
                 },
             }
-            out.ores.append({"rule": rule_id, "feature": feature_names[crel], "dimension": dimension,
-                             "blocks": [r["places_block"] for r in rules],
-                             "replaces": [r["may_replace"][0] for r in rules],
-                             "y": [lo, hi]})
+            if kind == "geode":
+                out.geodes.append({"rule": rule_id, "feature": feature_names[crel], "dimension": dimension,
+                                   "y": [lo, hi]})
+                if step == "local_modifications":
+                    out.notes.append(f"Geode `{ident}`: Java's local_modifications step written as Bedrock's "
+                                     "before_underground_pass, the pass before the ores' (#281 slice 3 pick 3).")
+            else:
+                out.ores.append({"rule": rule_id, "feature": feature_names[crel], "dimension": dimension,
+                                 "blocks": [r["places_block"] for r in rules],
+                                 "replaces": [r["may_replace"][0] for r in rules],
+                                 "y": [lo, hi]})
             if pf.get("placement") and any(p["type"] == "minecraft:height_range"
                                            and (p.get("height") or {}).get("type") == "minecraft:trapezoid"
                                            for p in _placements(pf)):
-                out.notes.append(f"Ore `{ident}`: Java's trapezoid height range written as Bedrock's triangle "
-                                 f"distribution over {lo}..{hi} (#281 pick 2).")
-        if len(out.ores) == rules_before and from_code is None:
+                out.notes.append(f"{kind.capitalize()} `{ident}`: Java's trapezoid height range written as Bedrock's "
+                                 f"triangle distribution over {lo}..{hi} (#281 pick 2).")
+        if len(out.files) == rules_before and from_code is None:
             empty_modifiers.append(rel)
-    for prel, (reason, crel) in sorted(refused.items()):
-        count = 1 + (crel not in converted_cf)
+    # Each file counted once, even when several placed features refuse it.
+    counted: set[str] = set()
+    for prel, (reason, crel, nested, kind) in sorted(refused.items()):
+        group = [crel] if crel not in converted_cf else []
+        group += sorted(nested - converted_cf)
+        count = 1 + sum(1 for r in group if r not in counted and r != prel)
+        counted |= set(group) | {prel}
+        what = {"ore": "ore placed feature (and its configured feature)",
+                "geode": "geode placed feature (and its configured feature)",
+                "patch": "plant patch placed feature (with the features it places)"}[kind]
         out.unhandled.append(Unhandled(source=prel, kind=KIND, count=count,
-                                       reason=f"ore placed feature (and its configured feature) not converted: "
-                                              f"{reason}"))
-    # Each configured feature counted once even when several placed features refuse it.
-    seen: set[str] = set()
-    for u in out.unhandled:
-        crel = refused[u.source][1]
-        if u.count == 2 and crel in seen:
-            u.count = 1
-        seen.add(crel)
+                                       reason=f"{what} not converted: {reason}"))
     for rel in empty_modifiers:
         out.unhandled.append(Unhandled(source=rel, kind=KIND, count=1,
-                                       reason="biome modifier adding only ores that didn't convert (their "
+                                       reason="biome modifier adding only features that didn't convert (their "
                                               "placed features are residue of their own)"))
+    for rel in removals:
+        out.consumed.add(rel)
+        out.unhandled.append(Unhandled(source=rel, kind=KIND, count=1,
+                                       reason="biome modifier removing features from biomes, which a Bedrock "
+                                              "feature rule can't subtract (#281 pick 6)"))
     return out

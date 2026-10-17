@@ -123,3 +123,67 @@ def convention_biome_tags(loader: str | None, minecraft: str | None) -> dict[str
         if tag_set.family != "vanilla":
             return dict(CONVENTION_BIOME_TAGS.get(tag_set.id, {}))
     return {}
+
+
+# -- geodes and patches (#281, third slice) ---------------------------------------
+
+# Java generation steps a geode's biome modifier may name -> Bedrock
+# placement_pass. Java runs the steps in GenerationStep.Decoration order
+# (raw_generation, lakes, local_modifications, underground_structures,
+# surface_structures, strongholds, underground_ores, ...: the enum's
+# declaration order in Mojang's 1.20.1 client mappings,
+# net.minecraft.world.level.levelgen.GenerationStep$Decoration). Bedrock: "Earlier passes in the list are
+# guaranteed to occur before later passes" (bedrock-samples
+# documentation/Features.html, Feature Rule Conditions, placement_pass), and
+# its list puts before_underground_pass ahead of underground_pass, where the
+# ores go (STEPS). So local_modifications, Java's step before the ores, is
+# before_underground_pass: the order kept, not an exact engine match (pick 3).
+GEODE_STEPS: dict[str, str] = {
+    "local_modifications": "before_underground_pass",
+    **STEPS,
+}
+
+# Vanilla blocks a geode layer or inner placement may name, kept to ids that
+# are the same on both editions: bedrock-samples resource_pack/blocks.json
+# lists air, calcite, clay, smooth_basalt, amethyst_block, budding_amethyst,
+# end_stone, obsidian and netherrack (and the SAME_ID_BLOCKS above).
+GEODE_VANILLA_BLOCKS = SAME_ID_BLOCKS | frozenset({
+    "minecraft:air", "minecraft:amethyst_block", "minecraft:budding_amethyst", "minecraft:obsidian",
+})
+
+# Bedrock minecraft:geode_feature integer ranges (bedrock-samples
+# documentation/Features.html and MicrosoftDocs/minecraft-creator
+# Features/minecraftGeode_feature.md): min_outer_wall_distance <1-10>,
+# max_outer_wall_distance <1-20>, min_distribution_points <1-10>,
+# max_distribution_points <1-20>, min_point_offset and max_point_offset
+# <0-10>, crack_point_offset <0-10>; base_crack_size 0..5 and the chances 0..1.
+GEODE_RANGES: dict[str, tuple[float, float]] = {
+    "min_outer_wall_distance": (1, 10), "max_outer_wall_distance": (1, 20),
+    "min_distribution_points": (1, 10), "max_distribution_points": (1, 20),
+    "min_point_offset": (0, 10), "max_point_offset": (0, 10),
+    "crack_point_offset": (0, 10), "base_crack_size": (0, 5),
+    "generate_crack_chance": (0, 1), "use_potential_placements_chance": (0, 1),
+    "use_alternate_layer0_chance": (0, 1),
+}
+
+# Java geode fields with no Bedrock geode_feature field (pick 1). Their Java
+# defaults, minecraft.wiki "Amethyst Geode" (oldid 3811952), Config: layers
+# filling 1.7, inner_layer 2.2, middle_layer 3.2, outer_layer 4.2;
+# min_gen_offset -16, max_gen_offset 16 ("Chebyshev distance between the
+# block and the center"); cannot_replace #minecraft:features_cannot_replace
+# and invalid_blocks #minecraft:geode_invalid_blocks in vanilla geodes.
+JAVA_GEODE_DEFAULTS = {
+    "layers": {"filling": 1.7, "inner_layer": 2.2, "middle_layer": 3.2, "outer_layer": 4.2},
+    "min_gen_offset": -16, "max_gen_offset": 16,
+    "cannot_replace": "#minecraft:features_cannot_replace",
+    "invalid_blocks": "#minecraft:geode_invalid_blocks",
+}
+
+# Java configured feature types of the plant patch family (minecraft.wiki
+# "Configured feature": random_patch, flower and no_bonemeal_flower take a
+# RandomPatchConfiguration (tries, xz_spread, y_spread, feature);
+# simple_block places one block state; random_selector and
+# simple_random_selector pick one of their placed features).
+PATCH_TYPES = frozenset({"minecraft:random_patch", "minecraft:flower", "minecraft:no_bonemeal_flower",
+                         "minecraft:simple_block"})
+SELECTOR_TYPES = frozenset({"minecraft:random_selector", "minecraft:simple_random_selector"})

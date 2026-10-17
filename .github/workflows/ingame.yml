@@ -3,7 +3,7 @@ name: ingame
 # In-game checks (#238): convert a few corpus and deco packs, install each with
 # a generated check behavior pack on Mojang's Bedrock Dedicated Server, and run
 # the Script API checks headlessly (every block places, every item spawns,
-# container slot counts #226, connection states #221, wired block drops #299, per-tool drops of match_tool tables #299, doors and two-tall blocks #296, trapdoors opened and closed by redstone and broken for one drop #296, ore features placed and generated #281, the Overworld's in a generated-world run). A run fails on a failed
+# container slot counts #226, connection states #221, wired block drops #299, per-tool drops of match_tool tables #299, doors and two-tall blocks #296, trapdoors opened and closed by redstone and broken for one drop #296, ore features placed and generated #281, the Overworld's in a generated-world run, geode features generated #281). A run fails on a failed
 # check or a content-log error; the server output, content log and report are
 # uploaded per pack.
 #
@@ -50,6 +50,8 @@ jobs:
           - { name: tinkers_construct, manifest: fixtures/real/gauntlet.toml, label: tinkers-gauntlet }
           # Fabric ores attached in code (#281 pick 5a), read from the bytecode: a generated world (ore checks only), so the Overworld's ores are counted in fresh chunks as well as the Nether's and the End's.
           - { name: mythicmetals, manifest: fixtures/real/mods.toml, label: mythicmetals-worldgen, world: default }
+          # Geodes from Forge biome modifiers (#281 slice 3): a generated world, where a test-only copy of each geode rule places the converted geode feature in every chunk and fresh Overworld chunks are scanned for its crystal blocks.
+          - { name: tinkers_construct, manifest: fixtures/real/gauntlet.toml, label: tinkers-worldgen, world: default }
     # `label` names a run whose jar shares its fixture name with another (one mod, two loader builds).
     name: ${{ matrix.label || matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
     env:

@@ -291,7 +291,7 @@ def _check_features(report: ValidationReport, behavior: Path, index: Index) -> N
     """Features and feature rules (#281). Each document's identifier names its
     file ("'feature_name' must match the filename", Mojang/bedrock-samples
     documentation/Features.html), a rule places a feature the pack declares,
-    and an ore places blocks the pack declares. All three sides are ours, so a
+    and an ore or a geode places blocks the pack declares. All three sides are ours, so a
     miss is an error: Bedrock drops the feature and the world never gets it."""
     prefix = behavior.name
     features: dict[str, str] = {}
@@ -313,6 +313,15 @@ def _check_features(report: ValidationReport, behavior: Path, index: Index) -> N
                     if _is_custom(block) and block not in index.blocks:
                         report.add(rel, "xref.feature",
                                    f"replace_rules[{i}] places {block!r}, which no block definition declares")
+            if key == "minecraft:geode_feature":
+                named = [(k, body.get(k)) for k in ("filler", "inner_layer", "alternate_inner_layer",
+                                                     "middle_layer", "outer_layer")]
+                named += [(f"inner_placements[{i}]", b.get("name") if isinstance(b, dict) else b)
+                          for i, b in enumerate(body.get("inner_placements") or [])]
+                for where, block in named:
+                    if _is_custom(block) and block not in index.blocks:
+                        report.add(rel, "xref.feature",
+                                   f"{where} places {block!r}, which no block definition declares")
     for path in sorted((behavior / "feature_rules").glob("*.json")):
         rel = f"{prefix}/feature_rules/{path.name}"
         desc = _obj(_obj(_obj(_load(path)).get("minecraft:feature_rules")).get("description"))
