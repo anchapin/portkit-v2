@@ -278,9 +278,12 @@ def test_native_tag_output_is_valid_end_to_end(tmp_path, fixtures_dir):
     assert recipe["minecraft:recipe_shaped"]["key"] == {"#": {"tag": "examplemod:alloy_ingots"}}
     steel = json.loads((bp / "items" / "steel_ingot.json").read_text())
     assert "examplemod:alloy_ingots" in steel["minecraft:item"]["components"]["minecraft:tags"]["tags"]
-    # the sword's recipe waits for the sword (#261), which is residue
+    # the sword's recipe waits for the sword (#261), which is residue of its
+    # own, so the recipe is owned_by_residue (#302)
     assert sorted(u.source for u in result.unhandled if u.kind == "recipe") == [
-        "data/examplemod/recipes/steel_sword.json", "data/examplemod/recipes/steel_trim.json"]
+        "data/examplemod/recipes/steel_trim.json"]
+    assert [u.source for u in result.unhandled if u.kind == "owned_by_residue" and "/recipes/" in u.source] == [
+        "data/examplemod/recipes/steel_sword.json"]
 
 
 def test_the_validator_flags_a_custom_tag_no_item_carries(tmp_path, fixtures_dir):

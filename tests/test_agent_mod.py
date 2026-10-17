@@ -17,8 +17,8 @@ def test_four_groups_each_with_a_reason_the_agent_can_act_on(tmp_path):
         "item:assets/examplemod/models/item/steel_sword.json",
         "recipe:data/examplemod/recipes/alloy_block.json",
         "recipe:data/examplemod/recipes/steel_trim.json",
-        # #261: the sword's recipe waits for the sword, which is residue above
-        "recipe:data/examplemod/recipes/steel_sword.json",
+        # #261/#302: the sword's recipe waits for the sword, which is residue above
+        "owned_by_residue:data/examplemod/recipes/steel_sword.json",
     }
     alloy = groups["recipe:data/examplemod/recipes/alloy_block.json"]
     assert "examplemod:bronze_ingot" in alloy and "examplemod:steel_ingot" in alloy
@@ -27,8 +27,13 @@ def test_four_groups_each_with_a_reason_the_agent_can_act_on(tmp_path):
     # #272: a mod item can't be a Bedrock trim material, and the reason says so
     trim_reason = groups["recipe:data/examplemod/recipes/steel_trim.json"]
     assert "addition examplemod:steel_ingot" in trim_reason and "can't register a trim material" in trim_reason
-    assert groups["recipe:data/examplemod/recipes/steel_sword.json"].startswith(
-        "names examplemod:steel_sword, which the pack doesn't ship")
+    # #261: the sword's recipe waits for the sword, which is residue above;
+    # #302: so it is owned_by_residue (an explained kind the agent skips),
+    # naming the sword's own entry and keeping why it was withdrawn.
+    (sword,) = [u for u in result.unhandled if u.source == "data/examplemod/recipes/steel_sword.json"]
+    assert sword.kind == "owned_by_residue"
+    assert "examplemod:steel_sword (assets/examplemod/models/item/steel_sword.json: item)" in sword.reason
+    assert "names examplemod:steel_sword, which the pack doesn't ship" in sword.reason
 
 
 def _write_trim(tmp_path, addition):

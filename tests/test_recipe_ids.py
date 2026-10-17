@@ -281,5 +281,8 @@ def test_a_block_withdrawn_for_its_texture_takes_its_recipes(tmp_path):
     out = convert(root, tmp_path / "out", emit_addon=False)
     assert not (out.tree / "behavior_pack" / "recipes" / "planks.json").exists()
     reasons = {u.source: u.reason for u in out.unhandled}
-    assert reasons["data/examplemod/recipes/planks.json"].startswith(
-        "names examplemod:wood, which the pack doesn't ship")
+    assert "names examplemod:wood, which the pack doesn't ship" in reasons["data/examplemod/recipes/planks.json"]
+    # the block is residue of its own (no texture), so the recipe goes with it (#302)
+    kinds = {u.source: u.kind for u in out.unhandled}
+    assert kinds["assets/examplemod/blockstates/wood.json"] not in ("recipe", "unowned")
+    assert kinds["data/examplemod/recipes/planks.json"] == "owned_by_residue"

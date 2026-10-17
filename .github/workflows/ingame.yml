@@ -34,6 +34,8 @@ jobs:
           - { name: mythicmetals, manifest: fixtures/real/mods.toml }
           # Blocks whose drops the loot converter wired with minecraft:loot (#299): each is broken and its drop counted.
           - { name: botania, manifest: fixtures/real/gauntlet.toml }
+          # Crafting recipes written with a bare type ("crafting_shaped"), read as minecraft: since #302.
+          - { name: biomes_o_plenty, manifest: fixtures/real/gauntlet.toml }
     name: ${{ matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
     env:
       PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache

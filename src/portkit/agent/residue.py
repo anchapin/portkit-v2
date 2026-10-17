@@ -147,9 +147,11 @@ SKIP_KINDS = {
                     "one of them"),
     "lang_unreadable": ("Java's own reader (Gson) rejects the file too, so Java never shows its text and "
                         "there is nothing to carry over"),
-    # #277 unowned: leftover models and textures the jar's references explain (portkit.ownership).
+    # #277 unowned: leftover models and textures the jar's references explain (portkit.ownership);
+    # block loot tables of refused blocks (#299) and recipes naming refused items (#302).
     "owned_by_residue": ("only residue that has its own entry uses these files (a refused block's blockstate, "
-                         "a particle definition): they ship with their owner when it converts, not alone"),
+                         "a particle definition), or they need such residue (a refused block's loot table, a "
+                         "recipe naming refused items): they ship with their owner when it converts, not alone"),
     "java_only_asset": ("nothing in the jar's JSON names these files, so only the mod's Java code draws them "
                         "(screens, entity and block-entity renderers, effect icons, armor layers, custom model "
                         "loaders) or, for atlases, Java's texture stitcher reads them; nothing in a Bedrock "

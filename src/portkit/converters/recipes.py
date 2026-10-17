@@ -74,6 +74,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -1090,6 +1091,29 @@ def _trimmable_armor_tags(mod: SourceMod, emitted: dict | None, tags: TagResolve
             f"that isn't armor the tag makes BDS refuse Mojang's own trim recipe ({trim_items.PROBE_SOURCE})")
 
 
+def with_namespaced_type(recipe: dict) -> dict:
+    """``recipe`` with its ``type`` as Java reads it (#302).
+
+    Java reads a recipe's ``type`` as a ResourceLocation, whose namespace
+    defaults to ``minecraft`` when the string has no ``:`` (minecraft.wiki,
+    Identifier, "Conversion from string": "In Java Edition ... when the ``:``
+    is absent, ``minecraft`` becomes the namespace and the whole string
+    becomes the path"). So Biomes O' Plenty's ``"type": "crafting_shaped"``
+    is ``minecraft:crafting_shaped``, the same recipe serializer. Item ids
+    already get the same default (:func:`bedrock_item`). A namespaced type, a
+    non-string type, or one that isn't a valid path is returned untouched.
+    """
+    kind = recipe.get("type")
+    if isinstance(kind, str) and ":" not in kind and _BARE_PATH.fullmatch(kind):
+        return {**recipe, "type": f"minecraft:{kind}"}
+    return recipe
+
+
+# A ResourceLocation path's legal characters (minecraft.wiki, Identifier,
+# "Legal characters": digits, lowercase letters, _ - . and /).
+_BARE_PATH = re.compile(r"[a-z0-9_.\-/]+")
+
+
 def convert(mod: SourceMod, emitted: dict | None = None,
             context: LoadContext | None = None,
             deferred: list | None = None) -> ConversionResult:
@@ -1180,6 +1204,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             result.unhandled.append(Unhandled(rel, "recipe", "recipe file is not a JSON object"))
             continue
 
+        recipe = with_namespaced_type(recipe)
         # Java loads the recipe only when its load conditions hold (#183).
         verdict = context.gate(recipe)
         if verdict.passes is not True:
@@ -1194,7 +1219,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 f"{rel}: {recipe['type']} wrapper; converted the entry Java loads with only this "
                 f"mod ({verdict.why})"
             )
-            recipe = chosen
+            recipe = with_namespaced_type(chosen)
 
         java_type = recipe.get("type")
         if deferred is not None and java_type in station_types:
@@ -1657,6 +1682,7 @@ def drop_unshipped_recipes(result: ConversionResult) -> None:
                 result.notes.append(f"{source}: crafting form {why}")
             else:
                 result.unhandled.append(Unhandled(source, "recipe", why))
+                result.unshipped_names[source] = named
             continue
         for path in paths:
             body = _recipe_body(result.files[path])
@@ -1672,6 +1698,63 @@ def drop_unshipped_recipes(result: ConversionResult) -> None:
             result.notes.append(
                 f"{path}: unlock entry {', '.join(dropped)} dropped, the pack doesn't ship it"
                 + ("" if kept else "; unlock AlwaysUnlocked (fallback)"))
+
+
+OWNED = "owned_by_residue"
+# Kinds that don't explain why an item is missing: a file nobody claimed, and
+# the recipe entries themselves.
+_NOT_AN_OWNER = frozenset({"unowned", "recipe"})
+
+
+def _owner_entry(item: str, residue: dict[str, str]) -> str | None:
+    """The residue entry that is mod item ``item`` itself, if it has one.
+
+    A Java item ``<ns>:<path>`` is defined, for a pack, by its blockstate
+    (``assets/<ns>/blockstates/<path>.json``: the block and its item), its
+    item model (``assets/<ns>/models/item/<path>.json``) or, from 1.21.4, its
+    item definition (``assets/<ns>/items/<path>.json``). When one of them has
+    a residue entry of an explaining kind, the converter that would ship the
+    item refused it there, and says why.
+    """
+    ns, _, path = item.partition(":")
+    for candidate in (f"assets/{ns}/blockstates/{path}.json",
+                      f"assets/{ns}/models/item/{path}.json",
+                      f"assets/{ns}/items/{path}.json"):
+        if residue.get(candidate) not in (None, *_NOT_AN_OWNER):
+            return candidate
+    return None
+
+
+def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]]) -> list[Unhandled]:
+    """Re-file a recipe withdrawn for naming unshipped items that are residue (#302).
+
+    :func:`drop_unshipped_recipes` withdraws a recipe naming (as its result or
+    an ingredient) a mod item the pack doesn't ship, since Bedrock refuses a
+    recipe naming an item it doesn't know. When every such item is itself
+    residue with its own entry (see :func:`_owner_entry`: its block or item
+    was refused, for a reason of its own), nothing is wrong with the recipe:
+    it becomes ``owned_by_residue``, the explained kind loot tables of refused
+    blocks (#299) and their models and textures (#292) use, keeping why it was
+    withdrawn, and it converts when its items do. A recipe naming an item with
+    no entry of its own (another mod's, or one the jar never defines) stays
+    ``recipe``. Pack bytes don't change.
+    """
+    residue = {u.source: u.kind for u in unhandled}
+    out: list[Unhandled] = []
+    for u in unhandled:
+        named = unshipped.get(u.source) if u.kind == "recipe" else None
+        owners = [(_owner_entry(i, residue), i) for i in named or []]
+        if owners and all(entry for entry, _ in owners):
+            shown = ", ".join(f"{i} ({entry}: {residue[entry]})" for entry, i in owners[:5])
+            if len(owners) > 5:
+                shown += f" and {len(owners) - 5} more"
+            out.append(Unhandled(
+                source=u.source, kind=OWNED, count=u.count,
+                reason=(f"a recipe whose items are residue: {shown}, each refused with an entry of its own, "
+                        f"so the recipe goes with them when they convert (the recipe itself: {u.reason})")))
+            continue
+        out.append(u)
+    return out
 
 
 SMITHING = "minecraft:recipe_smithing_transform"
