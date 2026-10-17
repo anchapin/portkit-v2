@@ -27,9 +27,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-17: ores a Forge/NeoForge biome modifier adds convert to a Bedrock `minecraft:ore_feature` plus a feature rule (pending: Alex's picks on PR #317)
+## 2026-10-17: ores a Forge/NeoForge biome modifier adds convert to a Bedrock `minecraft:ore_feature` plus a feature rule (approved (Alex, 2026-10-17))
 
-- **Decision (pending):** `converters/features.py` (#281, first slice) reads
+- **Decision:** `converters/features.py` (#281, first slice) reads
   the `data/<ns>/{forge,neoforge}/biome_modifier/` files of type
   `<loader>:add_features` whose every feature is a vanilla `minecraft:ore`
   placed with vanilla placements (`count`, `in_square`, `height_range`,
@@ -49,7 +49,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   dimension bounds, `rarity_filter` -> `scatter_chance` only before any count
   above 1, `underground_ores`/`underground_decoration` -> `underground_pass`,
   `#minecraft:is_nether` -> biome tag `nether` (the same five biomes).
-  Recommended defaults implemented for the picks (comment on PR #317):
+  Alex's picks (PR #317, picks comment 6239348623), the defaults:
   1a Java `size` -> Bedrock `count`; 2a a trapezoid with no plateau ->
   `triangle`, with a plateau residue; 3a `#minecraft:is_overworld` -> tag
   `overworld` or `overworld_generation` (Bedrock's legacy hills/mutated
@@ -70,9 +70,10 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   Create, IE and Mekanism ores use their own placement or feature types
   (`code_worldgen`), Mythic Metals' are Fabric (code-attached), BOP's sits only
   in its own biomes. Where Bedrock can't state Java's numbers exactly, the
-  feature stays residue until Alex picks.
+  feature stays residue (picks 2a, 4a, 6a).
 - **Rejected:** converting Fabric ores by the `<ore>_ore_biomes` tag naming
   convention (a guess, #87); a Bedrock biome for each Java biome tag.
+- **Status:** approved (Alex, 2026-10-17): picks 1a 2a 3a 4a 5a 6a, the defaults (PR #317, picks comment 6239348623).
 - **Links:** #281, #277, PR #317.
 
 ## 2026-10-17: worldgen typed with the mod's own classes is `code_worldgen`; data only another mod reads is `other_mod_data` (approved (Alex, 2026-10-17))
