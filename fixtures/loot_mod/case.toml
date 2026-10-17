@@ -1,5 +1,5 @@
 name = "loot_mod"
-description = "Plain block drops convert; fortune, silk touch alternatives and a random count are refused with the condition that defeated them."
+description = "Plain block drops convert; fortune and a random count are refused with what defeated them; a drop only under Silk Touch drops nothing on Bedrock (which drops the block itself under Silk Touch), and with no converted block to put the empty table on it stays residue."
 namespace = "examplemod"
 expect_valid = true
 expect_unhandled = 3

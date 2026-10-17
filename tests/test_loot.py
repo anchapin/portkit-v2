@@ -65,10 +65,10 @@ def test_fortune_is_refused_and_says_so(tmp_path):
     assert "fortune" in reason and "apply_bonus" in reason
 
 
-def test_silk_touch_alternatives_are_refused(tmp_path):
+def test_alternatives_with_no_children_drop_nothing(tmp_path):
     table = {"pools": [{"rolls": 1, "entries": [{"type": "minecraft:alternatives", "children": []}]}]}
     result = loot.convert(build(tmp_path, {"glass_pane": table}))
-    assert "alternatives" in result.unhandled[0].reason
+    assert "drops nothing" in result.unhandled[0].reason
 
 
 def test_a_tool_condition_names_the_condition(tmp_path):
@@ -142,7 +142,7 @@ def test_the_fixture_converts_the_plain_drops_and_reports_the_rest(tmp_path, fix
     assert produced == ["steel_block.json", "thatch.json"]
     reasons = " ".join(u.reason for u in out.unhandled)
     assert "fortune" in reasons
-    assert "alternatives" in reasons
+    assert "Silk Touch" in reasons
 
 
 def test_the_validator_actually_runs_on_loot_tables(tmp_path):
@@ -300,12 +300,14 @@ def test_a_drop_of_an_item_the_pack_lacks_is_not_wired(tmp_path):
     assert "examplemod:gone" in result.unhandled[0].reason
 
 
-def test_a_drop_of_air_waits_for_the_empty_table_pick(tmp_path):
+def test_a_drop_of_air_names_bedrocks_empty_table(tmp_path):
     table = pool({"type": "minecraft:item", "name": "minecraft:air"}, SURVIVES)
     blocks = {"blocks/pot.json": _block("examplemod:pot")}
     result = loot.convert(build(tmp_path, {"pot": table}), blocks=blocks)
-    assert result.files == {}
-    assert "minecraft:air" in result.unhandled[0].reason and "#299" in result.unhandled[0].reason
+    assert result.unhandled == []
+    assert result.files == {"blocks/pot.json": _block("examplemod:pot", {
+        "minecraft:friction": 0.6, "minecraft:loot": "loot_tables/empty.json"})}
+    assert any("loot_tables/empty.json" in n for n in result.notes)
 
 
 def test_a_block_that_already_has_minecraft_loot_is_left_alone(tmp_path):
@@ -376,3 +378,187 @@ def test_a_shortened_table_path_moves_the_blocks_reference():
                                      "blocks/x.json": _block("ex:x", {"minecraft:loot": long})})
     renames = shorten_paths(result)
     assert result.files["blocks/x.json"]["minecraft:block"]["components"]["minecraft:loot"] == renames[long]
+
+
+# -- tools (#299, Alex's picks 2026-10-16) ------------------------------------
+
+SILK_121 = {"condition": "minecraft:match_tool", "predicate": {"predicates": {"minecraft:enchantments": [
+    {"enchantments": "minecraft:silk_touch", "levels": {"min": 1}}]}}}
+SILK_120 = {"condition": "minecraft:match_tool", "predicate": {"enchantments": [
+    {"enchantment": "minecraft:silk_touch", "levels": {"min": 1}}]}}
+SHEARS = {"condition": "minecraft:match_tool", "predicate": {"items": "minecraft:shears"}}
+SHEARS_TAG = {"condition": "minecraft:match_tool", "predicate": {"tag": "forge:shears"}}
+IS_SHEARS = {"condition": "match_tool", "minecraft:match_tool_filter_any": ["minecraft:is_shears"]}
+
+
+def _alternatives(*children):
+    return {"type": "minecraft:block", "pools": [{"rolls": 1, "conditions": SURVIVES, "entries": [
+        {"type": "minecraft:alternatives", "children": list(children)}]}]}
+
+
+def _wired(result, name):
+    block = result.files[f"blocks/{name}.json"]["minecraft:block"]["components"]["minecraft:loot"]
+    return block, result.files.get(block)
+
+
+@pytest.mark.parametrize("silk", [SILK_120, SILK_121])
+def test_silk_touch_self_or_another_drop_is_the_other_drop_on_bedrock(tmp_path, silk):
+    """Bedrock drops the block itself under Silk Touch, so the table only needs the other branch: exact."""
+    table = _alternatives({"type": "minecraft:item", "name": "examplemod:ore", "conditions": [silk]},
+                          {"type": "minecraft:item", "name": "minecraft:diamond"})
+    blocks = {"blocks/ore.json": _block("examplemod:ore")}
+    result = loot.convert(build(tmp_path, {"ore": table}), blocks=blocks)
+    assert result.unhandled == []
+    path, wired = _wired(result, "ore")
+    assert wired == {"pools": [{"rolls": 1, "entries": [{
+        "type": "item", "name": "minecraft:diamond", "functions": [{"function": "explosion_decay"}]}]}]}
+    assert not any("approximated" in n for n in result.notes)
+
+
+def test_a_drop_only_under_silk_touch_is_bedrocks_empty_table(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "examplemod:pane"}, [SILK_121])
+    blocks = {"blocks/pane.json": _block("examplemod:pane")}
+    result = loot.convert(build(tmp_path, {"pane": table}), blocks=blocks)
+    assert result.unhandled == []
+    assert result.files["blocks/pane.json"]["minecraft:block"]["components"]["minecraft:loot"] == (
+        "loot_tables/empty.json")
+    assert not any("approximated" in n for n in result.notes)
+
+
+def test_a_shears_drop_becomes_a_match_tool_on_bedrocks_shears_tag(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "examplemod:bush"}, [SHEARS])
+    blocks = {"blocks/bush.json": _block("examplemod:bush")}
+    result = loot.convert(build(tmp_path, {"bush": table}), blocks=blocks)
+    assert result.unhandled == []
+    _, wired = _wired(result, "bush")
+    assert wired["pools"][0]["entries"] == [{"type": "item", "name": "examplemod:bush", "conditions": [IS_SHEARS]}]
+    note = next(n for n in result.notes if "approximated" in n)
+    # Java's Silk Touch drop is nothing here; Bedrock's is the block itself.
+    assert note.startswith("data/examplemod/loot_tables/blocks/bush.json: approximated loot (#299)")
+    assert "Silk Touch" in note and "nothing" in note
+
+
+def test_a_java_shears_tag_says_mod_shears_dont_count(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "examplemod:bush"}, [SHEARS_TAG])
+    result = loot.convert(build(tmp_path, {"bush": table}))
+    assert result.files["loot_tables/blocks/bush.json"]["pools"][0]["entries"][0]["conditions"] == [IS_SHEARS]
+    assert any("forge:shears" in n and "minecraft:is_shears" in n for n in result.notes)
+
+
+def test_shears_or_silk_touch_is_shears_on_bedrock(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "examplemod:vine"}, [
+        {"condition": "minecraft:any_of", "terms": [SHEARS, SILK_121]}])
+    result = loot.convert(build(tmp_path, {"vine": table}))
+    assert result.files["loot_tables/blocks/vine.json"]["pools"][0]["entries"][0]["conditions"] == [IS_SHEARS]
+
+
+def test_not_silk_touch_always_holds_on_bedrock(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "minecraft:stick"}, [
+        {"condition": "minecraft:inverted", "term": SILK_120}])
+    result = loot.convert(build(tmp_path, {"twig": table}))
+    assert result.files["loot_tables/blocks/twig.json"]["pools"][0]["entries"][0] == {
+        "type": "item", "name": "minecraft:stick"}
+
+
+def test_a_shears_branch_before_another_drop_is_refused(tmp_path):
+    """Bedrock can't say 'not shears', so the second branch can't be written."""
+    table = _alternatives({"type": "minecraft:item", "name": "examplemod:grass", "conditions": [SHEARS]},
+                          {"type": "minecraft:item", "name": "minecraft:wheat_seeds"})
+    result = loot.convert(build(tmp_path, {"grass": table}))
+    assert result.files == {}
+    assert "tool is absent" in result.unhandled[0].reason
+
+
+def test_not_shears_is_refused(tmp_path):
+    table = pool({"type": "minecraft:item", "name": "minecraft:stick"}, [
+        {"condition": "minecraft:inverted", "term": SHEARS}])
+    result = loot.convert(build(tmp_path, {"twig": table}))
+    assert "absent" in result.unhandled[0].reason
+
+
+def test_a_tool_test_bedrock_cant_read_is_refused(tmp_path):
+    table = pool(ITEM, [{"condition": "minecraft:match_tool", "predicate": {"tag": "examplemod:knives"}}])
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert "examplemod:knives" in result.unhandled[0].reason
+
+
+def test_two_pools_only_under_silk_touch_drop_nothing(tmp_path):
+    table = {"pools": [
+        {"rolls": 1, "conditions": [SILK_121], "entries": [{"type": "minecraft:item", "name": "examplemod:grass"}]},
+        {"rolls": 1, "conditions": [SILK_121], "entries": [{"type": "minecraft:item", "name": "minecraft:stick"}]}]}
+    blocks = {"blocks/grass.json": _block("examplemod:grass")}
+    result = loot.convert(build(tmp_path, {"grass": table}), blocks=blocks)
+    assert result.files["blocks/grass.json"]["minecraft:block"]["components"]["minecraft:loot"] == (
+        "loot_tables/empty.json")
+
+
+def test_an_empty_table_names_bedrocks_empty_table_only_on_a_converted_block(tmp_path):
+    blocks = {"blocks/cake.json": _block("examplemod:cake")}
+    result = loot.convert(build(tmp_path, {"cake": {"type": "minecraft:block"}, "gone": {"pools": []}}),
+                          blocks=blocks)
+    assert result.files["blocks/cake.json"]["minecraft:block"]["components"]["minecraft:loot"] == (
+        "loot_tables/empty.json")
+    [left] = result.unhandled
+    assert left.source.endswith("gone.json") and "drops nothing" in left.reason
+
+
+def _tier_mod(tmp_path, tables):
+    mod = build(tmp_path, tables)
+    tags = tmp_path / "data" / "minecraft" / "tags" / "blocks"
+    (tags / "mineable").mkdir(parents=True)
+    (tags / "needs_iron_tool.json").write_text(json.dumps({"values": ["examplemod:steel_block"]}))
+    (tags / "mineable" / "pickaxe.json").write_text(json.dumps({"values": ["examplemod:steel_block"]}))
+    return mod
+
+
+def test_a_tier_tagged_block_drops_only_for_its_tool_of_that_tier(tmp_path):
+    mod = _tier_mod(tmp_path, {"steel_block": pool(ITEM, SURVIVES)})
+    blocks = {"blocks/steel_block.json": _block("examplemod:steel_block")}
+    result = loot.convert(mod, blocks=blocks)
+    assert result.unhandled == []
+    _, wired = _wired(result, "steel_block")
+    assert wired["pools"][0]["entries"] == [{
+        "type": "item", "name": "examplemod:steel_block", "functions": [{"function": "explosion_decay"}],
+        "conditions": [{"condition": "match_tool",
+                        "minecraft:match_tool_filter_all": ["minecraft:is_tool", "minecraft:is_pickaxe"],
+                        "minecraft:match_tool_filter_any": ["minecraft:iron_tier", "minecraft:diamond_tier",
+                                                            "minecraft:netherite_tier"]}]}]
+    note = next(n for n in result.notes if "approximated" in n)
+    assert "needs_iron_tool" in note and "pickaxe" in note and "Silk Touch" in note
+
+
+def test_a_tier_tagged_block_in_no_mineable_tag_is_residue(tmp_path):
+    mod = build(tmp_path, {"steel_block": pool(ITEM, SURVIVES)})
+    tags = tmp_path / "data" / "minecraft" / "tags" / "blocks"
+    tags.mkdir(parents=True)
+    (tags / "needs_stone_tool.json").write_text(json.dumps({"values": ["examplemod:steel_block"]}))
+    result = loot.convert(mod, blocks={"blocks/steel_block.json": _block("examplemod:steel_block")})
+    assert "no mineable tag" in result.unhandled[0].reason
+
+
+def test_java_silk_touch_drop_is_read():
+    assert loot._java_silk_drop(pool(ITEM, [SILK_121])) == "examplemod:steel_block"
+    assert loot._java_silk_drop(pool(ITEM, [SHEARS])) == ""
+    assert loot._java_silk_drop(pool({"type": "minecraft:item", "name": "minecraft:air"})) == ""
+    assert loot._java_silk_drop(_alternatives(
+        {"type": "minecraft:item", "name": "examplemod:ore", "conditions": [SILK_120]},
+        {"type": "minecraft:item", "name": "minecraft:diamond"})) == "examplemod:ore"
+
+
+def test_the_validator_reads_match_tool_conditions(tmp_path):
+    from portkit.validate.rules import validate_pack
+
+    pack = tmp_path / "behavior_pack"
+    (pack / "loot_tables" / "blocks").mkdir(parents=True)
+    good = {"type": "item", "name": "ex:bush", "conditions": [IS_SHEARS]}
+    bad = [{"type": "item", "name": "ex:a", "conditions": [{"condition": "random_chance", "chance": 0.5}]},
+           {"type": "item", "name": "ex:b", "conditions": [{"condition": "match_tool", "predicate": {}}]},
+           {"type": "item", "name": "ex:c", "conditions": [
+               {"condition": "match_tool", "minecraft:match_tool_filter_any": []}]}]
+    (pack / "loot_tables" / "blocks" / "ok.json").write_text(json.dumps({"pools": [{"rolls": 1, "entries": [good]}]}))
+    for i, entry in enumerate(bad):
+        (pack / "loot_tables" / "blocks" / f"bad{i}.json").write_text(
+            json.dumps({"pools": [{"rolls": 1, "entries": [entry]}]}))
+    report = validate_pack(pack)
+    found = {f.path.rsplit("/", 1)[-1] for f in report.findings if f.rule == "loot.condition"}
+    assert found == {"bad0.json", "bad1.json", "bad2.json"}

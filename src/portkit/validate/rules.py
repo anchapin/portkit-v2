@@ -509,6 +509,39 @@ def _check_lang(report: ValidationReport, path: Path, rel: str) -> None:
 
 
 _LOOT_FUNCTIONS = {"set_count", "explosion_decay", "set_data", "looting_enchant"}
+# The entry conditions the converter writes (#299): Bedrock's match_tool with
+# item-tag filters (learn.microsoft.com, Loot and Trade Table Conditions,
+# match_tool: count, durability, enchantments, item and the three
+# minecraft:match_tool_filter_* tag lists).
+_MATCH_TOOL_KEYS = {"condition", "count", "durability", "enchantments", "item",
+                    "minecraft:match_tool_filter_any", "minecraft:match_tool_filter_all",
+                    "minecraft:match_tool_filter_none"}
+_MATCH_TOOL_FILTERS = ("minecraft:match_tool_filter_any", "minecraft:match_tool_filter_all",
+                       "minecraft:match_tool_filter_none")
+
+
+def _check_loot_conditions(report: ValidationReport, rel: str, where: str, conditions) -> None:
+    if conditions is None:
+        return
+    if not isinstance(conditions, list):
+        report.add(rel, "loot.condition", f"{where}.conditions must be a list")
+        return
+    for k, condition in enumerate(conditions):
+        at = f"{where}.conditions[{k}]"
+        if not isinstance(condition, dict) or condition.get("condition") != "match_tool":
+            report.add(rel, "loot.condition", f"{at} must be a match_tool condition")
+            continue
+        unknown = sorted(set(condition) - _MATCH_TOOL_KEYS)
+        if unknown:
+            report.add(rel, "loot.condition", f"{at} has fields match_tool doesn't take: {', '.join(unknown)}")
+        filters = [f for f in _MATCH_TOOL_FILTERS if f in condition]
+        if not filters and "item" not in condition and "enchantments" not in condition:
+            report.add(rel, "loot.condition", f"{at} tests nothing")
+        for f in filters:
+            tags = condition[f]
+            if not isinstance(tags, list) or not tags or not all(
+                    isinstance(t, str) and _IDENTIFIER.match(t) for t in tags):
+                report.add(rel, "loot.condition", f"{at}.{f} must be a non-empty list of item tag identifiers")
 
 
 def _check_loot_table(report: ValidationReport, path: Path, rel: str) -> None:
@@ -549,6 +582,7 @@ def _check_loot_table(report: ValidationReport, path: Path, rel: str) -> None:
             name = entry.get("name")
             if not isinstance(name, str) or not _IDENTIFIER.match(name):
                 report.add(rel, "loot.name", f"{where}.name {name!r} is not an identifier")
+            _check_loot_conditions(report, rel, where, entry.get("conditions"))
             for k, function in enumerate(entry.get("functions") or []):
                 fname = function.get("function")
                 if fname not in _LOOT_FUNCTIONS:
