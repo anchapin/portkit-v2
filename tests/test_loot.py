@@ -537,12 +537,15 @@ def test_a_tier_tagged_block_in_no_mineable_tag_is_residue(tmp_path):
 
 
 def test_java_silk_touch_drop_is_read():
-    assert loot._java_silk_drop(pool(ITEM, [SILK_121])) == "examplemod:steel_block"
-    assert loot._java_silk_drop(pool(ITEM, [SHEARS])) == ""
-    assert loot._java_silk_drop(pool({"type": "minecraft:item", "name": "minecraft:air"})) == ""
+    block = "examplemod:steel_block"
+    assert loot._java_silk_drop(pool(ITEM, [SILK_121]), block) is None
+    assert loot._java_silk_drop(pool(ITEM, [SHEARS]), block) == "nothing"
+    assert loot._java_silk_drop(pool({"type": "minecraft:item", "name": "minecraft:air"}), block) == "nothing"
+    assert loot._java_silk_drop(pool(ITEM, functions=[{"function": "minecraft:set_count", "count": 4}]),
+                                block) == "4 examplemod:steel_block"
     assert loot._java_silk_drop(_alternatives(
-        {"type": "minecraft:item", "name": "examplemod:ore", "conditions": [SILK_120]},
-        {"type": "minecraft:item", "name": "minecraft:diamond"})) == "examplemod:ore"
+        {"type": "minecraft:item", "name": "examplemod:steel_block", "conditions": [SILK_120]},
+        {"type": "minecraft:item", "name": "minecraft:diamond"}), block) is None
 
 
 def test_the_validator_reads_match_tool_conditions(tmp_path):

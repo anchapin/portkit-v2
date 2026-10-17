@@ -91,12 +91,42 @@ def test_drop_checks(tmp_path):
     assert testpack.expected_drops(one({"type": "item", "name": "x"}, conditions=[{"condition": "c"}])) is None
 
 
+def test_tool_drop_checks(tmp_path):
+    """#299: a match_tool-gated table is checked per tool that tells the gate apart."""
+    bp = tmp_path / "bp"
+    tables = bp / "loot_tables" / "blocks"
+    tables.mkdir(parents=True)
+    shears = {"condition": "match_tool", "minecraft:match_tool_filter_any": ["minecraft:is_shears"]}
+    tier = {"condition": "match_tool", "minecraft:match_tool_filter_all": ["minecraft:is_tool", "minecraft:is_pickaxe"],
+            "minecraft:match_tool_filter_any": ["minecraft:iron_tier", "minecraft:diamond_tier",
+                                                "minecraft:netherite_tier"]}
+    (tables / "bush.json").write_text(json.dumps({"pools": [{"rolls": 1, "entries": [
+        {"type": "item", "name": "demo:bush", "conditions": [shears]}]}]}))
+    (tables / "ore.json").write_text(json.dumps({"pools": [{"rolls": 1, "entries": [
+        {"type": "item", "name": "demo:ore", "functions": [{"function": "explosion_decay"}], "conditions": [tier]}]}]}))
+    _block(bp / "blocks" / "bush.json", "demo:bush", components={"minecraft:loot": "loot_tables/blocks/bush.json"})
+    _block(bp / "blocks" / "ore.json", "demo:ore", components={"minecraft:loot": "loot_tables/blocks/ore.json"})
+    checks = testpack.read_checks(bp)
+    # A bare hand (and setblock's destroy, which holds no tool) gets nothing.
+    assert checks.drops == [{"id": "demo:bush", "table": "loot_tables/blocks/bush.json", "expect": []},
+                            {"id": "demo:ore", "table": "loot_tables/blocks/ore.json", "expect": []}]
+    got = {(d["id"], d["tool"]): d["expect"] for d in checks.tool_drops}
+    assert got == {
+        ("demo:bush", None): [],
+        ("demo:bush", "minecraft:shears"): [{"item": "demo:bush", "count": 1}],
+        ("demo:ore", None): [],
+        ("demo:ore", "minecraft:stone_pickaxe"): [],
+        ("demo:ore", "minecraft:iron_pickaxe"): [{"item": "demo:ore", "count": 1}],
+    }
+    assert testpack.read_checks(bp).as_json()["tool_drops"] == checks.tool_drops
+
+
 def test_write_test_pack(tree, tmp_path):
     out = tmp_path / "checks"
     testpack.write_test_pack(tree / "behavior_pack", out, "demo")
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["modules"][0]["entry"] == "scripts/ingame.js"
-    assert manifest["dependencies"] == [{"module_name": "@minecraft/server", "version": "2.0.0"}]
+    assert manifest["dependencies"] == [{"module_name": "@minecraft/server", "version": "2.2.0"}]
     # Stable uuids: the same name gives the same pack.
     assert manifest == testpack.manifest("demo")
     assert manifest["header"]["uuid"] != testpack.manifest("other")["header"]["uuid"]
@@ -216,5 +246,5 @@ def test_cli(tree, tmp_path, capsys):
     assert main(["ingame", "run", "--tree", str(tree)]) == 2
     out = tmp_path / "checks"
     assert main(["ingame", "pack", "--tree", str(tree), "--out", str(out), "--name", "demo"]) == 0
-    assert "4 blocks, 1 items, 1 containers, 1 connection blocks, 1 drops" in capsys.readouterr().out
+    assert "4 blocks, 1 items, 1 containers, 1 connection blocks, 1 drops, 0 tool drops" in capsys.readouterr().out
     assert (out / "scripts" / "data.js").exists()

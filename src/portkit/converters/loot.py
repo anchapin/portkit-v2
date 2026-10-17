@@ -6,10 +6,10 @@ flatter version of the same idea and do not have most of it.
 
 The shape that carries almost every modded decorative block is: one pool, one
 roll, one item entry, drops itself, survives explosions. That converts. A table
-that reaches for fortune, silk touch, alternatives or a random count is refused
-with the condition or function that defeated it named in the reason, because a
-block that silently drops the wrong thing is worse than one the report tells you
-to finish by hand.
+that reaches for fortune, a random count or a condition Bedrock can't test is
+refused with the condition or function that defeated it named in the reason.
+Silk Touch, shears and tool tier are approximated with Bedrock's match_tool
+and each approximation is a report note (#299, see the tools section below).
 """
 from __future__ import annotations
 
@@ -369,8 +369,14 @@ def _drop(data: dict, silk_world: bool, approx: list[str]):
         if test is None:
             continue
         drops = []
-        for entry in pool.get("entries") or []:
-            drops += _entry_drops(entry, test, decay, silk_world, approx)
+        entries = pool.get("entries") or []
+        for entry in entries:
+            try:
+                drops += _entry_drops(entry, test, decay, silk_world, approx)
+            except _Refused:
+                if len(entries) > 1:
+                    raise _Refused(f"the pool has {len(entries)} entries; only a single drop is unambiguous")
+                raise
         if len(drops) > 1:
             raise _Refused(f"the pool has {len(pool.get('entries') or [])} entries; only a single drop is unambiguous")
         found += [(t, e, pool.get("functions") or [], d) for t, e, d in drops]
@@ -414,25 +420,32 @@ def _match_tool(tags: frozenset) -> dict:
     return {"condition": "match_tool", "minecraft:match_tool_filter_any": sorted(tags)}
 
 
-def _java_silk_drop(data: dict) -> str | None:
-    """What Java drops under Silk Touch (a tool no other test names), as an
-    item id; "" for nothing; None when that can't be read."""
+def _java_silk_drop(data: dict, block_id: str) -> str | None:
+    """None when Java drops the block itself, once, under Silk Touch (a tool
+    no other test names); otherwise what it drops there, in words."""
     try:
         drop = _drop(data, True, [])
     except _Refused:
-        return None
+        return "what its table gives there (not read)"
     if drop is None:
-        return ""
+        return "nothing"
     _, entry, functions, _ = drop
+    name = entry.get("name")
+    if name in AIR:
+        return "nothing"
+    count = 1
     for function in list(functions) + list(entry.get("functions") or []):
         fname = function.get("function")
         if fname in ("minecraft:explosion_decay", "explosion_decay"):
             continue
-        if fname in ("minecraft:set_count", "set_count") and _constant_count(function) == 1 \
-                and not function.get("conditions"):
+        if fname in ("minecraft:set_count", "set_count") and not function.get("conditions") \
+                and _constant_count(function) is not None and not function.get("add"):
+            count = _constant_count(function)
             continue
+        return f"{name} (with {fname})"
+    if name == block_id and count == 1:
         return None
-    return "" if entry.get("name") in AIR else entry.get("name")
+    return name if count == 1 else f"{count} {name}"
 
 
 def convert_table(data: dict, block: str | None = None,
@@ -674,12 +687,11 @@ def _gate(cases: list[tuple[str | None, dict]], tools: list[str],
     return out
 
 
-def _silk_note(silk: str | None, block_id: str) -> str | None:
-    """The approximation a wired table has under Silk Touch, or None when Java
-    drops the block itself there too."""
-    if silk == block_id:
+def _silk_note(java: str | None) -> str | None:
+    """The approximation a wired table has under Silk Touch (Java's drop there
+    from :func:`_java_silk_drop`), or None when Java drops the block itself too."""
+    if java is None:
         return None
-    java = ("nothing" if silk == "" else f"{silk}" if silk else "what its table gives (not read)")
     return (f"with Silk Touch Bedrock drops the block itself (it ignores minecraft:loot under Silk Touch), "
             f"where Java drops {java}")
 
@@ -765,7 +777,7 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
                     wired_block["minecraft:block"].setdefault("components", {})["minecraft:loot"] = EMPTY_TABLE
                     result.files[block_path] = wired_block
                     emptied.append(block_id)
-                    note = _silk_note(_java_silk_drop(data), block_id)
+                    note = _silk_note(_java_silk_drop(data, block_id))
                     if note:
                         approx.append(note)
                 if approx:
@@ -800,7 +812,7 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
                     continue
                 result.files[block_path] = _wire(block, name, cases, result.files)
                 wired.append(block_id)
-                note = _silk_note(_java_silk_drop(data), block_id)
+                note = _silk_note(_java_silk_drop(data, block_id))
                 if note:
                     approx.append(note)
             if approx:

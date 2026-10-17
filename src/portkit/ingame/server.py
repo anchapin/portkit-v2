@@ -270,6 +270,7 @@ def parse(lines: list[str]) -> dict:
         "script_errors": [d for k, d in tagged if k == "ERROR"],
         "connections": [d for k, d in tagged if k == "CONNECTION"],
         "drops": [d for k, d in tagged if k == "DROP"],
+        "tool_drops": [d for k, d in tagged if k == "TOOL_DROP"],
         "content_errors": errors,
         "content_warnings": warnings,
     }
