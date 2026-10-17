@@ -66,8 +66,13 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
     `rs_pool_additions/` 22, `unbreakables/` 1 and the template
     `village/common/waystone_waterlogged.nbt` (named only by the Repurposed
     Structures files, so not "with its pools" as the picks comment said)
-    `other_mod_data`. Waystones has no `unowned` data left but `advancement/`,
-    which the board does not count against done.
+    `other_mod_data`. Waystones has no `unowned` left and is done (gauntlet
+    run 39056824522: done 36 -> 37/50).
+  - Other gauntlet mods, same rule, no coverage change: `code_worldgen` Twilight
+    Forest 164, Biomes O' Plenty 107, Immersive Engineering 13, Tinkers 7 files;
+    `other_mod_data` Immersive Engineering 36 (its Repurposed Structures
+    `rs_*` data and the 12 engineer-house templates only those name).
+    `unowned [data/<ns>/worldgen/]` 8 mods/979 -> 7/663 files.
   - Pack bytes are unchanged: explained entries add no converted files, so
     coverage and mean coverage don't move.
 - **Why:** Alex's picks 1a, 2a and 3a on PR #316 (comment 6237827326): what the
