@@ -1,5 +1,5 @@
 {
- "about": "Defaults of mod-specific recipe load-condition flags, cited from each mod's source at the pinned version (docs/decisions.md, 2026-10-13). Keyed by mod id, the exact version its metadata declares, and condition type. A flag that is not here, or a mod version that is not here, is an unknown load condition: residue, never a guess. A flag's config_key, where present, is the option's name in the mod's own config file at the cited line, accepted as an alias by `portkit convert --config`. An entry's registers lists ids the mod's code registers only while that flag is on, with a citation; the item converter leaves them out when the flag is off. The values list holds the mod's non-boolean config options a converter reads (not load conditions), each with its type, cited default and the range the mod's config accepts; `portkit convert --config <mod>.<key>=<number>` replaces the default, and a value outside the range is an error.",
+ "about": "Defaults of mod-specific recipe load-condition flags, cited from each mod's source at the pinned version (docs/decisions.md, 2026-10-13). Keyed by mod id, the exact version its metadata declares, and condition type. A flag that is not here, or a mod version that is not here, is an unknown load condition: residue, never a guess. A flag's config_key, where present, is the option's name in the mod's own config file at the cited line, accepted as an alias by `portkit convert --config`. An entry's registers lists ids the mod's code registers only while that flag is on, with a citation; the item converter leaves them out when the flag is off. The values list holds the mod's non-boolean config options a converter reads (not load conditions), each with its type, cited default and the range the mod's config accepts; `portkit convert --config <mod>.<key>=<number>` replaces the default, and a value outside the range is an error. An entry with code_gate names the class whose no-argument boolean methods its flags are when the mod's code tests them (a config wrapper's adamantite()), keyed by method name; portkit.biomecode decides Fabric code-attached ores with them (#281).",
  "entries": [
   {
    "mod": "supplementaries",
@@ -1280,6 +1280,225 @@
      "url": "https://github.com/SlimeKnights/TinkersConstruct/blob/a5a0324954f71b7620f766fadea0a0adf2984ae0/src/main/java/slimeknights/tconstruct/common/config/Config.java#L169",
      "why": "ConfigEnabledCondition L128: add(\"slimy_loot_chests\", Config.COMMON.slimyLootChests); slimyLootChests = builder...define(..., true)",
      "config_key": "slimy_loot"
+    }
+   }
+  },
+  {
+   "mod": "mythicmetals",
+   "version": "0.24.6+1.21",
+   "loader": "fabric",
+   "condition": "mythicmetals:config",
+   "argument": "option",
+   "code_gate": "com/mythicmetals/config/MythicMetalsConfig",
+   "repo": "https://github.com/Noaaan/MythicMetals",
+   "commit": "7332378b515fa0048bec5bd7efac9865b309bf2d",
+   "pinning": "git tag 0.24.6+1.21 (Modrinth fKQ4feyG)",
+   "registration": {
+    "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+    "line": 10,
+    "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L10",
+    "why": "@Config(name = MythicMetals.MOD_ID + \"-config\", wrapperName = \"MythicMetalsConfig\"): owo-lib generates the wrapper class com.mythicmetals.config.MythicMetalsConfig; in the jar each no-argument boolean method <option>()Z returns its Option field's value (MythicMetalsConfig.adamantite()Z: getfield adamantite (Option), Option.value(), Boolean.booleanValue()), and MythicMetalsConfig$Keys builds each Option.Key from the option's name (new Option.Key(\"adamantite\")). A code gate MythicMetalsConfig.<option>() is this flag (#281 pick 5a)."
+   },
+   "flags": {
+    "adamantite": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 13,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L13",
+     "why": "owo config model field `public boolean adamantite = true;`",
+     "config_key": "adamantite"
+    },
+    "aquarium": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 15,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L15",
+     "why": "owo config model field `public boolean aquarium = true;`",
+     "config_key": "aquarium"
+    },
+    "banglum": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 17,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L17",
+     "why": "owo config model field `public boolean banglum = true;`",
+     "config_key": "banglum"
+    },
+    "netherBanglum": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 19,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L19",
+     "why": "owo config model field `public boolean netherBanglum = true;`",
+     "config_key": "netherBanglum"
+    },
+    "carmot": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 21,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L21",
+     "why": "owo config model field `public boolean carmot = true;`",
+     "config_key": "carmot"
+    },
+    "calciteKyber": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 23,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L23",
+     "why": "owo config model field `public boolean calciteKyber = true;`",
+     "config_key": "calciteKyber"
+    },
+    "manganese": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 25,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L25",
+     "why": "owo config model field `public boolean manganese = true;`",
+     "config_key": "manganese"
+    },
+    "kyber": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 27,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L27",
+     "why": "owo config model field `public boolean kyber = true;`",
+     "config_key": "kyber"
+    },
+    "morkite": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 29,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L29",
+     "why": "owo config model field `public boolean morkite = true;`",
+     "config_key": "morkite"
+    },
+    "midasGold": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 31,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L31",
+     "why": "owo config model field `public boolean midasGold = true;`",
+     "config_key": "midasGold"
+    },
+    "mythril": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 33,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L33",
+     "why": "owo config model field `public boolean mythril = true;`",
+     "config_key": "mythril"
+    },
+    "orichalcum": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 35,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L35",
+     "why": "owo config model field `public boolean orichalcum = true;`",
+     "config_key": "orichalcum"
+    },
+    "osmium": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 37,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L37",
+     "why": "owo config model field `public boolean osmium = true;`",
+     "config_key": "osmium"
+    },
+    "palladium": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 39,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L39",
+     "why": "owo config model field `public boolean palladium = true;`",
+     "config_key": "palladium"
+    },
+    "platinum": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 41,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L41",
+     "why": "owo config model field `public boolean platinum = true;`",
+     "config_key": "platinum"
+    },
+    "prometheum": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 43,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L43",
+     "why": "owo config model field `public boolean prometheum = true;`",
+     "config_key": "prometheum"
+    },
+    "quadrillum": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 45,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L45",
+     "why": "owo config model field `public boolean quadrillum = true;`",
+     "config_key": "quadrillum"
+    },
+    "runite": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 47,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L47",
+     "why": "owo config model field `public boolean runite = true;`",
+     "config_key": "runite"
+    },
+    "deepslateRunite": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 49,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L49",
+     "why": "owo config model field `public boolean deepslateRunite = true;`",
+     "config_key": "deepslateRunite"
+    },
+    "silver": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 51,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L51",
+     "why": "owo config model field `public boolean silver = true;`",
+     "config_key": "silver"
+    },
+    "starrite": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 53,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L53",
+     "why": "owo config model field `public boolean starrite = true;`",
+     "config_key": "starrite"
+    },
+    "endStarrite": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 55,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L55",
+     "why": "owo config model field `public boolean endStarrite = true;`",
+     "config_key": "endStarrite"
+    },
+    "stormyx": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 57,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L57",
+     "why": "owo config model field `public boolean stormyx = true;`",
+     "config_key": "stormyx"
+    },
+    "unobtainium": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 59,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L59",
+     "why": "owo config model field `public boolean unobtainium = true;`",
+     "config_key": "unobtainium"
+    },
+    "tin": {
+     "default": true,
+     "file": "src/main/java/com/mythicmetals/config/MythicConfigModel.java",
+     "line": 61,
+     "url": "https://github.com/Noaaan/MythicMetals/blob/7332378b515fa0048bec5bd7efac9865b309bf2d/src/main/java/com/mythicmetals/config/MythicConfigModel.java#L61",
+     "why": "owo config model field `public boolean tin = true;`",
+     "config_key": "tin"
     }
    }
   }

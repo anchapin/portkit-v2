@@ -491,6 +491,12 @@ class LoadContext:
         return Verdict(False, f"{label} (off by default)", disabled=[label], assumed=[found])
 
     # -- for converters ----------------------------------------------------
+    def flag_verdict(self, kind: str, argument: str | None, flag: str) -> Verdict:
+        """The verdict on one named flag of a condition type, as a condition
+        ``{"type": kind, argument: flag}`` would get it (the user's setting,
+        else the cited default); for flags tested in code (#281)."""
+        return self._flag(kind, {"type": kind, **({argument: flag} if argument else {})})
+
     def gate(self, data: dict, kind: str = "recipe") -> Verdict:
         """The verdict on a data file's own load conditions (True when it has none)."""
         parts = [self.evaluate(data[key]) for key in condition_keys(self.mod.loader, kind)

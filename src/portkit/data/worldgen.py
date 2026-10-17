@@ -67,6 +67,9 @@ SAME_ID_BLOCKS = frozenset({
     "minecraft:deepslate", "minecraft:tuff", "minecraft:netherrack", "minecraft:basalt",
     "minecraft:blackstone", "minecraft:end_stone", "minecraft:gravel", "minecraft:sand",
     "minecraft:dirt", "minecraft:clay", "minecraft:soul_sand", "minecraft:soul_soil",
+    # Java 1.17+ blocks, in blocks.json as "calcite" and "smooth_basalt"
+    # (Mythic Metals' starrite and orichalcum veins replace them, #281).
+    "minecraft:calcite", "minecraft:smooth_basalt",
 })
 
 # Java generation step (GenerationStep.Decoration) -> Bedrock placement_pass.
@@ -88,3 +91,35 @@ STEPS: dict[str, str] = {
 # (Java 255); the End from 0 to 255 on both.
 JAVA_Y = {"overworld": (-64, 319), "nether": (0, 255), "the_end": (0, 255)}
 BEDROCK_Y = {"overworld": (-64, 319), "nether": (0, 127), "the_end": (0, 255)}
+
+# Loader convention biome tags whose pinned definition is exactly one vanilla
+# dimension tag, keyed by the loader tag set (portkit.data.tags.select).
+#
+# * ``fabric-1.21.1``: fabric-convention-tags-v2 2.12.0+c3656daa19 (Fabric API
+#   0.116.17+1.21.1, Apache-2.0; the jar portkit.data.tags pins),
+#   ``data/c/tags/worldgen/biome/is_overworld.json`` is
+#   ``{"values": [{"id": "#minecraft:is_overworld", "required": false},
+#   {"id": "#c:in_the_overworld", "required": false}]}``; ``is_nether.json``
+#   the same with ``#minecraft:is_nether`` and ``#c:in_nether``;
+#   ``is_end.json`` with ``#minecraft:is_end`` and ``#c:in_the_end``. The
+#   legacy ``c:in_*`` tags are optional and defined nowhere in that Fabric API
+#   (its pom lists fabric-convention-tags-v2 only, and the v2 jar has no
+#   ``in_*`` biome tag), so each tag is exactly its vanilla tag.
+#
+# Other convention biome tags (``c:is_aquatic``, ``c:is_mountain``...) are
+# biome lists, which have no Bedrock map here (pick 3), so they are not rows.
+CONVENTION_BIOME_TAGS: dict[str, dict[str, str]] = {
+    "fabric-1.21.1": {
+        "c:is_overworld": "minecraft:is_overworld",
+        "c:is_nether": "minecraft:is_nether",
+        "c:is_end": "minecraft:is_end",
+    },
+}
+
+
+def convention_biome_tags(loader: str | None, minecraft: str | None) -> dict[str, str]:
+    from . import tags as tag_data
+    for tag_set in tag_data.select(loader, minecraft):
+        if tag_set.family != "vanilla":
+            return dict(CONVENTION_BIOME_TAGS.get(tag_set.id, {}))
+    return {}

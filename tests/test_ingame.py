@@ -167,6 +167,8 @@ def test_prepare(tree, tmp_path):
     assert rps == [{"pack_id": "u-rp", "version": [1, 0, 0]}]
     assert "level-type=FLAT" in (prepared.root / "server.properties").read_text()
     assert (bds / "server.properties").read_text() == "level-name=Bedrock level\n"
+    generated = server.prepare(bds, tmp_path / "work2", tree, "demo", world="default")
+    assert "level-type=DEFAULT" in (generated.root / "server.properties").read_text()
 
 
 LOG = """\

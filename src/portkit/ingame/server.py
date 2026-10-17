@@ -135,13 +135,20 @@ class Prepared:
     resource: list[Path] = field(default_factory=list)
 
 
-def prepare(server: Path, work: Path, tree: Path, name: str) -> Prepared:
+# World types a run can use: the flat check world, or Bedrock's generated
+# world (server.properties level-type DEFAULT; the flat one is FLAT, both per
+# the bedrock_server_how_to.html shipped with BDS) for the Overworld ore check.
+WORLDS = {"flat": "FLAT", "default": "DEFAULT"}
+
+
+def prepare(server: Path, work: Path, tree: Path, name: str, world: str = "flat") -> Prepared:
     """A fresh server copy in ``work`` with the converted tree and its check pack."""
     if work.exists():
         shutil.rmtree(work)
     shutil.copytree(server, work, symlinks=True)
     props = work / "server.properties"
-    props.write_text(set_properties(props.read_text() if props.exists() else "", PROPERTIES))
+    wanted = dict(PROPERTIES, **{"level-type": WORLDS[world]})
+    props.write_text(set_properties(props.read_text() if props.exists() else "", wanted))
     prepared = Prepared(work)
     bp_src, rp_src = tree / "behavior_pack", tree / "resource_pack"
     if bp_src.is_dir():
@@ -153,7 +160,7 @@ def prepare(server: Path, work: Path, tree: Path, name: str) -> Prepared:
         shutil.copytree(rp_src, dest)
         prepared.resource.append(dest)
     check = work / "behavior_packs" / f"portkit_checks_{name}"
-    write_test_pack(bp_src, check, name)
+    write_test_pack(bp_src, check, name, world=world)
     prepared.behavior.append(check)
     world = work / "worlds" / LEVEL
     world.mkdir(parents=True, exist_ok=True)

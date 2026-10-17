@@ -1196,13 +1196,14 @@ def cmd_ingame(args) -> int:
         return 2
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    prepared = server.prepare(Path(args.server), Path(args.work or out / "server"), tree, name)
+    prepared = server.prepare(Path(args.server), Path(args.work or out / "server"), tree, name,
+                              world=args.world)
     if args.experiment:
         server.enable_experiments(prepared.root, args.experiment)
     result = server.run(prepared.root, f"{server.TAG} DONE", args.timeout, out / "server.log")
     report = server.parse(result.lines)
     report.update(
-        name=name, bds_version=server.BDS_VERSION, experiments=args.experiment or [],
+        name=name, bds_version=server.BDS_VERSION, experiments=args.experiment or [], world=args.world,
         exit_code=result.exit_code, timed_out=result.timed_out, seconds=result.seconds,
     )
     report["content_logs"] = [p.name for p in server.collect_logs(prepared.root, out / "content-log")]
@@ -1530,6 +1531,9 @@ def main(argv=None) -> int:
     p.add_argument("--work", help="run: the server copy to run in (default OUT/server)")
     p.add_argument("--experiment", action="append", metavar="NAME",
                    help="run: toggle this experiment on in the world's level.dat (repeatable)")
+    p.add_argument("--world", choices=["flat", "default"], default="flat",
+                   help="run: the check world; 'default' generates a normal Overworld and runs only the ore "
+                        "checks, which then also count the ores the Overworld generates (#281)")
     p.add_argument("--timeout", type=float, default=900, help="run: seconds before the run is stopped")
     p.add_argument("--keep-server", action="store_true", help="run: keep the server copy afterwards")
     p.set_defaults(func=cmd_ingame)

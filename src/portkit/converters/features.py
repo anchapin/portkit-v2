@@ -53,8 +53,10 @@ FeaturesIntroduction.md and Features/minecraftOre_feature.md):
 * a ``remove_features`` modifier naming the feature -> residue (pick 6): the
   Bedrock rule can't subtract biomes the Java removal names.
 
-Fabric adds features to biomes in code (``BiomeModifications``), so a Fabric
-ore has no modifier and stays ``unowned`` here (pick 5).
+Fabric adds features to biomes in code (``BiomeModifications``): those calls
+are read from the bytecode by :mod:`portkit.biomecode` (pick 5a) and come in
+as ``code`` rows shaped like a modifier, decided the same way; a call that
+can't be read exactly leaves its ore ``unowned`` or residue with the reason.
 """
 from __future__ import annotations
 
@@ -300,8 +302,10 @@ def _file_name(ident: str, taken: set[str], suffix: str = "") -> str:
     return name
 
 
-def convert(root: Path, files: dict, namespaces: set[str]) -> FeatureResult:
-    """Ore features the jar's Forge/NeoForge biome modifiers add, converted."""
+def convert(root: Path, files: dict, namespaces: set[str], code: list | None = None) -> FeatureResult:
+    """Ore features the jar's Forge/NeoForge biome modifiers add, converted;
+    and those its Fabric code adds (``code``: :class:`portkit.biomecode.CodeAttachment`
+    rows, read from the bytecode), each shaped like a modifier."""
     root = Path(root)
     out = FeatureResult()
     blocks = _shipped_blocks(files)
@@ -319,6 +323,10 @@ def convert(root: Path, files: dict, namespaces: set[str]) -> FeatureResult:
             for f in _as_list(doc.get("features")):
                 if isinstance(f, str):
                     removed[f] = rel
+    code = list(code or [])
+    for c in code:
+        if c.removal:
+            removed[c.feature] = c.source
 
     feature_names: dict[str, str] = {}  # configured rel -> feature id written
     taken_features: set[str] = set()
@@ -332,16 +340,27 @@ def convert(root: Path, files: dict, namespaces: set[str]) -> FeatureResult:
         found = [_in_slice(root, f) for f in feats]
         if not feats or any(x is None for x in found):
             continue  # not wholly ores: left for the other passes
-        plans.append((rel, doc, list(zip(feats, found))))
+        plans.append((rel, doc, list(zip(feats, found)), None))
         for f in feats:
             adds_per_pf[f] = adds_per_pf.get(f, 0) + 1
+    for k, c in enumerate(code):
+        if c.removal:
+            continue
+        found = _in_slice(root, c.feature)
+        if found is None:
+            continue  # not a vanilla ore with vanilla placements: left for the other passes
+        plans.append((c.source, c.doc, [(c.feature, found)], c))
+        adds_per_pf[c.feature] = adds_per_pf.get(c.feature, 0) + 1
 
     converted_cf: set[str] = set()
     refused: dict[str, tuple[str, str]] = {}  # placed rel -> (reason, configured rel)
     empty_modifiers: list[str] = []
-    for rel, doc, entries in plans:
-        out.consumed.add(rel)
-        mod_name = _MODIFIER.match(rel).group(3)
+    for rel, doc, entries, from_code in plans:
+        if from_code is None:
+            out.consumed.add(rel)
+            mod_name = _MODIFIER.match(rel).group(3)
+        else:
+            mod_name = re.sub(r"[^a-z0-9_]", "_", from_code.source.split(" ")[0].rsplit(".", 1)[-1].lower())
         rules_before = len(out.ores)
         for ident, (prel, crel, pf, cf) in entries:
             out.consumed |= {prel, crel}
@@ -349,6 +368,8 @@ def convert(root: Path, files: dict, namespaces: set[str]) -> FeatureResult:
                 if ident in removed:
                     raise _Refused(f"`{removed[ident]}` removes it from some biomes, which a Bedrock feature rule "
                                    "can't subtract (#281 pick 6)")
+                if from_code is not None and from_code.refused:
+                    raise _Refused(f"attached in code by {from_code.source}: {from_code.refused}")
                 step = doc.get("step")
                 passname = ref.STEPS.get(step)
                 if passname is None:
@@ -375,6 +396,10 @@ def convert(root: Path, files: dict, namespaces: set[str]) -> FeatureResult:
                 out.files[f"features/{fname}.json"] = {"format_version": FEATURE_FORMAT,
                                                        "minecraft:ore_feature": body}
             converted_cf.add(crel)
+            if from_code is not None:
+                out.consumed |= from_code.consumed
+                out.notes.append(f"Ore `{ident}`: attached to biomes {', '.join(doc['biomes'])} at "
+                                 f"{doc['step']} by {from_code.source}.")
             suffix = "_feature_rules" if adds_per_pf.get(ident, 0) <= 1 else f"__{mod_name}_feature_rules"
             rname = _file_name(ident, taken_rules, suffix)
             rule_id = f"{_split(ident)[0]}:{rname}"
@@ -395,7 +420,7 @@ def convert(root: Path, files: dict, namespaces: set[str]) -> FeatureResult:
                                            for p in _placements(pf)):
                 out.notes.append(f"Ore `{ident}`: Java's trapezoid height range written as Bedrock's triangle "
                                  f"distribution over {lo}..{hi} (#281 pick 2).")
-        if len(out.ores) == rules_before:
+        if len(out.ores) == rules_before and from_code is None:
             empty_modifiers.append(rel)
     for prel, (reason, crel) in sorted(refused.items()):
         count = 1 + (crel not in converted_cf)

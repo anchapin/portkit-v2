@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import codeonly, datatags, ownership, worldgen
+from . import biomecode, codeonly, datatags, ownership, worldgen
 from .converters import features, lang, loot, recipes
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
@@ -21,6 +21,7 @@ from .converters.recipes import (
     withdraw_unacceptable_trims,
     withdraw_unequipped_smithing,
 )
+from .data import worldgen as worldgen_ref
 from .data.mappings import attach as attach_mappings
 from .icon import resolve as resolve_icon
 from .ingest import ingest
@@ -507,7 +508,21 @@ def convert(
         withdraw_unacceptable_trims(result)
         # The pack's blocks are final: the ores the jar's Forge/NeoForge biome
         # modifiers add become Bedrock ore features and feature rules (#281).
-        ores = features.convert(staged.root, result.files, set(selected))
+        # And the ores its Fabric code adds to biomes (BiomeModifications),
+        # read from the bytecode (#281 pick 5a).
+        code_ores = []
+        if staged.classes is not None and len(staged.classes):
+            reading = biomecode.read(staged.classes, staged.metadata)
+            result.notes.extend(reading.notes)
+            if reading.attachments:
+                gates = LoadContext(SourceMod.from_metadata(staged.root, namespace, meta),
+                                    overrides=overrides or None)
+                code_ores = biomecode.decide(reading, staged.root, set(selected), gates,
+                                             worldgen_ref.convention_biome_tags(meta.loader, meta.minecraft),
+                                             {k for k in worldgen_ref.BIOME_TAGS})
+                if gates.note():
+                    result.notes.append(gates.note())
+        ores = features.convert(staged.root, result.files, set(selected), code=code_ores)
         result.files.update(ores.files)
         result.consumed |= ores.consumed
         result.unhandled.extend(ores.unhandled)
