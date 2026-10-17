@@ -14,6 +14,7 @@ to finish by hand.
 from __future__ import annotations
 
 import json
+import re
 
 from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod, Unhandled
@@ -197,3 +198,38 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
     if note:
         result.notes.append(note)
     return result
+
+
+OWNED = "owned_by_residue"
+_BLOCK_TABLE = re.compile(r"^data/([^/]+)/(?:loot_tables|loot_table)/blocks/(.+)\.json$")
+
+
+def refine_owned(unhandled: list[Unhandled], shipped_blocks: set[str]) -> list[Unhandled]:
+    """Re-file a refused block loot table whose block is itself residue (#277 loot).
+
+    A ``loot`` entry for ``data/<ns>/loot_table[s]/blocks/<path>.json`` names
+    the block ``<ns>:<path>``. When the pack doesn't ship that block and its
+    blockstate ``assets/<ns>/blockstates/<path>.json`` has a residue entry of
+    its own (the block converter refused it, or it is a ``code_drawn_block``),
+    the table has no block to drop from (its item may still ship: a Java
+    block's item shares the block's id, so only the pack's blocks count here): it becomes ``owned_by_residue``, the
+    explained kind models and textures of refused blocks already use (#292),
+    keeping why the table itself was refused. It goes with its block when that
+    converts. A table whose block shipped, or has no blockstate, stays ``loot``.
+    """
+    residue = {u.source: u.kind for u in unhandled if u.kind not in ("loot", OWNED)}
+    out: list[Unhandled] = []
+    for u in unhandled:
+        match = _BLOCK_TABLE.match(u.source) if u.kind == "loot" else None
+        if match:
+            ns, path = match.groups()
+            blockstate = f"assets/{ns}/blockstates/{path}.json"
+            if f"{ns}:{path}" not in shipped_blocks and blockstate in residue:
+                out.append(Unhandled(
+                    source=u.source, kind=OWNED, count=u.count,
+                    reason=(f"the loot table of block {ns}:{path}, which the pack doesn't ship: its blockstate "
+                            f"{blockstate} is residue ({residue[blockstate]}) with its own entry, so the table "
+                            f"goes with the block when it converts (the table itself: {u.reason})")))
+                continue
+        out.append(u)
+    return out

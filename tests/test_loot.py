@@ -90,6 +90,35 @@ def test_two_pools_are_refused(tmp_path):
     assert "2 pools" in result.unhandled[0].reason
 
 
+def _residue(source, kind, reason="r"):
+    from portkit.model import Unhandled
+    return Unhandled(source=source, kind=kind, reason=reason)
+
+
+def test_a_refused_table_whose_block_is_residue_is_owned_by_residue():
+    unhandled = [
+        _residue("assets/ex/blockstates/chest.json", "code_drawn_block"),
+        _residue("data/ex/loot_table/blocks/chest.json", "loot", "the drop copies the block's custom name"),
+        _residue("data/ex/loot_tables/blocks/lamp.json", "loot", "the drop depends on the block state"),
+        _residue("data/ex/loot_table/blocks/ore.json", "loot", "the drop depends on the tool used"),
+        _residue("assets/ex/blockstates/lamp.json", "block"),
+    ]
+    out = loot.refine_owned(unhandled, shipped_blocks={"ex:ore"})
+    kinds = {u.source: u.kind for u in out}
+    assert kinds["data/ex/loot_table/blocks/chest.json"] == "owned_by_residue"
+    assert kinds["data/ex/loot_tables/blocks/lamp.json"] == "owned_by_residue"
+    # The block shipped: the table is still a converter gap.
+    assert kinds["data/ex/loot_table/blocks/ore.json"] == "loot"
+    chest = next(u for u in out if u.source.endswith("blocks/chest.json"))
+    assert "code_drawn_block" in chest.reason and "custom name" in chest.reason
+    assert len(out) == len(unhandled)
+
+
+def test_a_table_with_no_residue_blockstate_stays_loot():
+    unhandled = [_residue("data/ex/loot_table/blocks/ghost.json", "loot")]
+    assert loot.refine_owned(unhandled, shipped_blocks=set())[0].kind == "loot"
+
+
 def test_the_1_21_singular_directory_is_read_too(tmp_path):
     mod = build(tmp_path, {"steel_block": pool(ITEM, SURVIVES)}, dirname="loot_table")
     result = loot.convert(mod)
@@ -144,3 +173,23 @@ def test_a_pack_with_both_a_flipbook_and_loot_tables_validates(tmp_path):
     )
     report = validate_pack(pack)
     assert [f for f in report.findings if f.rule.startswith("loot.")] == []
+def test_the_pipeline_files_a_code_drawn_blocks_table_with_its_block(tmp_path):
+    from portkit.agent.residue import SKIP_KINDS
+    from portkit.pipeline import convert
+
+    src = tmp_path / "src"
+    assets = src / "assets" / "examplemod"
+    (assets / "blockstates").mkdir(parents=True)
+    (assets / "blockstates" / "chest.json").write_text(
+        json.dumps({"variants": {"": {"model": "examplemod:block/chest"}}}))
+    (assets / "models" / "block").mkdir(parents=True)
+    (assets / "models" / "block" / "chest.json").write_text(
+        json.dumps({"textures": {"particle": "examplemod:block/planks"}}))
+    chest = {"type": "minecraft:item", "name": "examplemod:chest",
+             "functions": [{"function": "minecraft:copy_name", "source": "block_entity"}]}
+    build(src, {"chest": pool(chest, SURVIVES), "steel_block": pool(ITEM, SURVIVES)}, dirname="loot_table")
+    out = convert(src, tmp_path / "out")
+    kinds = {u.source: u.kind for u in out.unhandled}
+    assert kinds["assets/examplemod/blockstates/chest.json"] == "code_drawn_block"
+    assert kinds["data/examplemod/loot_table/blocks/chest.json"] == "owned_by_residue"
+    assert "owned_by_residue" in SKIP_KINDS
