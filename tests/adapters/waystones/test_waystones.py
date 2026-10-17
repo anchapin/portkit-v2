@@ -243,7 +243,8 @@ def test_other_waystones_blocks_keep_their_residue(converted):
     result, tree = converted
     assert not (tree / "behavior_pack/blocks/white_sharestone.json").exists()
     assert any(u.source.endswith("blockstates/white_sharestone.json") and u.kind == "block" for u in result.unhandled)
-    assert any(u.source.endswith("loot_table/blocks/white_sharestone.json") and u.kind == "loot"
+    # Its loot table goes with the refused block (#277 loot).
+    assert any(u.source.endswith("loot_table/blocks/white_sharestone.json") and u.kind == "owned_by_residue"
                for u in result.unhandled)
 
 

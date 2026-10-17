@@ -234,7 +234,8 @@ def test_unread_version_leaves_feasts_as_residue(tmp_path, reference):  # noqa: 
     result = convert(_feast_mod(tmp_path, version="1.2.9"), tmp_path / "out", emit_addon=False)
     assert not (tmp_path / "out" / DATA).exists()
     assert any(u.source.endswith("blockstates/roast_chicken_block.json") for u in result.unhandled)
-    assert any(u.source.endswith("loot_table/blocks/roast_chicken_block.json") and u.kind == "loot"
+    # The table goes with its refused block (#299).
+    assert any(u.source.endswith("loot_table/blocks/roast_chicken_block.json") and u.kind == "owned_by_residue"
                for u in result.unhandled)
 
 
