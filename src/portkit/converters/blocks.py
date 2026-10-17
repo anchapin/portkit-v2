@@ -4164,6 +4164,11 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         result.java_states[f"{ns}:{name}"] = {"type": {
             t: (_molang(conds_of[("", t)]) if ("", t) in conds_of else None) for _, t in blockcode.directional_keys(kind)}}
         unreachable = [k for k in unreachable if k != ("", "double")]
+        # The double slab's model was read and set aside on purpose, as the
+        # horizontal slab's is (_convert_slab).
+        double_path = models.model_path(mod, cells[(("", "double"), ())][0])
+        if double_path is not None and double_path.is_file():
+            result.claim(mod, double_path)
     drawn = {"facing"} if kind == "facing6" else {"type"} if kind == "vslab" else {"face", "facing"}
     record = {
         "name": name,

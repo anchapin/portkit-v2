@@ -60,6 +60,8 @@ def _mod(tmp_path: Path, with_loot: bool = False) -> SourceMod:
     (root / f"assets/{NS}/textures/block/oak.png").write_bytes(_png())
     (root / f"assets/{NS}/models/block/oak_vertical_slab.json").write_text(json.dumps(_slab_model()))
     (root / f"assets/{NS}/blockstates/oak_vertical_slab.json").write_text(json.dumps(_states()))
+    (root / f"assets/{NS}/models/block/oak_full.json").write_text(json.dumps(
+        {"parent": "minecraft:block/cube_all", "textures": {"all": f"{NS}:block/oak"}}))
     if with_loot:
         tables = root / f"data/{NS}/loot_table/blocks"
         tables.mkdir(parents=True)
@@ -137,6 +139,8 @@ def test_states_for_loot_and_notes(converted):
     assert states["double"] is None
     assert states["west"] == _side("west")
     assert not converted.unhandled
+    # The double model is read and set aside, not left unowned.
+    assert f"assets/{NS}/models/block/oak_full.json" in converted.consumed
     notes = " ".join(converted.notes)
     assert "1 vertical slab block(s) convert" in notes
     assert "Vertical slab placement DEFAULT" in notes and "the mod ships no class files" in notes
