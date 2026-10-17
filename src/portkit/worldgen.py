@@ -311,11 +311,19 @@ def _group(rel: str) -> str:
     return "/".join(parts[:3]) + "/"
 
 
+def _scanned(source: str) -> bool:
+    """An unowned group this pass reads: worldgen, structure templates, or a
+    data folder that is neither Minecraft's nor a loader's."""
+    parts = source.strip("/").split("/")
+    return len(parts) >= 3 and parts[0] == "data" and (
+        parts[2] in ("worldgen", "structure", "structures") or parts[2] not in _VANILLA_DIRS)
+
+
 def refine(unhandled: list[Unhandled], root: Path, consumed: set[str], namespaces: set[str],
            classes=None) -> list[Unhandled]:
     """Re-file the unowned worldgen, structure and other-mod data files the jar
     explains; the rest of the residue is returned unchanged."""
-    groups = [u for u in unhandled if u.kind == "unowned" and u.source.startswith("data/")]
+    groups = [u for u in unhandled if u.kind == "unowned" and _scanned(u.source)]
     if not groups:
         return unhandled
     root = Path(root)
@@ -365,7 +373,9 @@ def refine(unhandled: list[Unhandled], root: Path, consumed: set[str], namespace
         if u not in groups:
             out.append(u)
             continue
-        left = sum(1 for f in leftover if f.startswith(u.source) and f not in found)
+        # Earlier passes may have re-filed files of a group without claiming
+        # them, so only this pass's finds come off its count.
+        left = u.count - sum(1 for f in found if f.startswith(u.source))
         if left:
             out.append(Unhandled(source=u.source, kind="unowned",
                                  reason=f"{left} file(s) no converter claims yet", count=left))

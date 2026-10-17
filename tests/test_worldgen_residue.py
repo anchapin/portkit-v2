@@ -173,3 +173,20 @@ def test_a_structure_goes_with_the_explained_residue_that_names_it(tmp_path):
 def test_nothing_to_do_returns_the_residue_unchanged(tmp_path):
     residue = [Unhandled("assets/examplemod/x/", "unowned", "1 file(s) no converter claims yet")]
     assert worldgen.refine(residue, tmp_path, set(), {"examplemod"}) == residue
+
+
+def test_groups_other_passes_refiled_keep_their_counts(tmp_path):
+    # An earlier pass (data tags) re-filed part of a group without claiming
+    # the files: this pass neither reads that group nor recounts it.
+    _write(tmp_path, "data/c/tags/item/a.json", {"values": []})
+    _write(tmp_path, "data/c/tags/item/b.json", {"values": []})
+    _write(tmp_path, "data/examplemod/worldgen/configured_feature/rock.json", {"type": "examplemod:rock"})
+    _write(tmp_path, "data/examplemod/worldgen/configured_feature/ore.json", {"type": "minecraft:ore"})
+    residue = [Unhandled("data/c/tags/", "unowned", "1 file(s) no converter claims yet", count=1),
+               Unhandled("data/c/tags/item/", "tag_unread", "read by nothing", count=1),
+               Unhandled("data/examplemod/worldgen/", "unowned", "2 file(s) no converter claims yet", count=2)]
+    out = worldgen.refine(residue, tmp_path, set(), {"examplemod"})
+    by = {(u.source, u.kind): u.count for u in out}
+    assert by[("data/c/tags/", "unowned")] == 1
+    assert by[("data/examplemod/worldgen/", "unowned")] == 1
+    assert sum(u.count for u in out) == sum(u.count for u in residue)
