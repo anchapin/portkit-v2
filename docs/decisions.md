@@ -29,7 +29,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ## 2026-10-17: doors and plain two-tall blocks convert on Bedrock's `minecraft:multi_block` trait; a door's hinge, hand use and redstone are a fixed script ported from vanilla `DoorBlock`
 
-- **Status:** proposed, awaiting Alex (picks on the #296 doors PR; defaults marked there).
+- **Status:** approved (Alex, 2026-10-17): picks 1a 2a 3a 4a 5a 6a 7a, the defaults (PR #313, picks comment 6235234464).
 - **Decision:**
   1. **Shapes.** A `variants` blockstate drawing exactly `facing`, `half` (lower/upper), `hinge`, `open` (Java's `powered` draws nothing and is dropped) with all 32 variants on vanilla's eight door templates (`block/door_{bottom,top}_{left,right}[_open]`, added to the fetched model templates; identical in mcmeta's 1.19 through 26.1 summaries) is a **door**. A `variants` blockstate drawing only `half` (one model per half, no turn) is a **plain two-tall block** (tall flowers and grasses).
   2. **Both halves are one block** (pick 2): `minecraft:multi_block` (`direction` up, 2 parts), block `format_version` 1.26.40, the first with no experiment for vertical multi-blocks (pick 5: the pack's engine floor follows). Bedrock places part 1 above part 0, breaks both together and drops only the broken part's loot. A door also uses `placement_direction` (`cardinal_direction`, the one other trait allowed), `minecraft:movable` popped, 32 permutations on part, facing, hinge and open (geometry and boxes only).
