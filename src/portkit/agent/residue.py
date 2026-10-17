@@ -168,6 +168,15 @@ SKIP_KINDS = {
                          "block is drawn by the mod's Java code (a block-entity renderer, the fluid renderer or "
                          "a model swapped in at runtime); a Bedrock block definition has no renderer to hand "
                          "that to, and a stand-in geometry would invent the look"),
+    # #277 worldgen and other mods' data the jar explains (portkit.worldgen; PR #316 picks 1a 2a 3a).
+    "code_worldgen": ("the worldgen file's type (a feature, placement modifier or pool element) is the mod's "
+                      "own Java class, or only the mod's code (or such files) puts it into generation, so what "
+                      "it generates and where is code; a Bedrock feature or feature rule would invent it, and "
+                      "the reason names the type or the class"),
+    "other_mod_data": ("data only another mod reads (its type or target is that mod's namespace, or a compat "
+                       "class of this jar registers it): neither Minecraft, the mod loader nor this mod reads "
+                       "it, and that mod isn't converted with this jar; the reason names the mod and what the "
+                       "jar shows"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }

@@ -27,6 +27,72 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-17: worldgen typed with the mod's own classes is `code_worldgen`; data only another mod reads is `other_mod_data` (approved (Alex, 2026-10-17))
+
+- **Decision:** two new explained residue kinds (agent `SKIP_KINDS`), filed from
+  leftover `unowned` data by `portkit.worldgen.refine` after the data-tag pass.
+  Core and generic, no mod names:
+  - `code_worldgen`: a `worldgen/configured_feature/` file whose `type`, a
+    `worldgen/placed_feature/` file with a `placement` modifier whose `type`, or
+    a `worldgen/template_pool/` file with an `element_type`, in one of the jar's
+    own namespaces. Those types are registry entries only code registers, so the
+    file is the mod's Java code. The reason names the type and the jar's classes
+    whose constant pool holds its path, the one that also names the jar's own
+    subclass of Minecraft's `Feature` / `PlacementModifier` / pool element first
+    (#87). Worldgen built only from `minecraft:` types stays `unowned` (#281); so
+    does a placed feature with only vanilla placements, even of a code feature.
+  - `other_mod_data`: `data/<ns>/<dir>/` where `<dir>` is not a folder Minecraft
+    (1.16-1.21.x) or a loader reads, and every file is a JSON object whose
+    top-level `type` or `target_*` names a namespace that is not the jar's own,
+    vanilla's, `c` or a loader's. One entry per folder; the reason names the
+    other mod's namespace and the jar's classes that name it.
+  - A structure template (`structure[s]/<path>.nbt`) every data file naming it
+    is residue of these kinds goes with them: `code_worldgen` when one is, else
+    `other_mod_data`. A template named by nothing, or by a file still `unowned`,
+    stays `unowned`.
+  - The Waystones adapter (`adapters/waystones/worldgen.py`, its new `convert`
+    hook) files the 5 village pools `worldgen/template_pool/village/<biome>/waystones.json`
+    as `code_worldgen` (nothing in the data names them;
+    `mixin/JigsawPlacementPlacerMixin#forceWaystonePool` turns a `.../houses`
+    pool into `waystones:.../waystones` by config `worldGen.spawnInVillages`) and
+    `unbreakables/generated_waystones.json` as `other_mod_data`
+    (`compat/UnbreakablesIntegration` registers its conditions through
+    `net/blay09/mods/unbreakables/api/UnbreakablesAPI`). Each claim checks that
+    the jar's classes hold the cited class and strings, else the file stays
+    `unowned`. The reasons say only what the jar shows; whether a Bedrock add-on
+    can add pieces to vanilla villages was not checked.
+  - Waystones 21.1.46 (NeoForge and Fabric): 20 features/placements, 5 pools and
+    2 templates `code_worldgen`; `lithostitched/` 5, `rs_pieces_spawn_counts/` 12,
+    `rs_pool_additions/` 22, `unbreakables/` 1 and the template
+    `village/common/waystone_waterlogged.nbt` (named only by the Repurposed
+    Structures files, so not "with its pools" as the picks comment said)
+    `other_mod_data`. Waystones has no `unowned` data left but `advancement/`,
+    which the board does not count against done.
+  - Pack bytes are unchanged: explained entries add no converted files, so
+    coverage and mean coverage don't move.
+- **Why:** Alex's picks 1a, 2a and 3a on PR #316 (comment 6237827326): what the
+  files generate, and where, is Java code or another mod's, and converting
+  them would invent it; but they are not a portkit gap either, so Waystones can
+  count as done (#277 rule 6).
+- **Rejected:** 1b converting the wild waystones to Bedrock features
+  (needs the spawn rate from WaystonePlacement's bytecode and world-generated
+  waystone naming, its own issue); 2b shipping the templates as standalone
+  `.mcstructure` features (Java never spawns them outside a village); 3b all
+  other-mod data in the Waystones adapter only; 1c/3c leaving them `unowned`.
+- **Links:** #277, #281, #87, PR #316.
+
+## 2026-10-17: an item-model template only emitted block items inherit is claimed with them
+
+- **Decision:** a `models/item/` file in the parent chain of an emitted block's
+  item model is claimed with it when no item is registered under the
+  template's name (`registered_ids(items_only=True)`). A registered template,
+  or one whose child blocks did not convert, keeps its `item` residue.
+- **Why:** such a template is a display parent, not an item (Waystones'
+  portstone/sharestone, BOP `rose_quartz_bud`, CfB `oven`); it ships with its
+  children.
+- **Rejected:** reporting it as an item that failed to convert.
+- **Links:** #277, PR #316.
+
 ## 2026-10-17: trapdoors convert as one block on `placement_position` (vertical_half) + `placement_direction`, opened by hand and redstone through the door's rules
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-17 pick 7a of the doors entry below, whose detection rule, runtime and sources it reuses unchanged; Alex's 2026-10-14 campaign order).
