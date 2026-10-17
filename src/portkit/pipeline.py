@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import codeonly, datatags, ownership
-from .converters import lang, loot
+from .converters import lang, loot, recipes
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
 from .converters import convert_all
@@ -549,6 +549,9 @@ def convert(
             blocks_shipped = {_declared(b) for b in result.files.values()
                               if isinstance(b, dict) and "minecraft:block" in b} - {None}
             unhandled = loot.refine_owned(unhandled, blocks_shipped)
+            # And a recipe withdrawn for naming items that are residue of
+            # their own goes with them (#302).
+            unhandled = recipes.refine_owned(unhandled, result.unshipped_names)
             # And its leftover data tags: what reads them, and whether their
             # members shipped (#293).
             unhandled = datatags.refine(unhandled, staged.root, result.consumed, shipped,

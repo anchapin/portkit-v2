@@ -114,6 +114,10 @@ class ConversionResult:
     # a function's block-state conditions with it (#299). A property it
     # doesn't name has no known mapping.
     java_states: dict[str, dict[str, dict[str, str | None]]] = field(default_factory=dict)
+    # Source recipe -> every mod item it names that the pack doesn't ship, for
+    # a recipe drop_unshipped_recipes withdrew (#261); the pipeline re-files it
+    # as owned_by_residue when each of those items is residue of its own (#302).
+    unshipped_names: dict[str, list[str]] = field(default_factory=dict)
 
     def claim(self, mod: "SourceMod", path: Path) -> str:
         """Record a source file as looked at and return its relative path."""
