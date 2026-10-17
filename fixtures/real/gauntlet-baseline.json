@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-17T00:22:55+00:00",
+ "generated": "2026-10-17T00:58:39+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
