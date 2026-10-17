@@ -170,3 +170,43 @@ def test_the_pipeline_converts_the_crop_seed_and_the_recipe_using_it(tmp_path):
     assert "items/salt_block.json" not in result.files
     assert "recipes/rice_bowl.json" in result.files
     assert not [u for u in result.unhandled if u.source.endswith("rice_bowl.json")]
+
+
+# A 3D item-model template that only block items inherit (Waystones'
+# models/item/portstone.json is the parent of its sixteen <colour>_portstone
+# item models; no item is registered as portstone).
+SHAPE = {"elements": [{"from": [0, 0, 0], "to": [16, 16, 16], "faces": {}}],
+         "textures": {"texture": "examplemod:block/salt_block"}}
+
+
+def _templated(tmp_path, lang=None, extra=None):
+    return _mod(tmp_path, {
+        "assets/examplemod/models/item/pillar.json": SHAPE,
+        "assets/examplemod/models/item/red_pillar.json": {"parent": "examplemod:item/pillar"},
+        "assets/examplemod/models/item/blue_pillar.json": {"parent": "examplemod:item/pillar"},
+        "assets/examplemod/blockstates/red_pillar.json": CUBE_STATE,
+        "assets/examplemod/blockstates/blue_pillar.json": CUBE_STATE,
+        **(extra or {}),
+    }, lang if lang is not None else {"block.examplemod.red_pillar": "Red", "block.examplemod.blue_pillar": "Blue"})
+
+
+def test_a_template_only_emitted_block_items_inherit_goes_with_them(tmp_path):
+    mod = _templated(tmp_path)
+    result = items.convert(mod, emitted_blocks={"examplemod:red_pillar", "examplemod:blue_pillar"})
+    assert result.files == {} and result.unhandled == []
+    assert "assets/examplemod/models/item/pillar.json" in result.consumed
+
+
+def test_a_template_of_block_items_that_did_not_convert_stays_residue(tmp_path):
+    mod = _templated(tmp_path)
+    result = items.convert(mod, emitted_blocks=set())
+    assert "assets/examplemod/models/item/pillar.json" in {u.source for u in result.unhandled}
+
+
+def test_a_template_that_is_also_a_registered_item_stays_an_item(tmp_path):
+    """Evidence that Java registers an item under the template's name (a lang
+    key) keeps it an item: its 3D shape is still residue, never claimed away."""
+    mod = _templated(tmp_path, lang={"item.examplemod.pillar": "Pillar"})
+    result = items.convert(mod, emitted_blocks={"examplemod:red_pillar", "examplemod:blue_pillar"})
+    [entry] = [u for u in result.unhandled if u.source.endswith("models/item/pillar.json")]
+    assert entry.kind == "item"

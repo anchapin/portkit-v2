@@ -72,6 +72,7 @@ the switch lives in Java code.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from ..conditions import LoadContext
 from ..entities import ENTITY, SPAWN_EGG_PARENT, spawn_egg_reason
@@ -227,6 +228,38 @@ def _block_names(mod: SourceMod) -> set[str]:
     if not states.is_dir():
         return set()
     return {p.stem for p in states.glob("*.json")}
+
+
+def _block_item_templates(mod: SourceMod, src: Path, blocks: set[str],
+                          emitted_blocks: set[str] | None) -> set[Path]:
+    """The ``models/item/`` files an emitted block's item model inherits from.
+
+    The item model named like an emitted block is claimed for that block
+    (Bedrock makes the block's item itself), and so is the parent chain it
+    inherits: a model such as ``models/item/<shape>.json`` that only serves as
+    the parent of several block items' models is part of those models, not
+    an item of its own (the caller still checks that no item is registered
+    under its name, :func:`portkit.registry.registered_ids`). Java's model
+    loader reads such a file only through the child's ``parent``; it loads
+    ``models/item/<id>`` by name for registered items only (as
+    :mod:`portkit.ownership` notes).
+    """
+    found: set[Path] = set()
+    root = src.resolve()
+    for path in sorted(src.glob("*.json")):
+        if path.stem not in blocks:
+            continue
+        if emitted_blocks is not None and bedrock_identifier(mod.namespace, path.stem) not in emitted_blocks:
+            continue
+        try:
+            model = json.loads(path.read_text())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(model, dict):
+            continue
+        _flat, seen, _why = _chain(mod, model)
+        found.update(p for p in seen if p.resolve().parent == root)
+    return found
 
 
 def _layer0(path) -> str | None:
@@ -677,9 +710,18 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
     separate: list[tuple[str, dict]] = []  # emitted separate_transforms items and their held look
     icon_parts: set[str] = set()  # item model names an emitted item's gui view is built from
     held_parts: dict[str, str] = {}  # source of another view's model -> its residue reason ("" converted)
+    templates = _block_item_templates(mod, src, blocks, emitted_blocks)
     for path in sorted(src.glob("*.json")):
         name = path.stem
         unplaced = False
+        if name not in blocks and path in templates:
+            if items_known is None:
+                items_known = registered_ids(mod.root, items_only=True)
+            if f"{mod.namespace}:{name}" not in items_known:
+                # Not an item of its own: only the parent of emitted blocks'
+                # item models, which go with their block (claimed below).
+                result.claim(mod, path)
+                continue
         if name in blocks:
             if emitted_blocks is None or bedrock_identifier(mod.namespace, name) in emitted_blocks:
                 # The block converter owns this one; claiming it keeps it off the
