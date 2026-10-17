@@ -44,11 +44,14 @@ jobs:
           - { name: immersive_engineering, manifest: fixtures/real/gauntlet.toml }
           # Vertical slabs on block_face + cardinal_direction permutations, one uvlocked bone per side (#296).
           - { name: quark, manifest: fixtures/real/gauntlet.toml }
-    name: ${{ matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
+          # The gauntlet's NeoForge Waystones build, converted by the same adapter as the Fabric one (#296).
+          - { name: waystones, manifest: fixtures/real/gauntlet.toml, label: waystones-neoforge }
+    # `label` names a run whose jar shares its fixture name with another (one mod, two loader builds).
+    name: ${{ matrix.label || matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
     env:
       PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache
       PORTKIT_REFERENCE_CACHE: ${{ github.workspace }}/.reference-cache
-      RUN_NAME: ${{ matrix.name }}${{ matrix.experiment && '-experiment' || '' }}
+      RUN_NAME: ${{ matrix.label || matrix.name }}${{ matrix.experiment && '-experiment' || '' }}
     steps:
       - uses: actions/checkout@v4
 

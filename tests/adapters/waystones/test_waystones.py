@@ -115,11 +115,20 @@ def _box_model(boxes):
                                                          for f in FACES}} for a, b in boxes]}
 
 
-def _waystones_mod(tmp_path, version="21.1.46", loot=None, lang=None) -> Path:
+def _waystones_mod(tmp_path, version="21.1.46", loot=None, lang=None, loader="fabric") -> Path:
     root = tmp_path / "ws"
     png = PNG.read_bytes()
-    _write(root, "fabric.mod.json", {"schemaVersion": 1, "id": NS, "version": version,
-                                     "depends": {"minecraft": "1.21.1", "fabricloader": ">=0.15"}})
+    if loader == "neoforge":
+        # The shape of the NeoForge 21.1.46 jar's META-INF/neoforge.mods.toml.
+        (root / "META-INF").mkdir(parents=True, exist_ok=True)
+        (root / "META-INF/neoforge.mods.toml").write_text(
+            'modLoader="javafml"\nloaderVersion="[1,)"\nlicense="All Rights Reserved"\n'
+            f'[[mods]]\nmodId="{NS}"\nversion="{version}"\ndisplayName="Waystones"\n'
+            f'[[dependencies.{NS}]]\nmodId="neoforge"\ntype="required"\nversionRange="[21-beta,)"\n'
+            f'[[dependencies.{NS}]]\nmodId="minecraft"\ntype="required"\nversionRange="[1.21,)"\n')
+    else:
+        _write(root, "fabric.mod.json", {"schemaVersion": 1, "id": NS, "version": version,
+                                         "depends": {"minecraft": "1.21.1", "fabricloader": ">=0.15"}})
     blocks = {"waystone": "andesite_waystone", "mossy_waystone": "mossy_andesite_waystone",
               "white_sharestone": "andesite_waystone", "orange_sharestone": "andesite_waystone",
               "white_portstone": "andesite_waystone", "orange_portstone": "andesite_waystone"}
@@ -270,6 +279,34 @@ def test_manifest_declares_server_ui_and_main_wires_the_table(converted):
     assert 'import { registerWaystones } from "./waystone.js";' in main
     for name in ("waystone.js", "waystone_core.js", "station_storage.js"):
         assert (tree / "behavior_pack/scripts/portkit" / name).is_file()
+
+
+def _tree_bytes(tree: Path) -> dict[str, bytes]:
+    return {str(p.relative_to(tree)): p.read_bytes() for p in sorted(tree.rglob("*")) if p.is_file()}
+
+
+def test_neoforge_build_converts_like_fabric(tmp_path):
+    """The NeoForge 21.1.46 build (the gauntlet's pin) is the same common/ code
+    as the Fabric one (VERSIONS, BUILDS): the same jar contents get the same pack."""
+    fab = convert(_waystones_mod(tmp_path / "f"), tmp_path / "f/out", emit_addon=False)
+    neo = convert(_waystones_mod(tmp_path / "n", loader="neoforge"), tmp_path / "n/out", emit_addon=False)
+    assert (tmp_path / "n/out" / DATA).is_file()
+    assert (tmp_path / "n/out/behavior_pack/blocks/waystone.json").is_file()
+    f_tree, n_tree = _tree_bytes(tmp_path / "f/out"), _tree_bytes(tmp_path / "n/out")
+    assert f_tree.keys() == n_tree.keys()
+    differ = sorted(k for k in f_tree if f_tree[k] != n_tree[k])
+    # Only the manifests differ: they record which loader's metadata the pack came from.
+    assert differ == ["behavior_pack/manifest.json", "resource_pack/manifest.json"], differ
+    assert sorted((u.source, u.kind, u.reason) for u in fab.unhandled) == \
+        sorted((u.source, u.kind, u.reason) for u in neo.unhandled)
+    assert not any(u.source.endswith("blockstates/waystone.json") for u in neo.unhandled)
+
+
+def test_another_loader_gets_no_runtime(tmp_path, monkeypatch):
+    monkeypatch.setattr(waystones, "VERSIONS", {"fabric": "21.1.46"})
+    result = convert(_waystones_mod(tmp_path, loader="neoforge"), tmp_path / "out", emit_addon=False)
+    assert not (tmp_path / "out" / DATA).exists()
+    assert any(u.source.endswith("blockstates/waystone.json") and u.kind == "block" for u in result.unhandled)
 
 
 def test_another_version_gets_no_runtime(tmp_path):
