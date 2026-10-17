@@ -179,6 +179,16 @@ class Index:
             self.files[lane] = files
         self._all = frozenset(f for files in self.files.values() for f in files)
 
+    def nested(self, lane: str, folder: str, name: str) -> list[str]:
+        """Files the lane's atlas names one or more folders below ``folder``
+        whose own file name is ``name`` (``textures/blocks/deepslate/
+        cobbled_deepslate`` for ``textures/blocks/`` + ``cobbled_deepslate``)."""
+        tail = "/" + name
+        return sorted(
+            f for f in self.files.get(lane, ())
+            if f.startswith(folder) and f.endswith(tail) and "/" in f[len(folder):]
+        )
+
     def short_names(self, lane: str) -> frozenset[str]:
         return frozenset(self.atlases.get(lane) or {})
 

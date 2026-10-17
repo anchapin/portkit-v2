@@ -555,7 +555,9 @@ def vanilla_texture(
     serves. No art is copied either way.
 
     The rule is the file's name (pick 1): Java's ``block/<name>`` is Bedrock's
-    ``textures/blocks/<name>``, the same texture under the same name. A vanilla
+    ``textures/blocks/<name>``, the same texture under the same name, or, where
+    the folder has no such file, the one file of that name in a folder below it
+    (``textures/blocks/deepslate/<name>``, #296). A vanilla
     short name showing just that file is named directly; a file the atlas only
     lists inside a set of variants gets the pack entry (pick 3), unless vanilla
     animates it (a flipbook keyed to vanilla's own short name; an entry of ours
@@ -575,8 +577,17 @@ def vanilla_texture(
         )
     folder, home = _VANILLA_DIRS[lane]
     file = folder + name
+    nested: list[str] = []
+    if file not in index.files[home]:
+        # Same file name one folder down (#296): Bedrock files some textures
+        # in a subfolder (textures/blocks/deepslate/, huge_fungus/, candles/).
+        # The name is still the shared identity of pick 1, taken only when
+        # exactly one file of that name sits under the folder.
+        nested = index.nested(home, folder, name)
+        if len(nested) == 1:
+            file = nested[0]
     # pipeline.vanilla_entries reads the file back off this key
-    entry_key = f"{namespace}:vanilla/{'block' if home == 'terrain' else 'item'}/{name}"
+    entry_key = f"{namespace}:vanilla/{'block' if home == 'terrain' else 'item'}/{file[len(folder):]}"
     animated = index.animated.get(file)
     if file in index.files[home]:
         if atlas == home:
@@ -592,6 +603,12 @@ def vanilla_texture(
                 f"its own would lose"
             )
         return entry_key, file, ""
+    if len(nested) > 1:
+        return None, None, (
+            f"model points at {reference!r}, a vanilla texture: Bedrock has no {file}, and "
+            f"{len(nested)} files of that name in folders below it ({', '.join(nested)}); which "
+            f"one Java's is isn't named"
+        )
     renamed = (index.atlases[home].get(name) or {}).get("paths") or []
     if len(renamed) == 1:
         if (MAP_RENAMED and atlas == home and index.atlases[home][name].get("plain")
