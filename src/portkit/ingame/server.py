@@ -269,6 +269,7 @@ def parse(lines: list[str]) -> dict:
         "failures": [d for k, d in tagged if k == "FAIL"],
         "script_errors": [d for k, d in tagged if k == "ERROR"],
         "connections": [d for k, d in tagged if k == "CONNECTION"],
+        "drops": [d for k, d in tagged if k == "DROP"],
         "content_errors": errors,
         "content_warnings": warnings,
     }

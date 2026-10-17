@@ -3,7 +3,7 @@ name: ingame
 # In-game checks (#238): convert a few corpus and deco packs, install each with
 # a generated check behavior pack on Mojang's Bedrock Dedicated Server, and run
 # the Script API checks headlessly (every block places, every item spawns,
-# container slot counts #226, connection states #221). A run fails on a failed
+# container slot counts #226, connection states #221, wired block drops #299). A run fails on a failed
 # check or a content-log error; the server output, content log and report are
 # uploaded per pack.
 #
@@ -32,6 +32,8 @@ jobs:
           - { name: cluttered, manifest: fixtures/ingame/mods.toml, experiment: upcoming_creator_features }
           # Wearable mod armor with worn-look attachables (#274). BDS loads the items; it doesn't draw them.
           - { name: mythicmetals, manifest: fixtures/real/mods.toml }
+          # Blocks whose drops the loot converter wired with minecraft:loot (#299): each is broken and its drop counted.
+          - { name: botania, manifest: fixtures/real/gauntlet.toml }
     name: ${{ matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
     env:
       PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache

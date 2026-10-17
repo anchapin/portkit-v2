@@ -1187,7 +1187,8 @@ def cmd_ingame(args) -> int:
         checks = testpack.write_test_pack(tree / "behavior_pack", Path(args.out), name)
         print(
             f"check pack -> {args.out}: {len(checks.blocks)} blocks, {len(checks.items)} items, "
-            f"{len(checks.containers)} containers, {len(checks.connections)} connection blocks"
+            f"{len(checks.containers)} containers, {len(checks.connections)} connection blocks, "
+            f"{len(checks.drops)} drops"
         )
         return 0
     if not args.server:
