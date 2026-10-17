@@ -27,6 +27,70 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-17: geodes a biome modifier adds convert to `minecraft:geode_feature`; plant patches are explained residue (pending)
+
+- **Decision:** `converters/features.py` (no mod names) reads every Forge/NeoForge
+  add/remove biome modifier, and every Fabric code row (#318), whose features
+  are wholly ores, vanilla `minecraft:geode`s or the plant patch family
+  (`random_patch`, `flower`, `no_bonemeal_flower`, `simple_block`, and
+  `random_selector`/`simple_random_selector` of them), with Minecraft's own
+  placement types on the placed feature. A geode becomes a Bedrock
+  `minecraft:geode_feature` (format 1.13.0) plus a feature rule under the
+  approved ore rules (dimension tags, `rarity_filter` -> `scatter_chance`,
+  `height_range`, Nether `below_top` and biome lists/exclusions residue,
+  removals residue). Exact fields: the five single-block providers ->
+  `filler`/`inner_layer`/`alternate_inner_layer`/`middle_layer`/`outer_layer`
+  (a block the pack ships or a same-id vanilla block); `outer_wall_distance`,
+  `distribution_points`, `point_offset` -> `min_`/`max_`; `crack.*`,
+  `noise_multiplier`, the two chances, `placements_require_layer0_alternate`,
+  `invalid_blocks_threshold` -> the same names, checked against Bedrock's
+  ranges (Java: minecraft.wiki "Amethyst Geode" oldid 3811952; Bedrock:
+  bedrock-samples `documentation/Features.html`, MicrosoftDocs
+  `Features/minecraftGeode_feature.md`). A geode leaving any field to Java's
+  defaults is residue. A patch is `worldgen_feature` residue with the first
+  reason that applies (a removal, the mod's own nested feature/placement types,
+  an unmapped biome tag, else pick 5); a remove modifier over such features is
+  residue of its own. The validator's `xref.feature` checks a geode's blocks.
+  In-game `geode_generate`: the check pack carries a test-only copy of each
+  geode rule without `scatter_chance` (pick 4) and asserts the crystal blocks
+  appear in fresh chunks.
+  Picks (pending Alex; defaults implemented):
+  1a convert a geode, dropping the Java fields Bedrock has no field for:
+  `layers` (shell thickness; Java defaults 1.7/2.2/3.2/4.2), `cannot_replace`
+  and `invalid_blocks` (block tags), and `min_gen_offset`/`max_gen_offset`
+  -m/m (a Chebyshev cutoff about the start) written as `max_radius` m;
+  asymmetric offsets residue; each geode gets an "approximated geode" note
+  naming every dropped field and value (1b convert only when those fields equal
+  vanilla's, which no corpus geode does; 1c every geode residue);
+  2a inner placements by block name only: Java's `GeodeFeature.place` sets
+  FACING to the side each bud grows on and WATERLOGGED from the fluid there
+  (1.20.1 client jar, class `dku` through Mojang's client mappings), Bedrock's
+  `inner_placements` carry one fixed state and its docs don't say whether the
+  engine turns them; the in-game check reports the `block_face` found (2b write
+  Java's literal `facing=up` as `block_face=up`; 2c residue);
+  3a Java's `local_modifications` step -> `before_underground_pass` (the
+  enum's order puts it before `underground_ores`; Bedrock "Earlier passes in
+  the list are guaranteed to occur before later passes"), ores staying in
+  `underground_pass` (3b `underground_pass` with the ores);
+  4a the in-game geode check uses a test-only every-chunk copy of the rule in
+  the check pack, since 1-in-256 geodes don't show in a 3x3-chunk scan (4b
+  scan more chunks with the real rule; 4c report-only);
+  5a patches stay residue with reasons until a corpus mod's patch clears the
+  biome/removal/code gates; then the tries/xz_spread scatter mapping
+  (Java's `nextInt(s+1)-nextInt(s+1)` offsets vs Bedrock's `triangle`) is
+  decided on that case (5b build the mapping now on fixtures only).
+  Measured: Tinkers' Construct earth geode converts (3 files); ichor, ender
+  and sky geodes, Botania's mystical flowers and mushrooms (24 files) and
+  Supplementaries' wild flax (3 files) move from `unowned` to explained
+  `worldgen_feature` residue.
+- **Why:** Bedrock's geode feature is the same algorithm family with fewer
+  knobs; converting with every dropped field named keeps the geode in the
+  world without hiding what changed, the #299 "approximated loot" pattern.
+- **Rejected:** guessing Bedrock's built-in shell thickness as an exact match
+  (undocumented); a Tinkers adapter (the reader is generic).
+- **Status:** pending (picks comment on PR #319).
+- **Links:** #281, #277, PR #319, PR #317, PR #318.
+
 ## 2026-10-17: ores a Fabric mod attaches in code are read from its bytecode and converted like modifier ores (approved (Alex, 2026-10-17))
 
 - **Decision:** new core module `src/portkit/biomecode.py` (no mod names)
