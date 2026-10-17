@@ -205,7 +205,7 @@ _BLOCK_TABLE = re.compile(r"^data/([^/]+)/(?:loot_tables|loot_table)/blocks/(.+)
 
 
 def refine_owned(unhandled: list[Unhandled], shipped_blocks: set[str]) -> list[Unhandled]:
-    """Re-file a refused block loot table whose block is itself residue (#277 loot).
+    """Re-file a refused block loot table whose block is itself residue (#299).
 
     A ``loot`` entry for ``data/<ns>/loot_table[s]/blocks/<path>.json`` names
     the block ``<ns>:<path>``. When the pack doesn't ship that block and its

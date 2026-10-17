@@ -30,13 +30,13 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 ## 2026-10-16: a refused block loot table whose block is residue is `owned_by_residue`, explained from the jar
 
 - **Decision:** after the ownership pass, a `loot` entry for `data/<ns>/loot_table[s]/blocks/<path>.json` is re-filed as `owned_by_residue` (`loot.refine_owned`) when the pack ships no block `<ns>:<path>` and the blockstate `assets/<ns>/blockstates/<path>.json` has a residue entry of its own (`block`, `code_drawn_block`, a station's, ...). Only the pack's blocks count as shipped: a Java block's item shares its id and may ship without the block. The new reason names the block, its blockstate's residue kind, and keeps why the table itself was refused. A table whose block shipped, or that has no blockstate, stays `loot`. Nothing ships differently: pack bytes are unchanged, and the entries still count as residue for coverage.
-- **Why:** this is the biggest sub-reason of the gauntlet's `loot` class (#277, breakdown in the sub-issue): 363 of the 688 refused block tables in the 11 content mods read locally (10 mods) belong to blocks that are already residue, so the table has no block to drop from and goes with its block when that converts. It is the same explain-from-the-jar rule `owned_by_residue` already applies to a refused block's models and textures (#292).
+- **Why:** this is the biggest sub-reason of the gauntlet's `loot` class (#277, breakdown in #299): 363 of the 688 refused block tables in the 11 content mods read locally (10 mods) belong to blocks that are already residue, so the table has no block to drop from and goes with its block when that converts. It is the same explain-from-the-jar rule `owned_by_residue` already applies to a refused block's models and textures (#292).
 - **Rejected:**
   - Converting the tables anyway: a loot table with no block is dead weight, and most of these use functions Bedrock lacks (copy_name, copy_components, block-state drops).
   - A new kind (`loot_owner_residue`): `owned_by_residue` already means "ships with its owner, which has its own entry", and the agent already skips it.
   - Counting the block as shipped when its item ships: the item is not the block, and nothing drops from it.
 - **Found on the way (not changed here):** converted block loot tables are written to `loot_tables/blocks/` but no block names them in `minecraft:loot`, and a Bedrock custom block without that component drops itself (learn.microsoft.com, Block Components: minecraft:loot). For a table that drops the block itself that is the same drop; for one that drops something else or a set count it is not. Wiring the tables, and then converting tables of several plain pools (164 files, 4 mods), is the next slice; both change what players get, so they need the in-game check.
-- **Links:** #277, the #277 loot sub-issue, #292, #296, #87.
+- **Links:** #277, #299, #292, #296, #87.
 
 
 ## 2026-10-16: a block whose every model bakes no quads is `code_drawn_block` residue, explained from the jar's models
