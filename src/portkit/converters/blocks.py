@@ -32,7 +32,7 @@ from portkit import png as png_reader
 
 from .. import blockcode
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import models
+from . import doors, models
 
 _MENU_CATEGORY = "construction"
 
@@ -1514,6 +1514,8 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     readings = _read_facing_code(mod, src, stations or {}, loaded)
     bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded)
     dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded)
+    paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded)
+    paired_records: list[dict] = []
     directional: list[dict] = []
     directional_bool: list[dict] = []
     vslabs: list[dict] = []
@@ -1603,6 +1605,18 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
                 _convert_facing_block(mod, result, rel, name, station_ref, station_uvlock, [], station)
                 continue
 
+        if name in paired_why:
+            result.unhandled.append(Unhandled(rel, "block", paired_why[name]))
+            continue
+        if name in paired_specs:
+            claimed = set(result.consumed)
+            record = _convert_paired(mod, result, rel, name, paired_specs[name], paired_readings[name])
+            if record is not None:
+                paired_records.append(record)
+            else:
+                result.consumed = claimed | {rel}
+            continue
+
         by_axis, why = _axis_variants(blockstate)
         if by_axis is not None:
             _convert_axis_block(mod, result, rel, name, by_axis)
@@ -1673,6 +1687,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     notes = result.notes
     result.notes = []
     _toggle_table(mod, result, coded_bool + directional_bool)
+    doors.door_table(mod, result, paired_records)
     _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
     _add_water(mod, result, sorted(water_dropped))
     later, result.notes = result.notes, notes
@@ -1686,6 +1701,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(_directional_notes(directional))
     result.notes.extend(_directional_bool_notes(directional_bool))
     result.notes.extend(_vslab_notes(vslabs))
+    result.notes.extend(doors.notes(paired_records))
     result.notes.extend(later)
     result.notes.extend(containers.pop("", []))
     return result
@@ -3447,6 +3463,77 @@ def _bool_state_notes(records: list[dict]) -> list[str]:
         notes.append("Light emission NOT converted, the block emits none (Java may light it) - "
                      + _grouped(nolight) + ".")
     return notes
+
+
+# --------------------------------------------------------------------------
+# Doors and plain two-tall blocks (#296): converters/doors.py.
+
+def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, dict, dict]:
+    """(spec, reading, residue reason) per door or plain two-tall blockstate.
+
+    A spec is ("door", variants) or ("two_tall", halves); the reading is
+    doors.read_code's. A door the code shows to be the mod's own (or whose
+    registration isn't read and which the jar doesn't tag as a wooden door)
+    gets a residue reason instead."""
+    specs: dict[str, tuple] = {}
+    why: dict[str, str] = {}
+    for stem, blockstate in loaded.items():
+        if stem in stations:
+            continue
+        variants, reason = doors.door_variants(blockstate)
+        if variants is not None:
+            specs[stem] = ("door", variants)
+            continue
+        if reason:
+            why[stem] = reason
+            continue
+        halves, reason = doors.two_tall_variants(blockstate)
+        if halves is not None:
+            specs[stem] = ("two_tall", halves)
+        elif reason:
+            why[stem] = reason
+    if not specs:
+        return {}, {}, why
+    classes = getattr(mod, "classes", None)
+    readings = {}
+    for kind in ("door", "two_tall"):
+        names = sorted(n for n, s in specs.items() if s[0] == kind)
+        if names:
+            readings.update(doors.read_code(classes, names, kind))
+    wooden = doors.wooden_doors(mod)
+    for stem in list(specs):
+        r = readings[stem]
+        if r.verdict == "refused":
+            what = "door" if specs[stem][0] == "door" else "two-tall block"
+            why[stem] = f"{what}: {r.why} (#296)"
+            del specs[stem]
+        elif r.verdict == "unread" and specs[stem][0] == "door" \
+                and f"{mod.namespace}:{stem}" not in wooden:
+            why[stem] = (f"door whose code isn't read ({r.why}) and which the jar's minecraft:wooden_doors tag "
+                         "doesn't list, so whether a hand opens it isn't known (#296)")
+            del specs[stem]
+    return specs, readings, why
+
+
+def _convert_paired(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                    spec: tuple, reading) -> dict | None:
+    kind, data = spec
+    if kind == "door":
+        door = reading.door if reading.door is not None else doors.DEFAULT_DOOR
+        if not doors.convert_door(mod, result, rel, name, data, door):
+            return None
+        if reading.verdict == "vanilla":
+            why = ("" if reading.door is not None else
+                   "its BlockSetType isn't a vanilla constant this reads: a wooden door's")
+        else:
+            why = f"its code isn't read: {reading.why}; the jar tags it minecraft:wooden_doors"
+        return {"kind": "door", "name": name, "door": door, "scripted": True,
+                "read": reading.verdict == "vanilla" and reading.door is not None,
+                "from": f"{reading.cls} {reading.door_from}".strip(), "why": why}
+    if not doors.convert_two_tall(mod, result, rel, name, data):
+        return None
+    return {"kind": "two_tall", "name": name, "read": reading.verdict == "vanilla",
+            "why": "" if reading.verdict == "vanilla" else f"its code isn't read: {reading.why}"}
 
 
 TOGGLE_RUNTIME = "scripts/portkit/toggle.js"

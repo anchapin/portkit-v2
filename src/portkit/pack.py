@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 import zipfile
 from pathlib import Path
@@ -36,6 +37,25 @@ SCRIPT_ENGINE = (1, 21, 90)
 # so the engine floor stays where the station scripts put it.
 SCRIPT_UI_DEPENDENCY = {"module_name": "@minecraft/server-ui", "version": "2.0.0"}
 SCRIPT_UI_IMPORT = 'from "@minecraft/server-ui"'
+# A fixed runtime that needs a newer @minecraft/server than SCRIPT_DEPENDENCY
+# says so on a line of its own: ``// portkit-requires: @minecraft/server 2.5.0``
+# (the door runtime's onRedstoneUpdate, #296). The pack then declares the
+# newest version any shipped script asks for, and its engine floor follows.
+_REQUIRES = re.compile(r"^// portkit-requires: @minecraft/server (\d+)\.(\d+)\.(\d+)$", re.MULTILINE)
+# @minecraft/server stable version -> the Bedrock release it shipped with:
+# version N is stable in the release whose script beta is N+1
+# (npm @minecraft/server dist versions "2.6.0-beta.1.26.0-stable" ...).
+SCRIPT_ENGINES = {(2, 0, 0): (1, 21, 90), (2, 5, 0): (1, 26, 0)}
+
+
+def script_version(files: dict) -> tuple[int, int, int]:
+    """The @minecraft/server version the shipped scripts need."""
+    version = tuple(int(v) for v in SCRIPT_DEPENDENCY["version"].split("."))
+    for path, body in files.items():
+        if path.startswith("scripts/") and isinstance(body, str):
+            for m in _REQUIRES.finditer(body):
+                version = max(version, tuple(int(v) for v in m.groups()))
+    return version
 
 
 def _uuid(*parts: str) -> str:
@@ -50,6 +70,7 @@ def manifest(
     min_engine: tuple[int, int, int] = (1, 20, 20),
     script_entry: str | None = None,
     script_ui: bool = False,
+    script_module: tuple[int, int, int] | None = None,
 ) -> dict:
     """One Bedrock pack manifest.
 
@@ -102,7 +123,10 @@ def manifest(
             for other in depends_on
         ]
     if script_entry:
-        data.setdefault("dependencies", []).append(dict(SCRIPT_DEPENDENCY))
+        dependency = dict(SCRIPT_DEPENDENCY)
+        if script_module is not None:
+            dependency["version"] = ".".join(str(v) for v in script_module)
+        data.setdefault("dependencies", []).append(dependency)
         if script_ui:
             data["dependencies"].append(dict(SCRIPT_UI_DEPENDENCY))
     return data
@@ -127,7 +151,7 @@ def engine_floor(files: dict) -> tuple[int, int, int]:
     """
     floor = ENGINE_FLOOR
     if SCRIPT_ENTRY in files:
-        floor = max(floor, SCRIPT_ENGINE)
+        floor = max(floor, SCRIPT_ENGINE, SCRIPT_ENGINES.get(script_version(files), SCRIPT_ENGINE))
     for relpath, content in files.items():
         is_block = relpath.startswith("blocks/")
         is_item = relpath.startswith("items/")
@@ -199,7 +223,8 @@ def write_tree(
         entry = SCRIPT_ENTRY if kind == "behavior" and SCRIPT_ENTRY in files else None
         (base / "manifest.json").write_text(
             json.dumps(manifest(namespace, kind, meta, depends_on, floor, entry,
-                                script_ui=bool(entry) and uses_script_ui(files)), indent=2) + "\n"
+                                script_ui=bool(entry) and uses_script_ui(files),
+                                script_module=script_version(files) if entry else None), indent=2) + "\n"
         )
         (base / ICON_NAME).write_bytes(icon)
         for relpath, content in files.items():

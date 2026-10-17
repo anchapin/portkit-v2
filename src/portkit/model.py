@@ -120,6 +120,12 @@ class ConversionResult:
     # the pipeline re-files it as owned_by_residue when each of those items is
     # residue of its own (#302).
     unshipped_names: dict[str, list[str]] = field(default_factory=dict)
+    # Converted block id -> the Java state naming its two halves (``half``),
+    # for a block written on Bedrock's two-part multi_block trait (#296):
+    # Java drops the lower half's table whichever half is broken, Bedrock
+    # drops the broken part's loot only, so the loot converter reads a
+    # ``half=lower`` loot condition on it as holding.
+    paired_halves: dict[str, str] = field(default_factory=dict)
 
     def claim(self, mod: "SourceMod", path: Path) -> str:
         """Record a source file as looked at and return its relative path."""
@@ -184,6 +190,7 @@ class ConversionResult:
         merged.recipe_sources = {**other.recipe_sources, **self.recipe_sources}
         merged.java_states = {**self.java_states, **other.java_states}
         merged.unshipped_names = {**self.unshipped_names, **other.unshipped_names}
+        merged.paired_halves = {**self.paired_halves, **other.paired_halves}
         return merged
 
     @property
