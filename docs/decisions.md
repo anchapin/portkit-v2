@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-17: geodes a biome modifier adds convert to `minecraft:geode_feature`; plant patches are explained residue (pending)
+## 2026-10-17: geodes a biome modifier adds convert to `minecraft:geode_feature`; plant patches are explained residue (approved (Alex, 2026-10-17))
 
 - **Decision:** `converters/features.py` (no mod names) reads every Forge/NeoForge
   add/remove biome modifier, and every Fabric code row (#318), whose features
@@ -54,7 +54,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   In-game `geode_generate`: the check pack carries a test-only copy of each
   geode rule without `scatter_chance` (pick 4) and asserts the crystal blocks
   appear in fresh chunks.
-  Picks (pending Alex; defaults implemented):
+  Picks (approved by Alex 2026-10-17: 1a 2a 3a 4a 5a, the defaults):
   1a convert a geode, dropping the Java fields Bedrock has no field for:
   `layers` (shell thickness; Java defaults 1.7/2.2/3.2/4.2), `cannot_replace`
   and `invalid_blocks` (block tags), and `min_gen_offset`/`max_gen_offset`
@@ -88,7 +88,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   world without hiding what changed, the #299 "approximated loot" pattern.
 - **Rejected:** guessing Bedrock's built-in shell thickness as an exact match
   (undocumented); a Tinkers adapter (the reader is generic).
-- **Status:** pending (picks comment on PR #319).
+- **Status:** approved (Alex, 2026-10-17): picks 1a 2a 3a 4a 5a, the defaults (PR #319, picks comment 6241942660).
 - **Links:** #281, #277, PR #319, PR #317, PR #318.
 
 ## 2026-10-17: ores a Fabric mod attaches in code are read from its bytecode and converted like modifier ores (approved (Alex, 2026-10-17))
