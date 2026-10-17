@@ -7,12 +7,13 @@ cited config defaults (``data/waystones_config_defaults.json``, pick 9a)
 moved here unchanged from ``converters/waystones.py``, ``portkit/runtime/``
 and ``portkit/data/`` (migration step 7). The core reaches it only through
 the ``station`` hook (:class:`portkit.adapters.StationHooks`), asked by
-:mod:`portkit.converters.stations`.
+:mod:`portkit.converters.stations`, and the ``convert`` hook
+(:mod:`.worldgen`: village pools and Unbreakables rules, #277).
 """
 from __future__ import annotations
 
 from .. import Adapter, StationHooks
-from . import convert
+from . import convert, worldgen
 
 
 def _convert(mod, deferred, loot, files, context):
@@ -23,6 +24,8 @@ def _convert(mod, deferred, loot, files, context):
 ADAPTER = Adapter(
     name="waystones",
     namespaces=frozenset({"waystones"}),
+    # Village waystone pools and Unbreakables rules (#277, PR #316 picks 2a/3a).
+    convert=worldgen.convert,
     station=StationHooks(
         blocks=convert.waystone_blocks,
         loot_names=convert.loot_names,

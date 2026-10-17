@@ -43,7 +43,7 @@
       "errors": 0
     },
     "silent_gear_1165": {
-      "coverage": 37.0,
+      "coverage": 37.1,
       "files": 1116,
       "residue": 1896,
       "errors": 0
@@ -73,9 +73,9 @@
       "errors": 0
     },
     "waystones": {
-      "coverage": 37.0,
+      "coverage": 37.1,
       "files": 328,
-      "residue": 559,
+      "residue": 557,
       "errors": 0
     }
   }

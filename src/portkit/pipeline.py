@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import codeonly, datatags, ownership
+from . import codeonly, datatags, ownership, worldgen
 from .converters import lang, loot, recipes
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
@@ -559,6 +559,10 @@ def convert(
             unhandled = datatags.refine(unhandled, staged.root, result.consumed, shipped,
                                         datatags.jar_namespaces(staged.root), getattr(meta, "loader", None),
                                         set(result.files))
+            # And its leftover worldgen, structure templates and other mods'
+            # data the jar explains (#277; PR #316 picks 1a 2a 3a).
+            unhandled = worldgen.refine(unhandled, staged.root, result.consumed,
+                                        datatags.jar_namespaces(staged.root), staged.classes)
         if outcome is None and (out_dir / codeonly.REPORT_NAME).is_file():
             # An earlier run's report would make this tree read as explained-empty.
             (out_dir / codeonly.REPORT_NAME).unlink()
