@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  PAIRED_Y, doorVerdict, pairedSlot, pairedVerdict,
+  PAIRED_Y, TRAPDOOR_Y, doorVerdict, pairedSlot, pairedVerdict, trapdoorSlot, trapdoorVerdict,
   AREA, CONNECTION_STATES, DROP_BATCH, DROP_Y, Tally, connectionSlot, connectionVerdict, containerVerdict,
   describe, dropSlot, dropVerdict, line, slot,
 } from "../../src/portkit/ingame/runtime/ingame_core.js";
@@ -120,4 +120,20 @@ test("door verdict: both halves open and powered together", () => {
   assert.equal(doorVerdict(true, [{ open: true, powered: true }, { open: true, powered: true }]).ok, true);
   const half = doorVerdict(false, [{ open: false, powered: false }, { open: true, powered: false }]);
   assert.deepEqual(half.problems, ["upper open=true, expected false"]);
+});
+
+test("trapdoor slots: the paired layout on their own layers, clear of the paired and drop layers", () => {
+  assert.deepEqual(trapdoorSlot(0), { x: 2, y: TRAPDOOR_Y, z: 2 });
+  assert.equal(trapdoorSlot(64).y, TRAPDOOR_Y + 4);
+  for (let i = 0; i < 256; i++) {
+    const at = trapdoorSlot(i);
+    assert.ok(at.x + 1 < AREA && at.z < AREA && at.y < DROP_Y, JSON.stringify(at));
+  }
+  assert.ok(TRAPDOOR_Y > pairedSlot(255).y + 1);
+});
+
+test("trapdoor verdict: open and powered both as wanted", () => {
+  assert.deepEqual(trapdoorVerdict(true, { open: true, powered: true }), { ok: true, problems: [] });
+  assert.deepEqual(trapdoorVerdict(false, { open: true, powered: false }).problems, ["open=true, expected false"]);
+  assert.deepEqual(trapdoorVerdict(true, { open: undefined, powered: true }).problems, ["open=undefined, expected true"]);
 });
