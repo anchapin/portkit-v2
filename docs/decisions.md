@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-17: ores a Fabric mod attaches in code are read from its bytecode and converted like modifier ores (pending: picks on the #281 Fabric PR)
+## 2026-10-17: ores a Fabric mod attaches in code are read from its bytecode and converted like modifier ores (pending: picks on PR #318)
 
 - **Decision:** new core module `src/portkit/biomecode.py` (no mod names)
   reads Fabric API `BiomeModifications.addFeature(selector, step, key)` and
@@ -85,8 +85,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **Rejected:** converting by the `<ore>_ore_biomes` tag naming convention
   (5b, a guess); a mod-specific adapter for Mythic Metals (the reader is
   generic); path enumeration (2^n paths for n sequential config ifs).
-- **Status:** pending (picks comment on the #281 Fabric PR).
-- **Links:** #281, #277, PR #317 picks comment 6239348623.
+- **Status:** pending (PR #318, picks comment 6240982325; defaults 1a 2a 3a 4a 5a implemented).
+- **Links:** #281, #277, PR #318, PR #317 picks comment 6239348623.
 
 ## 2026-10-17: ores a Forge/NeoForge biome modifier adds convert to a Bedrock `minecraft:ore_feature` plus a feature rule (approved (Alex, 2026-10-17))
 
