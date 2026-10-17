@@ -1122,7 +1122,9 @@ def _combinations(rest: list[int], multis: dict, positions: list, ingredients: l
             # Each of the tags' symbols: kept when all its slots hold one member.
             symbol_of: dict[tuple[int, str], str] = {}
             for i in rest:
-                chosen = {pick[cell] for cell in cells if by_cell[cell] == i}
+                # Members in the order their slots read (row by row), so the
+                # fresh symbols don't depend on string hashing (#309).
+                chosen = list(dict.fromkeys(pick[cell] for cell in cells if by_cell[cell] == i))
                 for member in chosen:
                     if len(chosen) == 1:
                         symbol_of[(i, member)] = symbols[i]
