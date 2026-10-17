@@ -268,3 +268,17 @@ def test_the_check_pack_lists_each_ore_rule(tmp_path):
                             "blocks": ["examplemod:ore"], "replaces": ["minecraft:netherrack"],
                             "dimension": "nether", "y": [8, 32]}]
     assert checks.as_json()["ores"] == checks.ores
+
+
+def test_constant_providers_written_out_read_as_their_value(tmp_path):
+    _ore(tmp_path, "ore", NETHERRACK)
+    _placed(tmp_path, "ore", [{"type": "minecraft:count", "count": {"type": "minecraft:constant", "value": 4}},
+                              {"type": "minecraft:height_range", "height": {"absolute": 20}}])
+    _modifier(tmp_path, "ores", ["examplemod:ore"])
+    dist = _convert(tmp_path).files["feature_rules/ore_feature_rules.json"]["minecraft:feature_rules"]["distribution"]
+    assert dist == {"iterations": 4, "x": 0, "y": 20, "z": 0}
+
+
+def test_refused_ores_are_explained_residue():
+    from portkit.agent.residue import SKIP_KINDS
+    assert features.KIND in SKIP_KINDS

@@ -134,6 +134,8 @@ def _in_slice(root: Path, ident: str) -> tuple[str, str, dict, dict] | None:
 
 
 def _int(value, what: str) -> int:
+    if isinstance(value, dict) and value.get("type") == "minecraft:constant" and set(value) == {"type", "value"}:
+        value = value["value"]  # a constant int provider, written out
     if isinstance(value, bool) or not isinstance(value, int):
         raise _Refused(f"{what} is {json.dumps(value)}, not a constant whole number")
     return value
@@ -160,11 +162,16 @@ def _anchor(anchor, dimension: str) -> int:
     raise _Refused(f"height anchor `{kind}` is not one of absolute/above_bottom/below_top")
 
 
+_ANCHORS = {"absolute", "above_bottom", "below_top"}
+
+
 def _height(height, dimension: str) -> dict:
-    if isinstance(height, int) and not isinstance(height, bool):
-        return {"y": height}
     if not isinstance(height, dict):
         raise _Refused(f"height {json.dumps(height)} is not a height provider")
+    if set(height) <= _ANCHORS and len(height) == 1:
+        # A bare vertical anchor is a constant height (Java's HeightProvider
+        # codec takes either form).
+        return {"y": _anchor(height, dimension)}
     kind = height.get("type", "minecraft:constant")
     if kind == "minecraft:constant":
         return {"y": _anchor(height.get("value"), dimension)}

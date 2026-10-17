@@ -111,6 +111,8 @@ SKIP_KINDS = {
               "agent's tools don't write; the reason says what the converter could not state exactly"),
     "waystone": ("a waystone's loot table is wired by the waystone runtime (#178), which the agent's tools "
                  "don't write; the reason says what the converter could not state exactly"),
+    "worldgen_feature": ("an ore placed feature (or its biome modifier) Bedrock's ore feature and feature rule "
+                         "can't state exactly (#281), which the agent's tools don't write; the reason says what"),
     "code_recipe": ("the recipe's result or station is the mod's Java code (#180); a Bedrock recipe "
                     "would have to invent or drop part of it, and the reason says which"),
     "fluid_recipe": ("the recipe melts, alloys, casts or fills with fluid measured in mB at a mod station "

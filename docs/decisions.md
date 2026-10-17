@@ -27,6 +27,54 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-17: ores a Forge/NeoForge biome modifier adds convert to a Bedrock `minecraft:ore_feature` plus a feature rule (pending: Alex's picks on PR #317)
+
+- **Decision (pending):** `converters/features.py` (#281, first slice) reads
+  the `data/<ns>/{forge,neoforge}/biome_modifier/` files of type
+  `<loader>:add_features` whose every feature is a vanilla `minecraft:ore`
+  placed with vanilla placements (`count`, `in_square`, `height_range`,
+  `rarity_filter`, `biome`). Each placed feature becomes
+  `features/<configured>.json` (`minecraft:ore_feature`, format 1.13.0 as in
+  Mojang's examples) and `feature_rules/<placed>_feature_rules.json`
+  (`placement_pass`, `minecraft:biome_filter`, scatter `distribution`), or
+  residue kind `worldgen_feature` (explained, agent `SKIP_KINDS`) naming why.
+  A modifier holding anything else is left for the other passes
+  (`code_worldgen`, `unowned`). Cited tables: `src/portkit/data/worldgen.py`.
+  Exact mappings: `discard_chance_on_air_exposure` (same field on Bedrock),
+  targets in order to `replace_rules` (`block_match` of a same-id vanilla
+  block, `tag_match` of `stone_ore_replaceables`, `deepslate_ore_replaceables`,
+  `base_stone_nether`, `base_stone_overworld`), constant `count` ->
+  `iterations`, `in_square` -> x/z uniform `[0, 15]`, `uniform` heights ->
+  `uniform` extents (both inclusive), anchors against each edition's
+  dimension bounds, `rarity_filter` -> `scatter_chance` only before any count
+  above 1, `underground_ores`/`underground_decoration` -> `underground_pass`,
+  `#minecraft:is_nether` -> biome tag `nether` (the same five biomes).
+  Recommended defaults implemented for the picks (comment on PR #317):
+  1a Java `size` -> Bedrock `count`; 2a a trapezoid with no plateau ->
+  `triangle`, with a plateau residue; 3a `#minecraft:is_overworld` -> tag
+  `overworld` or `overworld_generation` (Bedrock's legacy hills/mutated
+  biomes included), `#minecraft:is_end` -> `the_end`; 4a `below_top` in the
+  Nether (Java's top 255, Bedrock's 127) is residue; 5a Fabric ores, attached
+  in code, stay `unowned` (a bytecode reader for `BiomeModifications` is a
+  follow-up); 6a a feature some `remove_features` modifier names is residue.
+  Validator: `features/` documents must carry a feature type key, and
+  `xref.feature` (identifier = file name, rule -> a declared feature, ore ->
+  a declared block). In-game (#238): `ore_generate` loads fresh chunks of the
+  rule's dimension (not the flat Overworld) and counts the ore it generated.
+  Measured: Tinkers' Construct cobalt_ore_large converts (gauntlet ingame run
+  39060971192: 82 `tconstruct:cobalt_ore` generated in y 8..32 of a 48x48
+  Nether area, 0 content-log errors); cobalt_ore_small is 4a residue.
+- **Why:** ores are the one worldgen every content mod has, and Bedrock's ore
+  feature and feature rules carry Java's vein, targets and per-chunk scatter.
+  The 14-jar survey (gauntlet + corpus) found few data-attached vanilla ores:
+  Create, IE and Mekanism ores use their own placement or feature types
+  (`code_worldgen`), Mythic Metals' are Fabric (code-attached), BOP's sits only
+  in its own biomes. Where Bedrock can't state Java's numbers exactly, the
+  feature stays residue until Alex picks.
+- **Rejected:** converting Fabric ores by the `<ore>_ore_biomes` tag naming
+  convention (a guess, #87); a Bedrock biome for each Java biome tag.
+- **Links:** #281, #277, PR #317.
+
 ## 2026-10-17: worldgen typed with the mod's own classes is `code_worldgen`; data only another mod reads is `other_mod_data` (approved (Alex, 2026-10-17))
 
 - **Decision:** two new explained residue kinds (agent `SKIP_KINDS`), filed from

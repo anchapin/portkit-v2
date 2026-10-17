@@ -45,12 +45,13 @@ converter wrote, so the checks test the pack as shipped.
   then breaks it and counts the drop.
 - ``ores``: feature rules whose feature is a ``minecraft:ore_feature`` of the
   pack (#281). Each is ``{"rule", "feature", "blocks", "replaces",
-  "dimension", "y"}``: the check fills a cube with the first block the ore may
-  replace, places the feature in it with ``Dimension.placeFeature`` (stable
-  since @minecraft/server 1.19.0, MicrosoftDocs/minecraft-creator ScriptAPI
-  changelog) and counts the ore blocks; and, outside the Overworld (the check
-  world is flat), it loads fresh chunks of the rule's dimension and counts the
-  ore blocks the world generated in the rule's height range.
+  "dimension", "y"}``. Outside the Overworld (the check world is flat) the
+  check loads fresh chunks of the rule's dimension and counts the ore blocks
+  the world generated in the rule's height range (asserted, at least one).
+  It also places the feature into a cube of the first block it may replace
+  with ``Dimension.placeFeature`` (stable since @minecraft/server 1.19.0,
+  MicrosoftDocs/minecraft-creator ScriptAPI changelog) and reports what that
+  left, without asserting it.
 """
 from __future__ import annotations
 
