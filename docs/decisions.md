@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-17: ores a Fabric mod attaches in code are read from its bytecode and converted like modifier ores (pending: picks on PR #318)
+## 2026-10-17: ores a Fabric mod attaches in code are read from its bytecode and converted like modifier ores (approved (Alex, 2026-10-17))
 
 - **Decision:** new core module `src/portkit/biomecode.py` (no mod names)
   reads Fabric API `BiomeModifications.addFeature(selector, step, key)` and
@@ -51,7 +51,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   biome call no entrypoint reaches is only noted (its ore stays `unowned`).
   `SAME_ID_BLOCKS` gains `minecraft:calcite` and `minecraft:smooth_basalt`
   (bedrock-samples blocks.json `calcite`, `smooth_basalt`).
-  Recommended defaults (pending Alex):
+  Picks (approved by Alex 2026-10-17: 1a 2a 3a 4a 5a, the defaults):
   1a a config-gated attachment is decided at the gate's cited default: a
   `code_gate` entry in `config_flag_defaults.json` maps the config class's
   `<option>()Z` methods to flags (Mythic Metals 0.24.6+1.21: 25 owo-config
@@ -85,7 +85,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **Rejected:** converting by the `<ore>_ore_biomes` tag naming convention
   (5b, a guess); a mod-specific adapter for Mythic Metals (the reader is
   generic); path enumeration (2^n paths for n sequential config ifs).
-- **Status:** pending (PR #318, picks comment 6240982325; defaults 1a 2a 3a 4a 5a implemented).
+- **Status:** approved (Alex, 2026-10-17): picks 1a 2a 3a 4a 5a, the defaults (PR #318, picks comment 6240982325).
 - **Links:** #281, #277, PR #318, PR #317 picks comment 6239348623.
 
 ## 2026-10-17: ores a Forge/NeoForge biome modifier adds convert to a Bedrock `minecraft:ore_feature` plus a feature rule (approved (Alex, 2026-10-17))
