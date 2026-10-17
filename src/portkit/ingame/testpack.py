@@ -13,6 +13,13 @@ converter wrote, so the checks test the pack as shipped.
 - ``connections``: blocks whose description enables the
   ``minecraft:connection`` trait's ``minecraft:cardinal_connections`` (the #221
   multiparts, palisades and walls).
+- ``drops``: blocks whose ``minecraft:loot`` (on the block's own components,
+  with no permutation overriding it) names a table this check can read to an
+  exact expectation: one pool, one roll, one item entry with a fixed
+  ``set_count`` (``set_data`` and ``explosion_decay`` allowed), or Bedrock's
+  vanilla ``loot_tables/empty.json`` (drops nothing). Each is
+  ``{"id": block, "table": path, "expect": [{"item": id, "count": n}]}``; the
+  check breaks the block and counts the item entities it leaves (#299).
 """
 from __future__ import annotations
 
@@ -36,6 +43,7 @@ class Checks:
     items: list[str] = field(default_factory=list)
     containers: dict[str, int] = field(default_factory=dict)
     connections: list[str] = field(default_factory=list)
+    drops: list[dict] = field(default_factory=list)
 
     def as_json(self) -> dict:
         return {
@@ -43,6 +51,7 @@ class Checks:
             "items": self.items,
             "containers": self.containers,
             "connections": self.connections,
+            "drops": self.drops,
         }
 
 
@@ -51,6 +60,60 @@ def _read_json(path: Path):
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+# Bedrock's vanilla drop-nothing table (Mojang/bedrock-samples@46ba6ea9
+# behavior_pack/loot_tables/empty.json): a block may name it without shipping it.
+EMPTY_TABLE = "loot_tables/empty.json"
+_FIXED = {"set_data", "minecraft:set_data", "explosion_decay", "minecraft:explosion_decay"}
+
+
+def expected_drops(table) -> list[dict] | None:
+    """What breaking a block with ``table`` leaves, when that is exact: a list of
+    {"item", "count"}; None when the table is outside the shapes the converter
+    writes (more pools or entries, rolls other than 1, conditions, a ranged count)."""
+    if not isinstance(table, dict):
+        return None
+    pools = table.get("pools")
+    if pools == []:
+        return []
+    if not isinstance(pools, list) or len(pools) != 1 or not isinstance(pools[0], dict):
+        return None
+    pool = pools[0]
+    if pool.get("rolls", 1) != 1 or pool.get("conditions") or pool.get("bonus_rolls"):
+        return None
+    entries = pool.get("entries")
+    if not isinstance(entries, list) or len(entries) != 1 or not isinstance(entries[0], dict):
+        return None
+    entry = entries[0]
+    if entry.get("type") != "item" or not isinstance(entry.get("name"), str) or entry.get("conditions"):
+        return None
+    count = 1
+    for function in entry.get("functions") or []:
+        name = function.get("function") if isinstance(function, dict) else None
+        if name in ("set_count", "minecraft:set_count"):
+            if not isinstance(function.get("count"), int) or function.get("conditions"):
+                return None
+            count = function["count"]
+        elif name not in _FIXED or function.get("conditions"):
+            return None
+    return [{"item": entry["name"], "count": count}] if count > 0 else []
+
+
+def _drop_check(behavior_pack: Path, ident: str, block: dict) -> dict | None:
+    loot = (block.get("components") or {}).get("minecraft:loot")
+    if not isinstance(loot, str):
+        return None
+    for perm in block.get("permutations") or []:
+        if isinstance(perm, dict) and "minecraft:loot" in (perm.get("components") or {}):
+            return None  # the drop depends on the state it's placed in
+    if loot == EMPTY_TABLE and not (behavior_pack / loot).is_file():
+        expect = []
+    else:
+        expect = expected_drops(_read_json(behavior_pack / loot))
+    if expect is None:
+        return None
+    return {"id": ident, "table": loot, "expect": expect}
 
 
 def read_checks(behavior_pack: Path) -> Checks:
@@ -73,6 +136,9 @@ def read_checks(behavior_pack: Path) -> Checks:
         slots = (entity.get("container") or {}).get("slot_count") if isinstance(entity, dict) else None
         if isinstance(slots, int):
             checks.containers[ident] = slots
+        drop = _drop_check(behavior_pack, ident, block)
+        if drop is not None:
+            checks.drops.append(drop)
     for path in sorted((behavior_pack / "items").rglob("*.json")):
         doc = _read_json(path)
         item = (doc or {}).get("minecraft:item") if isinstance(doc, dict) else None
@@ -83,6 +149,7 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks.blocks.sort()
     checks.items.sort()
     checks.connections.sort()
+    checks.drops.sort(key=lambda d: d["id"])
     return checks
 
 

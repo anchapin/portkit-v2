@@ -12,13 +12,15 @@ of the original path, so the same mod always produces the same names and two
 long paths never meet. If the directory alone leaves no room, or is too deep,
 the file moves up to its first two directories (``textures/items``). Every
 reference to the old path moves with it: texture index entries, flipbook
-entries and sound definitions name files by path (without the extension).
+entries and sound definitions name files by path (without the extension), and a block's
+``minecraft:loot`` names its table by path (with it).
 Index keys (``tconstruct:tool_staff_...``) are not paths and don't change, so
 blocks, items and models that use them need nothing rewritten.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import PurePosixPath
 
 from .model import ConversionResult
@@ -135,6 +137,22 @@ def shorten_paths(result: ConversionResult) -> dict[str, str]:
                 body = {**body, "sounds": entries}
             definitions[event] = body
         result.files[_SOUNDS] = {**sounds, "sound_definitions": definitions}
+
+    # A block names its loot table by path, with the extension (#299).
+    for path, body in list(result.files.items()):
+        block = body.get("minecraft:block") if path.startswith("blocks/") and isinstance(body, dict) else None
+        if not isinstance(block, dict):
+            continue
+        lists = [block.get("components")] + [p.get("components") for p in block.get("permutations") or []
+                                             if isinstance(p, dict)]
+        if not any(isinstance(c, dict) and c.get("minecraft:loot") in renames for c in lists):
+            continue
+        block = json.loads(json.dumps(block))
+        for components in [block.get("components")] + [p.get("components") for p in block.get("permutations") or []
+                                                        if isinstance(p, dict)]:
+            if isinstance(components, dict) and components.get("minecraft:loot") in renames:
+                components["minecraft:loot"] = renames[components["minecraft:loot"]]
+        result.files[path] = {**body, "minecraft:block": block}
 
     examples = ", ".join(f"{o} -> {n}" for o, n in list(renames.items())[:3])
     more = f" (and {len(renames) - 3} more)" if len(renames) > 3 else ""

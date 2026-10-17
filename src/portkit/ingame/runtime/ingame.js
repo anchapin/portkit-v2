@@ -12,11 +12,14 @@
 //   connection a block on the connection trait (#221 multiparts) reports its
 //              four cardinal connection states, joined to its own kind and
 //              not to air (the states its bones' visibility reads)
+//   drop       a block whose minecraft:loot the converter wired (#299),
+//              broken with `setblock ... air destroy`, leaves exactly the
+//              items its table gives (item entities counted around it)
 // Content-log errors are the runner's to count (it reads the server output).
 import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
-  AREA, CONNECTION_STATES, ITEM_Y, Tally, connectionVerdict,
-  connectionSlot, containerVerdict, describe, line, slot,
+  AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, Tally, connectionVerdict,
+  connectionSlot, containerVerdict, describe, dropSlot, dropVerdict, line, slot,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
 
@@ -47,7 +50,7 @@ async function loaded(dim) {
 async function run() {
   const dim = world.getDimension("overworld");
   dim.runCommand(`tickingarea add 0 0 0 ${AREA - 1} 0 ${AREA - 1} portkit_ingame true`);
-  say("START", { blocks: CHECKS.blocks.length, items: CHECKS.items.length });
+  say("START", { blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length });
   if (!(await loaded(dim))) {
     say("ERROR", { detail: "the ticking area never loaded" });
     say("DONE", {});
@@ -110,6 +113,57 @@ async function run() {
       else fail("connection", id, verdict.problems.join("; "));
     } catch (err) {
       fail("connection", id, describe(err));
+    }
+  }
+
+  // drop: each wired block on a stone floor, broken as a player would (the
+  // destroy mode of setblock), then the item entities around it counted
+  const drops = CHECKS.drops ?? [];
+  const itemsNear = (at) => dim.getEntities({
+    type: "minecraft:item", location: { x: at.x + 0.5, y: at.y + 0.5, z: at.z + 0.5 }, maxDistance: 3,
+  });
+  for (let start = 0; start < drops.length; start += DROP_BATCH) {
+    const batch = drops.slice(start, start + DROP_BATCH);
+    const placed = [];
+    for (let k = 0; k < batch.length; k++) {
+      const { id } = batch[k];
+      const at = dropSlot(k);
+      try {
+        for (const e of itemsNear(at)) e.remove();
+        dim.getBlock({ x: at.x, y: at.y - 1, z: at.z }).setPermutation(BlockPermutation.resolve("minecraft:stone"));
+        dim.getBlock(at).setPermutation(BlockPermutation.resolve(id));
+        placed.push(k);
+      } catch (err) {
+        fail("drop", id, describe(err));
+      }
+    }
+    await system.waitTicks(1);
+    for (const k of placed) {
+      const at = dropSlot(k);
+      try {
+        dim.runCommand(`setblock ${at.x} ${at.y} ${at.z} air destroy`);
+      } catch (err) {
+        fail("drop", batch[k].id, describe(err));
+      }
+    }
+    await system.waitTicks(10);
+    for (const k of placed) {
+      const { id, expect } = batch[k];
+      const at = dropSlot(k);
+      try {
+        const got = [];
+        for (const e of itemsNear(at)) {
+          const stack = e.getComponent("minecraft:item")?.itemStack;
+          if (stack) got.push({ item: stack.typeId, count: stack.amount });
+          e.remove();
+        }
+        const verdict = dropVerdict(expect, got);
+        say("DROP", { id, expect, got });
+        if (verdict.ok) tally.record("drop", id, true);
+        else fail("drop", id, verdict.problems.join("; "));
+      } catch (err) {
+        fail("drop", id, describe(err));
+      }
     }
   }
 

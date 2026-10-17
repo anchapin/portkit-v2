@@ -15,6 +15,11 @@ export const SPACING = 2;
 export const PLACE_Y = 0;
 export const CONNECTION_Y = 100;
 export const ITEM_Y = 120;
+// The drop check's layer (#299): each block on a stone floor, eight apart so
+// what one block drops is never counted for another.
+export const DROP_Y = 80;
+export const DROP_SPACING = 8;
+export const DROP_BATCH = (AREA / DROP_SPACING) ** 2;
 
 const PER_ROW = AREA / SPACING;
 const PER_LAYER = PER_ROW * PER_ROW;
@@ -68,6 +73,35 @@ export function connectionVerdict(states) {
   if (states["minecraft:connection_east"] !== true) problems.push("east (same block) not connected");
   if (states["minecraft:connection_south"] !== false) problems.push("south (air) connected");
   if (states["minecraft:connection_west"] !== false) problems.push("west (air) connected");
+  return { ok: problems.length === 0, problems };
+}
+
+/** Where the i-th block of a drop batch goes (64 a batch, reused per batch). */
+export function dropSlot(i) {
+  const k = i % DROP_BATCH;
+  const per = AREA / DROP_SPACING;
+  return { x: (k % per) * DROP_SPACING + 2, y: DROP_Y, z: Math.floor(k / per) * DROP_SPACING + 2 };
+}
+
+/**
+ * The drop check's verdict (#299): what breaking the block left, as
+ * [{item, count}] item entities, against what its loot table gives. Counts are
+ * summed per item id; any item not expected, or a count off, fails.
+ */
+export function dropVerdict(expect, got) {
+  const sum = (rows) => {
+    const out = {};
+    for (const { item, count } of rows) out[item] = (out[item] ?? 0) + count;
+    return out;
+  };
+  const want = sum(expect);
+  const have = sum(got);
+  const problems = [];
+  for (const item of Object.keys({ ...want, ...have }).sort()) {
+    const w = want[item] ?? 0;
+    const h = have[item] ?? 0;
+    if (w !== h) problems.push(`dropped ${h} ${item}, expected ${w}`);
+  }
   return { ok: problems.length === 0, problems };
 }
 

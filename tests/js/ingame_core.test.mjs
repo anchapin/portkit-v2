@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  AREA, CONNECTION_STATES, Tally, connectionSlot, connectionVerdict, containerVerdict, describe, line, slot,
+  AREA, CONNECTION_STATES, DROP_BATCH, DROP_Y, Tally, connectionSlot, connectionVerdict, containerVerdict,
+  describe, dropSlot, dropVerdict, line, slot,
 } from "../../src/portkit/ingame/runtime/ingame_core.js";
 
 test("slots stay two apart inside the ticking area", () => {
@@ -69,4 +70,27 @@ test("connection slots: neighbours inside the area, air south and west of each b
   }
   assert.deepEqual(connectionSlot(0), { x: 0, y: 100, z: 1 });
   assert.deepEqual(connectionSlot(256), { x: 0, y: 102, z: 1 });
+});
+
+test("drop slots: eight apart, inside the ticking area, one batch reused", () => {
+  const seen = new Set();
+  for (let i = 0; i < DROP_BATCH; i++) {
+    const { x, y, z } = dropSlot(i);
+    assert.ok(x >= 0 && x < AREA && z >= 0 && z < AREA);
+    assert.equal(y, DROP_Y);
+    seen.add(`${x},${z}`);
+  }
+  assert.equal(seen.size, DROP_BATCH);
+  assert.deepEqual(dropSlot(0), dropSlot(DROP_BATCH));
+  assert.equal(dropSlot(1).x - dropSlot(0).x, 8);
+});
+
+test("drop verdict: counts summed per item, extras and shortfalls fail", () => {
+  const root = [{ item: "demo:living_root", count: 4 }];
+  assert.deepEqual(dropVerdict(root, [{ item: "demo:living_root", count: 3 }, { item: "demo:living_root", count: 1 }]),
+    { ok: true, problems: [] });
+  assert.deepEqual(dropVerdict(root, [{ item: "demo:root", count: 1 }]).problems,
+    ["dropped 0 demo:living_root, expected 4", "dropped 1 demo:root, expected 0"]);
+  assert.deepEqual(dropVerdict([], []), { ok: true, problems: [] });
+  assert.equal(dropVerdict([], [{ item: "minecraft:dirt", count: 1 }]).ok, false);
 });

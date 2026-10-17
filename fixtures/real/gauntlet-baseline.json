@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-17T00:58:39+00:00",
+ "generated": "2026-10-17T01:42:28+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -316,9 +316,9 @@
   "quark": {
    "class": "content",
    "status": "ok",
-   "coverage": 28.96,
-   "files": 2219,
-   "residue": 5444,
+   "coverage": 27.31,
+   "files": 2093,
+   "residue": 5570,
    "errors": 0,
    "done": false
   },
@@ -334,9 +334,9 @@
   "twilight_forest": {
    "class": "content",
    "status": "ok",
-   "coverage": 24.02,
-   "files": 2223,
-   "residue": 7030,
+   "coverage": 23.72,
+   "files": 2195,
+   "residue": 7058,
    "errors": 0,
    "done": false
   },
@@ -352,27 +352,27 @@
   "biomes_o_plenty": {
    "class": "content",
    "status": "ok",
-   "coverage": 39.58,
-   "files": 1225,
-   "residue": 1870,
+   "coverage": 39.55,
+   "files": 1224,
+   "residue": 1871,
    "errors": 0,
    "done": false
   },
   "immersive_engineering": {
    "class": "content",
    "status": "ok",
-   "coverage": 25.99,
-   "files": 2286,
-   "residue": 6509,
+   "coverage": 25.9,
+   "files": 2278,
+   "residue": 6517,
    "errors": 0,
    "done": false
   },
   "botania": {
    "class": "content",
    "status": "ok",
-   "coverage": 46.22,
-   "files": 3567,
-   "residue": 4151,
+   "coverage": 46.09,
+   "files": 3557,
+   "residue": 4161,
    "errors": 0,
    "done": false
   },
