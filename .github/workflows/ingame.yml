@@ -42,6 +42,8 @@ jobs:
           - { name: ae2, manifest: fixtures/real/gauntlet.toml }
           # Recipes written once per combination of a vanilla-only tag over several slots (#302 pick 1: blastbrick, c:bricks x4).
           - { name: immersive_engineering, manifest: fixtures/real/gauntlet.toml }
+          # Vertical slabs on block_face + cardinal_direction permutations, one uvlocked bone per side (#296).
+          - { name: quark, manifest: fixtures/real/gauntlet.toml }
     name: ${{ matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
     env:
       PORTKIT_CORPUS_CACHE: ${{ github.workspace }}/.corpus-cache
