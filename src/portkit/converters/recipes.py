@@ -1420,9 +1420,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                         found = (emitted or {}).get(body.get(slot))
                         if not found:
                             continue
-                        if found[0] == "item" and isinstance(found[2].get("minecraft:item"), dict):
+                        has_item = isinstance(found[2].get("minecraft:item"), dict)
+                        if found[0] == "item" and has_item:
                             item_tags.setdefault(body[slot], set()).add(slot_tag)
-                        elif slot != "base" and found[0] in _TAGGABLE_KINDS:
+                        elif slot != "base" and (found[0] == "block" or found[0] == "block_and_item" and has_item):
                             # A block in the template or addition slot carries
                             # the tag on its item form (its own item file, or
                             # one replacing its item, _block_item), the way
