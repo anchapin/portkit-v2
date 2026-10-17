@@ -211,10 +211,72 @@ def test_a_furnace_recipe_is_written_once_per_member(tmp_path, reference):
     assert inputs == {"minecraft:chest", "minecraft:trapped_chest"}
 
 
-def test_a_tag_filling_several_slots_is_not_split(tmp_path, reference):
+def test_a_vanilla_only_tag_over_several_slots_is_written_once_per_combination(tmp_path, reference):
+    """#302 pick 1: chest + trapped chest over two slots; each mix is its own recipe.
+    The two mixed grids are mirror images, which Bedrock's assume_symmetry
+    (default true) already matches, so they are one recipe."""
     result = recipes.convert(_mod(tmp_path, _shaped("forge:chests/wooden", ("G G",))), emitted={})
+    files = _recipe_files(result)
+    assert result.unhandled == []
+    assert set(files) == {"recipes/thing__minecraft_chest__minecraft_chest.json",
+                          "recipes/thing__minecraft_chest__minecraft_trapped_chest.json",
+                          "recipes/thing__minecraft_trapped_chest__minecraft_trapped_chest.json"}
+    same = files["recipes/thing__minecraft_chest__minecraft_chest.json"]["minecraft:recipe_shaped"]
+    assert same["pattern"] == ["G G"] and same["key"] == {"G": {"item": "minecraft:chest"}}
+    mixed = files["recipes/thing__minecraft_chest__minecraft_trapped_chest.json"]["minecraft:recipe_shaped"]
+    (left, _, right) = mixed["pattern"][0]
+    assert left != right and " " not in (left, right)
+    assert mixed["key"] == {left: {"item": "minecraft:chest"}, right: {"item": "minecraft:trapped_chest"}}
+    assert mixed["description"]["identifier"] == "examplemod:thing__minecraft_chest__minecraft_trapped_chest"
+    assert any("once per combination" in n for n in result.notes)
+
+
+def test_vanilla_only_combinations_keep_the_other_ingredients(tmp_path, reference):
+    recipe = {"type": "minecraft:crafting_shaped", "pattern": ["GSG"],
+              "key": {"G": {"tag": "forge:chests/wooden"}, "S": {"item": "minecraft:stick"}},
+              "result": {"item": "examplemod:thing"}}
+    result = recipes.convert(_mod(tmp_path, recipe), emitted={})
+    files = _recipe_files(result)
+    assert len(files) == 3  # cc, ct (= tc mirrored), tt
+    for body in files.values():
+        shaped = body["minecraft:recipe_shaped"]
+        assert shaped["key"][shaped["pattern"][0][1]] == {"item": "minecraft:stick"}
+
+
+def test_shapeless_vanilla_only_combinations_ignore_order(tmp_path, reference):
+    recipe = _shapeless("forge:chests/wooden", extra=[{"tag": "forge:chests/wooden"}])
+    result = recipes.convert(_mod(tmp_path, recipe), emitted={})
+    files = _recipe_files(result)
+    assert len(files) == 3  # {c,c}, {c,t}, {t,t}
+    assert sorted(sorted(i["item"] for i in b["minecraft:recipe_shapeless"]["ingredients"])
+                  for b in files.values()) == [
+        ["minecraft:chest", "minecraft:chest"], ["minecraft:chest", "minecraft:trapped_chest"],
+        ["minecraft:trapped_chest", "minecraft:trapped_chest"]]
+
+
+def test_vanilla_only_combinations_over_the_cap_stay_residue(tmp_path, reference):
+    """2 members over 5 slots is 32 combinations, over EXPANSION_CAP (16)."""
+    result = recipes.convert(_mod(tmp_path, _shaped("forge:chests/wooden", ("GGG", "G G"))), emitted={})
     assert _recipe_files(result) == {}
     assert "covers 2 items" in result.unhandled[0].reason
+
+
+def test_four_slots_of_two_members_is_at_the_cap(tmp_path, reference):
+    result = recipes.convert(_mod(tmp_path, _shaped("forge:chests/wooden", ("GG", "GG"))), emitted={})
+    files = _recipe_files(result)
+    assert 0 < len(files) <= recipes.EXPANSION_CAP
+    grids = set()
+    for body in files.values():
+        shaped = body["minecraft:recipe_shaped"]
+        grid = tuple(tuple(shaped["key"][c]["item"] for c in row) for row in shaped["pattern"])
+        assert grid not in grids and tuple(tuple(reversed(r)) for r in grid) not in grids
+        grids.add(grid)
+    # every one of the 16 grids is a written grid or its mirror image
+    import itertools
+    members = ("minecraft:chest", "minecraft:trapped_chest")
+    for a, b, c, d in itertools.product(members, repeat=4):
+        grid = ((a, b), (c, d))
+        assert grid in grids or ((b, a), (d, c)) in grids
 
 
 def test_a_bedrock_vanilla_tag_with_the_same_members_is_used(tmp_path, reference):

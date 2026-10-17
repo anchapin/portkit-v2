@@ -115,8 +115,10 @@ class ConversionResult:
     # doesn't name has no known mapping.
     java_states: dict[str, dict[str, dict[str, str | None]]] = field(default_factory=dict)
     # Source recipe -> every mod item it names that the pack doesn't ship, for
-    # a recipe drop_unshipped_recipes withdrew (#261); the pipeline re-files it
-    # as owned_by_residue when each of those items is residue of its own (#302).
+    # a recipe drop_unshipped_recipes withdrew (#261), or every member of the
+    # tags a recipe was refused for when none of them converted (#302 pick 3);
+    # the pipeline re-files it as owned_by_residue when each of those items is
+    # residue of its own (#302).
     unshipped_names: dict[str, list[str]] = field(default_factory=dict)
 
     def claim(self, mod: "SourceMod", path: Path) -> str:
@@ -181,6 +183,7 @@ class ConversionResult:
         merged.stations = {**self.stations, **other.stations}
         merged.recipe_sources = {**other.recipe_sources, **self.recipe_sources}
         merged.java_states = {**self.java_states, **other.java_states}
+        merged.unshipped_names = {**self.unshipped_names, **other.unshipped_names}
         return merged
 
     @property

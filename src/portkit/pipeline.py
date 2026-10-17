@@ -124,6 +124,8 @@ def merge_namespaces(results: dict[str, "ConversionResult"]) -> "ConversionResul
         merged.stations.update(result.stations)
         for path, source in result.recipe_sources.items():
             merged.recipe_sources.setdefault(path, source)
+        for source, names in result.unshipped_names.items():
+            merged.unshipped_names.setdefault(source, names)
         for path, value in result.files.items():
             if path not in merged.files:
                 merged.files[path] = value
