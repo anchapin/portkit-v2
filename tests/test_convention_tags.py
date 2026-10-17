@@ -496,3 +496,51 @@ def test_resolver_reads_the_reference_for_the_mods_loader(tmp_path, reference):
     assert resolver.reference.covers("c:foods/vegetable")
     assert not resolver.reference.covers("fabric:anything")
     assert [m for m in resolver.members("c:foods/vegetable").members] == ["minecraft:carrot", "minecraft:potato"]
+
+
+# -- #309: combination key symbols don't depend on string hashing ----------------
+_MIX_TAG = "data/examplemod/tags/items/mix.json"
+_MIX = ["minecraft:oak_planks", "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks"]
+
+
+def test_combination_symbols_follow_the_slots_reading_order(tmp_path, reference):
+    """A mixed slot's members take fresh symbols in the order their slots
+    read, row by row (#309), so the left one is always A."""
+    mod = _mod(tmp_path, _shaped("examplemod:mix", ("G G",)), tag_files={_MIX_TAG: _MIX})
+    files = _recipe_files(recipes.convert(mod, emitted={}))
+    mixed = files["recipes/thing__oak_planks__spruce_planks.json"]["minecraft:recipe_shaped"]
+    assert mixed["pattern"] == ["A B"]
+    assert mixed["key"] == {"A": {"item": "minecraft:oak_planks"}, "B": {"item": "minecraft:spruce_planks"}}
+
+
+_SEED_SCRIPT = """
+import json, sys
+from pathlib import Path
+from portkit.converters import recipes
+from portkit.model import SourceMod
+mod = SourceMod(root=Path(sys.argv[1]), namespace="examplemod", loader="forge", minecraft="1.20.1")
+result = recipes.convert(mod, emitted={})
+print(json.dumps({k: v for k, v in result.files.items() if k.startswith("recipes/")}, sort_keys=True))
+"""
+
+
+def test_combination_recipes_are_the_same_bytes_under_two_hash_seeds(tmp_path, reference):
+    """#309: the same jar converts to the same recipes whatever PYTHONHASHSEED is.
+    Seeds 1 and 4 iterate a set of these members in different orders (on
+    CPython 3.12 the old set-ordered symbols gave different bytes for them)."""
+    import os
+    import subprocess
+    import sys
+
+    mod = _mod(tmp_path, _shaped("examplemod:mix", ("G G",)), tag_files={_MIX_TAG: _MIX})
+    outputs = []
+    for seed in ("1", "4"):
+        # the child imports the same portkit this test does
+        src = str(Path(recipes.__file__).resolve().parents[2])
+        env = {**os.environ, "PYTHONHASHSEED": seed,
+               "PYTHONPATH": os.pathsep.join(filter(None, (src, os.environ.get("PYTHONPATH"))))}
+        run = subprocess.run([sys.executable, "-c", _SEED_SCRIPT, str(mod.root)], env=env,
+                             capture_output=True, text=True, check=True)
+        outputs.append(run.stdout)
+    assert json.loads(outputs[0])  # the combinations were written at all
+    assert outputs[0] == outputs[1]
