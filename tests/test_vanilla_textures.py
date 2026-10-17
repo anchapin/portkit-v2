@@ -26,7 +26,11 @@ TERRAIN = b"""// a comment line, as bedrock-samples ships
     "still_lava": {"textures": "textures/blocks/lava_still"},
     "kelp": {"textures": ["textures/blocks/kelp_a", "textures/blocks/kelp_b"]},
     "grass_carried": {"textures": {"path": "textures/blocks/grass_side", "overlay_color": "#79c05a"}},
-    "candle": {"textures": ["textures/blocks/candle", "textures/blocks/candle_lit"]}
+    "candle": {"textures": ["textures/blocks/candle", "textures/blocks/candle_lit"]},
+    "cobbled_deepslate": {"textures": "textures/blocks/deepslate/cobbled_deepslate"},
+    "fungus_door": {"textures": ["textures/blocks/huge_fungus/crimson_door_top", "textures/blocks/huge_fungus/warped_door_top"]},
+    "twin_a": {"textures": "textures/blocks/left/twin"},
+    "twin_b": {"textures": "textures/blocks/right/twin"}
   }
 }
 """
@@ -162,6 +166,33 @@ def test_renamed_textures_map_when_the_pick_says_so(index, monkeypatch):
     assert models.vanilla_texture("minecraft:block/oak_planks", "examplemod") == ("oak_planks", None, "")
 
 
+def test_the_same_file_name_one_folder_down_maps_to_its_short_name(index):
+    """Bedrock files deepslate textures in textures/blocks/deepslate/ (#296)."""
+    assert models.vanilla_texture("minecraft:block/cobbled_deepslate", "examplemod") == (
+        "cobbled_deepslate", None, "")
+
+
+def test_a_nested_file_only_in_a_variant_set_gets_an_entry_naming_its_folder(index):
+    key, file, why = models.vanilla_texture("minecraft:block/crimson_door_top", "examplemod")
+    assert (key, file, why) == (
+        "examplemod:vanilla/block/huge_fungus/crimson_door_top",
+        "textures/blocks/huge_fungus/crimson_door_top", "")
+
+
+def test_two_nested_files_of_one_name_stay_residue(index):
+    key, file, why = models.vanilla_texture("minecraft:block/twin", "examplemod")
+    assert key is None and file is None
+    assert "2 files of that name in folders below it" in why
+    assert "textures/blocks/left/twin, textures/blocks/right/twin" in why
+
+
+def test_nested_lookup_needs_the_whole_file_name(index):
+    """deepslate is not a file name under textures/blocks/, only a folder."""
+    assert vanilla_textures.index().nested("terrain", "textures/blocks/", "deepslate") == []
+    key, _, _ = models.vanilla_texture("minecraft:block/deepslate", "examplemod")
+    assert key is None
+
+
 # --- converters -------------------------------------------------------------
 
 def block_mod(tmp_path, model):
@@ -264,6 +295,36 @@ def test_the_pack_entry_points_at_the_vanilla_file_and_validates(tmp_path, index
     assert instances["up"] == {"texture": "examplemod:vanilla/block/barrel_top"}
     assert instances["*"] == {"texture": "iron_block"}
     # no art: the only pngs are the generated pack icons
+    assert {p.name for p in out.tree.rglob("*.png")} <= {"pack_icon.png"}
+
+
+def test_nested_vanilla_files_reach_the_pack_atlas_with_their_folder_and_validate(tmp_path, index):
+    """#296: a nested file named directly, and a nested variant-set file whose
+    pack entry keeps its folder, so the entry points at the real file."""
+    from portkit.pipeline import convert
+
+    src = tmp_path / "src"
+    assets = src / "assets" / "examplemod"
+    (assets / "blockstates").mkdir(parents=True)
+    (assets / "models" / "block").mkdir(parents=True)
+    (assets / "blockstates" / "slab.json").write_text(
+        json.dumps({"variants": {"": {"model": "examplemod:block/slab"}}}))
+    (assets / "models" / "block" / "slab.json").write_text(json.dumps(
+        {"parent": "minecraft:block/cube_column",
+         "textures": {"end": "minecraft:block/crimson_door_top", "side": "minecraft:block/cobbled_deepslate"}}))
+    (assets / "lang").mkdir()
+    (assets / "lang" / "en_us.json").write_text(json.dumps({"block.examplemod.slab": "Slab"}))
+
+    out = convert(src, tmp_path / "out", emit_addon=False)
+    assert out.report.ok, out.report.to_dict()
+    terrain = json.loads((out.tree / "resource_pack" / "textures" / "terrain_texture.json").read_text())
+    assert terrain["texture_data"] == {
+        "examplemod:vanilla/block/huge_fungus/crimson_door_top":
+            {"textures": "textures/blocks/huge_fungus/crimson_door_top"}}
+    slab = json.loads((out.tree / "behavior_pack" / "blocks" / "slab.json").read_text())
+    instances = slab["minecraft:block"]["components"]["minecraft:material_instances"]
+    assert instances["up"] == {"texture": "examplemod:vanilla/block/huge_fungus/crimson_door_top"}
+    assert instances["*"] == {"texture": "cobbled_deepslate"}
     assert {p.name for p in out.tree.rglob("*.png")} <= {"pack_icon.png"}
 
 

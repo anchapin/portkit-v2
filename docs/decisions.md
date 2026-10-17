@@ -27,6 +27,15 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-17: a vanilla texture Bedrock files one folder down (`textures/blocks/deepslate/<name>`) is the same file name; renamed short names still stay residue
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order): it extends #220 pick 1 (same file name) and leaves pick 2 (renamed short names) as it was.
+- **Decision:** where Bedrock has no `textures/blocks/<name>` (`textures/items/<name>`), the one file named `<name>` in a folder below it is Java's `block/<name>` (`item/<name>`), and then #220's rules apply unchanged: a plain one-file short name showing it is named directly (`cobbled_deepslate`, `crimson_planks`), a file only inside a variant set gets a pack entry whose key keeps the folder (`<ns>:vanilla/block/huge_fungus/<name>` -> `textures/blocks/huge_fungus/<name>`), animated files only through vanilla's flipbook tile. Two or more files of that name below the folder stay residue, naming them. The pinned index has 67 such terrain files (`candles/`, `deepslate/`, `huge_fungus/`) and 117 item files (`harness/`, `nautilus_armor/`, `spawn_eggs/`, `spear/`), with no name in two places and none clashing with a top-level file.
+- **Why:** the file name is the identity #220 settled on, and a subfolder doesn't change it. Checked locally against the Java 1.21.11 client jar (nothing kept): of the 184 nested files, 69 share a name with a Java texture, and all 69 are pixel-identical to it (52 byte-identical, 17 identical in every visible pixel; the 16 coloured candles and `candle` differ only in the colour of fully transparent pixels). Measured (Quark 4.1-487): 6 vertical slabs (cobbled deepslate, deepslate brick, deepslate tile, polished deepslate, crimson, warped) and 4 other blocks (crimson and warped bookshelves, vertical crimson and warped planks) convert; validator 0 errors.
+- **Not changed (pick 2 of #220 stands):** a Java name that is a Bedrock short name showing a file of another name (`oak_planks` -> `planks_oak`) still stays residue. The same check found 26 of those 225 short names are not Java's texture (`piston_top` shows `piston_inner`, the 16 `*_stained_glass_pane_top`, `short_grass`, `bubble_coral_block`, `fire_coral_block`, `purple_glazed_terracotta`, `spruce_planks` by one pixel, the 3 `command_block_*` mipmaps, `conduit`), so turning `MAP_RENAMED` on would ship wrong textures. Mapping them needs a cited per-name table, which is a call for Alex.
+- **Rejected:** turning `MAP_RENAMED` on (26 wrong of 225, above); a hand-written Java -> Bedrock name table (#87, #220); the nearest-named file.
+- **Links:** #296, #220, #277, #87.
+
 ## 2026-10-17: vertical slabs (`type` = north|east|south|west|double) convert on the 6-way placement mapping; a clicked top or bottom face places the half nearest the player
 
 - **Status:** approved (Alex, 2026-10-17): picks 1a 2a 3a 4a, the defaults (PR #307, picks comment 6229544923).
