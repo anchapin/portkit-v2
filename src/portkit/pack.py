@@ -19,7 +19,8 @@ from .model import ConversionResult
 # of installing beside it.
 _NS = uuid.UUID("6f0a7f1e-0a4a-4f2e-9a1b-6a5f0d1c2b3e")
 
-_BEHAVIOR_DIRS = ("recipes/", "entities/", "functions/", "loot_tables/", "blocks/", "items/", "scripts/")
+_BEHAVIOR_DIRS = ("recipes/", "entities/", "functions/", "loot_tables/", "blocks/", "items/", "scripts/",
+                  "features/", "feature_rules/")
 
 # A behavior pack that ships this file gets a script module running it, and a
 # dependency on the Script API version the station runtimes are written

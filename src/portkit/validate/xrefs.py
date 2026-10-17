@@ -287,6 +287,42 @@ def _check_loot(report: ValidationReport, behavior: Path, index: Index) -> None:
                 )
 
 
+def _check_features(report: ValidationReport, behavior: Path, index: Index) -> None:
+    """Features and feature rules (#281). Each document's identifier names its
+    file ("'feature_name' must match the filename", Mojang/bedrock-samples
+    documentation/Features.html), a rule places a feature the pack declares,
+    and an ore places blocks the pack declares. All three sides are ours, so a
+    miss is an error: Bedrock drops the feature and the world never gets it."""
+    prefix = behavior.name
+    features: dict[str, str] = {}
+    for path in sorted((behavior / "features").glob("*.json")):
+        rel = f"{prefix}/features/{path.name}"
+        data = _obj(_load(path))
+        for key, body in data.items():
+            if not (isinstance(key, str) and key.startswith("minecraft:") and isinstance(body, dict)):
+                continue
+            ident = _obj(body.get("description")).get("identifier")
+            if not isinstance(ident, str):
+                continue
+            features[ident] = rel
+            if ident.split(":", 1)[-1] != path.stem:
+                report.add(rel, "xref.feature", f"identifier {ident!r} doesn't match the file name {path.stem!r}")
+            if key == "minecraft:ore_feature":
+                for i, rule in enumerate(body.get("replace_rules") or []):
+                    block = _obj(rule).get("places_block")
+                    if _is_custom(block) and block not in index.blocks:
+                        report.add(rel, "xref.feature",
+                                   f"replace_rules[{i}] places {block!r}, which no block definition declares")
+    for path in sorted((behavior / "feature_rules").glob("*.json")):
+        rel = f"{prefix}/feature_rules/{path.name}"
+        desc = _obj(_obj(_obj(_load(path)).get("minecraft:feature_rules")).get("description"))
+        ident, places = desc.get("identifier"), desc.get("places_feature")
+        if isinstance(ident, str) and ident.split(":", 1)[-1] != path.stem:
+            report.add(rel, "xref.feature", f"identifier {ident!r} doesn't match the file name {path.stem!r}")
+        if _is_custom(places) and places not in features:
+            report.add(rel, "xref.feature", f"places_feature {places!r}, which no feature in features/ declares")
+
+
 def _check_lang(report: ValidationReport, resource: Path, index: Index) -> None:
     """Names are a warning, not an error: a missing one is ugly, not broken."""
     lang = resource / "texts" / "en_US.lang"
@@ -333,6 +369,7 @@ def check_cross_pack(report: ValidationReport, tree: Path) -> Index:
         _check_recipes(report, behavior, index)
         _check_block_placers(report, behavior, index)
         _check_loot(report, behavior, index)
+        _check_features(report, behavior, index)
     if resource is not None:
         _check_lang(report, resource, index)
     return index

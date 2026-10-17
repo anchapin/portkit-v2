@@ -137,3 +137,29 @@ test("trapdoor verdict: open and powered both as wanted", () => {
   assert.deepEqual(trapdoorVerdict(false, { open: true, powered: false }).problems, ["open=true, expected false"]);
   assert.deepEqual(trapdoorVerdict(true, { open: undefined, powered: true }).problems, ["open=undefined, expected true"]);
 });
+
+test("ore cubes sit eight apart inside the ticking area, below the paired layer (#281)", async () => {
+  const { ORE_CUBE, ORE_SPACING, ORE_Y, oreSlot } = await import("../../src/portkit/ingame/runtime/ingame_core.js");
+  const seen = new Set();
+  for (let i = 0; i < 64; i++) {
+    const { x, y, z } = oreSlot(i);
+    assert.ok(x >= 0 && x + ORE_CUBE <= AREA && z >= 0 && z + ORE_CUBE <= AREA);
+    assert.equal(y, ORE_Y);
+    assert.ok(ORE_CUBE < ORE_SPACING);
+    seen.add(`${x},${z}`);
+  }
+  assert.equal(seen.size, 64);
+  assert.ok(ORE_Y + ORE_CUBE <= PAIRED_Y);
+});
+
+test("ore scan range is the rule's extent clipped to the dimension; verdict needs one ore", async () => {
+  const { oreVerdict, scanRange } = await import("../../src/portkit/ingame/runtime/ingame_core.js");
+  assert.deepEqual(scanRange([8, 32], 0, 127), [8, 32]);
+  assert.deepEqual(scanRange([8, 247], 0, 127), [8, 127]);
+  assert.deepEqual(scanRange([32, 8], 0, 127), [8, 32]);
+  assert.equal(scanRange([200, 247], 0, 127), null);
+  assert.equal(oreVerdict({ "a:ore": 3 }, ["a:ore"]).ok, true);
+  assert.equal(oreVerdict({ "a:deep": 1 }, ["a:ore", "a:deep"]).ok, true);
+  assert.deepEqual(oreVerdict({}, ["a:ore"]), { ok: false, problems: ["none of a:ore found"] });
+  assert.equal(oreVerdict(undefined, ["a:ore"]).ok, false);
+});

@@ -200,3 +200,36 @@ export function describe(err) {
   if (err instanceof Error) return `${err.name}: ${err.message}`;
   return String(err);
 }
+
+// The ore check (#281). Each ore feature is placed into a cube of the block it
+// replaces, eight apart on layer ORE_Y (below the paired and drop layers).
+export const ORE_Y = 20;
+export const ORE_SPACING = 8;
+export const ORE_CUBE = 7;
+// The generation check loads fresh chunks of a dimension this far out (blocks,
+// both axes), GEN_SIZE wide: nothing else has touched them.
+export const GEN_ORIGIN = 4096;
+export const GEN_SIZE = 48;
+
+/** The corner of the i-th ore cube: eight apart, 64 a layer. */
+export function oreSlot(i) {
+  const per = AREA / ORE_SPACING;
+  const k = i % (per * per);
+  return { x: (k % per) * ORE_SPACING, y: ORE_Y, z: Math.floor(k / per) * ORE_SPACING };
+}
+
+/** The y range to scan for a rule: its extent clipped to the dimension's. */
+export function scanRange(y, lowest, highest) {
+  const lo = Math.max(Math.min(y[0], y[1]), lowest);
+  const hi = Math.min(Math.max(y[0], y[1]), highest);
+  return lo <= hi ? [lo, hi] : null;
+}
+
+/**
+ * The ore verdict: counts (block id -> blocks found) against the ore's blocks.
+ * At least one of them must be there.
+ */
+export function oreVerdict(counts, blocks) {
+  const found = blocks.reduce((n, b) => n + (counts?.[b] ?? 0), 0);
+  return found > 0 ? { ok: true, problems: [] } : { ok: false, problems: [`none of ${blocks.join(", ")} found`] };
+}

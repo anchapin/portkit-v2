@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import codeonly, datatags, ownership, worldgen
-from .converters import lang, loot, recipes
+from .converters import features, lang, loot, recipes
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
 from .converters import convert_all
@@ -505,6 +505,13 @@ def convert(
         # And a trim recipe whose base is the pack's own item that isn't armor
         # carrying minecraft:trimmable_armors (#272).
         withdraw_unacceptable_trims(result)
+        # The pack's blocks are final: the ores the jar's Forge/NeoForge biome
+        # modifiers add become Bedrock ore features and feature rules (#281).
+        ores = features.convert(staged.root, result.files, set(selected))
+        result.files.update(ores.files)
+        result.consumed |= ores.consumed
+        result.unhandled.extend(ores.unhandled)
+        result.notes.extend(ores.notes)
         # The pack's blocks are final: Java's tool and tier block tags become
         # Bedrock's vanilla block tags on them (#293).
         claimed, tag_notes = datatags.tool_tags(staged.root, result.files, getattr(meta, "loader", None))

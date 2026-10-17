@@ -66,6 +66,17 @@ _RECIPE_REQUIRED: dict[str, tuple] = {
 # agent's stub such as {"format_version": "1.20.80", "minecraft": "item"} would
 # otherwise pass as a valid pack. blocks/, recipes/ and loot_tables/ have their
 # own, stricter checks below. Directories not listed are not shape-checked.
+FEATURE_TYPES: tuple[str, ...] = tuple(f"minecraft:{t}" for t in (
+    "aggregate_feature", "beards_and_shavers", "cave_carver_feature", "conditional_list", "fossil_feature",
+    "geode_feature", "growing_plant_feature", "height_difference_filter_feature",
+    "horizontal_tree_decoration_feature", "multi_block_feature", "multiface_feature",
+    "multipart_block_column_feature", "nether_cave_carver_feature", "ore_feature",
+    "partially_exposed_blob_feature", "rect_layout", "scan_surface", "scatter_feature", "sculk_patch_feature",
+    "search_feature", "sequence_feature", "single_block_feature", "snap_to_surface_feature",
+    "structure_template_feature", "surface_relative_threshold_feature", "tree_feature",
+    "underwater_cave_carver_feature", "vegetation_patch_feature", "weighted_random_feature",
+))
+
 _DOCUMENT_KEYS: dict[str, dict[str, tuple[str, ...]]] = {
     "behavior_pack": {
         "items": ("minecraft:item",),
@@ -73,6 +84,8 @@ _DOCUMENT_KEYS: dict[str, dict[str, tuple[str, ...]]] = {
         "spawn_rules": ("minecraft:spawn_rules",),
         "biomes": ("minecraft:biome",),
         "feature_rules": ("minecraft:feature_rules",),
+        # Every feature type Mojang/bedrock-samples documentation/Features.html lists (#281).
+        "features": FEATURE_TYPES,
         "dimensions": ("minecraft:dimension",),
         "animations": ("animations",),
         "animation_controllers": ("animation_controllers",),
