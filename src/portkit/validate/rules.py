@@ -13,7 +13,7 @@ from pathlib import Path
 
 from ..data import FETCH_COMMAND, bedrock_vanilla_sounds
 from ..data import trim_items
-from ..data.smithing_bases import vanilla_base_refusal
+from ..data.smithing_bases import addon_slot_refusal, vanilla_base_refusal, vanilla_slot_refusal
 from ..paths import MAX_PATH, MAX_SEGMENTS, too_long
 from ..png import dimensions
 from .collisions import check_collisions
@@ -707,7 +707,14 @@ def _check_smithing_bases(report: ValidationReport, pack_root: Path, prefix: str
     equipment", #263). Checked for bases the pack defines (a block, or an item
     without durability) and for vanilla bases, against Bedrock's vanilla data
     (portkit.data.smithing_bases, #270: minecraft:stick is not armor or a
-    tool); other ids the pack doesn't define are other rules' business."""
+    tool); other ids the pack doesn't define are other rules' business.
+
+    ``recipe.smithing_slot`` (#305): the template and addition must carry
+    ``minecraft:transform_templates`` / ``minecraft:transform_materials``
+    (learn.microsoft.com, Recipe Documentation - Smithing Transform Recipe;
+    BDS 1.26.52.3 refuses the recipe otherwise): a vanilla item must be
+    Bedrock's own member (portkit.data.smithing_bases), the pack's item must
+    carry the tag, and the pack's block (no item definition) can't."""
     recipes = sorted((pack_root / "recipes").glob("*.json"))
     if not recipes:
         return
@@ -718,6 +725,25 @@ def _check_smithing_bases(report: ValidationReport, pack_root: Path, prefix: str
         except (ValueError, OSError):
             continue
         body = data.get("minecraft:recipe_smithing_transform") if isinstance(data, dict) else None
+        if isinstance(body, dict):
+            for slot in ("template", "addition"):
+                ident = body.get(slot)
+                if not isinstance(ident, str) or ":" not in ident:
+                    continue
+                if ident.startswith("minecraft:"):
+                    refusal = vanilla_slot_refusal(slot, ident)
+                else:
+                    if items is None:
+                        items = _definitions(pack_root, "items", "minecraft:item")
+                        blocks = _definitions(pack_root, "blocks", "minecraft:block")
+                    if ident in items:
+                        refusal = addon_slot_refusal(slot, ident, "item", items[ident])
+                    elif ident in blocks:
+                        refusal = addon_slot_refusal(slot, ident, "block", None)
+                    else:
+                        refusal = None  # not this pack's: other rules' business
+                if refusal:
+                    report.add(f"{prefix}/recipes/{path.name}", "recipe.smithing_slot", f"smithing {refusal}")
         base = body.get("base") if isinstance(body, dict) else None
         if not isinstance(base, str):
             continue

@@ -97,7 +97,7 @@ from ..model import ConversionResult, SourceMod, Unhandled
 from ..data import FETCH_COMMAND
 from ..data import java_items, vanilla_items
 from ..data import trim_items
-from ..data.smithing_bases import vanilla_base_refusal
+from ..data.smithing_bases import addon_slot_refusal, vanilla_base_refusal, vanilla_slot_refusal
 from .recipe_unlock import ALWAYS_UNLOCKED, NEEDS_UNLOCK, advancement_index, unlock_entries, with_unlock
 from .recipe_unlock import criteria as unlock_criteria
 from .tags import MultiMembers, TagResolver
@@ -1417,10 +1417,18 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 write(rel, out_path, ident, {"format_version": "1.20.10", body_key: body})
                 if body_key == "minecraft:recipe_smithing_transform":
                     for slot, slot_tag in _SMITHING_SLOT_TAGS.items():
-                        # Item definitions only: a block in a slot would need
-                        # an item form of its own (left as it is).
                         found = (emitted or {}).get(body.get(slot))
-                        if found and found[0] == "item" and isinstance(found[2].get("minecraft:item"), dict):
+                        if not found:
+                            continue
+                        has_item = isinstance(found[2].get("minecraft:item"), dict)
+                        if found[0] == "item" and has_item:
+                            item_tags.setdefault(body[slot], set()).add(slot_tag)
+                        elif slot != "base" and (found[0] == "block" or found[0] == "block_and_item" and has_item):
+                            # A block in the template or addition slot carries
+                            # the tag on its item form (its own item file, or
+                            # one replacing its item, _block_item), the way
+                            # #293's vanilla tags do (#305). Not the base: that
+                            # must be armor or a tool, which a block isn't.
                             item_tags.setdefault(body[slot], set()).add(slot_tag)
             continue
         if java_type == "minecraft:smithing_trim":
@@ -2035,6 +2043,28 @@ def equip_smithing_bases(mod: SourceMod, files: dict) -> ConversionResult:
     return result
 
 
+def _slot_refusal(slot: str, ident, emitted: dict) -> str | None:
+    """Why Bedrock won't take ``ident`` in a smithing transform's template or
+    addition slot, or None (#305).
+
+    The slot takes only items carrying its tag (``_SMITHING_SLOT_TAGS``). A
+    vanilla item must be one of Bedrock's own members
+    (:func:`portkit.data.smithing_bases.vanilla_slot_refusal`); the pack's own
+    item or block must carry the tag on its item definition, which the recipe
+    converter gives it. Ids the pack doesn't define are
+    :func:`drop_unshipped_recipes`' business."""
+    if not isinstance(ident, str) or ":" not in ident:
+        return None
+    if ident.startswith("minecraft:"):
+        return vanilla_slot_refusal(slot, ident)
+    found = emitted.get(ident)
+    if found is None:
+        return None
+    item = found[2].get("minecraft:item") if found[0] != "block" else None
+    components = item.get("components") if isinstance(item, dict) else None
+    return addon_slot_refusal(slot, ident, found[0], components)
+
+
 def withdraw_unequipped_smithing(result: ConversionResult) -> None:
     """Withdraw every smithing recipe whose base Bedrock won't take (#268).
 
@@ -2048,7 +2078,10 @@ def withdraw_unequipped_smithing(result: ConversionResult) -> None:
     smithing table and what the upgrade carries over). A vanilla base is
     checked against Bedrock's vanilla data (:mod:`portkit.data.smithing_bases`,
     #270): one that isn't armor or a tool there (``minecraft:stick``) withdraws
-    the recipe the same way. The smithing slot tags an item carried only for a recipe
+    the recipe the same way. So does a template or addition Bedrock won't take
+    (:func:`_slot_refusal`, #305): a vanilla item outside Bedrock's
+    ``minecraft:transform_templates`` / ``transform_materials``, or the pack's
+    own item or block without the tag. The smithing slot tags an item carried only for a recipe
     that was withdrawn (here or by :func:`drop_unshipped_recipes`) are taken
     off it again.
     """
@@ -2060,9 +2093,14 @@ def withdraw_unequipped_smithing(result: ConversionResult) -> None:
         if path.startswith("recipes/") and isinstance(value, dict) and isinstance(value.get(SMITHING), dict):
             by_source.setdefault(result.recipe_sources.get(path, path), []).append(path)
     for source, paths in by_source.items():
-        refused = []
+        refused, slot_refused = [], []
         for path in paths:
-            base = result.files[path][SMITHING].get("base")
+            body = result.files[path][SMITHING]
+            for slot in ("template", "addition"):
+                refusal = _slot_refusal(slot, body.get(slot), emitted)
+                if refusal:
+                    slot_refused.append(refusal)
+            base = body.get("base")
             if not isinstance(base, str) or ":" not in base:
                 continue
             if base.startswith("minecraft:"):
@@ -2077,13 +2115,18 @@ def withdraw_unequipped_smithing(result: ConversionResult) -> None:
                 refused.append(f"{base} is a block")
             elif not _durability(found[2]):
                 refused.append(f"{base} has no durability (none could be read from the mod's code)")
-        if not refused:
+        if not refused and not slot_refused:
             continue
         for path in paths:
             del result.files[path]
-        why = (f"smithing base {'; '.join(sorted(set(refused)))}: not written, since {_SMITHING_BASE_RULE}; "
-               "not rewritten as a crafting recipe, which would drop the smithing table and what the upgrade "
-               "carries over")
+        reasons = []
+        if refused:
+            reasons.append(f"smithing base {'; '.join(sorted(set(refused)))}: not written, since "
+                           f"{_SMITHING_BASE_RULE}")
+        if slot_refused:
+            reasons.append(f"smithing {'; '.join(sorted(set(slot_refused)))}: not written (#305)")
+        why = ("; ".join(reasons) + "; not rewritten as a crafting recipe, which would drop the smithing "
+               "table and what the upgrade carries over")
         if source in residue_sources:
             result.notes.append(f"{source}: {why}")
         else:
@@ -2164,4 +2207,9 @@ def _drop_orphan_slot_tags(result: ConversionResult) -> None:
             item["components"]["minecraft:tags"] = {"tags": kept}
         else:
             del item["components"]["minecraft:tags"]
+            if isinstance(ident, str) and item["components"] == _block_item(ident, path)[1]["minecraft:item"]["components"]:
+                # An item form written only to carry the tags (_block_item):
+                # with none left the block keeps its own item.
+                del result.files[path]
+                continue
         result.files[path] = {**body, "minecraft:item": item}

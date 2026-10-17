@@ -37,9 +37,9 @@ jobs:
           # Crafting recipes written with a bare type ("crafting_shaped"), read as minecraft: since #302.
           - { name: biomes_o_plenty, manifest: fixtures/real/gauntlet.toml }
           # Tool-gated drops (#299: tier match_tool on sky stone, budding quartz tables): checked per tool.
-          # (Create passes every drop and tool_drop check too, run 38996897674, but has one unrelated
-          # smithing content-log error, so it isn't in the matrix yet.)
           - { name: ae2, manifest: fixtures/real/gauntlet.toml }
+          # Smithing recipes whose addition is a block, tagged on its item form (#305: the copper backtank).
+          - { name: create, manifest: fixtures/real/mods.toml }
           # Recipes written once per combination of a vanilla-only tag over several slots (#302 pick 1: blastbrick, c:bricks x4).
           - { name: immersive_engineering, manifest: fixtures/real/gauntlet.toml }
           # Vertical slabs on block_face + cardinal_direction permutations, one uvlocked bone per side (#296).

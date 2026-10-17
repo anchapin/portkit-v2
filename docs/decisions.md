@@ -27,6 +27,16 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-17: a smithing transform's template and addition carry their Bedrock slot tag, a block's on its item form; otherwise the recipe goes to residue
+
+- **Decision:** every `recipe_smithing_transform` portkit writes has a template carrying `minecraft:transform_templates` and an addition carrying `minecraft:transform_materials` (learn.microsoft.com, Recipe Documentation - Smithing Transform Recipe: items "must have" the tag "to be accepted into the respective UI slot"; BDS 1.26.52.3 refuses the recipe otherwise, ingame run 38996897674).
+  1. The pack's own item in either slot gets the tag (as since #263). The pack's own **block** in either slot now gets it on its item form: its own item file if it has one, else an item replacing the block's item through `minecraft:block_placer` `replace_block_item` (the #293 mechanism, `recipes._block_item`). The Java recipe is the evidence the item goes in that slot. Not the base: that must be armor or a tool (#268), which a block isn't.
+  2. A vanilla item must be Bedrock's own member of the tag: `minecraft:netherite_upgrade_smithing_template` (template) and `minecraft:netherite_ingot` (addition), the only members minecraft.wiki's Item tag (Bedrock Edition) lists (oldid=3758407; MS Learn: the addition's "only accepted item is minecraft:netherite_ingot"). A vanilla item can't be given a tag, so any other vanilla template or addition sends the recipe to the residue with the reason, in the withdraw pass (`withdraw_unequipped_smithing`) and the new validator rule `recipe.smithing_slot` alike. A pack item or block that ends up without the tag is refused the same way.
+  3. When a withdrawn recipe was the only reason an item form was written for a block, that item form is removed again (the block keeps its own item).
+- **Why:** Create's `netherite_backtank_from_netherite` takes `create:copper_backtank` as the addition; the backtank ships as a block, so the recipe shipped without the tag and was Create's one content-log error, keeping it out of the in-game matrix. Tagging the block's item form is what Java does (the backtank item goes in the slot) and uses the item-form mechanism vanilla itself uses (bedrock-samples `items/shelf_mushroom.json`).
+- **Rejected:** withdrawing every recipe whose slot item ships as a block (loses a recipe Bedrock can take); tagging vanilla items (an add-on can't); rewriting as a crafting recipe (drops the smithing table and what the upgrade carries over, Alex 2026-10-16, #268).
+- **Links:** #305, #263, #268, #270, #293.
+
 ## 2026-10-17: a renamed vanilla texture (`oak_planks` -> `planks_oak`) maps through a pinned, pixel-checked per-name table; pairs that look different stay residue
 
 - **Status:** approved (Alex, 2026-10-17). Extends #220 (pick 2) and the 2026-10-17 subfolder entry below (#308), whose "call for Alex" this settles.
