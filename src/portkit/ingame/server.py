@@ -272,6 +272,7 @@ def parse(lines: list[str]) -> dict:
         "drops": [d for k, d in tagged if k == "DROP"],
         "tool_drops": [d for k, d in tagged if k == "TOOL_DROP"],
         "paired": [d for k, d in tagged if k == "PAIRED"],
+        "trapdoors": [d for k, d in tagged if k == "TRAPDOOR"],
         "content_errors": errors,
         "content_warnings": warnings,
     }

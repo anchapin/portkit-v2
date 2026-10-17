@@ -38,6 +38,11 @@ converter wrote, so the checks test the pack as shipped.
   its ``open`` and ``powered`` states: a block carrying the portkit door
   component) a redstone block is set beside the lower half and removed, and
   both halves are read after each.
+- ``trapdoors``: blocks carrying the portkit trapdoor component (#296). Each
+  is ``{"id", "states", "expect"}`` (``states`` names its ``open`` and
+  ``powered`` states; ``expect`` as for ``paired``); the check places it, sets
+  a redstone block beside it and removes it, reading both states after each,
+  then breaks it and counts the drop.
 """
 from __future__ import annotations
 
@@ -67,6 +72,7 @@ class Checks:
     drops: list[dict] = field(default_factory=list)
     tool_drops: list[dict] = field(default_factory=list)
     paired: list[dict] = field(default_factory=list)
+    trapdoors: list[dict] = field(default_factory=list)
 
     def as_json(self) -> dict:
         return {
@@ -77,6 +83,7 @@ class Checks:
             "drops": self.drops,
             "tool_drops": self.tool_drops,
             "paired": self.paired,
+            "trapdoors": self.trapdoors,
         }
 
 
@@ -261,6 +268,33 @@ def _paired_check(behavior_pack: Path, ident: str, block: dict) -> dict | None:
     return {"id": ident, "parts": parts, "expect": expect, "door": door}
 
 
+TRAPDOOR_COMPONENT = ":portkit_trapdoor"
+
+
+def _block_expect(behavior_pack: Path, ident: str, block: dict) -> list[dict] | None:
+    components = block.get("components") or {}
+    per_state = any(isinstance(p, dict) and "minecraft:loot" in (p.get("components") or {})
+                    for p in block.get("permutations") or [])
+    if "minecraft:loot" not in components and not per_state:
+        # No minecraft:loot: a custom block drops itself (learn.microsoft.com minecraft:loot).
+        return [{"item": ident, "count": 1}]
+    drop = _drop_check(behavior_pack, ident, block)
+    return drop["expect"] if drop else None
+
+
+def _trapdoor_check(behavior_pack: Path, ident: str, block: dict) -> dict | None:
+    components = block.get("components") or {}
+    if not any(isinstance(k, str) and k.endswith(TRAPDOOR_COMPONENT) for k in components):
+        return None
+    states = [s for s in ((block.get("description") or {}).get("states") or {}) if isinstance(s, str)]
+    opened = [s for s in states if s.endswith(":open")]
+    powered = [s for s in states if s.endswith(":powered")]
+    if len(opened) != 1 or len(powered) != 1:
+        return None
+    return {"id": ident, "states": {"open": opened[0], "powered": powered[0]},
+            "expect": _block_expect(behavior_pack, ident, block)}
+
+
 def read_checks(behavior_pack: Path) -> Checks:
     """What to check in a converted behavior pack, in a stable (sorted) order."""
     checks = Checks()
@@ -288,6 +322,9 @@ def read_checks(behavior_pack: Path) -> Checks:
         paired = _paired_check(behavior_pack, ident, block)
         if paired is not None:
             checks.paired.append(paired)
+        trapdoor = _trapdoor_check(behavior_pack, ident, block)
+        if trapdoor is not None:
+            checks.trapdoors.append(trapdoor)
     for path in sorted((behavior_pack / "items").rglob("*.json")):
         doc = _read_json(path)
         item = (doc or {}).get("minecraft:item") if isinstance(doc, dict) else None
@@ -301,6 +338,7 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks.drops.sort(key=lambda d: d["id"])
     checks.tool_drops.sort(key=lambda d: (d["id"], d["tool"] or ""))
     checks.paired.sort(key=lambda d: d["id"])
+    checks.trapdoors.sort(key=lambda d: d["id"])
     return checks
 
 

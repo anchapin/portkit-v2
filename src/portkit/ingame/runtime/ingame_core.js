@@ -144,6 +144,25 @@ export function doorVerdict(want, halves) {
   return { ok: problems.length === 0, problems };
 }
 
+// The trapdoor check's layer (#296): one block each, laid out like the paired
+// check (eight apart, room for a redstone block beside it), a new layer four
+// up every 64.
+export const TRAPDOOR_Y = 60;
+
+/** Where the i-th trapdoor goes. */
+export function trapdoorSlot(i) {
+  const at = pairedSlot(i);
+  return { ...at, y: at.y - PAIRED_Y + TRAPDOOR_Y };
+}
+
+/** A trapdoor after a power change: `want` open and powered. */
+export function trapdoorVerdict(want, state) {
+  const problems = [];
+  if (state.open !== want) problems.push(`open=${state.open}, expected ${want}`);
+  if (state.powered !== want) problems.push(`powered=${state.powered}, expected ${want}`);
+  return { ok: problems.length === 0, problems };
+}
+
 /** The container check's verdict: the slot count the converter wrote. */
 export function containerVerdict(expected, size) {
   if (size === undefined) return { ok: false, problems: ["no minecraft:inventory component"] };
