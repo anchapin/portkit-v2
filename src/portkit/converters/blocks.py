@@ -32,7 +32,7 @@ from portkit import png as png_reader
 
 from .. import blockcode
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import doors, models
+from . import doors, models, trapdoors
 
 _MENU_CATEGORY = "construction"
 
@@ -1687,7 +1687,8 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     notes = result.notes
     result.notes = []
     _toggle_table(mod, result, coded_bool + directional_bool)
-    doors.door_table(mod, result, paired_records)
+    doors.door_table(mod, result, [r for r in paired_records if r["kind"] != "trapdoor"])
+    trapdoors.table(mod, result, [r for r in paired_records if r["kind"] == "trapdoor"])
     _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
     _add_water(mod, result, sorted(water_dropped))
     later, result.notes = result.notes, notes
@@ -1701,7 +1702,8 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(_directional_notes(directional))
     result.notes.extend(_directional_bool_notes(directional_bool))
     result.notes.extend(_vslab_notes(vslabs))
-    result.notes.extend(doors.notes(paired_records))
+    result.notes.extend(doors.notes([r for r in paired_records if r["kind"] != "trapdoor"]))
+    result.notes.extend(trapdoors.notes([r for r in paired_records if r["kind"] == "trapdoor"]))
     result.notes.extend(later)
     result.notes.extend(containers.pop("", []))
     return result
@@ -3466,12 +3468,13 @@ def _bool_state_notes(records: list[dict]) -> list[str]:
 
 
 # --------------------------------------------------------------------------
-# Doors and plain two-tall blocks (#296): converters/doors.py.
+# Doors, trapdoors and plain two-tall blocks (#296): converters/doors.py,
+# converters/trapdoors.py.
 
 def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, dict, dict]:
-    """(spec, reading, residue reason) per door or plain two-tall blockstate.
+    """(spec, reading, residue reason) per door, trapdoor or plain two-tall blockstate.
 
-    A spec is ("door", variants) or ("two_tall", halves); the reading is
+    A spec is ("door", variants), ("trapdoor", variants) or ("two_tall", halves); the reading is
     doors.read_code's. A door the code shows to be the mod's own (or whose
     registration isn't read and which the jar doesn't tag as a wooden door)
     gets a residue reason instead."""
@@ -3487,6 +3490,13 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, di
         if reason:
             why[stem] = reason
             continue
+        variants, reason = trapdoors.trapdoor_variants(blockstate)
+        if variants is not None:
+            specs[stem] = ("trapdoor", variants)
+            continue
+        if reason:
+            why[stem] = reason
+            continue
         halves, reason = doors.two_tall_variants(blockstate)
         if halves is not None:
             specs[stem] = ("two_tall", halves)
@@ -3496,20 +3506,21 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, di
         return {}, {}, why
     classes = getattr(mod, "classes", None)
     readings = {}
-    for kind in ("door", "two_tall"):
+    for kind in ("door", "trapdoor", "two_tall"):
         names = sorted(n for n, s in specs.items() if s[0] == kind)
         if names:
             readings.update(doors.read_code(classes, names, kind))
-    wooden = doors.wooden_doors(mod)
+    wooden = {"door": doors.wooden_doors(mod), "trapdoor": doors.wooden_doors(mod, "wooden_trapdoors")}
     for stem in list(specs):
         r = readings[stem]
+        kind = specs[stem][0]
         if r.verdict == "refused":
-            what = "door" if specs[stem][0] == "door" else "two-tall block"
+            what = {"door": "door", "trapdoor": "trapdoor"}.get(kind, "two-tall block")
             why[stem] = f"{what}: {r.why} (#296)"
             del specs[stem]
-        elif r.verdict == "unread" and specs[stem][0] == "door" \
-                and f"{mod.namespace}:{stem}" not in wooden:
-            why[stem] = (f"door whose code isn't read ({r.why}) and which the jar's minecraft:wooden_doors tag "
+        elif r.verdict == "unread" and kind in wooden \
+                and f"{mod.namespace}:{stem}" not in wooden[kind]:
+            why[stem] = (f"{kind} whose code isn't read ({r.why}) and which the jar's minecraft:wooden_{kind}s tag "
                          "doesn't list, so whether a hand opens it isn't known (#296)")
             del specs[stem]
     return specs, readings, why
@@ -3518,6 +3529,18 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, di
 def _convert_paired(mod: SourceMod, result: ConversionResult, rel: str, name: str,
                     spec: tuple, reading) -> dict | None:
     kind, data = spec
+    if kind == "trapdoor":
+        door = reading.door if reading.door is not None else trapdoors.DEFAULT_TRAPDOOR
+        if not trapdoors.convert(mod, result, rel, name, data):
+            return None
+        if reading.verdict == "vanilla":
+            why = ("" if reading.door is not None else
+                   "its BlockSetType isn't a vanilla constant this reads: a wooden trapdoor's")
+        else:
+            why = f"its code isn't read: {reading.why}; the jar tags it minecraft:wooden_trapdoors"
+        return {"kind": "trapdoor", "name": name, "door": door,
+                "read": reading.verdict == "vanilla" and reading.door is not None,
+                "from": f"{reading.cls} {reading.door_from}".strip(), "why": why}
     if kind == "door":
         door = reading.door if reading.door is not None else doors.DEFAULT_DOOR
         if not doors.convert_door(mod, result, rel, name, data, door):

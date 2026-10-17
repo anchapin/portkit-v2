@@ -93,6 +93,12 @@ TEMPLATES = (
     "block/door_bottom_right", "block/door_bottom_right_open",
     "block/door_top_left", "block/door_top_left_open",
     "block/door_top_right", "block/door_top_right_open",
+    # #296 trapdoors: vanilla's six trapdoor templates. Identical (parent,
+    # textures, elements) in mcmeta's 1.16.5, 1.18.2, 1.19.2, 1.20.1, 1.21.1,
+    # 1.21.8 and 26.1 summaries (2026-10-17).
+    "block/template_trapdoor_bottom", "block/template_trapdoor_top", "block/template_trapdoor_open",
+    "block/template_orientable_trapdoor_bottom", "block/template_orientable_trapdoor_top",
+    "block/template_orientable_trapdoor_open",
 )
 
 # Templates whose boxes changed between game versions: the first version whose
@@ -106,7 +112,7 @@ SINCE = {
 
 # sha256 of the derived JSON (see derive). `python -m portkit.data.models --pin`
 # prints it; bump it together with COMMIT.
-SHA256 = "a668bf199fbf67498d876f11a43ec8d619190510ee9e6c5b45bb387aacd4000e"
+SHA256 = "2f6eaa958e34db692137e18083da1e67c72fbc2e49080d97eefd1987ac5b604e"
 
 
 def derive(summary: bytes) -> bytes:

@@ -27,12 +27,16 @@
 //              with it and leaves exactly one drop. Reported, not asserted:
 //              what placing the lower part alone and the setblock command
 //              leave above it.
+//   trapdoor   a block carrying the portkit trapdoor component (#296): placed
+//              by script, powered by a redstone block beside it (it opens),
+//              unpowered (it closes), broken with `setblock ... air destroy`
+//              and its drop counted (exactly one).
 // Content-log errors are the runner's to count (it reads the server output).
 import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
   AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, PAIRED_PART, Tally, connectionVerdict,
   connectionSlot, containerVerdict, describe, doorVerdict, dropSlot, dropVerdict, line,
-  pairedSlot, pairedVerdict, slot,
+  pairedSlot, pairedVerdict, slot, trapdoorSlot, trapdoorVerdict,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
 
@@ -66,6 +70,7 @@ async function run() {
   say("START", {
     blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length,
     tool_drops: (CHECKS.tool_drops ?? []).length, paired: (CHECKS.paired ?? []).length,
+    trapdoors: (CHECKS.trapdoors ?? []).length,
   });
   if (!(await loaded(dim))) {
     say("ERROR", { detail: "the ticking area never loaded" });
@@ -291,6 +296,63 @@ async function run() {
       fail("paired", id, describe(err));
     }
     say("PAIRED", seen);
+  }
+
+  // trapdoor: one block at a time (#296)
+  const TRAPDOORS = CHECKS.trapdoors ?? [];
+  for (let i = 0; i < TRAPDOORS.length; i++) {
+    const { id, expect, states } = TRAPDOORS[i];
+    const at = trapdoorSlot(i);
+    const beside = { x: at.x + 1, y: at.y, z: at.z };
+    const seen = { id };
+    const stateAt = () => {
+      const perm = dim.getBlock(at).permutation;
+      return { open: perm.getState(states.open), powered: perm.getState(states.powered) };
+    };
+    try {
+      for (const e of itemsNear(at)) e.remove();
+      dim.getBlock(at).setPermutation(BlockPermutation.resolve(id));
+      await system.waitTicks(2);
+      seen.placed = dim.getBlock(at)?.typeId;
+      if (seen.placed !== id) {
+        fail("trapdoor_place", id, `reads back as ${seen.placed}`);
+        say("TRAPDOOR", seen);
+        continue;
+      }
+      tally.record("trapdoor_place", id, true);
+      seen.before = stateAt();
+      dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:redstone_block"));
+      await system.waitTicks(4);
+      seen.powered = stateAt();
+      const on = trapdoorVerdict(true, seen.powered);
+      if (on.ok) tally.record("trapdoor_power", id, true);
+      else fail("trapdoor_power", id, on.problems.join("; "));
+      dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:air"));
+      await system.waitTicks(4);
+      seen.unpowered = stateAt();
+      const off = trapdoorVerdict(false, seen.unpowered);
+      if (off.ok) tally.record("trapdoor_unpower", id, true);
+      else fail("trapdoor_unpower", id, off.problems.join("; "));
+      for (const e of itemsNear(at)) e.remove();
+      dim.runCommand(`setblock ${at.x} ${at.y} ${at.z} air destroy`);
+      await system.waitTicks(10);
+      seen.after_break = dim.getBlock(at)?.typeId;
+      const got = [];
+      for (const e of itemsNear(at)) {
+        const stack = e.getComponent("minecraft:item")?.itemStack;
+        if (stack) got.push({ item: stack.typeId, count: stack.amount });
+        e.remove();
+      }
+      seen.drop = got;
+      if (expect) {
+        const verdict = dropVerdict(expect, got);
+        if (verdict.ok) tally.record("trapdoor_drop", id, true);
+        else fail("trapdoor_drop", id, verdict.problems.join("; "));
+      }
+    } catch (err) {
+      fail("trapdoor", id, describe(err));
+    }
+    say("TRAPDOOR", seen);
   }
 
   // item: each id spawned as an item entity, read back, removed

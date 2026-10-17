@@ -74,6 +74,7 @@ DOOR_TEMPLATES = {
     for half in _HALVES for hinge in _HINGES for is_open in (False, True)
 }
 _DOOR_CLASS = "net/minecraft/world/level/block/DoorBlock"
+_TRAPDOOR_CLASS = "net/minecraft/world/level/block/TrapDoorBlock"
 _TWO_TALL_CLASSES = {"net/minecraft/world/level/block/DoublePlantBlock",
                      "net/minecraft/world/level/block/TallFlowerBlock"}
 # Methods whose override changes how a door behaves: use, placement, hinge,
@@ -86,12 +87,20 @@ DOOR_BEHAVIOUR = frozenset({
     "isOpen", "playSound", "onExplosionHit", "entityInside", "stepOn", "tick", "randomTick",
     "onPlace", "onRemove", "newBlockEntity", "getTicker", "attack", "getHinge",
 })
+# The same for a trapdoor (Mojang names, 1.21.1 TrapDoorBlock: useWithoutItem,
+# toggle, playSound, neighborChanged, getStateForPlacement, updateShape,
+# getShape, onExplosionHit; plus BlockBehaviour's other hooks).
+TRAPDOOR_BEHAVIOUR = frozenset({
+    "use", "useWithoutItem", "useItemOn", "getStateForPlacement", "setPlacedBy", "neighborChanged",
+    "updateShape", "canSurvive", "getShape", "getCollisionShape", "toggle", "playSound",
+    "onExplosionHit", "entityInside", "stepOn", "tick", "randomTick", "onPlace", "onRemove",
+    "newBlockEntity", "getTicker", "attack",
+})
 TWO_TALL_BEHAVIOUR = frozenset({
     "use", "useWithoutItem", "useItemOn", "getStateForPlacement", "setPlacedBy", "neighborChanged",
     "updateShape", "canSurvive", "playerWillDestroy", "entityInside", "stepOn", "tick", "randomTick",
     "onPlace", "onRemove", "newBlockEntity", "getTicker", "performBonemeal", "isValidBonemealTarget",
 })
-_WOODEN_DOORS = ("data/minecraft/tags/blocks/wooden_doors.json", "data/minecraft/tags/block/wooden_doors.json")
 DEFAULT_DOOR = (True, "WOODEN")
 
 
@@ -189,16 +198,26 @@ def _overrides(machine, cls: str, behaviour: frozenset) -> list[str]:
     return sorted(set(found))
 
 
+_KINDS = {
+    "door": ({_DOOR_CLASS}, DOOR_BEHAVIOUR),
+    "trapdoor": ({_TRAPDOOR_CLASS}, TRAPDOOR_BEHAVIOUR),
+    "two_tall": (_TWO_TALL_CLASSES, TWO_TALL_BEHAVIOUR),
+}
+
+
 def read_code(classes, names: list[str], kind: str) -> dict[str, Reading]:
-    """A :class:`Reading` per name; ``kind`` "door" or "two_tall"."""
+    """A :class:`Reading` per name; ``kind`` "door", "trapdoor" or "two_tall".
+
+    For a door or trapdoor read as vanilla, ``Reading.door`` is (opens by
+    hand, sound family) from the ``BlockSetType`` constant its vanilla
+    constructor was given (both take ``(BlockSetType, Properties)``)."""
     readings = {n: Reading(n) for n in names}
     if classes is None or not len(classes) or not names:
         for r in readings.values():
             r.why = "the mod ships no class files"
         return readings
     machine, registered = blockcode._registered(classes, names)
-    wanted = {_DOOR_CLASS} if kind == "door" else _TWO_TALL_CLASSES
-    behaviour = DOOR_BEHAVIOUR if kind == "door" else TWO_TALL_BEHAVIOUR
+    wanted, behaviour = _KINDS[kind]
     for name, r in readings.items():
         objs, why = registered[name]
         if not objs:
@@ -218,7 +237,7 @@ def read_code(classes, names: list[str], kind: str) -> dict[str, Reading]:
             r.why = f"its class overrides vanilla behaviour ({', '.join(over)}), which is its own code"
             continue
         r.verdict = "vanilla"
-        if kind == "door":
+        if kind in ("door", "trapdoor"):
             ctor = obj.fields.get("__vanilla_ctor")
             consts = [a.name for a in (ctor[2] if ctor else ()) if isinstance(a, blockcode.Const)
                       and a.owner == block_set_types.CLASS]
@@ -230,10 +249,11 @@ def read_code(classes, names: list[str], kind: str) -> dict[str, Reading]:
     return readings
 
 
-def wooden_doors(mod: SourceMod) -> set[str]:
-    """Ids the jar's own ``minecraft:wooden_doors`` block tag lists (its share)."""
+def wooden_doors(mod: SourceMod, tag: str = "wooden_doors") -> set[str]:
+    """Ids the jar's own ``minecraft:<tag>`` block tag lists (its share):
+    ``wooden_doors`` or ``wooden_trapdoors``."""
     out: set[str] = set()
-    for rel in _WOODEN_DOORS:
+    for rel in (f"data/minecraft/tags/blocks/{tag}.json", f"data/minecraft/tags/block/{tag}.json"):
         path = mod.root / rel
         if not path.is_file():
             continue

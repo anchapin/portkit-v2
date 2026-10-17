@@ -276,3 +276,27 @@ def test_paired_checks(tmp_path):
     assert testpack.read_checks(bp).as_json()["paired"] == checks.paired
     report = server.parse(['[x] PORTKIT-INGAME PAIRED {"id": "demo:door", "lower_only": {}}'])
     assert report["paired"] == [{"id": "demo:door", "lower_only": {}}]
+
+
+def test_trapdoor_checks(tmp_path):
+    """#296: a block carrying the portkit trapdoor component names its open/powered states."""
+    bp = tmp_path / "bp"
+    states = {"demo:open": [False, True], "demo:powered": [False, True]}
+    (bp / "blocks").mkdir(parents=True)
+    for name, components in (("trap", {"demo:portkit_trapdoor": {}}),
+                             ("lost", {"demo:portkit_trapdoor": {}, "minecraft:loot": "loot_tables/blocks/gone.json"})):
+        (bp / "blocks" / f"{name}.json").write_text(json.dumps({"format_version": "1.26.0", "minecraft:block": {
+            "description": {"identifier": f"demo:{name}", "states": states},
+            "components": {**components, "minecraft:redstone_consumer": {"min_power": 0}}}}))
+    (bp / "blocks" / "stateless.json").write_text(json.dumps({"format_version": "1.26.0", "minecraft:block": {
+        "description": {"identifier": "demo:stateless"}, "components": {"demo:portkit_trapdoor": {}}}}))
+    _block(bp / "blocks" / "plain.json", "demo:plain")
+    checks = testpack.read_checks(bp)
+    want = {"open": "demo:open", "powered": "demo:powered"}
+    assert checks.trapdoors == [
+        {"id": "demo:lost", "states": want, "expect": None},
+        {"id": "demo:trap", "states": want, "expect": [{"item": "demo:trap", "count": 1}]},
+    ]
+    assert checks.as_json()["trapdoors"] == checks.trapdoors
+    report = server.parse(['[x] PORTKIT-INGAME TRAPDOOR {"id": "demo:trap", "drop": []}'])
+    assert report["trapdoors"] == [{"id": "demo:trap", "drop": []}]
