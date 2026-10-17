@@ -31,12 +31,21 @@
 //              by script, powered by a redstone block beside it (it opens),
 //              unpowered (it closes), broken with `setblock ... air destroy`
 //              and its drop counted (exactly one).
+//   ore        an ore feature the converter wrote (#281). Asserted
+//              (ore_generate): outside the flat Overworld, fresh chunks of the
+//              rule's dimension are loaded and the ore blocks the world
+//              generated in the rule's height range counted, at least one per
+//              rule. Reported, not asserted: a cube of the block it replaces
+//              with the feature placed in it by Dimension.placeFeature (on
+//              BDS 1.26.52 it returned false for a converted ore feature that
+//              the world itself generates)
 // Content-log errors are the runner's to count (it reads the server output).
 import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
   AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, PAIRED_PART, Tally, connectionVerdict,
   connectionSlot, containerVerdict, describe, doorVerdict, dropSlot, dropVerdict, line,
   pairedSlot, pairedVerdict, slot, trapdoorSlot, trapdoorVerdict,
+  GEN_ORIGIN, GEN_SIZE, ORE_CUBE, oreSlot, oreVerdict, scanRange,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
 
@@ -70,7 +79,7 @@ async function run() {
   say("START", {
     blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length,
     tool_drops: (CHECKS.tool_drops ?? []).length, paired: (CHECKS.paired ?? []).length,
-    trapdoors: (CHECKS.trapdoors ?? []).length,
+    trapdoors: (CHECKS.trapdoors ?? []).length, ores: (CHECKS.ores ?? []).length,
   });
   if (!(await loaded(dim))) {
     say("ERROR", { detail: "the ticking area never loaded" });
@@ -353,6 +362,83 @@ async function run() {
       fail("trapdoor", id, describe(err));
     }
     say("TRAPDOOR", seen);
+  }
+
+  // ore: each ore feature placed into a cube of what it replaces (#281)
+  const ores = CHECKS.ores ?? [];
+  const countIn = async (where, x0, z0, size, y0, y1, ids) => {
+    const counts = {};
+    let n = 0;
+    for (let x = x0; x < x0 + size; x++) {
+      for (let z = z0; z < z0 + size; z++) {
+        for (let y = y0; y <= y1; y++) {
+          const id = where.getBlock({ x, y, z })?.typeId;
+          if (ids.includes(id)) counts[id] = (counts[id] ?? 0) + 1;
+          if (++n % 8192 === 0) await system.waitTicks(1);
+        }
+      }
+    }
+    return counts;
+  };
+  for (let i = 0; i < ores.length; i++) {
+    const ore = ores[i];
+    const at = oreSlot(i);
+    const seen = { rule: ore.rule, feature: ore.feature };
+    try {
+      const top = at.y + ORE_CUBE - 1;
+      dim.runCommand(`fill ${at.x} ${at.y} ${at.z} ${at.x + ORE_CUBE - 1} ${top} ${at.z + ORE_CUBE - 1} ${ore.replaces[0]}`);
+      try {
+        seen.placed = dim.placeFeature(ore.feature, { x: at.x + 3, y: at.y + 3, z: at.z + 3 }, true);
+      } catch (err) {
+        seen.placed = false;
+        seen.error = describe(err);
+      }
+      seen.counts = await countIn(dim, at.x, at.z, ORE_CUBE, at.y, top, ore.blocks);
+      seen.verdict = oreVerdict(seen.counts, ore.blocks);
+    } catch (err) {
+      seen.error = describe(err);
+    }
+    say("ORE", seen);
+  }
+  // ore_generate: the world generates each rule's ore in fresh chunks of its
+  // dimension (not the Overworld: the check world is flat)
+  const genDims = [...new Set(ores.map((o) => o.dimension).filter((d) => d && d !== "overworld"))];
+  for (const name of genDims) {
+    const there = world.getDimension(name);
+    const g = GEN_ORIGIN;
+    const seen = { dimension: name };
+    try {
+      there.runCommand(`tickingarea add ${g} 0 ${g} ${g + GEN_SIZE - 1} 0 ${g + GEN_SIZE - 1} portkit_ore_${name}`);
+      let ready = false;
+      for (let tick = 0; tick < 1200 && !ready; tick += 10) {
+        try {
+          ready = Boolean(there.getBlock({ x: g, y: 0, z: g }) && there.getBlock({ x: g + GEN_SIZE - 1, y: 0, z: g + GEN_SIZE - 1 }));
+        } catch {
+          ready = false;
+        }
+        if (!ready) await system.waitTicks(10);
+      }
+      if (!ready) throw new Error(`the ${name} ticking area never loaded`);
+      await system.waitTicks(40);
+      const range = there.heightRange;
+      seen.height = [range.min, range.max];
+      for (const ore of ores.filter((o) => o.dimension === name)) {
+        const span = scanRange(ore.y, range.min, range.max - 1);
+        const row = { rule: ore.rule, y: span };
+        if (span === null) {
+          fail("ore_generate", ore.rule, `height range ${ore.y} is outside the ${name}`);
+        } else {
+          row.counts = await countIn(there, g, g, GEN_SIZE, span[0], span[1], ore.blocks);
+          const verdict = oreVerdict(row.counts, ore.blocks);
+          if (verdict.ok) tally.record("ore_generate", ore.rule, true);
+          else fail("ore_generate", ore.rule, verdict.problems.join("; "));
+        }
+        say("ORE_GENERATE", row);
+      }
+    } catch (err) {
+      fail("ore_generate", name, describe(err));
+    }
+    say("ORE_DIMENSION", seen);
   }
 
   // item: each id spawned as an item entity, read back, removed

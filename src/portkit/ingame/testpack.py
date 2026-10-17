@@ -43,6 +43,15 @@ converter wrote, so the checks test the pack as shipped.
   ``powered`` states; ``expect`` as for ``paired``); the check places it, sets
   a redstone block beside it and removes it, reading both states after each,
   then breaks it and counts the drop.
+- ``ores``: feature rules whose feature is a ``minecraft:ore_feature`` of the
+  pack (#281). Each is ``{"rule", "feature", "blocks", "replaces",
+  "dimension", "y"}``. Outside the Overworld (the check world is flat) the
+  check loads fresh chunks of the rule's dimension and counts the ore blocks
+  the world generated in the rule's height range (asserted, at least one).
+  It also places the feature into a cube of the first block it may replace
+  with ``Dimension.placeFeature`` (stable since @minecraft/server 1.19.0,
+  MicrosoftDocs/minecraft-creator ScriptAPI changelog) and reports what that
+  left, without asserting it.
 """
 from __future__ import annotations
 
@@ -73,6 +82,7 @@ class Checks:
     tool_drops: list[dict] = field(default_factory=list)
     paired: list[dict] = field(default_factory=list)
     trapdoors: list[dict] = field(default_factory=list)
+    ores: list[dict] = field(default_factory=list)
 
     def as_json(self) -> dict:
         return {
@@ -84,6 +94,7 @@ class Checks:
             "tool_drops": self.tool_drops,
             "paired": self.paired,
             "trapdoors": self.trapdoors,
+            "ores": self.ores,
         }
 
 
@@ -295,6 +306,51 @@ def _trapdoor_check(behavior_pack: Path, ident: str, block: dict) -> dict | None
             "expect": _block_expect(behavior_pack, ident, block)}
 
 
+# A rule's biome tag -> the dimension it generates in (portkit.data.worldgen.BIOME_TAGS).
+_DIMENSION_TAGS = {"nether": "nether", "the_end": "the_end"}
+
+
+def _tags(value) -> set[str]:
+    if isinstance(value, dict):
+        out = {value["value"]} if value.get("test") == "has_biome_tag" and isinstance(value.get("value"), str) else set()
+        for v in value.values():
+            out |= _tags(v)
+        return out
+    if isinstance(value, list):
+        return set().union(*(_tags(v) for v in value)) if value else set()
+    return set()
+
+
+def _ore_checks(behavior_pack: Path) -> list[dict]:
+    ores: dict[str, dict] = {}
+    for path in sorted((behavior_pack / "features").glob("*.json")):
+        body = (_read_json(path) or {}).get("minecraft:ore_feature")
+        if not isinstance(body, dict):
+            continue
+        ident = (body.get("description") or {}).get("identifier")
+        rules = [r for r in body.get("replace_rules") or [] if isinstance(r, dict)]
+        blocks = [r.get("places_block") for r in rules]
+        replaces = [(r.get("may_replace") or [None])[0] for r in rules]
+        if isinstance(ident, str) and blocks and all(isinstance(b, str) for b in blocks + replaces):
+            ores[ident] = {"blocks": blocks, "replaces": replaces}
+    out = []
+    for path in sorted((behavior_pack / "feature_rules").glob("*.json")):
+        rule = (_read_json(path) or {}).get("minecraft:feature_rules")
+        if not isinstance(rule, dict):
+            continue
+        desc = rule.get("description") or {}
+        ore = ores.get(desc.get("places_feature"))
+        y = (rule.get("distribution") or {}).get("y")
+        span = y.get("extent") if isinstance(y, dict) else [y, y] if isinstance(y, int) else None
+        if ore is None or not isinstance(desc.get("identifier"), str) or not isinstance(span, list):
+            continue
+        tags = _tags((rule.get("conditions") or {}).get("minecraft:biome_filter"))
+        dims = {_DIMENSION_TAGS.get(t, "overworld") for t in tags} or {"overworld"}
+        out.append({"rule": desc["identifier"], "feature": desc["places_feature"], **ore,
+                    "dimension": dims.pop() if len(dims) == 1 else None, "y": span})
+    return out
+
+
 def read_checks(behavior_pack: Path) -> Checks:
     """What to check in a converted behavior pack, in a stable (sorted) order."""
     checks = Checks()
@@ -339,6 +395,7 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks.tool_drops.sort(key=lambda d: (d["id"], d["tool"] or ""))
     checks.paired.sort(key=lambda d: d["id"])
     checks.trapdoors.sort(key=lambda d: d["id"])
+    checks.ores = _ore_checks(behavior_pack)
     return checks
 
 

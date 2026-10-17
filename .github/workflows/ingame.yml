@@ -3,7 +3,7 @@ name: ingame
 # In-game checks (#238): convert a few corpus and deco packs, install each with
 # a generated check behavior pack on Mojang's Bedrock Dedicated Server, and run
 # the Script API checks headlessly (every block places, every item spawns,
-# container slot counts #226, connection states #221, wired block drops #299, per-tool drops of match_tool tables #299, doors and two-tall blocks #296, trapdoors opened and closed by redstone and broken for one drop #296). A run fails on a failed
+# container slot counts #226, connection states #221, wired block drops #299, per-tool drops of match_tool tables #299, doors and two-tall blocks #296, trapdoors opened and closed by redstone and broken for one drop #296, ore features placed and generated #281). A run fails on a failed
 # check or a content-log error; the server output, content log and report are
 # uploaded per pack.
 #
@@ -46,6 +46,8 @@ jobs:
           - { name: quark, manifest: fixtures/real/gauntlet.toml }
           # The gauntlet's NeoForge Waystones build, converted by the same adapter as the Fabric one (#296).
           - { name: waystones, manifest: fixtures/real/gauntlet.toml, label: waystones-neoforge }
+          # Ores from Forge biome modifiers (#281): each ore feature placed by script, and the nether checked for the ore it generates.
+          - { name: tinkers_construct, manifest: fixtures/real/gauntlet.toml, label: tinkers-gauntlet }
     # `label` names a run whose jar shares its fixture name with another (one mod, two loader builds).
     name: ${{ matrix.label || matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
     env:
