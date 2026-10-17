@@ -27,6 +27,67 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-17: ores a Fabric mod attaches in code are read from its bytecode and converted like modifier ores (pending: picks on the #281 Fabric PR)
+
+- **Decision:** new core module `src/portkit/biomecode.py` (no mod names)
+  reads Fabric API `BiomeModifications.addFeature(selector, step, key)` and
+  `BiomeModifications.create(id).add(phase, selector, (sel, ctx) ->
+  ctx.getGenerationSettings().addFeature/removeFeature(step, key))` from the
+  jar's classes (Mojang names; Fabric intermediary through the #235 mapping),
+  starting at the `fabric.mod.json` `main` (Quilt `init`) entrypoints and
+  following only mod methods that reach `net.fabricmc.fabric.api.biome.v1`.
+  Each method runs once over its control-flow graph with values joined where
+  paths meet; a call's guards are the undecided branches it is control
+  dependent on (Ferrante-Ottenstein-Warren), in its method and every caller.
+  A branch on a mod's own undecided no-argument boolean method is a named
+  gate (`MythicMetalsConfig.adamantite()`). Each attachment becomes a
+  modifier-shaped row for `converters/features.py`, which converts it under
+  the approved ore rules (1a-6a) or files `worldgen_feature` residue with the
+  reason. Selectors read: `BiomeSelectors.tag`, `foundInOverworld`,
+  `foundInTheNether`, `foundInTheEnd`; anything else (`all`, `includeByKey`,
+  `Predicate.and/or/negate`) is residue. A biome tag resolves through the
+  jar's own tag files only down to vanilla dimension tags; a biome id or any
+  other tag is residue (never a guess from a tag's name, 5b rejected). A
+  biome call no entrypoint reaches is only noted (its ore stays `unowned`).
+  `SAME_ID_BLOCKS` gains `minecraft:calcite` and `minecraft:smooth_basalt`
+  (bedrock-samples blocks.json `calcite`, `smooth_basalt`).
+  Recommended defaults (pending Alex):
+  1a a config-gated attachment is decided at the gate's cited default: a
+  `code_gate` entry in `config_flag_defaults.json` maps the config class's
+  `<option>()Z` methods to flags (Mythic Metals 0.24.6+1.21: 25 owo-config
+  options, `MythicConfigModel.java` L13-61 at 7332378b, all `true`), the same
+  rule as recipe load conditions (#183 option C), noted, `--config
+  mythicmetals.<option>=false` turns one off; an uncited gate is residue
+  (1b: every gated attachment residue);
+  2a Fabric's `c:is_overworld`, `c:is_nether`, `c:is_end` are their vanilla
+  tags (fabric-convention-tags-v2 2.12.0+c3656daa19: `#minecraft:is_*` plus
+  an optional legacy `#c:in_*` defined nowhere in Fabric API 0.116.17+1.21.1),
+  table `CONVENTION_BIOME_TAGS` keyed by the pinned loader tag set (2b residue);
+  3a `foundInOverworld/TheNether/TheEnd` ("all biomes that would normally spawn
+  in" that dimension, BiomeSelectors.java L61-84) map like the vanilla
+  dimension tags; biomes other mods add to a dimension are not covered, as for
+  tags (3b residue);
+  4a biome-list tags (`c:is_aquatic`, `c:is_mountain`/`c:is_hill`,
+  `c:is_jungle` + `minecraft:lush_caves`) stay residue until a cited Java to
+  Bedrock biome table exists (4b build that table now);
+  5a the in-game check gets `portkit ingame run --world default` (BDS
+  `level-type=DEFAULT`, ore checks only) so Overworld ores are counted in fresh
+  chunks; a rule whose scanned range holds none of the blocks it may replace
+  is reported as skipped, not failed (5b no Overworld check).
+  Measured on Mythic Metals 0.24.6+1.21: 22 of 25 ores convert (17 Overworld,
+  4 Nether, 1 End); aquarium, osmium and prometheum are 4a residue. The code,
+  not the option names, decides the gate: `banglum()` gates both banglum ores,
+  `kyber()` calcite kyber, `runite()` deepslate runite (the options
+  `netherBanglum`, `calciteKyber`, `deepslateRunite` gate nothing here).
+- **Why:** Fabric has no biome-modifier JSON; the attachment exists only as
+  code, and reading it from the bytecode (Alex's pick 5a on PR #317) gives the
+  exact selector, step and key instead of a naming guess.
+- **Rejected:** converting by the `<ore>_ore_biomes` tag naming convention
+  (5b, a guess); a mod-specific adapter for Mythic Metals (the reader is
+  generic); path enumeration (2^n paths for n sequential config ifs).
+- **Status:** pending (picks comment on the #281 Fabric PR).
+- **Links:** #281, #277, PR #317 picks comment 6239348623.
+
 ## 2026-10-17: ores a Forge/NeoForge biome modifier adds convert to a Bedrock `minecraft:ore_feature` plus a feature rule (approved (Alex, 2026-10-17))
 
 - **Decision:** `converters/features.py` (#281, first slice) reads

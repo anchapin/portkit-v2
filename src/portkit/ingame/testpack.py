@@ -47,7 +47,10 @@ converter wrote, so the checks test the pack as shipped.
   pack (#281). Each is ``{"rule", "feature", "blocks", "replaces",
   "dimension", "y"}``. Outside the Overworld (the check world is flat) the
   check loads fresh chunks of the rule's dimension and counts the ore blocks
-  the world generated in the rule's height range (asserted, at least one).
+  the world generated in the rule's height range (asserted, at least one,
+  when the scanned range holds any block the ore may replace (``hosts``);
+  with none there the row is reported as skipped). In a ``world="default"``
+  run (a generated Overworld, ore checks only) the Overworld is scanned too.
   It also places the feature into a cube of the first block it may replace
   with ``Dimension.placeFeature`` (stable since @minecraft/server 1.19.0,
   MicrosoftDocs/minecraft-creator ScriptAPI changelog) and reports what that
@@ -83,9 +86,13 @@ class Checks:
     paired: list[dict] = field(default_factory=list)
     trapdoors: list[dict] = field(default_factory=list)
     ores: list[dict] = field(default_factory=list)
+    # "flat" (the default check world) or "default": a generated Overworld,
+    # where only the ore checks run and the Overworld's ores are generated too.
+    world: str = "flat"
 
     def as_json(self) -> dict:
-        return {
+        extra = {"world": self.world} if self.world != "flat" else {}
+        return {**extra,
             "blocks": self.blocks,
             "items": self.items,
             "containers": self.containers,
@@ -331,8 +338,9 @@ def _ore_checks(behavior_pack: Path) -> list[dict]:
         rules = [r for r in body.get("replace_rules") or [] if isinstance(r, dict)]
         blocks = [r.get("places_block") for r in rules]
         replaces = [(r.get("may_replace") or [None])[0] for r in rules]
+        hosts = sorted({h for r in rules for h in r.get("may_replace") or [] if isinstance(h, str)})
         if isinstance(ident, str) and blocks and all(isinstance(b, str) for b in blocks + replaces):
-            ores[ident] = {"blocks": blocks, "replaces": replaces}
+            ores[ident] = {"blocks": blocks, "replaces": replaces, "hosts": hosts}
     out = []
     for path in sorted((behavior_pack / "feature_rules").glob("*.json")):
         rule = (_read_json(path) or {}).get("minecraft:feature_rules")
@@ -426,9 +434,14 @@ def manifest(name: str) -> dict:
     }
 
 
-def write_test_pack(behavior_pack: Path, out: Path, name: str) -> Checks:
-    """Write the check pack for ``behavior_pack`` into ``out``; return its checks."""
+def write_test_pack(behavior_pack: Path, out: Path, name: str, world: str = "flat") -> Checks:
+    """Write the check pack for ``behavior_pack`` into ``out``; return its checks.
+
+    ``world="default"``: the run's world is a generated Overworld (#281), so
+    only the ore checks go in (the others lay out blocks on the flat world)."""
     checks = read_checks(behavior_pack)
+    if world != "flat":
+        checks = Checks(ores=checks.ores, world=world)
     if out.exists():
         shutil.rmtree(out)
     scripts = out / "scripts"

@@ -162,4 +162,12 @@ test("ore scan range is the rule's extent clipped to the dimension; verdict need
   assert.equal(oreVerdict({ "a:deep": 1 }, ["a:ore", "a:deep"]).ok, true);
   assert.deepEqual(oreVerdict({}, ["a:ore"]), { ok: false, problems: ["none of a:ore found"] });
   assert.equal(oreVerdict(undefined, ["a:ore"]).ok, false);
+  const { generateVerdict } = await import("../../src/portkit/ingame/runtime/ingame_core.js");
+  assert.deepEqual(generateVerdict({ "a:ore": 2, "minecraft:stone": 9 }, ["a:ore"], ["minecraft:stone"]),
+    { ok: true, problems: [], skipped: false });
+  assert.deepEqual(generateVerdict({ "minecraft:stone": 9 }, ["a:ore"], ["minecraft:stone"]),
+    { ok: false, problems: ["none of a:ore found"], skipped: false });
+  assert.deepEqual(generateVerdict({}, ["a:ore"], ["minecraft:calcite"]),
+    { ok: false, skipped: true, problems: ["none of minecraft:calcite in the scanned range"] });
+  assert.equal(generateVerdict({}, ["a:ore"], []).skipped, false);
 });

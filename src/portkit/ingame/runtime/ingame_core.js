@@ -233,3 +233,16 @@ export function oreVerdict(counts, blocks) {
   const found = blocks.reduce((n, b) => n + (counts?.[b] ?? 0), 0);
   return found > 0 ? { ok: true, problems: [] } : { ok: false, problems: [`none of ${blocks.join(", ")} found`] };
 }
+
+/**
+ * The generation verdict (#281): an ore found in the scanned range passes; none
+ * fails, unless the range held none of the blocks it may replace (``hosts``),
+ * where nothing could have generated: then it is skipped, with the reason.
+ */
+export function generateVerdict(counts, blocks, hosts) {
+  const verdict = oreVerdict(counts, blocks);
+  if (verdict.ok || !hosts || hosts.length === 0) return { ...verdict, skipped: false };
+  const room = hosts.reduce((n, b) => n + (counts?.[b] ?? 0), 0);
+  if (room > 0) return { ...verdict, skipped: false };
+  return { ok: false, skipped: true, problems: [`none of ${hosts.join(", ")} in the scanned range`] };
+}

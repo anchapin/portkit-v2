@@ -45,7 +45,7 @@ import {
   AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, PAIRED_PART, Tally, connectionVerdict,
   connectionSlot, containerVerdict, describe, doorVerdict, dropSlot, dropVerdict, line,
   pairedSlot, pairedVerdict, slot, trapdoorSlot, trapdoorVerdict,
-  GEN_ORIGIN, GEN_SIZE, ORE_CUBE, oreSlot, oreVerdict, scanRange,
+  GEN_ORIGIN, GEN_SIZE, ORE_CUBE, generateVerdict, oreSlot, oreVerdict, scanRange,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
 
@@ -401,8 +401,9 @@ async function run() {
     say("ORE", seen);
   }
   // ore_generate: the world generates each rule's ore in fresh chunks of its
-  // dimension (not the Overworld: the check world is flat)
-  const genDims = [...new Set(ores.map((o) => o.dimension).filter((d) => d && d !== "overworld"))];
+  // dimension (the Overworld only in a generated world: the check world is flat)
+  const generated = CHECKS.world === "default";
+  const genDims = [...new Set(ores.map((o) => o.dimension).filter((d) => d && (d !== "overworld" || generated)))];
   for (const name of genDims) {
     const there = world.getDimension(name);
     const g = GEN_ORIGIN;
@@ -428,9 +429,11 @@ async function run() {
         if (span === null) {
           fail("ore_generate", ore.rule, `height range ${ore.y} is outside the ${name}`);
         } else {
-          row.counts = await countIn(there, g, g, GEN_SIZE, span[0], span[1], ore.blocks);
-          const verdict = oreVerdict(row.counts, ore.blocks);
+          const hosts = ore.hosts ?? [];
+          row.counts = await countIn(there, g, g, GEN_SIZE, span[0], span[1], [...ore.blocks, ...hosts]);
+          const verdict = generateVerdict(row.counts, ore.blocks, hosts);
           if (verdict.ok) tally.record("ore_generate", ore.rule, true);
+          else if (verdict.skipped) row.skipped = verdict.problems.join("; ");
           else fail("ore_generate", ore.rule, verdict.problems.join("; "));
         }
         say("ORE_GENERATE", row);

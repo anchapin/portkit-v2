@@ -266,8 +266,21 @@ def test_the_check_pack_lists_each_ore_rule(tmp_path):
     checks = testpack.read_checks(tree / "behavior_pack")
     assert checks.ores == [{"rule": "examplemod:ore_feature_rules", "feature": "examplemod:ore",
                             "blocks": ["examplemod:ore"], "replaces": ["minecraft:netherrack"],
-                            "dimension": "nether", "y": [8, 32]}]
+                            "hosts": ["minecraft:netherrack"], "dimension": "nether", "y": [8, 32]}]
     assert checks.as_json()["ores"] == checks.ores
+    assert "world" not in checks.as_json()
+
+
+def test_a_generated_world_check_pack_holds_only_the_ores(tmp_path):
+    _ore(tmp_path, "ore", NETHERRACK)
+    _placed(tmp_path, "ore", _standard())
+    _modifier(tmp_path, "ores", ["examplemod:ore"])
+    out = _convert(tmp_path)
+    tree = _tree(tmp_path, out.files)
+    checks = testpack.write_test_pack(tree / "behavior_pack", tmp_path / "pack", "demo", world="default")
+    assert checks.blocks == [] and len(checks.ores) == 1
+    data = (tmp_path / "pack" / "scripts" / "data.js").read_text()
+    assert '"world": "default"' in data
 
 
 def test_constant_providers_written_out_read_as_their_value(tmp_path):

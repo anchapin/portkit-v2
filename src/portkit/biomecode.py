@@ -328,6 +328,20 @@ class BiomeMachine(Machine):
                 nxt = code[k + 1].offset if k + 1 < len(code) else None
                 run = Frame(f.pc, list(f.locals), list(f.stack), f.forked, f.effects)
                 ctx.pc = insn.offset
+                if run.forked and insn.op in (0xB3, 0xB5):
+                    # A write on one side of an undecided branch: what the
+                    # field holds afterwards depends on the path, so unknown.
+                    value = run.stack.pop()
+                    if insn.op == 0xB3:
+                        self.statics[(self._field_owner(insn.arg.owner, insn.arg.name), insn.arg.name)] = UNKNOWN
+                    else:
+                        obj = run.stack.pop()
+                        if isinstance(obj, Obj):
+                            obj.fields[insn.arg.name] = UNKNOWN
+                    del value
+                    run.pc = nxt if nxt is not None else -1
+                    work.append(run)
+                    continue
                 outcome = self.step(cf, insn, run, nxt)
                 if insn.op in (0xAA, 0xAB):
                     ctx.outcomes.setdefault(insn.offset, set()).add(None if outcome else run.pc)
@@ -355,6 +369,11 @@ class BiomeMachine(Machine):
             ctx.outcomes.setdefault(ctx.pc, set()).add(None if out is not None else f.pc)
             ctx.conds[ctx.pc] = (value, op, target)
         return out
+
+    def _write(self, frame: Frame) -> None:
+        if self._ctxs and self.depth == self._ctxs[-1].depth:
+            return  # a new object's constructor; field writes are handled in exec_method
+        super()._write(frame)
 
     def _invoke(self, op: int, ref: Ref, f: Frame):
         self._from_exec = bool(self._ctxs) and self.depth == self._ctxs[-1].depth
