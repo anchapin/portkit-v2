@@ -7,9 +7,9 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 38.5,
-      "files": 3394,
-      "residue": 5426,
+      "coverage": 39.1,
+      "files": 3418,
+      "residue": 5326,
       "errors": 0
     },
     "create": {
@@ -19,9 +19,9 @@
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 41.2,
-      "files": 906,
-      "residue": 1293,
+      "coverage": 41.3,
+      "files": 908,
+      "residue": 1290,
       "errors": 0
     },
     "farmers_delight_neoforge": {
@@ -67,9 +67,9 @@
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 52.2,
-      "files": 16622,
-      "residue": 15219,
+      "coverage": 52.3,
+      "files": 16634,
+      "residue": 15179,
       "errors": 0
     },
     "waystones": {
