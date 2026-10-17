@@ -28,6 +28,16 @@ converter wrote, so the checks test the pack as shipped.
   server's ``LootTableManager.generateLootFromBlockPermutation`` (stable since
   @minecraft/server 2.2.0, MicrosoftDocs/minecraft-creator ScriptAPI
   changelog) what the block drops for that tool.
+- ``paired``: blocks on Bedrock's ``minecraft:multi_block`` trait (#296:
+  doors and two-tall plants). Each is ``{"id", "parts", "expect", "door"}``;
+  the check places the block three ways (the lower part alone, the
+  ``setblock`` command, every part set by script), reports what each leaves
+  above it, breaks the upper part and counts the drop against ``expect``
+  (the item list its own table gives, the block itself when it has no
+  ``minecraft:loot``, None when neither is exact). For a door (``door`` names
+  its ``open`` and ``powered`` states: a block carrying the portkit door
+  component) a redstone block is set beside the lower half and removed, and
+  both halves are read after each.
 """
 from __future__ import annotations
 
@@ -56,6 +66,7 @@ class Checks:
     connections: list[str] = field(default_factory=list)
     drops: list[dict] = field(default_factory=list)
     tool_drops: list[dict] = field(default_factory=list)
+    paired: list[dict] = field(default_factory=list)
 
     def as_json(self) -> dict:
         return {
@@ -65,6 +76,7 @@ class Checks:
             "connections": self.connections,
             "drops": self.drops,
             "tool_drops": self.tool_drops,
+            "paired": self.paired,
         }
 
 
@@ -219,6 +231,36 @@ def _drop_check(behavior_pack: Path, ident: str, block: dict) -> dict | None:
     return {"id": ident, "table": loot, "expect": expect}
 
 
+DOOR_COMPONENT = ":portkit_door"
+
+
+def _paired_check(behavior_pack: Path, ident: str, block: dict) -> dict | None:
+    desc = block.get("description") or {}
+    trait = (desc.get("traits") or {}).get("minecraft:multi_block")
+    if not isinstance(trait, dict) or trait.get("direction", "up") != "up":
+        return None
+    parts = trait.get("parts")
+    if not isinstance(parts, int) or parts < 2:
+        return None
+    components = block.get("components") or {}
+    door = None
+    if any(isinstance(k, str) and k.endswith(DOOR_COMPONENT) for k in components):
+        states = [s for s in (desc.get("states") or {}) if isinstance(s, str)]
+        opened = [s for s in states if s.endswith(":open")]
+        powered = [s for s in states if s.endswith(":powered")]
+        if len(opened) == 1 and len(powered) == 1:
+            door = {"open": opened[0], "powered": powered[0]}
+    per_state = any(isinstance(p, dict) and "minecraft:loot" in (p.get("components") or {})
+                    for p in block.get("permutations") or [])
+    if "minecraft:loot" not in components and not per_state:
+        # No minecraft:loot: a custom block drops itself (learn.microsoft.com minecraft:loot).
+        expect = [{"item": ident, "count": 1}]
+    else:
+        drop = _drop_check(behavior_pack, ident, block)
+        expect = drop["expect"] if drop else None
+    return {"id": ident, "parts": parts, "expect": expect, "door": door}
+
+
 def read_checks(behavior_pack: Path) -> Checks:
     """What to check in a converted behavior pack, in a stable (sorted) order."""
     checks = Checks()
@@ -243,6 +285,9 @@ def read_checks(behavior_pack: Path) -> Checks:
         if drop is not None:
             checks.drops.append(drop)
         checks.tool_drops += _tool_drop_checks(behavior_pack, ident, block)
+        paired = _paired_check(behavior_pack, ident, block)
+        if paired is not None:
+            checks.paired.append(paired)
     for path in sorted((behavior_pack / "items").rglob("*.json")):
         doc = _read_json(path)
         item = (doc or {}).get("minecraft:item") if isinstance(doc, dict) else None
@@ -255,6 +300,7 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks.connections.sort()
     checks.drops.sort(key=lambda d: d["id"])
     checks.tool_drops.sort(key=lambda d: (d["id"], d["tool"] or ""))
+    checks.paired.sort(key=lambda d: d["id"])
     return checks
 
 

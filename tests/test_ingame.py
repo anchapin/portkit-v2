@@ -248,3 +248,31 @@ def test_cli(tree, tmp_path, capsys):
     assert main(["ingame", "pack", "--tree", str(tree), "--out", str(out), "--name", "demo"]) == 0
     assert "4 blocks, 1 items, 1 containers, 1 connection blocks, 1 drops, 0 tool drops" in capsys.readouterr().out
     assert (out / "scripts" / "data.js").exists()
+
+
+def test_paired_checks(tmp_path):
+    """#296: blocks on the multi_block trait; a door names its open/powered states."""
+    bp = tmp_path / "bp"
+    multi = {"minecraft:multi_block": {"enabled_states": ["minecraft:multi_block_part"], "direction": "up", "parts": 2}}
+    door = {"format_version": "1.26.40", "minecraft:block": {
+        "description": {"identifier": "demo:door", "traits": multi,
+                        "states": {"demo:hinge": ["left", "right"], "demo:open": [False, True],
+                                   "demo:powered": [False, True]}},
+        "components": {"demo:portkit_door": {}, "minecraft:redstone_consumer": {"min_power": 0}}}}
+    (bp / "blocks").mkdir(parents=True)
+    (bp / "blocks" / "door.json").write_text(json.dumps(door))
+    _block(bp / "blocks" / "plant.json", "demo:plant", traits=multi)
+    _block(bp / "blocks" / "lootless.json", "demo:odd", traits=multi,
+           components={"minecraft:loot": "loot_tables/blocks/gone.json"})
+    _block(bp / "blocks" / "down.json", "demo:down", traits={"minecraft:multi_block": {"direction": "down", "parts": 2}})
+    _block(bp / "blocks" / "plain.json", "demo:plain")
+    checks = testpack.read_checks(bp)
+    assert checks.paired == [
+        {"id": "demo:door", "parts": 2, "expect": [{"item": "demo:door", "count": 1}],
+         "door": {"open": "demo:open", "powered": "demo:powered"}},
+        {"id": "demo:odd", "parts": 2, "expect": None, "door": None},
+        {"id": "demo:plant", "parts": 2, "expect": [{"item": "demo:plant", "count": 1}], "door": None},
+    ]
+    assert testpack.read_checks(bp).as_json()["paired"] == checks.paired
+    report = server.parse(['[x] PORTKIT-INGAME PAIRED {"id": "demo:door", "lower_only": {}}'])
+    assert report["paired"] == [{"id": "demo:door", "lower_only": {}}]
