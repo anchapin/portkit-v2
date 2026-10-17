@@ -20,6 +20,10 @@ TERRAIN = b"""// a comment line, as bedrock-samples ships
     "bell_stone": {"textures": "textures/blocks/stone"},
     "iron_block": {"textures": "textures/blocks/iron_block"},
     "oak_planks": {"textures": "textures/blocks/planks_oak"},
+    "spruce_planks": {"textures": "textures/blocks/planks_spruce"},
+    "mod_alias": {"textures": "textures/blocks/alias_file"},
+    "poppy": {"textures": "textures/blocks/not_flower_rose"},
+    "tall_grass_top": {"textures": {"path": "textures/blocks/double_plant_grass_top", "overlay_color": "#79c05a"}},
     "planks": {"textures": ["textures/blocks/planks_oak", "textures/blocks/planks_spruce"]},
     "barrel_side": {"textures": ["textures/blocks/barrel_side", "textures/blocks/barrel_side"]},
     "barrel": {"textures": ["textures/blocks/barrel_side", "textures/blocks/barrel_top"]},
@@ -39,6 +43,7 @@ ITEMS = b"""{
   "texture_name": "atlas.items",
   "texture_data": {
     "stick": {"textures": "textures/items/stick"},
+    "salmon": {"textures": "textures/items/fish_salmon_raw"},
     "sword": {"textures": ["textures/items/wood_sword", "textures/items/diamond_sword"]}
   }
 }
@@ -122,11 +127,42 @@ def test_a_dressed_entry_is_not_named(index):
     assert (key, file) == ("examplemod:vanilla/block/grass_side", "textures/blocks/grass_side")
 
 
-def test_a_renamed_texture_stays_residue(index):
-    key, file, why = models.vanilla_texture("minecraft:block/oak_planks", "examplemod")
+def test_a_renamed_texture_outside_the_checked_table_stays_residue(index):
+    key, file, why = models.vanilla_texture("minecraft:block/mod_alias", "examplemod")
     assert key is None and file is None
-    assert "a vanilla texture: Bedrock has no textures/blocks/oak_planks" in why
-    assert "shows textures/blocks/planks_oak, a file of another name" in why
+    assert "a vanilla texture: Bedrock has no textures/blocks/mod_alias" in why
+    assert "shows textures/blocks/alias_file, a file of another name not in the pixel-checked table" in why
+
+
+def test_a_renamed_texture_the_pixel_check_found_different_stays_residue(index):
+    """spruce_planks differs from Bedrock's planks_spruce by one pixel (#296)."""
+    key, file, why = models.vanilla_texture("minecraft:block/spruce_planks", "examplemod")
+    assert key is None and file is None
+    assert "pixel check found does not look like Java's spruce_planks (#296)" in why
+
+
+def test_a_pixel_checked_renamed_texture_maps_to_its_short_name(index):
+    """oak_planks looks exactly like Bedrock's planks_oak (#296)."""
+    assert models.vanilla_texture("minecraft:block/oak_planks", "examplemod") == ("oak_planks", None, "")
+
+
+def test_a_checked_pair_needs_the_atlas_to_still_show_that_file(index):
+    """The table names poppy -> flower_rose; an atlas showing another file isn't it."""
+    key, _, why = models.vanilla_texture("minecraft:block/poppy", "examplemod")
+    assert key is None and "not in the pixel-checked table" in why
+
+
+def test_a_checked_pair_whose_short_name_tints_gets_a_pack_entry(index):
+    """Naming a dressed short name would bring its tint; the entry names the file."""
+    key, file, why = models.vanilla_texture("minecraft:block/tall_grass_top", "examplemod")
+    assert (key, file, why) == ("examplemod:vanilla/block/double_plant_grass_top",
+                                "textures/blocks/double_plant_grass_top", "")
+
+
+def test_a_checked_item_pair_maps_on_the_item_atlas(index):
+    assert models.vanilla_texture("minecraft:item/salmon", "examplemod", "item") == ("salmon", None, "")
+    key, file, _ = models.vanilla_texture("minecraft:item/salmon", "examplemod")
+    assert (key, file) == ("examplemod:vanilla/item/fish_salmon_raw", "textures/items/fish_salmon_raw")
 
 
 def test_a_short_name_that_is_a_variant_set_stays_residue(index):
@@ -159,11 +195,6 @@ def test_without_the_index_vanilla_textures_stay_residue_saying_to_fetch():
 def test_an_item_icon_from_a_block_file_gets_an_item_atlas_entry(index):
     key, file, _ = models.vanilla_texture("minecraft:block/iron_block", "examplemod", "item")
     assert (key, file) == ("examplemod:vanilla/block/iron_block", "textures/blocks/iron_block")
-
-
-def test_renamed_textures_map_when_the_pick_says_so(index, monkeypatch):
-    monkeypatch.setattr(models, "MAP_RENAMED", True)
-    assert models.vanilla_texture("minecraft:block/oak_planks", "examplemod") == ("oak_planks", None, "")
 
 
 def test_the_same_file_name_one_folder_down_maps_to_its_short_name(index):
@@ -230,11 +261,20 @@ def test_an_element_wearing_a_vanilla_texture_renders_alpha_tested(tmp_path, ind
 
 def test_a_renamed_vanilla_texture_keeps_the_block_in_the_residue(tmp_path, index):
     mod = block_mod(tmp_path, {"parent": "minecraft:block/cube_all",
-                               "textures": {"all": "minecraft:block/oak_planks"}})
+                               "textures": {"all": "minecraft:block/spruce_planks"}})
     result = blocks.convert(mod)
     assert result.files == {}
     [u] = result.unhandled
-    assert "a file of another name, so it is not mapped" in u.reason
+    assert "does not look like Java's spruce_planks (#296), so it is not mapped" in u.reason
+
+
+def test_a_pixel_checked_renamed_texture_converts_the_block(tmp_path, index):
+    mod = block_mod(tmp_path, {"parent": "minecraft:block/cube_all",
+                               "textures": {"all": "minecraft:block/oak_planks"}})
+    result = blocks.convert(mod)
+    assert result.unhandled == []
+    instances = result.files["blocks/frame.json"]["minecraft:block"]["components"]["minecraft:material_instances"]
+    assert instances["*"]["texture"] == "oak_planks"
 
 
 def item_mod(tmp_path, layer0):
@@ -338,3 +378,34 @@ def test_without_the_index_a_vanilla_short_name_is_a_dangling_reference(tmp_path
     assert "iron_block" in xrefs.Index(None, rp).terrain
     monkeypatch.delenv("PORTKIT_VANILLA_TEXTURES")
     assert "iron_block" not in xrefs.Index(None, rp).terrain
+
+
+# --- the pixel-checked alias table (#296) -------------------------------------
+
+def test_alias_table_is_tied_to_the_pinned_atlases():
+    from portkit import data
+    from portkit.data import vanilla_texture_aliases as aliases
+    assert aliases.BEDROCK_COMMIT == data.COMMIT
+
+
+def test_alias_table_shape():
+    from portkit.data import vanilla_texture_aliases as aliases
+    assert set(aliases.ALIASES) == {"terrain", "item"}
+    assert sum(map(len, aliases.ALIASES.values())) == 203
+    assert sum(map(len, aliases.DIFFERS.values())) == 28
+    for atlas, folder in (("terrain", "textures/blocks/"), ("item", "textures/items/")):
+        same, differ = aliases.ALIASES[atlas], aliases.DIFFERS.get(atlas, {})
+        assert not set(same) & set(differ)
+        for name, file in {**same, **differ}.items():
+            # a renamed file only: the same name would never need the table
+            assert file.startswith(folder) and file.rpartition("/")[2] != name
+    assert aliases.ALIASES["terrain"]["oak_planks"] == "textures/blocks/planks_oak"
+    assert aliases.DIFFERS["terrain"]["piston_top"] == "textures/blocks/piston_inner"
+
+
+def test_alias_table_holds_no_name_bedrock_lacks():
+    """Java names with no same-named Bedrock short name have no cited pair."""
+    from portkit.data import vanilla_texture_aliases as aliases
+    for name in ("bricks", "sandstone", "red_sandstone", "mossy_cobblestone", "nether_bricks",
+                 "red_nether_bricks", "end_stone_bricks", "prismarine"):
+        assert name not in aliases.ALIASES["terrain"]

@@ -527,11 +527,11 @@ _VANILLA_DIRS = {
     "item": ("textures/items/", "item"), "items": ("textures/items/", "item"),
 }
 
-# Pick 2 (PR #220): a Java name that is a vanilla short name showing a file of
-# another name (oak_planks -> textures/blocks/planks_oak). Off: such a name
-# stays residue, since Bedrock's short names are not always Java's texture
-# (Bedrock's piston_top shows textures/blocks/piston_inner).
-MAP_RENAMED = False
+# Pick 2 (PR #220) as amended for #296: a Java name that is a vanilla short
+# name showing a file of another name (oak_planks -> textures/blocks/planks_oak)
+# maps only through the pixel-checked pairs of portkit.data.vanilla_texture_aliases,
+# since Bedrock's short names are not always Java's texture (Bedrock's
+# piston_top shows textures/blocks/piston_inner).
 
 
 def is_vanilla(reference: str, namespace: str) -> bool:
@@ -557,13 +557,15 @@ def vanilla_texture(
     The rule is the file's name (pick 1): Java's ``block/<name>`` is Bedrock's
     ``textures/blocks/<name>``, the same texture under the same name, or, where
     the folder has no such file, the one file of that name in a folder below it
-    (``textures/blocks/deepslate/<name>``, #296). A vanilla
+    (``textures/blocks/deepslate/<name>``, #296), or the file Bedrock's short
+    name of that name shows when a pixel check found it looks exactly like
+    Java's (``oak_planks`` -> ``textures/blocks/planks_oak``, #296). A vanilla
     short name showing just that file is named directly; a file the atlas only
     lists inside a set of variants gets the pack entry (pick 3), unless vanilla
     animates it (a flipbook keyed to vanilla's own short name; an entry of ours
     would show the whole strip). Everything else stays residue with the reason.
     """
-    from ..data import vanilla_textures
+    from ..data import vanilla_texture_aliases, vanilla_textures
 
     _, _, path = reference.rpartition(":")
     lane, _, name = path.partition("/")
@@ -586,6 +588,13 @@ def vanilla_texture(
         nested = index.nested(home, folder, name)
         if len(nested) == 1:
             file = nested[0]
+        elif not nested:
+            # A short name of Java's name showing a file of another name
+            # (#296): taken only when the pixel check found that file looks
+            # exactly like Java's texture.
+            shows = (index.atlases[home].get(name) or {}).get("paths") or []
+            if len(shows) == 1 and vanilla_texture_aliases.verified(home, name, shows[0]):
+                file = shows[0]
     # pipeline.vanilla_entries reads the file back off this key
     entry_key = f"{namespace}:vanilla/{'block' if home == 'terrain' else 'item'}/{file[len(folder):]}"
     animated = index.animated.get(file)
@@ -611,12 +620,16 @@ def vanilla_texture(
         )
     renamed = (index.atlases[home].get(name) or {}).get("paths") or []
     if len(renamed) == 1:
-        if (MAP_RENAMED and atlas == home and index.atlases[home][name].get("plain")
-                and not index.animated.get(renamed[0])):
-            return name, None, ""
+        if vanilla_texture_aliases.differs(home, name, renamed[0]):
+            return None, None, (
+                f"model points at {reference!r}, a vanilla texture: Bedrock has no {file}; its "
+                f"short name {name!r} shows {renamed[0]}, a file of another name that a pixel "
+                f"check found does not look like Java's {name} (#296), so it is not mapped"
+            )
         return None, None, (
             f"model points at {reference!r}, a vanilla texture: Bedrock has no {file}; its "
-            f"short name {name!r} shows {renamed[0]}, a file of another name, so it is not mapped"
+            f"short name {name!r} shows {renamed[0]}, a file of another name not in the "
+            f"pixel-checked table, so it is not mapped"
         )
     if renamed:
         return None, None, (
