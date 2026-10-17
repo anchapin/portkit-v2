@@ -28,17 +28,18 @@ this conversion emits (``emitted``, filled by
    ``minecraft:planks``), the recipe takes Bedrock's tag and each of the mod's
    members carries it: an item in its ``minecraft:tags``, a block through an
    item that replaces the block's own item and carries the tag (see
-   :func:`_block_item`). If one of them can't (a block that already has an
-   item file), a single-slot ingredient keeps the tag recipe and gets one more
-   recipe per mod member beside it (``<recipe>__<member>.json``); anything
-   else stays residue. Bedrock's tag on its own would drop the mod's members.
+   :func:`_block_item`), and a block that already has its own item file
+   through that item file (#302 pick 2). Bedrock's tag on its own would drop
+   the mod's members.
 2. Native tag. When the mod's members are items or blocks this conversion
    emits, the recipe keeps ``{"tag": "<java tag id>"}``: each member item gets
    the tag in its ``minecraft:tags`` component, and each member block gets an
    item form carrying it (see :func:`_block_item`; a block's own
-   ``minecraft:tags`` are block tags, which recipes don't read). A vanilla item
-   can't be given a tag by an add-on, nor can a block with its own item file;
-   when the tag holds such members and at least two of the mod's own, a
+   ``minecraft:tags`` are block tags, which recipes don't read). A block that
+   already has its own item file carries the tag on that item file (Alex's
+   pick 2 on #302, 2026-10-16), so the player holding it matches. A vanilla
+   item can't be given a tag by an add-on; when the tag holds such members
+   and at least two of the mod's own, a
    single-slot ingredient keeps the tag recipe and gets one recipe per such
    member beside it (``<recipe>__<member>.json``, at most
    :data:`EXPANSION_CAP`). Create's ``stone_types`` tags (14 blocks and one
@@ -49,6 +50,19 @@ this conversion emits (``emitted``, filled by
    only, because a tag filling several slots lets the player mix members, and
    per-member recipes would forbid that. Furnace recipes always take this
    form, since Bedrock's furnace input is one item id.
+4. One recipe per combination (#302 pick 1). Tags whose members are all
+   vanilla items, filling several grid slots between them, are written once
+   per combination of members the player can put there, each slot its own
+   key symbol, when there are at most :data:`EXPANSION_CAP` combinations
+   (nᵏ for n members over k slots); mirror images of a shaped grid and
+   reorderings of a shapeless one are written once (see :func:`_combinations`).
+   Forge's ``chests/wooden`` over two slots is three recipes.
+
+A recipe refused only for tags none of whose members converted (every member
+a mod item this conversion didn't emit) records those members in
+``ConversionResult.unshipped_names``; the pipeline files it
+``owned_by_residue`` when each has a residue entry of its own (#302 pick 3,
+:func:`refine_owned`).
 
 An ingredient written as a JSON list of items (Java's "any of these"; Mythic
 Metals' ``[{"item": "...:deepslate_adamantite_ore"}, {"item":
@@ -755,7 +769,8 @@ def emitted_definitions(files: dict) -> dict[str, tuple[str, str, dict]]:
     """identifier -> (kind, path, body) for every block and item definition in ``files``.
 
     kind is ``"item"``, ``"block"``, or ``"block_and_item"`` for a block that
-    also has its own item file (path and body are then the first one seen).
+    also has its own item file; path and body are then the item file's, the
+    one a recipe tag goes on (#302 pick 2).
     """
     found: dict[str, tuple[str, str, dict]] = {}
     for path, body in files.items():
@@ -767,9 +782,14 @@ def emitted_definitions(files: dict) -> dict[str, tuple[str, str, dict]]:
             if not isinstance(ident, str):
                 continue
             if ident in found and found[ident][0] != kind:
-                # A block with its own item file: which one a recipe slot sees
-                # depends on how the player got it, so neither can be tagged alone.
-                found[ident] = ("block_and_item", *found[ident][1:])
+                # A block with its own item file. Its item file is where a
+                # recipe tag goes (Alex's pick 2 on #302): the player holding
+                # that item form matches the tag.
+                if found[ident][0] == "item":
+                    found[ident] = ("block_and_item", *found[ident][1:])
+                elif kind == "item":
+                    found[ident] = ("block_and_item", path, body)
+                # (block_and_item already: keep the item file it holds.)
             else:
                 found.setdefault(ident, (kind, path, body))
     return found
@@ -867,6 +887,12 @@ def _multi_list(spec, emitted: dict | None) -> _Multi | None:
                   taggable=False, extras=[], listed=True)
 
 
+# Emitted definitions a native item tag can go on: an item file, a block
+# (through an item form replacing its own, see _block_item), and a block with
+# its own item file (on that item file, #302 pick 2).
+_TAGGABLE_KINDS = ("item", "block", "block_and_item")
+
+
 def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
     """The tag (or item-list) ingredient as a known, fully emitted membership, or None."""
     if isinstance(spec, list):
@@ -885,13 +911,15 @@ def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
         else:
             return None  # a member this conversion did not emit: not ours to drop
     own = [k for k in kinds if k != "vanilla"]
+    # A block with its own item file carries the tag on that item file (#302
+    # pick 2), so every one of the mod's own members can carry it.
     taggable = (not found.tag.startswith("minecraft:")
-                and any(k in ("item", "block") for k in own))
-    extras = [m for m, k in zip(found.members, kinds) if k in ("vanilla", "block_and_item")]
+                and any(k in _TAGGABLE_KINDS for k in own))
+    extras = [m for m, k in zip(found.members, kinds) if k == "vanilla"]
     # Bedrock's tag holds vanilla's whole share, so only when the jar's file
     # doesn't replace the tag (mod_additions is None then).
     bedrock_tag = (found.tag in _BEDROCK_VANILLA_TAGS and tags.mod_additions(found.tag) is not None
-                   and all(k in ("vanilla", "item", "block") for k in kinds))
+                   and all(k == "vanilla" or k in _TAGGABLE_KINDS for k in kinds))
     return _Multi(spec=spec, found=found, taggable=taggable, vanilla_tag=_bedrock_equivalent(found, tags),
                   bedrock_tag=bedrock_tag, extras=extras)
 
@@ -909,6 +937,41 @@ def _not_emitted(spec, tags: TagResolver, emitted: dict | None) -> list[str]:
     if found is None:
         return []
     return [m for m in found.members if not m.startswith("minecraft:") and m not in emitted]
+
+
+def _all_unconverted(failing: list[int], multis: dict, positions: list, mapped: list,
+                     tags: TagResolver, emitted: dict | None) -> list[str]:
+    """Every mod item a refused recipe needs, when what refuses it is only tags
+    whose every member is an unconverted mod item; else [] (#302 pick 3).
+
+    Alex's pick 3 on #302 (comment 6228435148, approved 2026-10-16): a tag
+    ingredient none of whose members converted can't match anything on
+    Bedrock until they do. When every refused ingredient is such a tag (no
+    vanilla member, no member this conversion emitted, membership fully
+    known), the recipe's fate is its members': the list (with any other mod
+    item it names that wasn't emitted) goes to :func:`refine_owned`, which
+    files it ``owned_by_residue`` only if each has a residue entry of its own.
+    A tag with any member that converted, or a recipe refused for anything
+    else as well, stays ``recipe``.
+    """
+    if emitted is None or not failing:
+        return []
+    names: list[str] = []
+    for i in failing:
+        spec = positions[i][0]
+        if multis.get(i) is not None or not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
+            return []
+        found = tags.members(spec["tag"])
+        if found is None or not found.members:
+            return []
+        if any(m.startswith("minecraft:") or m in emitted or ":" not in m for m in found.members):
+            return []
+        names.extend(found.members)
+    for m in mapped:
+        item = m.get("item") if isinstance(m, dict) else None
+        if isinstance(item, str) and ":" in item and not item.startswith("minecraft:") and item not in emitted:
+            names.append(item)
+    return sorted(set(names))
 
 
 def _max_format(current, minimum: str) -> str:
@@ -993,6 +1056,117 @@ def recipe_names(rels: list[PurePosixPath]) -> tuple[dict[PurePosixPath, str], d
     return names, refused
 
 
+_KEY_SYMBOLS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+
+def _vanilla_only(multi: "_Multi | None") -> bool:
+    """A tag ingredient whose every member is a vanilla item (none an add-on can tag)."""
+    return (multi is not None and not multi.listed and not multi.vanilla_tag
+            and all(m.startswith("minecraft:") for m in multi.found.members))
+
+
+def _combinations(rest: list[int], multis: dict, positions: list, ingredients: list,
+                  pattern: list | None, symbols: list | None):
+    """Every combination of the vanilla-only tags in ``rest``, one recipe each (#302 pick 1).
+
+    Alex's pick 1 on #302 (comment 6228435148, approved 2026-10-16): a tag
+    ingredient whose members are all vanilla items can't be written as a tag
+    (an add-on can't tag a vanilla item, and no Bedrock vanilla tag has the
+    same members), and when it fills several grid slots the player may put a
+    different member in each. Exact only if every such mix is its own recipe,
+    so each one is, when there are at most :data:`EXPANSION_CAP` of them
+    (n members over k slots: nᵏ; several such tags multiply).
+
+    Shaped: each slot of the tag gets its own key symbol, one per member
+    (Bedrock: "The key used in the pattern may be any single character
+    except the 'space' character", learn.microsoft.com, Recipe Documentation -
+    Shaped Recipe); a slot set all to one member keeps the Java symbol. A
+    combination that is another's mirror image is written once: Bedrock's
+    ``assume_symmetry`` defaults to true ("Used to automatically assume a
+    symmetrical recipe should return the same result", same page), as Java
+    matches a shaped recipe mirrored. Shapeless: order doesn't matter, so a
+    combination is written once whatever slot each member is in.
+
+    Returns ``(variants, shaped_forms)`` (see the caller), or None when the
+    tags aren't all vanilla-only or the count is over the cap.
+    """
+    import itertools
+
+    if not rest or not all(_vanilla_only(multis[i]) for i in rest):
+        return None
+    total = 1
+    for i in rest:
+        total *= len(multis[i].found.members) ** positions[i][1]
+    if total > EXPANSION_CAP or (len(rest) == 1 and positions[rest[0]][1] == 1):
+        return None
+    variants: list[tuple[str, list]] = []
+    shaped: dict[str, tuple[list, dict]] = {}
+    seen: set = set()
+    if pattern is not None and symbols is not None:
+        rows = [row for row in pattern if isinstance(row, str)]
+        if len(rows) != len(pattern):
+            return None
+        used = set("".join(rows)) | set(symbols)
+        free = iter(c for c in _KEY_SYMBOLS if c not in used)
+        cells = [(r, c) for r, row in enumerate(rows) for c, ch in enumerate(row)
+                 if ch in {symbols[i] for i in rest}]
+        by_cell = {cell: next(i for i in rest if symbols[i] == rows[cell[0]][cell[1]]) for cell in cells}
+        fresh: dict[tuple[int, str], str] = {}
+        for choice in itertools.product(*(multis[by_cell[cell]].found.members for cell in cells)):
+            pick = dict(zip(cells, choice))
+            grid = tuple(tuple(pick.get((r, c), ch) for c, ch in enumerate(row)) for r, row in enumerate(rows))
+            mirror = tuple(tuple(reversed(row)) for row in grid)
+            if mirror in seen:
+                continue
+            seen.add(grid)
+            # Each of the tags' symbols: kept when all its slots hold one member.
+            symbol_of: dict[tuple[int, str], str] = {}
+            for i in rest:
+                chosen = {pick[cell] for cell in cells if by_cell[cell] == i}
+                for member in chosen:
+                    if len(chosen) == 1:
+                        symbol_of[(i, member)] = symbols[i]
+                    else:
+                        if (i, member) not in fresh:
+                            got = next(free, None)
+                            if got is None:
+                                return None
+                            fresh[(i, member)] = got
+                        symbol_of[(i, member)] = fresh[(i, member)]
+            new_rows = ["".join(symbol_of[(by_cell[(r, c)], pick[(r, c)])] if (r, c) in pick else ch
+                                for c, ch in enumerate(row)) for r, row in enumerate(rows)]
+            key: dict = {}
+            for i, (symbol, ingredient) in enumerate(zip(symbols, ingredients)):
+                if i not in rest:
+                    key[symbol] = ingredient
+                    continue
+                for member in dict.fromkeys(pick[cell] for cell in cells if by_cell[cell] == i):
+                    key[symbol_of[(i, member)]] = {"item": member}
+            suffix = "__" + "__".join(_vanilla_suffix(pick[cell]) for cell in cells)
+            shaped[suffix] = (new_rows, key)
+            one = list(ingredients)
+            for i in rest:
+                one[i] = {"item": pick[next(cell for cell in cells if by_cell[cell] == i)]}
+            variants.append((suffix, one))
+        return variants, shaped
+    for choice in itertools.product(*(multis[i].found.members for i in rest)):
+        one = list(ingredients)
+        for i, member in zip(rest, choice):
+            one[i] = {"item": member}
+        order = tuple(sorted(json.dumps(x, sort_keys=True) for x in one))
+        if order in seen:
+            continue
+        seen.add(order)
+        variants.append(("__" + "__".join(_vanilla_suffix(m) for m in choice), one))
+    return variants, shaped
+
+
+def _vanilla_suffix(member: str) -> str:
+    """A vanilla member's path for a combination's name: every member is
+    ``minecraft:``, so the namespace adds nothing but length."""
+    return _member_suffix(member.removeprefix("minecraft:"))
+
+
 def _member_suffix(member: str) -> str:
     return member.replace(":", "_").replace("/", "_")
 
@@ -1030,8 +1204,7 @@ def _bedrock_vanilla_tags(mod: SourceMod, emitted: dict | None, tags: TagResolve
             members = tags.own_share(java_tag)
             sources = [tags.tag_file(java_tag).relative_to(mod.root).as_posix()]
         members = [m for m in members if m.startswith(f"{mod.namespace}:")]
-        tagged = [m for m in members if (emitted.get(m) or ("",))[0] in ("item", "block")]
-        cannot = [m for m in members if (emitted.get(m) or ("",))[0] == "block_and_item"]
+        tagged = [m for m in members if (emitted.get(m) or ("",))[0] in _TAGGABLE_KINDS]
         if not tagged:
             continue
         for member in tagged:
@@ -1039,8 +1212,7 @@ def _bedrock_vanilla_tags(mod: SourceMod, emitted: dict | None, tags: TagResolve
         result.consumed.update(sources)
         result.notes.append(
             f"{len(tagged)} of this mod's members of #{java_tag} ({', '.join(sources)}) carry Bedrock's "
-            f"tag of that name, which Bedrock's own recipes take (#293)"
-            + (f"; {', '.join(cannot)} can't (a block with its own item file)" if cannot else ""))
+            f"tag of that name, which Bedrock's own recipes take (#293)")
 
 
 def _trimmable_armor_tags(mod: SourceMod, emitted: dict | None, tags: TagResolver,
@@ -1314,6 +1486,8 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         with_extras: int | None = None  # the native tag ingredient with extra recipes
         expanded: int | None = None  # the ingredient written once per member
         rest: list[int] = []  # tag ingredients only a per-member expansion could write
+        combos: list[int] = []  # vanilla-only tags written once per combination (#302 pick 1)
+        shaped_forms: dict[str, tuple[list, dict]] = {}  # suffix -> (pattern, key) of a combination
         if failing and all(multis.values()):
             ingredients = list(mapped)
             for i in failing:
@@ -1385,6 +1559,15 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                     one = list(ingredients)
                     one[expanded] = {"item": member}
                     variants.append((f"__{_member_suffix(member)}", one))
+            elif not furnace and (combined := _combinations(
+                    rest, multis, positions, ingredients,
+                    (recipe.get("pattern") if java_type == "minecraft:crafting_shaped" else None),
+                    [symbol for symbol, _ in key_specs] if java_type == "minecraft:crafting_shaped" else None,
+            )) is not None:
+                # Vanilla-only tags filling several slots: one recipe per
+                # combination the player can make (#302 pick 1).
+                variants, shaped_forms = combined
+                combos = rest
             else:
                 native = set()
         if any(m is None for _, ms in variants for m in ms):
@@ -1401,6 +1584,12 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             if missing:
                 reason += f"; not converted: {', '.join(missing)}"
             result.unhandled.append(Unhandled(rel, "recipe", reason))
+            unconverted = _all_unconverted(failing, multis, positions, mapped, tag_resolver, emitted)
+            if unconverted:
+                # Every member of each refused tag is a mod item this pack
+                # didn't emit: the pipeline files it owned_by_residue when
+                # each has a residue entry of its own (#302 pick 3).
+                result.unshipped_names[rel] = unconverted
             continue
 
         if furnace:
@@ -1460,7 +1649,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         for suffix, ingredients in variants:
             variant = copy.deepcopy(body)
             variant["description"]["identifier"] = f"{identifier}{suffix}"
-            if java_type == "minecraft:crafting_shaped":
+            if java_type == "minecraft:crafting_shaped" and suffix in shaped_forms:
+                variant["pattern"], variant["key"] = copy.deepcopy(shaped_forms[suffix])
+                variant["result"] = variant.pop("result")
+            elif java_type == "minecraft:crafting_shaped":
                 variant["pattern"] = recipe.get("pattern", [])
                 variant["key"] = {symbol: ing for (symbol, _), ing in zip(key_specs, ingredients)}
                 # keep the field order the single-recipe form always had
@@ -1535,6 +1727,14 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 f"{rel}: tag {multi.found.tag!r} is carried by this mod's members, and "
                 f"{', '.join(multi.extras)} (which can't carry it) got their own recipe "
                 f"({name}__<member>) beside the one taking the tag"
+            )
+        if combos:
+            shown = ", ".join(f"{multis[i].found.tag!r} ({len(multis[i].found.members)} vanilla items, "
+                              f"{positions[i][1]} slot{'s' if positions[i][1] != 1 else ''})" for i in combos)
+            result.notes.append(
+                f"{rel}: tag ingredient(s) {shown} hold only vanilla items, which an add-on can't tag, "
+                f"so the recipe was written once per combination of members the player can put in "
+                f"those slots ({len(variants)} recipes, {name}__<members>; #302)"
             )
         if expanded is not None and variants[0][0] == "":
             member_tag = multis[expanded].found.tag

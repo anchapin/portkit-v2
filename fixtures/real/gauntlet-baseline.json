@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-17T03:00:32+00:00",
+ "generated": "2026-10-17T03:34:32+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -361,9 +361,9 @@
   "immersive_engineering": {
    "class": "content",
    "status": "ok",
-   "coverage": 25.78,
-   "files": 2267,
-   "residue": 6527,
+   "coverage": 25.89,
+   "files": 2279,
+   "residue": 6525,
    "errors": 0,
    "done": false
   },

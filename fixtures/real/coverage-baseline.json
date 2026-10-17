@@ -13,21 +13,21 @@
       "errors": 0
     },
     "create": {
-      "coverage": 40.9,
-      "files": 4013,
-      "residue": 5799,
+      "coverage": 41.0,
+      "files": 4023,
+      "residue": 5797,
       "errors": 0
     },
     "farmers_delight_fabric": {
-      "coverage": 41.1,
-      "files": 903,
-      "residue": 1295,
+      "coverage": 41.2,
+      "files": 906,
+      "residue": 1293,
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 47.0,
-      "files": 880,
-      "residue": 991,
+      "coverage": 47.2,
+      "files": 883,
+      "residue": 989,
       "errors": 0
     },
     "mekanism": {
@@ -43,9 +43,9 @@
       "errors": 0
     },
     "silent_gear_1165": {
-      "coverage": 36.3,
-      "files": 1089,
-      "residue": 1907,
+      "coverage": 36.7,
+      "files": 1105,
+      "residue": 1905,
       "errors": 0
     },
     "storage_drawers_1122": {

@@ -111,3 +111,60 @@ def test_drop_unshipped_recipes_records_every_unshipped_item():
     assert "and 3 more" in u.reason  # the reason shortens the list
     assert result.unshipped_names["data/ex/recipes/a.json"] == sorted(
         ["ex:a"] + [f"ex:part_{i}" for i in range(7)])
+
+
+def _tag_mod(tmp_path, recipe, members):
+    root = tmp_path / "mod"
+    for rel, body in (("data/examplemod/recipes/thing.json", recipe),
+                      ("data/examplemod/tags/items/flowers.json", {"values": members})):
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(body))
+    return SourceMod(root=root, namespace="examplemod", loader="forge", minecraft="1.20.1")
+
+
+TAGGED = {"type": "minecraft:crafting_shapeless",
+          "ingredients": [{"tag": "examplemod:flowers"}, {"item": "minecraft:stick"}],
+          "result": {"item": "examplemod:wand"}}
+
+
+def test_a_tag_whose_every_member_did_not_convert_records_them(tmp_path):
+    """#302 pick 3: the members go to refine_owned like unshipped items do."""
+    mod = _tag_mod(tmp_path, TAGGED, ["examplemod:red_flower", "examplemod:blue_flower"])
+    result = recipes.convert(mod, emitted={})
+    (u,) = result.unhandled
+    assert u.kind == "recipe"
+    assert result.unshipped_names[u.source] == ["examplemod:blue_flower", "examplemod:red_flower"]
+    residue = [_u("assets/examplemod/blockstates/red_flower.json", "block"),
+               _u("assets/examplemod/blockstates/blue_flower.json", "code_drawn_block"), u]
+    (owned,) = [x for x in recipes.refine_owned(residue, result.unshipped_names) if x.source == u.source]
+    assert owned.kind == "owned_by_residue"
+    assert u.reason in owned.reason  # the original reason is kept
+    assert "examplemod:red_flower" in owned.reason
+
+
+def test_a_tag_with_a_member_that_converted_or_a_vanilla_one_is_not_recorded(tmp_path):
+    emitted = {"examplemod:red_flower": ("item", "items/red_flower.json",
+                                         {"minecraft:item": {"description": {"identifier": "examplemod:red_flower"}}})}
+    mod = _tag_mod(tmp_path, TAGGED, ["examplemod:red_flower", "examplemod:blue_flower"])
+    result = recipes.convert(mod, emitted=emitted)
+    assert [u.kind for u in result.unhandled] == ["recipe"] and result.unshipped_names == {}
+    mod = _tag_mod(tmp_path / "b", TAGGED, ["minecraft:poppy", "minecraft:dandelion", "examplemod:blue_flower"])
+    result = recipes.convert(mod, emitted={})
+    assert [u.kind for u in result.unhandled] == ["recipe"] and result.unshipped_names == {}
+
+
+def test_one_member_without_an_entry_of_its_own_keeps_it_recipe(tmp_path):
+    mod = _tag_mod(tmp_path, TAGGED, ["examplemod:red_flower", "examplemod:blue_flower"])
+    result = recipes.convert(mod, emitted={})
+    (u,) = result.unhandled
+    residue = [_u("assets/examplemod/blockstates/red_flower.json", "block"), u]
+    out = recipes.refine_owned(residue, result.unshipped_names)
+    assert [x.kind for x in out if x.source == u.source] == ["recipe"]
+
+
+def test_merge_keeps_unshipped_names():
+    a, b = ConversionResult(), ConversionResult()
+    a.unshipped_names["x"] = ["ex:a"]
+    b.unshipped_names["y"] = ["ex:b"]
+    assert a.merge(b).unshipped_names == {"x": ["ex:a"], "y": ["ex:b"]}

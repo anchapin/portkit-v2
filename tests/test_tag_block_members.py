@@ -46,8 +46,10 @@ def _emitted(blocks=BLOCKS + ("cut_granite_slab",), both=()):
         found[ident] = ("block", f"blocks/{name}.json", {"minecraft:block": {"description": {"identifier": ident}}})
     for name in both:
         ident = f"examplemod:{name}"
-        found[ident] = ("block_and_item", f"blocks/{name}.json",
-                        {"minecraft:block": {"description": {"identifier": ident}}})
+        # emitted_definitions gives a block with its own item file the item file (#302 pick 2).
+        found[ident] = ("block_and_item", f"items/{name}.json",
+                        {"format_version": "1.20.10",
+                         "minecraft:item": {"description": {"identifier": ident}, "components": {}}})
     return found
 
 
@@ -89,15 +91,17 @@ def test_without_a_vanilla_member_one_recipe_takes_the_tag(tmp_path):
     assert set(_recipes(result)) == {"recipes/cut_granite_slab_from_stone_types.json"}
 
 
-def test_a_block_with_its_own_item_gets_its_own_recipe_too(tmp_path):
+def test_a_block_with_its_own_item_carries_the_tag_on_its_item_file(tmp_path):
+    """#302 pick 2: the item file of a block that has one carries the tag."""
     result = recipes.convert(_mod(tmp_path, _stonecutting(), MEMBERS),
                              emitted=_emitted(blocks=("cut_granite", "cut_granite_stairs", "cut_granite_slab"),
                                               both=("cut_granite_wall",)))
     assert set(_recipes(result)) == {
         "recipes/cut_granite_slab_from_stone_types.json",
-        "recipes/cut_granite_slab_from_stone_types__examplemod_cut_granite_wall.json",
         "recipes/cut_granite_slab_from_stone_types__minecraft_granite.json"}
-    assert "items/cut_granite_wall.json" not in result.files
+    wall = result.files["items/cut_granite_wall.json"]["minecraft:item"]
+    assert wall["components"]["minecraft:tags"] == {"tags": [TAG]}
+    assert "minecraft:block_placer" not in wall["components"]
 
 
 def test_one_mod_member_and_a_vanilla_one_keep_one_recipe_each(tmp_path):

@@ -66,8 +66,10 @@ def _emitted(*, items=(), blocks=(), both=()):
         found[ident] = ("block", f"blocks/{name}.json", {"minecraft:block": {"description": {"identifier": ident}}})
     for name in both:
         ident = f"examplemod:{name}"
-        found[ident] = ("block_and_item", f"blocks/{name}.json",
-                        {"minecraft:block": {"description": {"identifier": ident}}})
+        # emitted_definitions gives a block with its own item file the item file (#302 pick 2).
+        found[ident] = ("block_and_item", f"items/{name}.json",
+                        {"format_version": "1.20.10",
+                         "minecraft:item": {"description": {"identifier": ident}, "components": {}}})
     return found
 
 
@@ -156,30 +158,31 @@ def test_a_jar_file_adding_only_vanilla_still_passes_through(tmp_path, reference
     assert not [k for k in result.files if k.startswith("items/")]
 
 
-def test_a_member_with_its_own_item_file_falls_back_to_one_recipe_each(tmp_path, reference):
-    """A block that already has an item file can't be tagged through a stand-in
-    item, so the single-slot recipe keeps the tag and gains one per mod member."""
+def test_a_member_with_its_own_item_file_carries_the_tag_on_it(tmp_path, reference):
+    """#302 pick 2: a block that already has an item file carries the tag on
+    that item file, so the recipe takes the tag once."""
     mod = _mod(tmp_path, _shapeless(), blocks=["netherwood_planks"], planks=["examplemod:netherwood_planks"])
     result = recipes.convert(mod, emitted=_emitted(both=["netherwood_planks"]))
     assert result.unhandled == []
     files = _recipe_files(result)
-    assert set(files) == {"recipes/thing.json", "recipes/thing__examplemod_netherwood_planks.json"}
+    assert set(files) == {"recipes/thing.json"}
     assert {"tag": "minecraft:planks"} in _ingredients(files["recipes/thing.json"])
-    assert {"item": "examplemod:netherwood_planks"} in _ingredients(
-        files["recipes/thing__examplemod_netherwood_planks.json"])
-    ids = {_b["minecraft:recipe_shapeless"]["description"]["identifier"] for _b in files.values()}
-    assert ids == {"examplemod:thing", "examplemod:thing__examplemod_netherwood_planks"}
-    assert not [k for k in result.files if k.startswith("items/")]
-    assert any("each got its own recipe" in n for n in result.notes)
+    item = result.files["items/netherwood_planks.json"]
+    assert item["minecraft:item"]["components"]["minecraft:tags"] == {"tags": ["minecraft:planks"]}
+    assert item["format_version"] == "1.20.50"
+    assert "minecraft:block_placer" not in item["minecraft:item"]["components"]  # the mod's own item file
 
 
-def test_the_multi_slot_fallback_stays_residue(tmp_path, reference):
-    """Per-member recipes would forbid mixing members across slots."""
+def test_a_multi_slot_tag_with_a_block_and_item_member_converts(tmp_path, reference):
+    """With the tag on the item file, mixing members across slots is the tag's job."""
     mod = _mod(tmp_path, _shaped(pattern=("PP",)), blocks=["netherwood_planks"],
                planks=["examplemod:netherwood_planks"])
     result = recipes.convert(mod, emitted=_emitted(both=["netherwood_planks"]))
-    assert _recipe_files(result) == {}
-    assert "minecraft:planks" in result.unhandled[0].reason
+    files = _recipe_files(result)
+    assert list(files) == ["recipes/thing.json"]
+    assert files["recipes/thing.json"]["minecraft:recipe_shaped"]["key"] == {"P": {"tag": "minecraft:planks"}}
+    assert "minecraft:planks" in result.files["items/netherwood_planks.json"]["minecraft:item"][
+        "components"]["minecraft:tags"]["tags"]
 
 
 def test_a_member_this_conversion_did_not_emit_is_residue_not_dropped(tmp_path, reference):
@@ -207,7 +210,8 @@ def test_replace_true_does_not_pass_through(tmp_path, reference):
 
 def test_the_blocking_ingredient_is_the_one_named(tmp_path, reference):
     """When planks would convert but another tag can't, the reason names the other."""
-    recipe = {"type": "minecraft:crafting_shaped", "pattern": ["PSS"],
+    # forge:chests/wooden over five slots: 2^5 = 32 combinations, over the cap (#302 pick 1).
+    recipe = {"type": "minecraft:crafting_shaped", "pattern": ["PSS", "SSS"],
               "key": {"P": {"tag": "minecraft:planks"}, "S": {"tag": "forge:chests/wooden"}},
               "result": {"item": "examplemod:thing"}}
     mod = _mod(tmp_path, recipe, blocks=["netherwood_planks"], planks=["examplemod:netherwood_planks"])
