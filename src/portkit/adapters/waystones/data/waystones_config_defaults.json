@@ -2,7 +2,7 @@
   "about": "Waystones config defaults the waystone runtime (#178) reads, cited from the mod's source at the pinned version (docs/decisions.md, 2026-10-13). Keyed by the mod version the jar's metadata declares; a version that is not here gets no runtime (its blocks stay residue), never these values. Each value is the field's initializer in WaystonesConfigData at the cited line; Balm writes these into the config file a Java player edits, so a pack that changed them behaves differently and this conversion follows the defaults (named in the conversion note).",
   "versions": {
     "21.1.46": {
-      "loader": "fabric",
+      "loaders": ["fabric", "neoforge"],
       "commit": "9d280c1ac8d036516a2927e3d2cad8054e491074",
       "tag": "v21.1.46",
       "repo": "https://github.com/TwelveIterations/Waystones",

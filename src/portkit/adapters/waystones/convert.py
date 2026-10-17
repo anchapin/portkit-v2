@@ -123,7 +123,25 @@ UI_VERSION = "2.0.0"
 
 REPO = "https://github.com/TwelveIterations/Waystones"
 COMMIT = "9d280c1ac8d036516a2927e3d2cad8054e491074"  # tag v21.1.46
-VERSIONS = {"fabric": "21.1.46"}
+# The builds the runtime follows, by loader: the version its code was read at.
+# Waystones is one multi-loader source tree: everything this converter and its
+# runtime cite is under common/ (_src), which both loader builds of a tag
+# compile; the loader directories hold only the entrypoint and compat glue
+# (neoforge/.../NeoForgeWaystones.java at COMMIT: Balm.initialize(...,
+# Waystones::initialize) plus The One Probe / Repurposed Structures compat;
+# fabric/: FabricWaystones, Mod Menu / REI compat, datagen), and both builds'
+# loader mixin configs list no mixins. Read from the two 21.1.46 jars (#296,
+# BUILDS): their assets/ and data/ trees are byte-identical (495 files), they
+# share 375 classes whose numeric and string constants are identical (the
+# Fabric build's in intermediary names, the NeoForge build's in Mojang names),
+# and they differ only by the loader classes above. So one conversion serves both.
+VERSIONS = {"fabric": "21.1.46", "neoforge": "21.1.46"}
+BUILDS = {
+    "fabric": ("https://cdn.modrinth.com/data/LOpKHB2A/versions/nSAwjAk4/waystones-fabric-1.21.1-21.1.46.jar"
+               " (sha512 b301a1af..., fixtures/real/mods.toml)"),
+    "neoforge": ("https://cdn.modrinth.com/data/LOpKHB2A/versions/6Z6MQ6os/waystones-neoforge-1.21.1-21.1.46.jar"
+                 " (sha512 ca90b58d..., fixtures/real/gauntlet.toml)"),
+}
 
 
 def _src(path: str, line: str) -> str:
