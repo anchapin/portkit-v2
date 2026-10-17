@@ -2466,7 +2466,13 @@ def _read_water(machine: Machine, obj: Obj, r: WaterReading) -> None:
 # block up; Java would try the next looking direction or refuse to place. The
 # reading says when it leaned on this (support_assumed).
 
-DIRECTIONAL_KINDS = ("facing6", "attach")
+DIRECTIONAL_KINDS = ("facing6", "attach", "vslab")
+# Vertical slabs (#296): ``type`` = the horizontal side the slab stands
+# against, or ``double``. The value is the mod's own enum (no vanilla class
+# has this state set), whose serialized names the interpreter doesn't
+# evaluate, so the rule and the boxes always fall back to the labelled
+# DEFAULT below; the reading still names the class and its collision.
+VSLAB_TYPES = ("north", "east", "south", "west", "double")
 
 
 @dataclass
@@ -2493,6 +2499,8 @@ def directional_keys(kind: str) -> list[tuple[str, str]]:
     """The Java (face, facing) keys a kind of blockstate draws."""
     if kind == "facing6":
         return [("", d) for d in DIRECTIONS]
+    if kind == "vslab":
+        return [("", t) for t in VSLAB_TYPES]
     return [(f, d) for f in ("floor", "wall", "ceiling") for d in HORIZONTAL]
 
 
@@ -2501,10 +2509,17 @@ def default_rule(kind: str) -> dict:
     clicked face (facing = the clicked face, as vanilla's rods and amethyst
     clusters do); attach-face follows vanilla
     FaceAttachedHorizontalDirectionalBlock#getStateForPlacement L39-52 with the
-    clicked face holding the block up."""
+    clicked face holding the block up. A vertical slab (``vslab``) stands
+    against the side face clicked (type = that face, as vanilla
+    SlabBlock#getStateForPlacement puts a slab against the face it was placed
+    on); a clicked top or bottom face, where Java code picks the half by the
+    point clicked and Bedrock exposes no such point, gives type = the
+    player's facing: the half nearest the player."""
     out = {}
     for c in DIRECTIONS:
-        if kind == "facing6":
+        if kind == "vslab":
+            out[c] = ("", ("player", 0)) if c in ("up", "down") else ("", ("dir", c))
+        elif kind == "facing6":
             out[c] = ("", ("dir", c))
         elif c == "up":
             out[c] = ("floor", ("player", 0))
@@ -2556,6 +2571,11 @@ def read_directional(classes: ClassIndex | None, kinds: dict[str, str]) -> dict[
         r.cls = obj.cls.replace("/", ".")
         _read_states(machine, obj, r)
         r.behaviour = _behaviour(machine, obj.cls)
+        if r.kind == "vslab":
+            r.rule_why = r.shape_why = (
+                f"{r.cls}: type is the mod's own enum, whose serialized names the reader doesn't evaluate")
+            _read_shape_collision(machine, obj, r)
+            continue
         _read_rule(machine, obj, r)
         _read_dir_shapes(machine, obj, r)
         _read_shape_collision(machine, obj, r)

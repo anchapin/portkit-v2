@@ -1516,6 +1516,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded)
     directional: list[dict] = []
     directional_bool: list[dict] = []
+    vslabs: list[dict] = []
     coded: list[dict] = []
     coded_bool: list[dict] = []
     render_types: dict[str, set] = {}
@@ -1567,7 +1568,8 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             if record is not None:
                 if name in water_dropped:
                     record["states"] = [x for x in record["states"] if x != "waterlogged"]
-                (directional_bool if record.get("bools") else directional).append(record)
+                (vslabs if record["kind"] == "vslab"
+                 else directional_bool if record.get("bools") else directional).append(record)
             else:
                 result.consumed = claimed | {rel}
             continue
@@ -1675,7 +1677,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     _add_water(mod, result, sorted(water_dropped))
     later, result.notes = result.notes, notes
     containers = _add_containers(mod, result, stations or {}, experiments)
-    for record in coded + coded_bool + directional + directional_bool:
+    for record in coded + coded_bool + directional + directional_bool + vslabs:
         if record["name"] in containers:
             # Carried: the block entity and the use that opens its menu.
             record["behaviour"] = [m for m in record["behaviour"] if m not in _CONTAINER_CARRIED]
@@ -1683,6 +1685,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(_coded_bool_notes(coded_bool))
     result.notes.extend(_directional_notes(directional))
     result.notes.extend(_directional_bool_notes(directional_bool))
+    result.notes.extend(_vslab_notes(vslabs))
     result.notes.extend(later)
     result.notes.extend(containers.pop("", []))
     return result
@@ -3655,11 +3658,15 @@ def _water_notes(readings: list) -> list[str]:
 _ATTACH_FACES = ("floor", "wall", "ceiling")
 _SIX = ("down", "up", "north", "south", "west", "east")
 _OPPOSITE = {"down": "up", "up": "down", "north": "south", "south": "north", "west": "east", "east": "west"}
-_DIR_LABEL = {"facing6": "6-way facing", "attach": "attach face"}
+_DIR_LABEL = {"facing6": "6-way facing", "attach": "attach face", "vslab": "vertical slab"}
+# The blockstate property a kind's second key is drawn on (``facing`` unless
+# named here).
+_DIR_PROP = {"vslab": "type"}
 
 
-def _key_label(key: tuple) -> str:
-    return f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}"
+def _key_label(key: tuple, kind: str = "") -> str:
+    prop = _DIR_PROP.get(kind, "facing")
+    return f"face={key[0]},{prop}={key[1]}" if key[0] else f"{prop}={key[1]}"
 
 
 def _directional_variants(blockstate: dict) -> tuple[str | None, dict | None, str]:
@@ -3680,6 +3687,10 @@ def _directional_variants(blockstate: dict) -> tuple[str | None, dict | None, st
         parsed[key] = cell
     if set(props) == {"facing"} and props["facing"] == set(_SIX):
         kind = "facing6"
+    elif set(props) == {"type"} and props["type"] == set(blockcode.VSLAB_TYPES):
+        # Vertical slabs (#296): one Java variant per side the slab stands
+        # against, plus double.
+        kind = "vslab"
     elif set(props) == {"face", "facing"} and props["face"] == set(_ATTACH_FACES) \
             and props["facing"] == set(_CARDINALS):
         kind = "attach"
@@ -3696,7 +3707,8 @@ def _directional_variants(blockstate: dict) -> tuple[str | None, dict | None, st
         x, y = entry.get("x") or 0, entry.get("y") or 0
         if any(not isinstance(v, int) or isinstance(v, bool) or v % 90 for v in (x, y)):
             return None, None, f"{label}: {key} turns a model by other than a quarter turn"
-        cells[(cell.get("face", ""), cell["facing"])] = (entry["model"], x % 360, y % 360, bool(entry.get("uvlock")))
+        cells[(cell.get("face", ""), cell[_DIR_PROP.get(kind, "facing")])] = (
+            entry["model"], x % 360, y % 360, bool(entry.get("uvlock")))
     if len(cells) != len(blockcode.directional_keys(kind)):
         return None, None, f"{label}: not every combination has a variant"
     return kind, cells, ""
@@ -4145,13 +4157,25 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         fmt = SCRIPT_FORMAT
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = {"format_version": fmt, "minecraft:block": block}
-    drawn = {"facing"} if kind == "facing6" else {"face", "facing"}
+    if kind == "vslab":
+        # Java's type values as the converted block has them (#299 loot
+        # reads these): each side is the trait states that place it; a
+        # double slab can't exist (see _vslab_notes).
+        result.java_states[f"{ns}:{name}"] = {"type": {
+            t: (_molang(conds_of[("", t)]) if ("", t) in conds_of else None) for _, t in blockcode.directional_keys(kind)}}
+        unreachable = [k for k in unreachable if k != ("", "double")]
+        # The double slab's model was read and set aside on purpose, as the
+        # horizontal slab's is (_convert_slab).
+        double_path = models.model_path(mod, cells[(("", "double"), ())][0])
+        if double_path is not None and double_path.is_file():
+            result.claim(mod, double_path)
+    drawn = {"facing"} if kind == "facing6" else {"type"} if kind == "vslab" else {"face", "facing"}
     record = {
         "name": name,
         "kind": kind,
         "rule": reading.rule_from if reading.rule is not None else None,
         "rule_why": reading.rule_why,
-        "rule_text": _rule_text(rule),
+        "rule_text": _rule_text(rule, _DIR_PROP.get(kind, "facing")),
         "support": reading.support_assumed or reading.rule is None and kind == "attach",
         "box": reading.shape_from if reading.shapes_by is not None else None,
         "box_why": reading.shape_why,
@@ -4161,7 +4185,7 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         "behaviour": [m for m in reading.behaviour if not (toggle and m in ("useWithoutItem", "use"))],
         "clamped": clamped,
         "uvlock": any(cells[c][3] for c in live),
-        "unreachable": [_key_label(k) for k in unreachable],
+        "unreachable": [_key_label(k, kind) for k in unreachable],
     }
     if bools:
         record.update({
@@ -4180,7 +4204,7 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
     return record
 
 
-def _rule_text(rule: dict) -> str:
+def _rule_text(rule: dict, prop: str = "facing") -> str:
     """The placement rule in words, e.g. 'facing = the clicked face'."""
     def facing(c, token):
         kind, arg = token
@@ -4198,7 +4222,7 @@ def _rule_text(rule: dict) -> str:
     parts = []
     for c in _SIX:
         face, token = rule[c]
-        text = (f"face {face}, " if face else "") + f"facing {facing(c, token)}"
+        text = (f"face {face}, " if face else "") + f"{prop} {facing(c, token)}"
         parts.append((text, c))
     grouped: dict = {}
     for text, c in parts:
@@ -4213,6 +4237,11 @@ _DIR_RULE_DEFAULT = {
     "attach": ("vanilla FaceAttachedHorizontalDirectionalBlock#getStateForPlacement L39-52: clicked top -> "
                "floor, clicked bottom -> ceiling (facing = the player's facing), clicked side -> wall facing "
                "away from it"),
+    "vslab": ("clicked side -> type = that face, the slab standing against the block it was placed on, as "
+              "vanilla SlabBlock#getStateForPlacement puts a slab against the face clicked; clicked top or "
+              "bottom -> type = the player's facing (Bedrock cardinal_direction), the half nearest the player: "
+              "Java code picks the half by the point clicked on the face, which neither Bedrock's placement "
+              "traits nor its script place event expose"),
 }
 
 
@@ -4234,6 +4263,26 @@ def _directional_bool_notes(records: list[dict]) -> list[str]:
     return notes + _directional_notes(records)[1:] + _bool_state_notes(records)
 
 
+def _vslab_notes(records: list[dict]) -> list[str]:
+    """Notes for vertical slabs (#296): placement, box and collision as the
+    6-way / attach-face notes word them, plus the double slab set aside as
+    the horizontal slab's is."""
+    if not records:
+        return []
+    notes = [
+        f"{len(records)} vertical slab block(s) convert (blockstate type=north|east|south|west|double): each "
+        "side the slab stands against is a permutation on Bedrock's minecraft:block_face (the clicked face) and "
+        "minecraft:cardinal_direction (the player's facing) that place it, the model's uvlocked y turn baked "
+        "into one bone per side. Placement rule and box read from the jar's bytecode where it can be read "
+        "deterministically, otherwise a documented DEFAULT, named per block below (a DEFAULT is not a citation).",
+        "Java's double vertical slab (type=double, a second slab placed into the first) has no data-driven "
+        "Bedrock form, as with horizontal slabs: a second slab goes in the next block space instead of merging, "
+        "and a loot count conditioned on type=double never applies - " + ", ".join(r["name"] for r in records)
+        + ".",
+    ]
+    return notes + _directional_notes(records)[1:]
+
+
 def _directional_notes(records: list[dict]) -> list[str]:
     if not records:
         return []
@@ -4248,7 +4297,7 @@ def _directional_notes(records: list[dict]) -> list[str]:
     read = [(f"{r['rule']} ({r['rule_text']})", r["name"]) for r in records if r["rule"]]
     if read:
         notes.append("Placement rule read from bytecode - " + _grouped(read) + ".")
-    for kind in ("facing6", "attach"):
+    for kind in ("facing6", "attach", "vslab"):
         default = [(r["rule_why"], r["name"]) for r in records if not r["rule"] and r["kind"] == kind]
         if default:
             notes.append(f"{_DIR_LABEL[kind].capitalize()} placement DEFAULT, not read from code "
