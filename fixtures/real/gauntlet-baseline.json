@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-17T15:39:03+00:00",
+ "generated": "2026-10-17T17:39:25+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -297,9 +297,9 @@
   "waystones": {
    "class": "content",
    "status": "ok",
-   "coverage": 37.27,
+   "coverage": 37.36,
    "files": 328,
-   "residue": 552,
+   "residue": 550,
    "errors": 0,
    "done": false
   },
@@ -352,9 +352,9 @@
   "biomes_o_plenty": {
    "class": "content",
    "status": "ok",
-   "coverage": 50.31,
+   "coverage": 50.33,
    "files": 1454,
-   "residue": 1436,
+   "residue": 1435,
    "errors": 0,
    "done": false
   },
@@ -475,9 +475,9 @@
   "cooking_for_blockheads": {
    "class": "content",
    "status": "ok",
-   "coverage": 39.42,
+   "coverage": 39.44,
    "files": 637,
-   "residue": 979,
+   "residue": 978,
    "errors": 0,
    "done": false
   },
