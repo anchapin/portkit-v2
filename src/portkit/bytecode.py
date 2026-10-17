@@ -440,6 +440,10 @@ class ClassIndex:
     def names(self) -> list[str]:
         return sorted(self._raw)
 
+    def raw(self, name: str) -> bytes | None:
+        """The class file's bytes as compiled (not remapped), for cheap scans."""
+        return self._raw.get(name)
+
     def get(self, name: str, remap: bool = True) -> ClassFile | None:
         """The parsed class, through the remapper unless ``remap`` is False
         (names as compiled, not cached)."""
