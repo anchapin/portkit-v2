@@ -7,9 +7,9 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 39.5,
-      "files": 3450,
-      "residue": 5276,
+      "coverage": 39.9,
+      "files": 3483,
+      "residue": 5236,
       "errors": 0
     },
     "create": {
@@ -68,8 +68,8 @@
     },
     "tinkers_construct": {
       "coverage": 52.4,
-      "files": 16652,
-      "residue": 15153,
+      "files": 16667,
+      "residue": 15137,
       "errors": 0
     },
     "waystones": {

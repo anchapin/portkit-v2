@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-17T22:09:51+00:00",
+ "generated": "2026-10-18T01:33:07+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -316,9 +316,9 @@
   "quark": {
    "class": "content",
    "status": "ok",
-   "coverage": 32.57,
-   "files": 2490,
-   "residue": 5154,
+   "coverage": 32.69,
+   "files": 2499,
+   "residue": 5145,
    "errors": 0,
    "done": false
   },
@@ -343,18 +343,18 @@
   "tinkers_construct": {
    "class": "content",
    "status": "ok",
-   "coverage": 53.12,
-   "files": 15351,
-   "residue": 13549,
+   "coverage": 53.17,
+   "files": 15366,
+   "residue": 13533,
    "errors": 0,
    "done": false
   },
   "biomes_o_plenty": {
    "class": "content",
    "status": "ok",
-   "coverage": 50.33,
-   "files": 1454,
-   "residue": 1435,
+   "coverage": 51.6,
+   "files": 1487,
+   "residue": 1395,
    "errors": 0,
    "done": false
   },
