@@ -343,7 +343,7 @@ def _attach_mappings(classes, source: Path) -> None:
         meta = parse(metadata, "")
         attach(classes, meta.loader, meta.minecraft)
         from .data.vanilla_blocks import attach as attach_vanilla_blocks
-        attach_vanilla_blocks(classes, meta.minecraft)
+        attach_vanilla_blocks(classes, meta.minecraft or meta.loader_minecraft)
     except Exception:  # noqa: BLE001 - without a table the names read as compiled
         pass
 

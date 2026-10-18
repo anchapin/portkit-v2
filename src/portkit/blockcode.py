@@ -336,6 +336,18 @@ class Strm:
 
 
 @dataclass(frozen=True)
+class Coll:
+    """An immutable collection built from known elements (#280): Guava's
+    ``ImmutableList.of`` / ``ImmutableSet.of`` and ``java.util.List.of`` /
+    ``Set.of``, elements in iteration order (a Guava ImmutableSet keeps the
+    first of equal elements in the order given; ``Set.of`` refuses
+    duplicates, and its iteration order is unspecified, so only a set of at
+    most one element is kept as known)."""
+
+    items: tuple
+
+
+@dataclass(frozen=True)
 class Opt:
     value: object
 
@@ -682,6 +694,9 @@ class Machine:
         on a block of the jar)."""
         if v is None:
             return 0
+        if isinstance(cls, str) and self._vanilla_block_id(v) is not None and self.is_mod(cls):
+            # A vanilla Blocks constant is an object of a vanilla class (#280).
+            return 0
         if not isinstance(v, Obj) or not isinstance(cls, str) or not self.is_mod(v.cls):
             return UNKNOWN
         chain = self.chain(v.cls)
@@ -809,7 +824,11 @@ class Machine:
             found = self.default_method(start, name, desc)
             if found is not None:
                 return self.run(*found, args)
-        self._record(args)
+        if not (owner in _JAVA_MAPS and name in ("put", "putIfAbsent")):
+            # A java.util Map#put stores a pair in a map; it registers
+            # nothing (#280: Zeta's ``blocksToColorProviderName.put(crystal,
+            # "myalite")`` had filed the crystal under its stone's name).
+            self._record(args)
         _n, returns = _arg_count(desc)
         for a in args:
             if isinstance(a, Arr):
@@ -888,37 +907,52 @@ class Machine:
         work = [Frame(0, local, [])]
         results: list = []
         paths = 1
+        stopped: Unreadable | None = None
         while work:
             frame = work.pop()
-            while True:
-                self.steps += 1
-                if self.steps > _MAX_STEPS:
-                    raise Unreadable("too much code to follow")
-                insn = code[at[frame.pc]] if frame.pc in at else None
-                if insn is None:
-                    raise Unreadable(f"jump into the middle of an instruction in {cf.name}.{m.name}")
-                nxt = code[at[frame.pc] + 1].offset if at[frame.pc] + 1 < len(code) else None
-                outcome = self.step(cf, insn, frame, nxt)
-                if outcome is None:
-                    continue
-                kind, payload = outcome
-                if kind == "return":
-                    results.append(payload)
-                    if self.effects is not None and self.depth == self.effects_depth:
-                        self.effects.append((payload, frame.effects))
-                    break
-                if kind == "throw":
-                    break
-                if kind == "fork":
-                    for g in payload:
-                        g.fork_serial = _ALLOCATED[0]
-                    paths += len(payload) - 1
-                    if paths > _MAX_PATHS:
-                        raise Unreadable(f"too many paths through {cf.name}.{m.name}")
-                    for other in payload[1:]:
-                        work.append(other)
-                    frame = payload[0]
-                    continue
+            try:
+                while True:
+                    self.steps += 1
+                    if self.steps > _MAX_STEPS:
+                        raise Unreadable("too much code to follow")
+                    insn = code[at[frame.pc]] if frame.pc in at else None
+                    if insn is None:
+                        raise Unreadable(f"jump into the middle of an instruction in {cf.name}.{m.name}")
+                    nxt = code[at[frame.pc] + 1].offset if at[frame.pc] + 1 < len(code) else None
+                    outcome = self.step(cf, insn, frame, nxt)
+                    if outcome is None:
+                        continue
+                    kind, payload = outcome
+                    if kind == "return":
+                        results.append(payload)
+                        if self.effects is not None and self.depth == self.effects_depth:
+                            self.effects.append((payload, frame.effects))
+                        break
+                    if kind == "throw":
+                        break
+                    if kind == "fork":
+                        for g in payload:
+                            g.fork_serial = _ALLOCATED[0]
+                        paths += len(payload) - 1
+                        if paths > _MAX_PATHS:
+                            raise Unreadable(f"too many paths through {cf.name}.{m.name}")
+                        for other in payload[1:]:
+                            work.append(other)
+                        frame = payload[0]
+                        continue
+            except Unreadable as exc:
+                # While registrations are collected, a way of a fork that
+                # stops at a write (see _write) doesn't keep its sibling ways
+                # from running for the registrations they make (#280: the way
+                # where a library's name lookup answered unknown stops at a
+                # write, the way where it answered the vanilla key registers
+                # its name first). The run still stops once they are done:
+                # what it returns and writes isn't known.
+                if self.registrations is None or not frame.forked or str(exc) != _FORKED_WRITE:
+                    raise
+                stopped = stopped or exc
+        if stopped is not None:
+            raise stopped
         return results
 
     def _wide_locals(self, m: Method, args: list) -> list:
@@ -952,7 +986,7 @@ class Machine:
         ``fork_serial``; #280, an array built for String.format after Zeta's
         registry lookup forks)."""
         if frame.forked and (target is None or getattr(target, "_serial", -1) <= frame.fork_serial):
-            raise Unreadable("writes to memory after a branch it can't decide")
+            raise Unreadable(_FORKED_WRITE)
 
     def step(self, cf: ClassFile, insn: Insn, f: Frame, nxt: int | None):
         op = insn.op
@@ -1551,6 +1585,9 @@ class Machine:
             return [rest[0]]
         if name in ("booleanValue", "intValue", "doubleValue") and recv is not None and not static:
             return [recv]
+        coll = self._collections(owner, name, desc, recv, rest, static)
+        if coll is not _NOT_HANDLED:
+            return coll
         if owner in ("com/google/common/collect/ImmutableMap", "java/util/Map") and static \
                 and name in ("of", "ofEntries"):
             if name == "of" and len(rest) % 2 == 0:
@@ -1827,6 +1864,46 @@ class Machine:
             return [UNKNOWN]
         return [UNKNOWN]
 
+    def _collections(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
+        """Immutable lists and sets of known elements and ``forEach`` over
+        them (#280: ``ImmutableSet.of(Blocks.OAK_SLAB, ..).forEach(slab ->
+        new VerticalSlabBlock(slab, ..))``). ``Iterable#forEach(Consumer)``
+        runs the consumer on each element in iteration order (Java SE 21);
+        anything else is not handled here."""
+        if static and name == "of" and owner in _IMMUTABLE_OF:
+            items = list(rest)
+            if items and desc.split(")", 1)[0].endswith("[Ljava/lang/Object;"):
+                if not isinstance(items[-1], Arr):
+                    return [UNKNOWN]
+                items = items[:-1] + list(items[-1].items)
+            if owner in _SET_OF:
+                if any(i is UNKNOWN or not _hashable(i) for i in items):
+                    return [UNKNOWN]
+                kept = []
+                for i in items:
+                    same = [_same(i, k) for k in kept]
+                    if None in same:
+                        return [UNKNOWN]
+                    if not any(same):
+                        kept.append(i)
+                if owner == "java/util/Set" and (len(kept) != len(items) or len(kept) > 1):
+                    return [UNKNOWN]
+                items = kept
+            return [Coll(tuple(items))]
+        if isinstance(recv, Coll) and not static:
+            if name == "forEach" and len(rest) == 1 and desc == "(Ljava/util/function/Consumer;)V":
+                if not isinstance(rest[0], Lam):
+                    return [None]
+                for item in recv.items:
+                    self.call_lambda(rest[0], [item])
+                return [None]
+            if name == "size" and not rest:
+                return [len(recv.items)]
+            if name == "stream" and not rest:
+                return [Strm(recv.items)]
+            return [UNKNOWN] if _arg_count(desc)[1] else [None]
+        return _NOT_HANDLED
+
     def _reduce(self, strm: Strm, rest: list):
         if len(rest) == 1:
             op, items, acc = rest[0], list(strm.items), None
@@ -1848,6 +1925,19 @@ class Machine:
 
 
 _NOT_HANDLED = object()
+# java.util's Map interface and its implementations (Java SE 21).
+_JAVA_MAPS = frozenset({"java/util/Map", "java/util/HashMap", "java/util/LinkedHashMap", "java/util/TreeMap",
+                        "java/util/IdentityHashMap", "java/util/WeakHashMap", "java/util/EnumMap",
+                        "java/util/SortedMap", "java/util/NavigableMap", "java/util/AbstractMap",
+                        "java/util/concurrent/ConcurrentHashMap", "java/util/concurrent/ConcurrentMap"})
+# How many levels of callers of a name-building method _piece_methods runs.
+_CALLER_LEVELS = 4
+_FORKED_WRITE = "writes to memory after a branch it can't decide"
+# Static ``of`` factories of immutable collections (Guava, java.util; Java SE 21 /
+# Guava 32 javadoc: a list keeps the order given, an ImmutableSet the first of
+# equal elements in the order given).
+_SET_OF = frozenset({"com/google/common/collect/ImmutableSet", "java/util/Set"})
+_IMMUTABLE_OF = _SET_OF | {"com/google/common/collect/ImmutableList", "java/util/List"}
 _BUILTIN_REGISTRIES = "net/minecraft/core/registries/BuiltInRegistries"
 _VANILLA_BLOCKS = "net/minecraft/world/level/block/Blocks"
 # A resource location's characters (ResourceLocation#isValidNamespace /
@@ -2065,25 +2155,46 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
     # One level up: a method that calls one of those (a module's
     # register(event) looping over DyeColor.values() into
     # ``new StoolBlock(this, dye)``, whose constructor appends "_stool").
+    # Callers are searched up to _CALLER_LEVELS levels, and a lambda or method
+    # reference (an invokedynamic naming the method) counts as a call (#280:
+    # Quark's VerticalSlabsModule#postRegister hands each slab to a lambda
+    # that builds a QuarkVerticalSlabBlock, whose constructor takes its name
+    # from a lambda appending "_vertical_slab").
     targets = {(cf.name, m.name, m.desc) for cf, m in out}
     chosen = set(targets)
     callers = []
+    codes = []
     for cname in classes.names():
         cf = classes.get(cname)
         if cf is None:
             continue
         for m in cf.methods:
-            key = (cname, m.name, m.desc)
-            if m.name == "<clinit>" or m.code is None or key in chosen or key in done:
+            if m.name == "<clinit>" or m.code is None:
                 continue
             try:
                 code = instructions(cf, m.code)
             except Exception:  # noqa: BLE001
                 continue
-            if any(i.op in (0xB6, 0xB7, 0xB8, 0xB9) and isinstance(i.arg, Ref)
-                   and (i.arg.owner, i.arg.name, i.arg.desc) in targets for i in code):
-                callers.append((cf, m))
-                chosen.add(key)
+            called = set()
+            for i in code:
+                if i.op in (0xB6, 0xB7, 0xB8, 0xB9) and isinstance(i.arg, Ref):
+                    called.add((i.arg.owner, i.arg.name, i.arg.desc))
+                elif i.op == 0xBA and isinstance(i.arg, Indy):
+                    called.update((h.ref.owner, h.ref.name, h.ref.desc) for h in i.arg.args
+                                  if isinstance(h, Handle))
+            codes.append((cf, m, called))
+    for _level in range(_CALLER_LEVELS):
+        found = []
+        for cf, m, called in codes:
+            key = (cf.name, m.name, m.desc)
+            if key in chosen or key in done or not called & targets:
+                continue
+            found.append((cf, m))
+            chosen.add(key)
+        if not found:
+            break
+        callers += found
+        targets = {(cf.name, m.name, m.desc) for cf, m in found}
     return out + callers
 
 

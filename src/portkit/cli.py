@@ -1144,7 +1144,7 @@ def cmd_reference(args) -> int:
     if meta is None:
         block_id_sets = list(block_id_data.SETS)
     else:
-        chosen_ids = block_id_data.select(meta.minecraft)
+        chosen_ids = block_id_data.select(meta.minecraft or meta.loader_minecraft)
         block_id_sets = [chosen_ids] if chosen_ids else []
     if args.action == "list":
         for mapping in mapping_sets:
