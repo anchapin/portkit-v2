@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-18T02:21:06+00:00",
+ "generated": "2026-10-18T03:18:00+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -316,9 +316,9 @@
   "quark": {
    "class": "content",
    "status": "ok",
-   "coverage": 32.69,
-   "files": 2499,
-   "residue": 5145,
+   "coverage": 32.51,
+   "files": 2489,
+   "residue": 5167,
    "errors": 0,
    "done": false
   },
