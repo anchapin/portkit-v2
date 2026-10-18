@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  PAIRED_Y, TRAPDOOR_Y, doorVerdict, pairedSlot, pairedVerdict, trapdoorSlot, trapdoorVerdict,
+  PAIRED_Y, PLATE_Y, TRAPDOOR_Y, doorVerdict, pairedSlot, pairedVerdict, plateSlot, plateVerdict,
+  trapdoorSlot, trapdoorVerdict,
   AREA, CONNECTION_STATES, DROP_BATCH, DROP_Y, Tally, connectionSlot, connectionVerdict, containerVerdict,
   describe, dropSlot, dropVerdict, line, slot,
 } from "../../src/portkit/ingame/runtime/ingame_core.js";
@@ -170,4 +171,22 @@ test("ore scan range is the rule's extent clipped to the dimension; verdict need
   assert.deepEqual(generateVerdict({}, ["a:ore"], ["minecraft:calcite"]),
     { ok: false, skipped: true, problems: ["none of minecraft:calcite in the scanned range"] });
   assert.equal(generateVerdict({}, ["a:ore"], []).skipped, false);
+});
+
+test("plate slots: the paired layout on their own layers, between the trapdoors and the drops", () => {
+  assert.deepEqual(plateSlot(0), { x: 2, y: PLATE_Y, z: 2 });
+  assert.equal(plateSlot(64).y, PLATE_Y + 4);
+  for (let i = 0; i < 128; i++) {
+    const at = plateSlot(i);
+    // the stone below, the lamp beside, clear of the drop layer and of the trapdoors
+    assert.ok(at.x + 1 < AREA && at.z < AREA && at.y < DROP_Y, JSON.stringify(at));
+    assert.ok(at.y - 1 > trapdoorSlot(127).y, JSON.stringify(at));
+  }
+});
+
+test("plate verdict: pressed as wanted, and the lamp when asked", () => {
+  assert.deepEqual(plateVerdict(true, { powered: true, lamp: true }), { ok: true, problems: [] });
+  assert.deepEqual(plateVerdict(false, { powered: false }), { ok: true, problems: [] });
+  assert.deepEqual(plateVerdict(true, { powered: true, lamp: false }).problems, ["lamp lit=false, expected true"]);
+  assert.deepEqual(plateVerdict(false, { powered: undefined }).problems, ["powered=undefined, expected false"]);
 });

@@ -47,6 +47,21 @@ entry `scripts/portkit/main.js` that wires the two.
   (`scripts/portkit/data/<namespace>_trapdoors.js`) only for trapdoors read as
   vanilla `TrapDoorBlock`, or the labelled DEFAULT wooden trapdoor
   (`converters/trapdoors.py`).
+- `pressure_plate_core.js`: the pure rules of a pressure plate (#296), from
+  vanilla `BasePressurePlateBlock` / `PressurePlateBlock` (1.21.1): the touch
+  box, what presses it (everything, or mobs and players only; never a
+  spectator) and `checkPressed`'s timing (press at once, re-check every
+  `getPressedTime()` = 20 ticks, release at the first empty re-check); no
+  imports.
+- `pressure_plate.js`: its Bedrock binding, `@minecraft/server` 2.0.0. A
+  plate has no collision, and Bedrock's step events need a collision box
+  taller than 3.2 pixels, so the block's `minecraft:tick` sends `onTick`
+  every few ticks (DEFAULT) and the plate reads `Dimension.getEntities` in its
+  touch box. The redstone output is the block's own
+  `minecraft:redstone_producer` on the powered permutation. The converter
+  writes the table (`scripts/portkit/data/<namespace>_pressure_plates.js`)
+  only for plates read as vanilla `PressurePlateBlock`, or the labelled
+  DEFAULT wooden plate (`converters/plates.py`).
 - `book_core.js`: not a station: what one page of a guide book shows (#182):
   title, text and the page's buttons as translation keys, back to its parent;
   no imports.
