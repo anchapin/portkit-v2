@@ -73,3 +73,52 @@ TRAPDOOR_SOUNDS: dict[str, tuple[str, str]] = {
 }
 
 CLASS = "net/minecraft/world/level/block/state/properties/BlockSetType"
+
+# Pressure plates (#296): constant -> (sensitivity, Java pressure plate sound
+# family). Read from the same 1.21.1 ``BlockSetType#<clinit>``: the
+# ``pressurePlateSensitivity`` argument (``BlockSetType$PressurePlateSensitivity``
+# EVERYTHING or MOBS) and ``pressurePlateClickOn``/``Off``: STONE and
+# POLISHED_BLACKSTONE pass MOBS with STONE_PRESSURE_PLATE_CLICK_*; IRON, GOLD
+# and COPPER pass EVERYTHING with METAL_PRESSURE_PLATE_CLICK_*; CHERRY, CRIMSON,
+# WARPED and BAMBOO pass EVERYTHING with their own wood family's; the
+# one-argument constructor passes EVERYTHING with WOODEN_PRESSURE_PLATE_CLICK_*.
+# 1.20.1 (client jar sha1 0c3ec587af28e5a785c0b4a7b8a30f9a8f78f838, client.txt
+# 6c48521eed01fe2e8ecdadbd5ae348415f3c47da) passes the same click sounds per
+# constant but keeps sensitivity out of BlockSetType: its
+# ``PressurePlateBlock(Sensitivity, Properties, BlockSetType)`` takes a
+# ``PressurePlateBlock$Sensitivity`` constant, read by :data:`SENSITIVITY_CLASS`.
+PLATE_TYPES: dict[str, tuple[str, str]] = {
+    "IRON": ("EVERYTHING", "METAL"),
+    "COPPER": ("EVERYTHING", "METAL"),
+    "GOLD": ("EVERYTHING", "METAL"),
+    "STONE": ("MOBS", "STONE"),
+    "POLISHED_BLACKSTONE": ("MOBS", "STONE"),
+    "OAK": ("EVERYTHING", "WOODEN"),
+    "SPRUCE": ("EVERYTHING", "WOODEN"),
+    "BIRCH": ("EVERYTHING", "WOODEN"),
+    "ACACIA": ("EVERYTHING", "WOODEN"),
+    "CHERRY": ("EVERYTHING", "CHERRY_WOOD"),
+    "JUNGLE": ("EVERYTHING", "WOODEN"),
+    "DARK_OAK": ("EVERYTHING", "WOODEN"),
+    "CRIMSON": ("EVERYTHING", "NETHER_WOOD"),
+    "WARPED": ("EVERYTHING", "NETHER_WOOD"),
+    "MANGROVE": ("EVERYTHING", "WOODEN"),
+    "BAMBOO": ("EVERYTHING", "BAMBOO_WOOD"),
+}
+SENSITIVITY_CLASS = "net/minecraft/world/level/block/PressurePlateBlock$Sensitivity"
+SENSITIVITIES = ("EVERYTHING", "MOBS")
+
+# Java pressure plate sound family -> Bedrock (click on, click off) sound
+# definitions and pitches, from the bedrock-samples ``block_sounds`` families
+# (``pressure_plate.click_on`` / ``.click_off``: wood ->
+# click_on.wooden_pressure_plate and so on, no pitch given). Bedrock's metal
+# family has no pressure_plate events; its ``power.on`` / ``power.off`` play
+# random.click at pitch 0.6 / 0.5, which is what a metal plate gets.
+PLATE_SOUNDS: dict[str, tuple[str, str, float, float]] = {
+    "WOODEN": ("click_on.wooden_pressure_plate", "click_off.wooden_pressure_plate", 1.0, 1.0),
+    "STONE": ("click_on.stone_pressure_plate", "click_off.stone_pressure_plate", 1.0, 1.0),
+    "CHERRY_WOOD": ("click_on.cherry_wood_pressure_plate", "click_off.cherry_wood_pressure_plate", 1.0, 1.0),
+    "NETHER_WOOD": ("click_on.nether_wood_pressure_plate", "click_off.nether_wood_pressure_plate", 1.0, 1.0),
+    "BAMBOO_WOOD": ("click_on.bamboo_wood_pressure_plate", "click_off.bamboo_wood_pressure_plate", 1.0, 1.0),
+    "METAL": ("random.click", "random.click", 0.6, 0.5),
+}
