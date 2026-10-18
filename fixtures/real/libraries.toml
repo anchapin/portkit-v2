@@ -1,0 +1,32 @@
+# Dependency jars a corpus or gauntlet mod is converted with, read-only (#280,
+# src/portkit/libraries.py). A library's classes are visible to the bytecode
+# readers (base classes, registering constructors); nothing of it is converted
+# or shipped. Jars are downloaded and sha512-checked like the corpus jars,
+# measured and discarded, never committed.
+#
+# Hand-pinned, one entry per library jar; `for` names the manifest mods
+# (fixtures/real/mods.toml, fixtures/real/gauntlet.toml) it is read with. Rule
+# (DEFAULT, #280 pick 2a): the newest Modrinth release of the library on the
+# mod's loader and game version that satisfies the mod's own declared range,
+# pinned only when measured to change what the readers find.
+#
+# Not pinned, measured 2026-10-17: BCLib 21.800.2, WorldWeaver 21.800.2 (with
+# its 19 nested wover jars) and WunderLib 21.800.2 for BetterEnd 21.800.2: with
+# them the readers find 0 of BetterEnd's 722 blockstate registrations (as
+# without), because BetterEnd builds its blocks through WorldWeaver's
+# BlockSet / BlockDefinition builders, whose lazily created registries are
+# written after branches the reader can't decide.
+
+[[library]]
+name = "zeta"
+for = ["quark"]
+project = "zeta"
+version_id = "9GjNW2Gf"
+version = "1.1-40"
+loader = "neoforge"
+minecraft = "1.21.1"
+license = "CC-BY-NC-SA-3.0"
+source = "https://github.com/VazkiiMods/Zeta"
+url = "https://cdn.modrinth.com/data/MVARlG2f/versions/9GjNW2Gf/Zeta-1.1-40.jar"
+sha512 = "a81dcf44f2bfd0fc1a52f00d9ca47a84ad2baf067adedb35eec859f6b9cec7b61ca432e549a3342b10902f84e76d70224cd54400285c8b13a0926835a62c667c"
+notes = "Quark 4.1-487 requires zeta [1,1.2) (its META-INF/neoforge.mods.toml); 1.1-40 is the newest 1.21.1 NeoForge build (Modrinth, published 2026-04-24)"

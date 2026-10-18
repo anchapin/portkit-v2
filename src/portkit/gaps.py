@@ -137,17 +137,21 @@ def shard_of(mods: list, index: int, total: int) -> list:
     return [m for i, m in enumerate(mods) if i % total == index - 1]
 
 
-def _child_cmd(jar: Path, out: Path, result: Path) -> list[str]:
-    return [sys.executable, "-m", "portkit.gaps", "child", str(jar), str(out), str(result)]
+def _child_cmd(jar: Path, out: Path, result: Path, libraries=()) -> list[str]:
+    return [sys.executable, "-m", "portkit.gaps", "child", str(jar), str(out), str(result),
+            *(str(p) for p in libraries)]
 
 
-def convert_one(jar: Path, workdir: Path, timeout: float = DEFAULT_TIMEOUT, runner=subprocess.run) -> dict:
+def convert_one(jar: Path, workdir: Path, timeout: float = DEFAULT_TIMEOUT, runner=subprocess.run,
+                libraries=()) -> dict:
     """Convert one jar in a child process. Returns the mod's record (without
-    the manifest fields); the tree is left at workdir/out for mct."""
+    the manifest fields); the tree is left at workdir/out for mct.
+    ``libraries`` are the mod's pinned dependency jars, read-only (#280)."""
     out, result = workdir / "out", workdir / "result.json"
     started = time.monotonic()
     try:
-        proc = runner(_child_cmd(jar, out, result), capture_output=True, text=True, timeout=timeout)
+        proc = runner(_child_cmd(jar, out, result, libraries), capture_output=True, text=True,
+                      timeout=timeout)
     except subprocess.TimeoutExpired:
         return {"status": "timeout", "seconds": round(time.monotonic() - started, 1),
                 "detail": f"conversion took longer than {timeout:g}s"}
@@ -163,13 +167,14 @@ def convert_one(jar: Path, workdir: Path, timeout: float = DEFAULT_TIMEOUT, runn
     return record
 
 
-def _child(jar: str, out: str, result: str) -> int:
+def _child(jar: str, out: str, result: str, *libraries: str) -> int:
     """The child process: one conversion, numbers written to ``result``."""
     from .ingest import IngestError
     from .pipeline import convert
 
     try:
-        res = convert(Path(jar), Path(out), emit_addon=False)
+        res = convert(Path(jar), Path(out), emit_addon=False,
+                      libraries=[Path(p) for p in libraries] or None)
     except IngestError as exc:  # e.g. a jar with no assets/ or data/ tree
         Path(result).write_text(json.dumps({"status": "ingest_error", "detail": str(exc)[:300]}))
         return 0
@@ -192,7 +197,7 @@ def _child(jar: str, out: str, result: str) -> int:
 
 def run_shard(mods, *, shard: str | None = None, manifest: str = "", fetch=None,
               timeout: float = DEFAULT_TIMEOUT, mct_exe: str | None = None,
-              convert=convert_one, log=print, profile=None) -> dict:
+              convert=convert_one, log=print, profile=None, libraries=None) -> dict:
     """Fetch and convert one shard of the sample; returns the shard document.
 
     ``fetch(mod) -> Path`` raises on failure (corpus.CorpusError); a mod that
@@ -200,6 +205,9 @@ def run_shard(mods, *, shard: str | None = None, manifest: str = "", fetch=None,
     manifest marks ``unfetchable`` is recorded as such without a fetch.
     ``profile(jar) -> dict``, when given, reads the jar itself (the gauntlet's
     classification, #278) and is stored on the mod's record.
+    ``libraries(mod) -> [(name, Path)]``, when given, fetches the dependency
+    jars pinned for the mod (#280, ``fixtures/real/libraries.toml``); they are
+    read with it and named on its record.
     """
     index, total = parse_shard(shard)
     chosen = shard_of(list(mods), index, total)
@@ -226,9 +234,20 @@ def run_shard(mods, *, shard: str | None = None, manifest: str = "", fetch=None,
                 meta["profile"] = profile(jar)
             except Exception as exc:  # noqa: BLE001 - an unreadable jar is a row, not a crash
                 meta["profile"] = {"class": "?", "evidence": [f"profile failed: {str(exc)[:200]}"]}
+        libs = []
+        if libraries is not None:
+            try:
+                libs = list(libraries(mod))
+            except Exception as exc:  # noqa: BLE001 - a library that can't be had is a row, not a crash
+                doc["mods"][mod.name] = {**meta, "status": "fetch_failed", "detail": f"library: {str(exc)[:290]}"}
+                log(f"{mod.name}: library fetch failed: {exc}")
+                continue
+            if libs:
+                meta["libraries"] = [name for name, _ in libs]
         work = Path(tempfile.mkdtemp(prefix="portkit-gaps-"))
         try:
-            record = convert(Path(jar), work, timeout)
+            record = (convert(Path(jar), work, timeout, libraries=[p for _, p in libs]) if libs
+                      else convert(Path(jar), work, timeout))
             if record.get("status") == "ok" and mct_exe:
                 # An explained-empty mod has no pack for mct to read (#279).
                 record["mct"] = ({"skipped": "explained-empty: no pack"} if record.get("outcome")
@@ -427,7 +446,7 @@ def render_markdown(board: dict, top: int = 50) -> str:
 
 
 if __name__ == "__main__":  # the child process of convert_one
-    if len(sys.argv) == 5 and sys.argv[1] == "child":
+    if len(sys.argv) >= 5 and sys.argv[1] == "child":
         sys.exit(_child(*sys.argv[2:]))
-    print("usage: python -m portkit.gaps child JAR OUT RESULT", file=sys.stderr)
+    print("usage: python -m portkit.gaps child JAR OUT RESULT [LIBRARY_JAR ...]", file=sys.stderr)
     sys.exit(2)

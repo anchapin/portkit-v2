@@ -40,7 +40,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .corpus-cache
-          key: real-mods-${{ inputs.include_optional && 'all' || 'default' }}-${{ hashFiles('fixtures/real/mods.toml') }}
+          key: real-mods-${{ inputs.include_optional && 'all' || 'default' }}-${{ hashFiles('fixtures/real/mods.toml', 'fixtures/real/libraries.toml') }}
           restore-keys: |
             real-mods-${{ inputs.include_optional && 'all' || 'default' }}-
 

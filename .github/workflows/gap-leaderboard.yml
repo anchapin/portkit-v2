@@ -67,7 +67,7 @@ jobs:
           # Modrinth jars only. "-v2": caches from before #278 pick 2 held
           # CurseForge jars and are not restored; portkit also deletes any
           # CurseForge jar it finds here before the cache is saved.
-          key: ${{ env.SET }}-v2-${{ matrix.shard }}-${{ hashFiles(env.SET == 'gauntlet' && 'fixtures/real/gauntlet.toml' || 'fixtures/sample/mods.toml') }}
+          key: ${{ env.SET }}-v2-${{ matrix.shard }}-${{ hashFiles(env.SET == 'gauntlet' && 'fixtures/real/gauntlet.toml' || 'fixtures/sample/mods.toml', 'fixtures/real/libraries.toml') }}
           restore-keys: |
             ${{ env.SET }}-v2-${{ matrix.shard }}-
 

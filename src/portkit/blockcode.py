@@ -479,6 +479,10 @@ class Machine:
             name = cf.super_name
         return out
 
+    def _library(self, name: str) -> bool:
+        lib = getattr(self.classes, "is_library", None)
+        return bool(lib and lib(name))
+
     def is_block_class(self, name: str) -> bool:
         last = self.chain(name)[-1]
         return last.startswith(_VANILLA_BLOCK_PACKAGE) and "/entity/" not in last \
@@ -575,6 +579,11 @@ class Machine:
             self.support_assumed = True
             return [1]
         start = recv.cls if isinstance(recv, Obj) and not special and not static else owner
+        if self.is_mod(start) and self.registrations is not None and self._library(owner):
+            # A call into a dependency jar's code (#280) is a registration
+            # the same way a call into code that isn't there is (a name and
+            # the block handed to it, see _record), and is followed as well.
+            self._record(args)
         if self.is_mod(start):
             if static:
                 self.init_class(start)
@@ -1535,15 +1544,50 @@ def _wanted_classes(classes: ClassIndex, names: set[str]) -> list[str]:
     return out
 
 
+def _naming_methods(classes: ClassIndex, cname: str, names: set[str]) -> list:
+    """The methods of ``cname`` other than its static initializer that load
+    one of ``names`` as a String constant (``ldc``), abstract ones skipped."""
+    cf = classes.get(cname)
+    if cf is None:
+        return []
+    out = []
+    for m in cf.methods:
+        if m.name == "<clinit>" or m.code is None:
+            continue
+        try:
+            code = instructions(cf, m.code)
+        except Exception:  # noqa: BLE001 - an unreadable method names nothing
+            continue
+        if any(i.op in (0x12, 0x13) and isinstance(i.arg, str)
+               and (i.arg in names or i.arg.rsplit(":", 1)[-1] in names) for i in code):
+            out.append((cf, m))
+    return out
+
+
 def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[str, tuple[list, str]]]:
     """Run the registration code that names each blockstate in ``names`` and
     return, per name, the block objects built for it (``[]`` with the reason
     when none was found or it can't be followed)."""
     machine = Machine(classes)
     machine.registrations = []
-    for cname in _wanted_classes(classes, set(names)):
+    wanted = _wanted_classes(classes, set(names))
+    for cname in wanted:
         machine.steps = 0
         machine.init_class(cname)
+    # Registrations made in a method rather than a static initializer (#280):
+    # a module's or an initializer's ``register(event)`` / ``onInitialize()``
+    # constructing ``new FooBlock("name", ...)``. Each method of a wanted class
+    # that loads one of the names runs once on unknown arguments.
+    for cname in wanted:
+        for cf, m in _naming_methods(classes, cname, set(names)):
+            machine.steps = 0
+            machine.new_epoch()
+            static = bool(m.access & 0x0008)
+            n, _ = _arg_count(m.desc)
+            try:
+                machine.run(cf, m, [UNKNOWN] * (n + (0 if static else 1)))
+            except Unreadable:
+                pass
     regs: dict[str, list] = {}
     unread: dict[str, str] = {}
     for reg in machine.registrations:
@@ -1551,7 +1595,11 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
             unread.setdefault(reg.name, reg.why)
             regs.setdefault(reg.name, [])
             continue
-        regs.setdefault(reg.name, []).append(reg.value)
+        found = regs.setdefault(reg.name, [])
+        # The same object handed on through a library's own registry
+        # methods (each recorded, #280) is one registration.
+        if not any(v is reg.value for v in found):
+            found.append(reg.value)
     machine.registrations = None
 
     out: dict[str, tuple[list, str]] = {}
