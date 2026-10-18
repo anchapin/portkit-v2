@@ -348,6 +348,17 @@ class Coll:
 
 
 @dataclass(frozen=True)
+class PairV:
+    """An Apache Commons Lang ``ImmutablePair`` (#280): ``Pair.of(left,
+    right)`` / ``ImmutablePair.of`` keep both elements, and ``getLeft`` /
+    ``getKey`` and ``getRight`` / ``getValue`` return them (commons-lang3
+    3.x, org.apache.commons.lang3.tuple; Minecraft ships the library)."""
+
+    left: object
+    right: object
+
+
+@dataclass(frozen=True)
 class Opt:
     value: object
 
@@ -440,6 +451,10 @@ class Frame:
     # couldn't decide: what is allocated after it, no other path sees (see
     # Machine._write).
     fork_serial: int = -1
+    # In a constructor run (Machine._run_code), the receiver's fields as this
+    # path left them: each path after an undecided branch writes its own copy,
+    # and the copies are joined where the constructor returns (#280).
+    recv_fields: dict | None = None
 
     def copy(self) -> "Frame":
         return Frame(self.pc, list(self.locals), list(self.stack), True, self.effects)
@@ -597,6 +612,10 @@ class Machine:
         self.depth = 0
         # Whether the instruction being run sits after an undecided branch.
         self._forked = False
+        # (depth, receiver) of each constructor being run (see _run_code):
+        # its paths may write to the receiver after a branch they can't
+        # decide, each on its own copy of its fields, joined at the end.
+        self._receivers: list = []
         # Which evaluation is running (see Props.epoch).
         self.epoch = 0
         self._epochs = 0
@@ -908,8 +927,28 @@ class Machine:
         results: list = []
         paths = 1
         stopped: Unreadable | None = None
+        # A constructor's receiver (#280): each path after an undecided branch
+        # keeps its own copy of the receiver's fields (Frame.recv_fields), so
+        # a write to the object under construction no longer stops the run;
+        # the copies of the paths that return are joined below (_join_fields).
+        recv = args[0] if m.name == "<init>" and args and isinstance(args[0], Obj) else None
+        ends: list = []
+        if recv is not None:
+            work[0].recv_fields = recv.fields
+            self._receivers.append((self.depth, recv))
+        try:
+            return self._run_paths(cf, m, code, at, work, results, paths, stopped, recv, ends)
+        finally:
+            if recv is not None:
+                self._receivers.pop()
+                if ends:
+                    recv.fields = _join_fields(ends)
+
+    def _run_paths(self, cf, m, code, at, work, results, paths, stopped, recv, ends) -> list:
         while work:
             frame = work.pop()
+            if recv is not None:
+                recv.fields = frame.recv_fields
             try:
                 while True:
                     self.steps += 1
@@ -925,6 +964,8 @@ class Machine:
                     kind, payload = outcome
                     if kind == "return":
                         results.append(payload)
+                        if recv is not None:
+                            ends.append(recv.fields)
                         if self.effects is not None and self.depth == self.effects_depth:
                             self.effects.append((payload, frame.effects))
                         break
@@ -936,6 +977,12 @@ class Machine:
                         paths += len(payload) - 1
                         if paths > _MAX_PATHS:
                             raise Unreadable(f"too many paths through {cf.name}.{m.name}")
+                        if recv is not None:
+                            # Every way starts from the receiver as it is now.
+                            snap = dict(recv.fields)
+                            payload[0].recv_fields = recv.fields
+                            for other in payload[1:]:
+                                other.recv_fields = dict(snap)
                         for other in payload[1:]:
                             work.append(other)
                         frame = payload[0]
@@ -985,7 +1032,12 @@ class Machine:
         (no other way sees it: its ``_serial`` is above the frame's
         ``fork_serial``; #280, an array built for String.format after Zeta's
         registry lookup forks)."""
-        if frame.forked and (target is None or getattr(target, "_serial", -1) <= frame.fork_serial):
+        if not frame.forked:
+            return
+        if target is not None and self._receivers and self._receivers[-1][0] == self.depth \
+                and target is self._receivers[-1][1]:
+            return  # the object this constructor builds: each way has its own copy (_run_code)
+        if target is None or getattr(target, "_serial", -1) <= frame.fork_serial:
             raise Unreadable(_FORKED_WRITE)
 
     def step(self, cf: ClassFile, insn: Insn, f: Frame, nxt: int | None):
@@ -1283,7 +1335,9 @@ class Machine:
             return MapV({})
         if cls == "java/lang/StringBuilder":
             return Builder([])
-        return Obj(cls)
+        obj = Obj(cls)
+        obj._uninit = True  # until its constructor is called (see _invoke)
+        return obj
 
     def _indy(self, indy: Indy, f: Frame):
         n, _ = _arg_count(indy.desc)
@@ -1327,6 +1381,23 @@ class Machine:
                     text = self.stringify(args[1])
                     obj.parts.append(text if text is not None else UNKNOWN)
                 return None
+            if isinstance(obj, Obj) and getattr(obj, "_uninit", False):
+                if not (f.forked and obj._serial <= f.fork_serial):
+                    obj._uninit = False
+                else:
+                    # ``new`` ran before a branch this path can't decide and
+                    # the constructor after it: until its constructor is
+                    # called the object can only sit on this frame's stack
+                    # and locals (JVMS 4.10.1.9, uninitialized references:
+                    # no field, array or call sees it), where every way of
+                    # the branch holds the same reference. Each way builds
+                    # its own copy (#280: a module's ``new LeafCarpetBlock(
+                    # inherit(leaf, ..), ..)``, where the library's name
+                    # lookup forks between ``new`` and the constructor).
+                    copy = Obj(obj.cls, dict(obj.fields))
+                    f.stack[:] = [copy if v is obj else v for v in f.stack]
+                    f.locals[:] = [copy if v is obj else v for v in f.locals]
+                    args[0] = obj = copy
             if isinstance(obj, Obj) and self.is_mod(ref.owner):
                 found = self.find_method(ref.owner, "<init>", ref.desc)
                 if found is not None:
@@ -1775,6 +1846,17 @@ class Machine:
                 if desc.startswith("(Ljava/lang/CharSequence;") and all(isinstance(a, str) for a in rest):
                     return [recv.replace(rest[0], rest[1])]
                 return [UNKNOWN]
+            if name in ("replaceAll", "replaceFirst") and len(rest) == 2:
+                # A regex with no metacharacter matches itself literally, and
+                # a replacement with no '\\' or '$' is inserted as it is
+                # (java.util.regex.Pattern, Matcher#appendReplacement, Java
+                # SE 21): then it is a plain left-to-right replacement (#280:
+                # Quark's ``path.replaceAll("_leaves", "_leaf_carpet")``).
+                regex, repl = rest
+                if isinstance(regex, str) and isinstance(repl, str) and regex \
+                        and not any(c in _REGEX_META for c in regex) and not any(c in "\\$" for c in repl):
+                    return [recv.replace(regex, repl, -1 if name == "replaceAll" else 1)]
+                return [UNKNOWN]
             if name in ("isEmpty", "length") and not rest:
                 return [int(not recv) if name == "isEmpty" else len(recv)]
             if name in ("startsWith", "endsWith", "contains", "equals") and len(rest) == 1:
@@ -1890,6 +1972,14 @@ class Machine:
                     return [UNKNOWN]
                 items = kept
             return [Coll(tuple(items))]
+        if static and name == "of" and owner in _PAIR_OF and desc == _PAIR_OF_DESC.get(owner) and len(rest) == 2:
+            return [PairV(rest[0], rest[1])]
+        if isinstance(recv, PairV) and not static and not rest:
+            if name in ("getLeft", "getKey"):
+                return [recv.left]
+            if name in ("getRight", "getValue"):
+                return [recv.right]
+            return [UNKNOWN] if _arg_count(desc)[1] else [None]
         if isinstance(recv, Coll) and not static:
             if name == "forEach" and len(rest) == 1 and desc == "(Ljava/util/function/Consumer;)V":
                 if not isinstance(rest[0], Lam):
@@ -1932,6 +2022,15 @@ _JAVA_MAPS = frozenset({"java/util/Map", "java/util/HashMap", "java/util/LinkedH
                         "java/util/concurrent/ConcurrentHashMap", "java/util/concurrent/ConcurrentMap"})
 # How many levels of callers of a name-building method _piece_methods runs.
 _CALLER_LEVELS = 4
+_PAIR_OF = ("org/apache/commons/lang3/tuple/Pair", "org/apache/commons/lang3/tuple/ImmutablePair")
+_PAIR_OF_DESC = {
+    "org/apache/commons/lang3/tuple/Pair": "(Ljava/lang/Object;Ljava/lang/Object;)Lorg/apache/commons/lang3/tuple/Pair;",
+    "org/apache/commons/lang3/tuple/ImmutablePair":
+        "(Ljava/lang/Object;Ljava/lang/Object;)Lorg/apache/commons/lang3/tuple/ImmutablePair;",
+}
+# java.util.regex metacharacters (Pattern, Java SE 21): a regex without
+# any of them matches only itself.
+_REGEX_META = set("\\^$.|?*+()[]{}")
 _FORKED_WRITE = "writes to memory after a branch it can't decide"
 # Static ``of`` factories of immutable collections (Guava, java.util; Java SE 21 /
 # Guava 32 javadoc: a list keeps the order given, an ImmutableSet the first of
@@ -1943,6 +2042,49 @@ _VANILLA_BLOCKS = "net/minecraft/world/level/block/Blocks"
 # A resource location's characters (ResourceLocation#isValidNamespace /
 # isValidPath, MC 1.21.1: namespace [a-z0-9_.-], path [a-z0-9_./-]).
 _RESOURCE_NAME = re.compile(r"([a-z0-9_.-]+:)?[a-z0-9_./-]+")
+
+
+def _join_fields(ends: list) -> dict:
+    """The fields a constructor leaves on its receiver, joined over the
+    paths that returned (#280). A field every path left the same (the same
+    object, or an equal value: a string, a number, a constant, an equal
+    Properties copy) keeps it; a field the paths left differently, or that
+    some path didn't set, is UNKNOWN and the object is marked ``__partial``
+    (what its constructor stored isn't known), so no reader takes it."""
+    if len(ends) == 1:
+        return ends[0]
+    out: dict = {}
+    differ = []
+    for key in sorted({k for e in ends for k in e}, key=str):
+        if key == "__partial":
+            continue
+        vals = [e.get(key, _MISSING) for e in ends]
+        first = vals[0]
+        if all(v is first or (v is not _MISSING and first is not _MISSING and _equal(v, first)) for v in vals[1:]):
+            out[key] = first
+        else:
+            out[key] = UNKNOWN
+            differ.append(key)
+    partial = [e["__partial"] for e in ends if "__partial" in e]
+    if partial:
+        out["__partial"] = partial[0]
+    elif differ:
+        out["__partial"] = ("its constructor's ways after a branch it can't decide leave "
+                            + ", ".join(differ) + " different")
+    return out
+
+
+_MISSING = object()
+
+
+def _equal(a, b) -> bool:
+    """Value equality for joining: identity for objects, arrays, maps and
+    builders (Obj and friends compare by identity), == for everything else
+    (frozen dataclasses and Props compare by value; tuples element-wise)."""
+    try:
+        return bool(a == b)
+    except Exception:
+        return False
 
 
 def _hashable(v) -> bool:
@@ -2113,6 +2255,19 @@ def _recipe_matcher(recipe: str) -> "re.Pattern":
     return re.compile("[a-z0-9_./-]+".join(re.escape(p) for p in parts))
 
 
+def _format_matcher(text: str) -> "re.Pattern | None":
+    """A ``String.format`` pattern whose only specifiers are ``%s`` (``%%``
+    aside) as a pattern a whole name must match, each ``%s`` a non-empty
+    run of name characters; None for any other specifier."""
+    rest = text.replace("%%", "")
+    if re.search(r"%(?!s)", rest):
+        return None
+    parts = text.replace("%%", "%").split("%s") if "%%" not in text else None
+    if parts is None or len(parts) < 2:
+        return None
+    return re.compile("[a-z0-9_./-]+".join(re.escape(p) for p in parts))
+
+
 def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
     """Methods of the mod's own classes (not a library's, never its static
     initializers, abstract ones skipped, those in ``done`` skipped) that may
@@ -2120,7 +2275,8 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
     a whole-word piece of a name (``"azalea"`` handed to a helper that
     appends ``"_planks"``; ``"_shingles"`` appended in a loop), or one whose
     ``makeConcatWithConstants`` recipe matches a whole name
-    (``"\\x01_pressure_plate"``). Which name it builds is only what the
+    (``"\\x01_pressure_plate"``), or one that loads a ``%s`` format string
+    whose filled slots match a whole name (``"hollow_%s"``). Which name it builds is only what the
     machine evaluates; this only chooses what to run."""
     pieces = _name_pieces(names)
     bare = {n.rsplit(":", 1)[-1] for n in names}
@@ -2130,7 +2286,9 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
         if cf is None:
             continue
         strings = {cf.pool[e[1]][1] for e in cf.pool if e is not None and e[0] == 8}
-        if not any(s.strip("_") in pieces or "\x01" in s for s in strings):
+        fmts = [_format_matcher(s) for s in strings if "%s" in s]
+        fmts = {s.pattern for s in fmts if s is not None and any(s.fullmatch(n) for n in bare)}
+        if not any(s.strip("_") in pieces or "\x01" in s for s in strings) and not fmts:
             continue
         for m in cf.methods:
             if m.name == "<clinit>" or m.code is None or (cname, m.name, m.desc) in done:
@@ -2143,6 +2301,12 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
             for i in code:
                 if i.op in (0x12, 0x13) and isinstance(i.arg, str) and i.arg.strip("_") in pieces:
                     hit = True
+                elif i.op in (0x12, 0x13) and isinstance(i.arg, str) and "%s" in i.arg:
+                    # A format string whose %s slots, filled, give a whole
+                    # name ("hollow_%s" handed to a library's inherit with
+                    # the parent block, #280).
+                    pat = _format_matcher(i.arg)
+                    hit = pat is not None and pat.pattern in fmts
                 elif i.op == 0xBA and isinstance(i.arg, Indy) and i.arg.bootstrap \
                         and i.arg.bootstrap.ref.owner == "java/lang/invoke/StringConcatFactory" \
                         and i.arg.args and isinstance(i.arg.args[0], str) and "\x01" in i.arg.args[0]:
