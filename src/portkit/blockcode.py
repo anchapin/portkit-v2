@@ -286,25 +286,48 @@ class Lam:
     itype: str | None = None
 
 
+# Every object, array, map and string builder the machine makes is numbered
+# in order (``_serial``): what a path allocated after a branch it couldn't
+# decide, no other path sees (Machine._write).
+_ALLOCATED = [0]
+
+
+def _next_serial() -> int:
+    _ALLOCATED[0] += 1
+    return _ALLOCATED[0]
+
+
 @dataclass(eq=False)
 class Obj:
     cls: str
     fields: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        self._serial = _next_serial()
 
 
 @dataclass(eq=False)
 class Arr:
     items: list
 
+    def __post_init__(self):
+        self._serial = _next_serial()
+
 
 @dataclass(eq=False)
 class MapV:
     items: dict
 
+    def __post_init__(self):
+        self._serial = _next_serial()
+
 
 @dataclass(eq=False)
 class Builder:
     parts: list
+
+    def __post_init__(self):
+        self._serial = _next_serial()
 
 
 @dataclass(frozen=True)
@@ -356,8 +379,25 @@ class Props:
 
 
 @dataclass(frozen=True)
+class Tail:
+    """A string whose start is unknown but which is known to end with ``":"``
+    followed by ``text`` (``text`` has no ``":"``): a resource location
+    whose namespace isn't known but whose path is (#280, a name derived from
+    another block's registered name, ``String.format("%s:%s", modid, ..)``).
+    Its last ``:``-separated segment, which is what a registration name is
+    matched by (``_record`` drops the namespace), is ``text`` exactly,
+    whatever the unknown start holds."""
+
+    text: str
+
+
+@dataclass(frozen=True)
 class RL:
-    path: str
+    path: "str | Tail"  # "namespace:path" (or just "path"), or a Tail
+    # Set on the key a block registry's getKey answered (Machine._registry_key):
+    # it names a registration already made, so handing it on with a block
+    # (a potted plant's pot filed under its plant's key) registers nothing.
+    lookup: bool = False
 
 
 class _Ctx:
@@ -384,6 +424,10 @@ class Frame:
     # The blocks this path set in the world (Level#setBlock), as (pos,
     # state) pairs, when the machine tracks them (Machine.effects).
     effects: tuple = ()
+    # The last ``_serial`` allocated when this path last passed a branch it
+    # couldn't decide: what is allocated after it, no other path sees (see
+    # Machine._write).
+    fork_serial: int = -1
 
     def copy(self) -> "Frame":
         return Frame(self.pc, list(self.locals), list(self.stack), True, self.effects)
@@ -425,13 +469,47 @@ def _arg_kinds(desc: str) -> list[str]:
     return out
 
 
-def _format(rest: list):
-    """``String.format(fmt, args)`` for a format of only ``%s`` (each an
-    argument that is a string) and ``%%``; anything else is unknown."""
-    fmt, arr = rest
-    if not isinstance(fmt, str) or not isinstance(arr, Arr):
+def _join(pieces: list):
+    """The concatenation of ``pieces`` (strings, UNKNOWN or :class:`Tail`):
+    the string when every piece is known; else a :class:`Tail` of what
+    follows the last ``":"`` after the last unknown piece, when that run is
+    known and holds a ``":"``; else UNKNOWN. A Tail piece is an unknown start
+    and ``":" + text``."""
+    flat = []
+    for p in pieces:
+        if isinstance(p, Tail):
+            flat += [UNKNOWN, ":" + p.text]
+        else:
+            flat.append(p if isinstance(p, str) else UNKNOWN)
+    if all(isinstance(p, str) for p in flat):
+        return "".join(flat)
+    last = max(k for k, p in enumerate(flat) if not isinstance(p, str))
+    after = "".join(flat[last + 1:])
+    if ":" not in after:
         return UNKNOWN
-    out, k, i = [], 0, 0
+    return Tail(after.rsplit(":", 1)[1])
+
+
+def _format(rest: list):
+    """``String.format(fmt, args)`` for a format of only ``%s`` and ``%%``;
+    anything else is unknown. An argument that isn't a known string prints
+    as an unknown piece (see :func:`_join`). A format that is a
+    :class:`Tail` (``"<unknown>:%s_slab"``) formats its known text only when
+    that text's ``%s`` take exactly the arguments given: no format specifier
+    can span the ``":"`` (``:`` is not a conversion character, so a
+    specifier the unknown start opens throws), and one there that takes an
+    argument leaves the text's ``%s`` one short, which throws; so whenever
+    the call returns, the text's ``%s`` took the arguments in order
+    (java.util.Formatter, Java SE 21 javadoc)."""
+    fmt, arr = rest
+    if not isinstance(arr, Arr):
+        return UNKNOWN
+    head = []
+    if isinstance(fmt, Tail):
+        head, fmt = [UNKNOWN, ":"], fmt.text
+    if not isinstance(fmt, str):
+        return UNKNOWN
+    out, k, i = list(head), 0, 0
     while i < len(fmt):
         c = fmt[i]
         if c != "%":
@@ -441,13 +519,16 @@ def _format(rest: list):
         spec = fmt[i + 1:i + 2]
         if spec == "%":
             out.append("%")
-        elif spec == "s" and k < len(arr.items) and isinstance(arr.items[k], str):
-            out.append(arr.items[k])
+        elif spec == "s" and k < len(arr.items):
+            item = arr.items[k]
+            out.append(item if isinstance(item, (str, Tail)) else UNKNOWN)
             k += 1
         else:
             return UNKNOWN
         i += 2
-    return "".join(out)
+    if head and k != len(arr.items):
+        return UNKNOWN
+    return _join(out)
 
 
 def _snapshot(props):
@@ -494,6 +575,13 @@ class Machine:
         self._clinit_failed: set[str] = set()
         self.steps = 0
         self.registrations: list[Registration] | None = None
+        # id(block object) -> (the object, the names it was registered
+        # with), as recorded by _record: what a block registry's getKey
+        # answers for it (see _registry_key, #280).
+        self.names_of: dict[int, tuple] = {}
+        # (instructions, offset -> index) of each method being run, innermost
+        # last (see _throws_only).
+        self._code: list = []
         self.depth = 0
         # Whether the instruction being run sits after an undecided branch.
         self._forked = False
@@ -557,6 +645,66 @@ class Machine:
             if m is not None:  # abstract
                 continue
         return None
+
+    def default_method(self, start: str, name: str, desc: str) -> tuple[ClassFile, Method] | None:
+        """An interface's default method that a call on a ``start`` object
+        reaches when no class in its chain declares one (JVMS 5.4.3.3 /
+        5.4.6: the maximally-specific superinterface method that isn't
+        abstract), searched in the interfaces of the classes in the jar
+        and their superinterfaces. None unless exactly one interface has a
+        non-abstract one and none of the chain's classes declares the method
+        at all (a vanilla superclass might, out of sight)."""
+        chain = [c for c in self.chain(start) if self.classes.get(c) is not None]
+        found, seen = [], set()
+        todo = [i for c in chain for i in self.classes.get(c).interfaces]
+        while todo:
+            iname = todo.pop(0)
+            if iname in seen:
+                continue
+            seen.add(iname)
+            cf = self.classes.get(iname)
+            if cf is None:
+                continue
+            m = cf.method(name, desc)
+            if m is not None and m.code is not None and not m.access & 0x0008:
+                found.append((cf, m))
+                continue  # a superinterface's is less specific
+            todo.extend(cf.interfaces)
+        return found[0] if len({cf.name for cf, _m in found}) == 1 else None
+
+    def instance_of(self, v, cls) -> object:
+        """``v instanceof cls`` (1 or 0), or UNKNOWN. Exact for null and for
+        an object of a class in the jar: its superclasses are known as far as
+        its vanilla base, and a vanilla class can't extend or implement a
+        class or interface of the jar, so a jar type that isn't among them
+        isn't one of its types. A vanilla type beyond the vanilla base is
+        unknown (#280: Zeta's ``parent instanceof IVariantsShouldBeEmissive``
+        on a block of the jar)."""
+        if v is None:
+            return 0
+        if not isinstance(v, Obj) or not isinstance(cls, str) or not self.is_mod(v.cls):
+            return UNKNOWN
+        chain = self.chain(v.cls)
+        if cls in chain:
+            return 1
+        target = self.classes.get(cls)
+        if target is None:
+            return UNKNOWN  # a vanilla type: the vanilla base may be one
+        if not target.access & 0x0200:
+            return 0
+        seen, todo = set(), [i for c in chain if self.classes.get(c) is not None
+                             for i in self.classes.get(c).interfaces]
+        while todo:
+            name = todo.pop()
+            if name == cls:
+                return 1
+            if name in seen:
+                continue
+            seen.add(name)
+            cf = self.classes.get(name)
+            if cf is not None:
+                todo.extend(cf.interfaces)
+        return 0
 
     def vanilla_base(self, start: str) -> str:
         return self.chain(start)[-1]
@@ -654,6 +802,13 @@ class Machine:
         handled = self.vanilla(vowner, name, desc, args, static)
         if handled is not _NOT_HANDLED:
             return handled
+        if self.is_mod(start) and not static:
+            # Neither the jar's classes nor what is modelled of vanilla
+            # answer it: an interface's default method in the jar may (#280,
+            # Zeta's IZetaBlock#setCreativeTab returning the block).
+            found = self.default_method(start, name, desc)
+            if found is not None:
+                return self.run(*found, args)
         self._record(args)
         _n, returns = _arg_count(desc)
         for a in args:
@@ -666,15 +821,22 @@ class Machine:
     def _record(self, args: list) -> None:
         if self.registrations is None:
             return
+        if any(isinstance(a, RL) and a.lookup for a in args):
+            return
         names = [a.path if isinstance(a, RL) else a.fields["__rl"] if isinstance(a, Obj) and "__rl" in a.fields
                  else a for a in args
-                 if isinstance(a, (str, RL)) or (isinstance(a, Obj) and "__rl" in a.fields)]
+                 if isinstance(a, (str, RL, Tail)) or (isinstance(a, Obj) and "__rl" in a.fields)]
+        names = [n.text if isinstance(n, Tail) else n for n in names]
         values = [a for a in args if isinstance(a, Lam) or (isinstance(a, Obj) and "__rl" not in a.fields)]
         if len(names) != 1 or not values:
             return
         name = names[0].rsplit(":", 1)[-1]
         if len(values) == 1:
             self.registrations.append(Registration(name, values[0]))
+            if isinstance(values[0], Obj) and _RESOURCE_NAME.fullmatch(names[0]):
+                # Only a valid resource location can be a registry key (a
+                # format such as "%s_wall" handed with the block isn't one).
+                self.names_of.setdefault(id(values[0]), (values[0], set()))[1].add(names[0])
             return
         # Several lambdas in one call: a block registration that also makes
         # the block's item, e.g. MrCrayfish Framework's
@@ -714,6 +876,13 @@ class Machine:
     def _run(self, cf: ClassFile, m: Method, args: list) -> list:
         code = instructions(cf, m.code)
         at = {insn.offset: k for k, insn in enumerate(code)}
+        self._code.append((code, at))
+        try:
+            return self._run_code(cf, m, args, code, at)
+        finally:
+            self._code.pop()
+
+    def _run_code(self, cf: ClassFile, m: Method, args: list, code: list, at: dict) -> list:
         # Longs and doubles take two local slots (JVMS 2.6.1).
         local = self._wide_locals(m, args) + [UNKNOWN] * 256
         work = [Frame(0, local, [])]
@@ -741,6 +910,8 @@ class Machine:
                 if kind == "throw":
                     break
                 if kind == "fork":
+                    for g in payload:
+                        g.fork_serial = _ALLOCATED[0]
                     paths += len(payload) - 1
                     if paths > _MAX_PATHS:
                         raise Unreadable(f"too many paths through {cf.name}.{m.name}")
@@ -773,8 +944,14 @@ class Machine:
             k += 1
         return out
 
-    def _write(self, frame: Frame) -> None:
-        if frame.forked:
+    def _write(self, frame: Frame, target=None) -> None:
+        """A write by ``frame`` after a branch it can't decide may happen on
+        one way and not the other, so it stops the run (Unreadable), unless
+        it is to ``target``, an object or array this way allocated since
+        (no other way sees it: its ``_serial`` is above the frame's
+        ``fork_serial``; #280, an array built for String.format after Zeta's
+        registry lookup forks)."""
+        if frame.forked and (target is None or getattr(target, "_serial", -1) <= frame.fork_serial):
             raise Unreadable("writes to memory after a branch it can't decide")
 
     def step(self, cf: ClassFile, insn: Insn, f: Frame, nxt: int | None):
@@ -819,7 +996,7 @@ class Machine:
         elif 0x4F <= op <= 0x56:  # xastore
             val, idx, arr = s.pop(), s.pop(), s.pop()
             if isinstance(arr, Arr):
-                self._write(f)
+                self._write(f, arr)
                 if isinstance(idx, int) and 0 <= idx < len(arr.items):
                     arr.items[idx] = val
                 else:
@@ -859,7 +1036,7 @@ class Machine:
             else:
                 s.append(UNKNOWN)
         elif 0x99 <= op <= 0xA6 or op in (0xC6, 0xC7):
-            return self._branch(op, insn.arg, f)
+            return self._branch(op, insn.arg, f, nxt)
         elif op == 0xA7 or op == 0xC8:
             f.pc = insn.arg
         elif op in (0xAA, 0xAB):
@@ -896,7 +1073,7 @@ class Machine:
         elif op == 0xB5:
             val, obj = s.pop(), s.pop()
             if isinstance(obj, Obj):
-                self._write(f)
+                self._write(f, obj)
                 obj.fields[insn.arg.name] = val
         elif op in (0xB6, 0xB7, 0xB8, 0xB9):
             return self._invoke(op, insn.arg, f)
@@ -917,8 +1094,9 @@ class Machine:
         elif op == 0xC0:
             pass
         elif op == 0xC1:
-            s.pop()
-            s.append(UNKNOWN)
+            v = s.pop()
+            cls = insn.arg[1] if isinstance(insn.arg, tuple) else insn.arg
+            s.append(self.instance_of(v, cls))
         elif op in (0xC2, 0xC3):
             s.pop()
         else:
@@ -952,7 +1130,43 @@ class Machine:
             r = UNKNOWN
         s.append(r)
 
-    def _branch(self, op: int, target: int, f: Frame):
+    def _throws_only(self, offset: int) -> bool:
+        """Whether the code at ``offset`` (in the method being run) only
+        builds and throws a ``java.lang`` exception: ``new``, ``dup``,
+        constants and local loads, a string concatenation for its message,
+        the exception's own constructor, then ``athrow``; nothing it does
+        reaches memory or a call into other code."""
+        if not self._code:
+            return False
+        code, at = self._code[-1]
+        k = at.get(offset)
+        if k is None:
+            return False
+        for insn in code[k:k + 12]:
+            op = insn.op
+            if op == 0xBF:  # athrow
+                return True
+            if op == 0xBB:  # new
+                cls = insn.arg[1] if isinstance(insn.arg, tuple) else insn.arg
+                if not (isinstance(cls, str) and cls.startswith("java/lang/")
+                        and cls.endswith(("Exception", "Error"))):
+                    return False
+            elif op == 0xB7:  # invokespecial
+                ref = insn.arg
+                if not (isinstance(ref, Ref) and ref.name == "<init>" and ref.owner.startswith("java/lang/")
+                        and ref.owner.endswith(("Exception", "Error"))):
+                    return False
+            elif op == 0xBA:  # invokedynamic: only a string concatenation
+                indy = insn.arg
+                if not (isinstance(indy, Indy) and indy.bootstrap
+                        and indy.bootstrap.ref.owner == "java/lang/invoke/StringConcatFactory"):
+                    return False
+            elif not (op == 0x59 or 0x01 <= op <= 0x14 or 0x15 <= op <= 0x2D):
+                # dup, constants (aconst_null..ldc2_w), loads (iload..aload_3)
+                return False
+        return False
+
+    def _branch(self, op: int, target: int, f: Frame, nxt: int | None = None):
         s = f.stack
         if op <= 0x9E or op in (0xC6, 0xC7):
             v = s.pop()
@@ -982,6 +1196,14 @@ class Machine:
             else:
                 same = _same(a, b)
                 taken = None if same is None else (same if op == 0xA5 else not same)
+        if taken is None and nxt is not None:
+            # A guard whose one way only throws (``if (x == null) throw new
+            # IllegalArgumentException(..)``): that way registers and returns
+            # nothing, so the other is the only way on, and not a fork (#280).
+            if self._throws_only(nxt):
+                taken = True
+            elif self._throws_only(target):
+                taken = False
         if taken is None:
             g = f.copy()
             g.pc = target
@@ -1045,17 +1267,15 @@ class Machine:
             out, k = [], 0
             for ch in recipe:
                 if ch == "\x01":
-                    v = self.stringify(args[k], kinds[k] if k < len(kinds) else "L")
+                    v = args[k] if isinstance(args[k], Tail) else \
+                        self.stringify(args[k], kinds[k] if k < len(kinds) else "L")
                     k += 1
-                    if v is None:
-                        f.stack.append(UNKNOWN)
-                        return None
-                    out.append(v)
+                    out.append(v if v is not None else UNKNOWN)
                 elif ch == "\x02":
                     out.append(str(consts.pop(0)))
                 else:
                     out.append(ch)
-            f.stack.append("".join(out))
+            f.stack.append(_join(out))
         else:
             f.stack.append(UNKNOWN)
         return None
@@ -1076,7 +1296,9 @@ class Machine:
             if isinstance(obj, Obj) and self.is_mod(ref.owner):
                 found = self.find_method(ref.owner, "<init>", ref.desc)
                 if found is not None:
-                    self._write(f)
+                    # Constructing an object this way allocated since its
+                    # last undecided branch writes to that object.
+                    self._write(f, obj)
                     try:
                         self.run(*found, args)
                     except Unreadable as exc:
@@ -1362,13 +1584,12 @@ class Machine:
             if name == "append" and rest:
                 # StringBuilder#append(x) appends String.valueOf(x); the
                 # descriptor says how a JVM int is printed (char, boolean).
-                text = self.stringify(rest[0], _arg_kinds(desc)[0] if _arg_kinds(desc) else "L")
+                text = rest[0] if isinstance(rest[0], Tail) else \
+                    self.stringify(rest[0], _arg_kinds(desc)[0] if _arg_kinds(desc) else "L")
                 recv.parts.append(text if text is not None else UNKNOWN)
                 return [recv]
             if name == "toString":
-                if all(isinstance(p, str) for p in recv.parts):
-                    return ["".join(recv.parts)]
-                return [UNKNOWN]
+                return [_join(recv.parts)]
         strings = self._strings(owner, name, desc, recv, rest, static)
         if strings is not _NOT_HANDLED:
             return strings
@@ -1385,6 +1606,17 @@ class Machine:
                 return [recv.value] if recv.value is not None else []
             if name == "orElse" and rest:
                 return [recv.value if recv.value is not None else rest[0]]
+        key = self._registry_key(owner, name, desc, recv, rest, static)
+        if key is not _NOT_HANDLED:
+            return key
+        if owner == "net/minecraft/resources/ResourceLocation" and static and len(rest) == 2 \
+                and name in ("fromNamespaceAndPath", "tryBuild") and isinstance(rest[1], str) \
+                and not isinstance(rest[0], str) and ":" not in rest[1]:
+            # The namespace isn't known, the path is.
+            return [RL(Tail(rest[1]))]
+        if owner == "net/minecraft/resources/ResourceLocation" and static and len(rest) == 1 \
+                and name in ("parse", "tryParse") and isinstance(rest[0], Tail):
+            return [RL(rest[0])]
         if owner == "net/minecraft/resources/ResourceLocation" and static:
             strs = [a for a in rest if isinstance(a, str)]
             if name in ("fromNamespaceAndPath", "tryBuild") and len(strs) == 2 and len(rest) == 2:
@@ -1393,6 +1625,36 @@ class Machine:
                 return [RL(strs[0])]
         if name == "hashCode" or name == "equals":
             return [UNKNOWN]
+        return _NOT_HANDLED
+
+    def _registry_key(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
+        """The block registry's ``getKey(block)`` (``BuiltInRegistries.BLOCK``,
+        vanilla ``Registry#getKey(Object)``: "the key of the value", MC 1.21.1)
+        for a block object this run recorded as registered under exactly one
+        name: that name (#280, a name derived from another block's registered
+        name). A name recorded without a namespace keeps it unknown
+        (:class:`Tail`). And ``ResourceLocation#getPath`` /
+        ``getNamespace`` / ``toString`` of a location known here. Anything else
+        is not handled here."""
+        if not static and name == "getKey" and desc == "(Ljava/lang/Object;)Lnet/minecraft/resources/ResourceLocation;" \
+                and recv == Const(_BUILTIN_REGISTRIES, "BLOCK") and len(rest) == 1:
+            entry = self.names_of.get(id(rest[0])) if isinstance(rest[0], Obj) else None
+            if entry is None or entry[0] is not rest[0] or len(entry[1]) != 1:
+                return [UNKNOWN]
+            (raw,) = entry[1]
+            return [RL(raw, True) if ":" in raw else RL(Tail(raw), True)]
+        if isinstance(recv, RL) and not rest and not static:
+            loc = recv.path
+            if name == "getPath" and desc == "()Ljava/lang/String;":
+                if isinstance(loc, Tail):
+                    return [loc.text]
+                return [loc.split(":", 1)[1] if ":" in loc else loc]
+            if name == "getNamespace" and desc == "()Ljava/lang/String;":
+                if isinstance(loc, Tail):
+                    return [UNKNOWN]
+                return [loc.split(":", 1)[0] if ":" in loc else "minecraft"]
+            if name == "toString" and desc == "()Ljava/lang/String;":
+                return [loc if isinstance(loc, Tail) or ":" in loc else f"minecraft:{loc}"]
         return _NOT_HANDLED
 
     def stringify(self, v, kind: str = "L") -> str | None:
@@ -1572,6 +1834,10 @@ class Machine:
 
 
 _NOT_HANDLED = object()
+_BUILTIN_REGISTRIES = "net/minecraft/core/registries/BuiltInRegistries"
+# A resource location's characters (ResourceLocation#isValidNamespace /
+# isValidPath, MC 1.21.1: namespace [a-z0-9_.-], path [a-z0-9_./-]).
+_RESOURCE_NAME = re.compile(r"([a-z0-9_.-]+:)?[a-z0-9_./-]+")
 
 
 def _hashable(v) -> bool:

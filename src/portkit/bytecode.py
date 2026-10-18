@@ -258,14 +258,16 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
     (n,) = struct.unpack_from(">H", data, pos)
     pos += 2
     for _ in range(n):
-        access, name, desc = struct.unpack_from(">HHH", data, pos)
+        # (A method's own flags: the class's ``access`` is kept for the
+        # ClassFile; it was overwritten here before #280 slice 3.)
+        maccess, name, desc = struct.unpack_from(">HHH", data, pos)
         pos, attrs = attributes(pos + 6)
         code = None
         for aname, body in attrs:
             if aname == "Code":
                 (length,) = struct.unpack_from(">I", body, 4)
                 code = body[8:8 + length]
-        methods.append(Method(member(utf(name)), desc_of(utf(desc)), access, code))
+        methods.append(Method(member(utf(name)), desc_of(utf(desc)), maccess, code))
 
     pos, attrs = attributes(pos)
     bootstrap = []
