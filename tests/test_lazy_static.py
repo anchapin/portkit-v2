@@ -53,3 +53,25 @@ def test_field_flags_are_parsed():
     cf = _index().get("com/example/lmod/LBlocks")
     assert cf.field_access["registry"] & 0x000A == 0x000A
     assert cf.field_access["FIRST"] & 0x0010
+
+
+def test_two_guards_computing_different_values_are_not_taken_as_null():
+    # Which of getA/getB ran first in the game isn't known (review of PR #326).
+    _m, reg = blockcode._registered(_index(), ["two_first", "two_second"])
+    assert reg["two_second"][0] == []
+    assert not Machine(_index())._lazy_field("com/example/lmod/LTwo", "registry")
+
+
+def test_a_guard_computing_from_an_argument_is_not_taken_as_null():
+    # A set field holds what the first caller passed, not this caller's argument.
+    _m, reg = blockcode._registered(_index(), ["arg_first", "arg_second"])
+    assert reg["arg_second"][0] == []
+    assert not Machine(_index())._lazy_field("com/example/lmod/LArg", "registry")
+
+
+def test_an_outer_test_with_code_of_its_own_is_not_taken_as_null():
+    # The field is lazy (its one write is guarded), but the outer test skips
+    # code that runs in the game only while the field is null.
+    assert Machine(_index())._lazy_field("com/example/lmod/LDouble", "registry")
+    _m, reg = blockcode._registered(_index(), ["double_first", "double_second"])
+    assert reg["double_second"][0] == []

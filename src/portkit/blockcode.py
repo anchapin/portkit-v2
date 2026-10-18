@@ -828,17 +828,23 @@ class Machine:
         if not self.is_mod(owner) or not self._lazy_field(owner, insn.arg.name):
             return False
         target = code[k + 1].arg
+        # The write this test guards: its guard must be this very test, not
+        # an inner one (code between two tests may run in the game only
+        # while the field is null).
         return any(c.op == 0xB3 and isinstance(c.arg, Ref) and c.arg.name == insn.arg.name
-                   and _lazy_guarded(code, i, owner, insn.arg.name, self) and code[i + 1].offset == target
+                   and code[i + 1].offset == target
+                   and _lazy_guarded(code, i, owner, insn.arg.name, self) == k + 1
                    for i, c in enumerate(code[k + 2:], k + 2) if i + 1 < len(code))
 
     def _lazy_field(self, owner: str, name: str) -> bool:
-        """Whether static ``owner.name`` is written only by lazy-
-        initialisation guards: a private, non-final reference field without
+        """Whether static ``owner.name`` is written only by a lazy-
+        initialisation guard: a private, non-final reference field without
         a ConstantValue (so only its own nest can write it, JVMS 5.4.4,
-        and it starts null, JVMS 2.3, 5.4.2), every ``putstatic`` to which
-        in its nest's classes, its static initializer included, is guarded
-        (see _lazy_guarded)."""
+        and it starts null, JVMS 2.3, 5.4.2) with exactly one ``putstatic``
+        in its nest's classes, its static initializer included, and that
+        one guarded (see _lazy_guarded). One write, so a set field holds
+        what that same guard computed: two guards could compute different
+        values, and which ran first in the game isn't known."""
         key = (owner, name)
         if key in self._lazy:
             return self._lazy[key]
@@ -863,10 +869,10 @@ class Machine:
                     if insn.op != 0xB3 or not isinstance(insn.arg, Ref) or insn.arg.name != name \
                             or self._field_owner(insn.arg.owner, name) != owner:
                         continue
-                    if not _lazy_guarded(code, k, owner, name, self):
+                    if _lazy_guarded(code, k, owner, name, self) is None:
                         return False
                     writers += 1
-        self._lazy[key] = writers > 0
+        self._lazy[key] = writers == 1
         return self._lazy[key]
 
     # -- running ------------------------------------------------------------
@@ -2112,10 +2118,13 @@ _VANILLA_BLOCKS = "net/minecraft/world/level/block/Blocks"
 _RESOURCE_NAME = re.compile(r"([a-z0-9_.-]+:)?[a-z0-9_./-]+")
 
 
-def _lazy_guarded(code: list, k: int, owner: str, name: str, machine: "Machine") -> bool:
-    """Whether the ``putstatic`` at ``code[k]`` is guarded as ``getstatic F;
-    ifnonnull L; ...; putstatic F; L:`` with nothing between the guard and
-    the write jumping out of it or into it from elsewhere."""
+def _lazy_guarded(code: list, k: int, owner: str, name: str, machine: "Machine") -> int | None:
+    """The index of the ``ifnonnull`` guarding the ``putstatic`` at
+    ``code[k]`` as ``getstatic F; ifnonnull L; ...; putstatic F; L:``, with
+    nothing between the guard and the write jumping out of it or into it
+    from elsewhere, returning or throwing, and no local variable read there that the stretch didn't
+    first write (a computation from the method's arguments or earlier
+    locals could yield a different value each call), or None."""
     after = code[k + 1].offset if k + 1 < len(code) else None
     for j in range(k - 1, 0, -1):
         insn = code[j]
@@ -2123,18 +2132,50 @@ def _lazy_guarded(code: list, k: int, owner: str, name: str, machine: "Machine")
             prev = code[j - 1]
             if not (prev.op == 0xB2 and isinstance(prev.arg, Ref) and prev.arg.name == name
                     and machine._field_owner(prev.arg.owner, name) == owner):
-                return False
+                return None
             inside = {c.offset for c in code[j + 1:k + 1]}
             for i, other in enumerate(code):
                 if j <= i <= k:
                     targets = _targets(other)
                     if i > j and any(t not in inside and t != after for t in targets):
-                        return False
+                        return None
                     continue
                 if any(t in inside for t in _targets(other)):
-                    return False
-            return True
-    return False
+                    return None
+            written: set = set()
+            for other in code[j + 1:k]:
+                if 0xAC <= other.op <= 0xB1 or other.op == 0xBF:
+                    return None  # leaves the method before the write
+                load = _local_load(other)
+                if load is not None and load not in written:
+                    return None
+                store = _local_store(other)
+                if store is not None:
+                    written.add(store)
+            return j
+    return None
+
+
+def _local_load(insn) -> int | None:
+    """The local variable slot ``insn`` reads (xload, iinc, ret), if any."""
+    op = insn.op
+    if 0x15 <= op <= 0x19 or op == 0xA9:
+        return insn.arg
+    if 0x1A <= op <= 0x2D:
+        return (op - 0x1A) % 4
+    if op == 0x84:
+        return insn.arg[0]
+    return None
+
+
+def _local_store(insn) -> int | None:
+    """The local variable slot ``insn`` writes (xstore), if any."""
+    op = insn.op
+    if 0x36 <= op <= 0x3A:
+        return insn.arg
+    if 0x3B <= op <= 0x4E:
+        return (op - 0x3B) % 4
+    return None
 
 
 def _targets(insn) -> list:
