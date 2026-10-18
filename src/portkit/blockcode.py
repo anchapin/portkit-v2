@@ -2256,14 +2256,15 @@ def _recipe_matcher(recipe: str) -> "re.Pattern":
 
 
 def _format_matcher(text: str) -> "re.Pattern | None":
-    """A ``String.format`` pattern whose only specifiers are ``%s`` (``%%``
-    aside) as a pattern a whole name must match, each ``%s`` a non-empty
-    run of name characters; None for any other specifier."""
-    rest = text.replace("%%", "")
-    if re.search(r"%(?!s)", rest):
+    """A ``String.format`` pattern whose only specifiers are ``%s`` as a
+    pattern a whole name must match, each ``%s`` a non-empty run of name
+    characters; None for any other specifier (``%%`` included) and for one
+    with no letter or digit of its own (``"%s"``, ``"%s_%s"`` would match
+    nearly every name)."""
+    if re.search(r"%(?!s)", text):
         return None
-    parts = text.replace("%%", "%").split("%s") if "%%" not in text else None
-    if parts is None or len(parts) < 2:
+    parts = text.split("%s")
+    if len(parts) < 2 or not re.search("[a-z0-9]", "".join(parts)):
         return None
     return re.compile("[a-z0-9_./-]+".join(re.escape(p) for p in parts))
 

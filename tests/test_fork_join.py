@@ -104,6 +104,8 @@ def test_join_keeps_a_way_that_stopped_partial():
     ("hollow_%s", "oak_log", False),
     ("%d_post", "1_post", None),
     ("%s%%", "x", None),
+    ("%s", "oak_post", None),
+    ("%s_%s", "oak_post", None),
 ])
 def test_format_matcher(text, name, hit):
     pat = blockcode._format_matcher(text)
