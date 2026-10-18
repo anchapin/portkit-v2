@@ -360,20 +360,20 @@ class BiomeMachine(Machine):
             self._ctxs.pop()
             self.depth -= 1
 
-    def _branch(self, op: int, target: int, f: Frame):
+    def _branch(self, op: int, target: int, f: Frame, nxt: int | None = None):
         s = f.stack
         value = s[-1] if (op <= 0x9E or op in (0xC6, 0xC7)) and s else UNKNOWN
-        out = super()._branch(op, target, f)
+        out = super()._branch(op, target, f, nxt)
         if self._ctxs and self.depth == self._ctxs[-1].depth:
             ctx = self._ctxs[-1]
             ctx.outcomes.setdefault(ctx.pc, set()).add(None if out is not None else f.pc)
             ctx.conds[ctx.pc] = (value, op, target)
         return out
 
-    def _write(self, frame: Frame) -> None:
+    def _write(self, frame: Frame, target=None) -> None:
         if self._ctxs and self.depth == self._ctxs[-1].depth:
             return  # a new object's constructor; field writes are handled in exec_method
-        super()._write(frame)
+        super()._write(frame, target)
 
     def _invoke(self, op: int, ref: Ref, f: Frame):
         self._from_exec = bool(self._ctxs) and self.depth == self._ctxs[-1].depth

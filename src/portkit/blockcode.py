@@ -876,7 +876,7 @@ class Machine:
     def _run(self, cf: ClassFile, m: Method, args: list) -> list:
         code = instructions(cf, m.code)
         at = {insn.offset: k for k, insn in enumerate(code)}
-        self._code.append((code, at))
+        self._code.append((self.depth, code, at))
         try:
             return self._run_code(cf, m, args, code, at)
         finally:
@@ -1136,9 +1136,9 @@ class Machine:
         constants and local loads, a string concatenation for its message,
         the exception's own constructor, then ``athrow``; nothing it does
         reaches memory or a call into other code."""
-        if not self._code:
-            return False
-        code, at = self._code[-1]
+        if not self._code or self._code[-1][0] != self.depth:
+            return False  # not run by _run (a subclass's own loop)
+        _depth, code, at = self._code[-1]
         k = at.get(offset)
         if k is None:
             return False
