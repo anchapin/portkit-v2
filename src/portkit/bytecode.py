@@ -402,10 +402,35 @@ class ClassIndex:
     """The class files of one mod (a jar or an unpacked directory), parsed on
     demand by internal name (``com/example/FooBlock``)."""
 
-    def __init__(self, entries: dict[str, bytes]):
+    def __init__(self, entries: dict[str, bytes], libraries: dict[str, bytes] | None = None):
         self._raw = entries
+        # Classes of the mod's declared dependency jars (#280), read-only: a
+        # lookup by name finds them (a block class subclassing a library's
+        # base, a library constructor that registers its block), but they are
+        # never listed, counted or scanned as the mod's own (``names``,
+        # ``raw``, ``len``), so nothing of a library is converted or shipped.
+        self._lib: dict[str, bytes] = {k: v for k, v in (libraries or {}).items() if k not in entries}
         self._parsed: dict[str, ClassFile | None] = {}
         self.remapper = None
+
+    def add_libraries(self, entries: dict[str, bytes]) -> int:
+        """Make ``entries`` (a dependency jar's classes) visible to lookups;
+        a name the mod or an earlier library already has is kept. Returns how
+        many classes were added."""
+        added = 0
+        for k, v in entries.items():
+            if k not in self._raw and k not in self._lib:
+                self._lib[k] = v
+                self._parsed.pop(k, None)
+                added += 1
+        return added
+
+    def is_library(self, name: str) -> bool:
+        """Whether ``name`` is a dependency jar's class rather than the mod's."""
+        return name in self._lib and name not in self._raw
+
+    def library_count(self) -> int:
+        return len(self._lib)
 
     def set_remapper(self, remapper) -> None:
         """Read every class through ``remapper`` from now on (#235): a Forge SRG
@@ -448,13 +473,15 @@ class ClassIndex:
         """The parsed class, through the remapper unless ``remap`` is False
         (names as compiled, not cached)."""
         if not remap and self.remapper is not None:
-            raw = self._raw.get(name)
+            raw = self._raw.get(name, self._lib.get(name))
             try:
                 return parse(raw) if raw is not None else None
             except ClassFormatError:
                 return None
         if name not in self._parsed:
             raw = self._raw.get(name)
+            if raw is None:
+                raw = self._lib.get(name)
             try:
                 self._parsed[name] = parse(raw, self.remapper) if raw is not None else None
             except ClassFormatError:

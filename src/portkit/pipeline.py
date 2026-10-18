@@ -23,6 +23,7 @@ from .converters.recipes import (
 )
 from .data import worldgen as worldgen_ref
 from .data.mappings import attach as attach_mappings
+from .libraries import attach as attach_libraries
 from .icon import resolve as resolve_icon
 from .ingest import ingest
 from .meta import ModMetadata, parse as parse_metadata
@@ -421,6 +422,7 @@ def convert(
     agent: "ResidueAgent | None" = None,
     config: "list[ConfigRequest] | None" = None,
     experiments: "list[str] | None" = None,
+    libraries: "list[Path] | None" = None,
 ) -> PipelineResult:
     """Convert a mod directory or .jar into a Bedrock pack tree under out_dir.
 
@@ -445,6 +447,11 @@ def convert(
     world runs; content that needs one ships only when it is named (see
     ``portkit.converters.blocks.EXPERIMENTS``). An unknown name raises
     ValueError before anything is written. Each is recorded in the notes.
+
+    ``libraries`` (``--library``) are dependency jars read for their classes
+    only (#280, :mod:`portkit.libraries`): a block subclassing a library's
+    base class or registered by a library's constructor is read as far as
+    vanilla; nothing of a library is converted or shipped. Each is noted.
     """
     out_dir = Path(out_dir)
     chosen = frozenset(experiments or ())
@@ -473,6 +480,8 @@ def convert(
         mapping_note = attach_mappings(staged.classes, meta.loader, meta.minecraft)
         if mapping_note:
             meta.notes.append(mapping_note)
+        if libraries:
+            meta.notes.extend(attach_libraries(staged.classes, libraries))
 
         overrides, records = {}, []
         if config:

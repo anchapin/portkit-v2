@@ -1,5 +1,5 @@
 // portkit runtime: the pure rules of a pressure plate (#296). No imports;
-// tested with node (tests/js/pressure_plate_core.test.mjs). The Bedrock
+// tested with node (tests/js/pressure_plate.test.mjs). The Bedrock
 // binding is pressure_plate.js.
 //
 // Ported from vanilla Java BasePressurePlateBlock and PressurePlateBlock, read

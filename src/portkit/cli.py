@@ -9,6 +9,8 @@ from pathlib import Path
 
 from .conditions import ConfigError, load_config_file, parse_config_arg
 from .ingest import IngestError
+from . import libraries
+from .libraries import LibraryError
 from .converters.blocks import EXPERIMENTS
 from .pipeline import convert
 from .validate import validate_tree
@@ -237,9 +239,13 @@ def _convert_once(args):
             agent=agent,
             config=config or None,
             experiments=getattr(args, "experiment", None) or None,
+            libraries=[Path(p) for p in getattr(args, "library", None) or []] or None,
         )
     except IngestError as exc:
         print(f"cannot read {args.source}: {exc}", file=sys.stderr)
+        return 2, None
+    except LibraryError as exc:
+        print(f"cannot read a --library jar: {exc}", file=sys.stderr)
         return 2, None
     except ConfigError as exc:
         print(f"bad mod config: {exc}", file=sys.stderr)
@@ -515,7 +521,8 @@ def cmd_eval(args) -> int:
     rows, measured, failures, error_counts = [], [], 0, {}
     for name, source in cases:
         with tempfile.TemporaryDirectory() as tmp:
-            result = convert(source, Path(tmp) / "out", emit_addon=not corpus_mode)
+            result = convert(source, Path(tmp) / "out", emit_addon=not corpus_mode,
+                             libraries=(_CORPUS_LIBRARIES.get(name) if corpus_mode else None))
             if mct_exe:
                 _mct_one(mct_exe, name, Path(tmp) / "out", mct_runs, mct_failed)
             ok = result.report.ok
@@ -638,6 +645,10 @@ def _write_eval_json(path: Path, corpus_mode, rows, error_counts, mct_exe, mct_r
     print(f"eval written: {path}")
 
 
+# eval --corpus: the library jars read with each case (#280), set by _corpus_cases.
+_CORPUS_LIBRARIES: dict[str, list] = {}
+
+
 def _corpus_cases(args):
     """(root, [(name, jar)]) for ``eval --corpus``, or an exit code."""
     from . import corpus
@@ -654,6 +665,12 @@ def _corpus_cases(args):
         print(str(exc), file=sys.stderr)
         return 2
     cases, missing = [], []
+    try:
+        pinned = libraries.load()
+    except (OSError, corpus.CorpusError) as exc:
+        print(f"cannot read the library manifest: {exc}", file=sys.stderr)
+        return 2
+    _CORPUS_LIBRARIES.clear()
     for mod in mods:
         try:
             jar = corpus.fetch(mod)[0] if args.fetch else corpus.cached(mod)
@@ -662,8 +679,19 @@ def _corpus_cases(args):
             return 2
         if jar is None:
             missing.append(mod.name)
-        else:
-            cases.append((mod.name, jar))
+            continue
+        cases.append((mod.name, jar))
+        # The mod's pinned dependency jars (#280), read with it.
+        for lib in libraries.for_mod(mod.name, pinned):
+            try:
+                path = corpus.fetch(lib)[0] if args.fetch else corpus.cached(lib)
+            except corpus.CorpusError as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
+            if path is None:
+                missing.append(f"library {lib.name}")
+            else:
+                _CORPUS_LIBRARIES.setdefault(mod.name, []).append(path)
     if missing:
         print(f"not in the corpus cache: {', '.join(missing)}; run `portkit corpus fetch` "
               "or add --fetch", file=sys.stderr)
@@ -846,6 +874,23 @@ def cmd_corpus(args) -> int:
             failed += 1
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} {mod.name} -> {path}")
+    # The dependency jars pinned for the chosen mods (#280), read-only.
+    try:
+        pinned = libraries.load()
+    except (OSError, corpus.CorpusError) as exc:
+        print(f"cannot read the library manifest: {exc}", file=sys.stderr)
+        return 2
+    names = {m.name for m in chosen}
+    for lib in pinned:
+        if not names & set(lib.used_by):
+            continue
+        try:
+            path, downloaded = corpus.fetch(lib, cache)
+        except corpus.CorpusError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} library {lib.name} (for {', '.join(lib.used_by)}) -> {path}")
     if hidden and not args.fixture:
         print(f"skipped {len(hidden)} optional: {', '.join(hidden)} (add --include-optional)")
     return 1 if failed else 0
@@ -984,8 +1029,14 @@ def cmd_gauntlet(args) -> int:
             def fetch(mod):
                 return corpus.fetch(mod, Path(fresh) if mod.host == "curseforge" else None)[0]
 
+            pinned = libraries.load()
+
+            def fetch_libraries(mod):
+                return [(lib.name, corpus.fetch(lib)[0]) for lib in libraries.for_mod(mod.name, pinned)]
+
             doc = gaps.run_shard(mods, shard=args.shard, manifest=label, fetch=fetch, timeout=args.timeout,
-                                 mct_exe=mct_exe, profile=gauntlet.profile_and_classify)
+                                 mct_exe=mct_exe, profile=gauntlet.profile_and_classify,
+                                 libraries=fetch_libraries)
         if allow:  # what the official API said, per CurseForge mod in this shard
             doc["curseforge_allow_mod_distribution"] = allow
         out = Path(args.out)
@@ -1283,6 +1334,15 @@ def main(argv=None) -> int:
             "number option takes a number in the range the mod accepts, e.g. "
             "farmersdelight.cuttingBoardFortuneBonus=0.25. An unknown mod or flag, or a "
             "number out of range, is an error listing the valid ones"
+        ),
+    )
+    p.add_argument(
+        "--library", action="append", metavar="JAR",
+        help=(
+            "a dependency jar the mod registers its blocks through (repeatable, e.g. a "
+            "library mod), read for its classes only: blocks subclassing its base classes or "
+            "registered by its constructors are read as far as vanilla. Nothing of it is "
+            "converted or shipped (#280)"
         ),
     )
     p.add_argument(
