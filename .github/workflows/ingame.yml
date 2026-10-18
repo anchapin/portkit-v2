@@ -84,7 +84,9 @@ jobs:
       - name: Convert
         run: |
           jar=$(ls "$PORTKIT_CORPUS_CACHE"/${{ matrix.name }}-*.jar)
-          portkit convert "$jar" "tree/$RUN_NAME" --no-addon ${{ matrix.experiment && format('--experiment {0}', matrix.experiment) || '' }}
+          # The mod's pinned dependency jars (fixtures/real/libraries.toml, #280), read-only.
+          libs=$(python -c "from portkit import corpus, libraries; print(' '.join('--library ' + str(corpus.cached(l)) for l in libraries.for_mod('${{ matrix.name }}', libraries.load()) if corpus.cached(l)))")
+          portkit convert "$jar" "tree/$RUN_NAME" --no-addon $libs ${{ matrix.experiment && format('--experiment {0}', matrix.experiment) || '' }}
 
       - name: Fetch Bedrock Dedicated Server (pinned, sha256-checked; agrees to the Minecraft EULA)
         run: portkit ingame fetch-server --dir "$RUNNER_TEMP/bds" --accept-eula

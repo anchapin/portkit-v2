@@ -140,3 +140,41 @@ def test_manifest_errors(tmp_path):
     ok.write_text(entry + entry)
     with pytest.raises(CorpusError, match="twice"):
         libraries.load(ok)
+
+
+# --- the gauntlet / sample harness --------------------------------------------------
+
+def test_run_shard_reads_a_mods_libraries_and_names_them():
+    from portkit import corpus, gaps
+
+    def mod(name):
+        return corpus.Mod(name=name, project=name, version_id="v", url="https://e/x.jar",
+                          sha512="a" * 128, license="MIT")
+
+    seen = {}
+
+    def convert(jar, work, timeout, libraries=None):
+        seen[jar.stem] = libraries
+        return {"status": "ok", "namespace": "x", "files": 1, "residue": 0, "coverage": 100.0,
+                "valid": True, "errors": 0, "seconds": 0.1, "reasons": {}}
+
+    def libs(m):
+        if m.name == "broken":
+            raise corpus.CorpusError("lib: sha512 mismatch")
+        return [("lib", Path("/jars/lib.jar"))] if m.name == "withlib" else []
+
+    doc = gaps.run_shard([mod("withlib"), mod("plain"), mod("broken")], shard="1/1", manifest="m",
+                         fetch=lambda m: Path(f"/jars/{m.name}.jar"), convert=convert,
+                         log=lambda *_: None, libraries=libs)
+    assert seen == {"withlib": [Path("/jars/lib.jar")], "plain": None}
+    assert doc["mods"]["withlib"]["libraries"] == ["lib"]
+    assert "libraries" not in doc["mods"]["plain"]
+    assert doc["mods"]["broken"]["status"] == "fetch_failed"
+    assert "library" in doc["mods"]["broken"]["detail"]
+
+
+def test_the_child_command_passes_library_jars():
+    from portkit import gaps
+
+    cmd = gaps._child_cmd(Path("m.jar"), Path("out"), Path("r.json"), [Path("a.jar"), Path("b.jar")])
+    assert cmd[-5:] == ["m.jar", "out", "r.json", "a.jar", "b.jar"]
