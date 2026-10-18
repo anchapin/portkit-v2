@@ -1138,10 +1138,21 @@ def cmd_reference(args) -> int:
         chosen_map = mapping_data.select(meta.loader, meta.minecraft)
         mapping_sets = [chosen_map] if chosen_map else []
         print(f"{args.mod}: name mappings: {chosen_map.id if chosen_map else 'none needed'}")
+    # Vanilla Blocks field -> id tables (#280): every pinned set, or the one
+    # the mod's declared game version needs.
+    from .data import vanilla_blocks as block_id_data
+    if meta is None:
+        block_id_sets = list(block_id_data.SETS)
+    else:
+        chosen_ids = block_id_data.select(meta.minecraft or meta.loader_minecraft)
+        block_id_sets = [chosen_ids] if chosen_ids else []
     if args.action == "list":
         for mapping in mapping_sets:
             state = "cached" if mapping_data.cached(mapping, cache) else "missing"
             print(f"{mapping.id:28} {mapping.label} {state}")
+        for block_ids in block_id_sets:
+            state = "cached" if block_id_data.cached(block_ids, cache) else "missing"
+            print(f"{block_ids.id:28} {block_ids.label} {state}")
         state = "cached" if data.cached_sounds(cache) else "missing"
         print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
         state = "cached" if model_data.cached(cache) else "missing"
@@ -1206,6 +1217,14 @@ def cmd_reference(args) -> int:
             failed += 1
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} {mapping.id} -> {path}")
+    for block_ids in block_id_sets:
+        try:
+            path, downloaded = block_id_data.fetch(block_ids, cache)
+        except data.ReferenceDataError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} {block_ids.id} -> {path}")
     for tag_set in sets:
         try:
             path, downloaded = tags.fetch(tag_set, cache)

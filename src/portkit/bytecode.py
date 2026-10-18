@@ -414,6 +414,10 @@ class ClassIndex:
         self._lib: dict[str, bytes] = {k: v for k, v in (libraries or {}).items() if k not in entries}
         self._parsed: dict[str, ClassFile | None] = {}
         self.remapper = None
+        # Vanilla ``Blocks`` field name -> block registry id for the game
+        # version the mod declares (:mod:`portkit.data.vanilla_blocks`, #280),
+        # or None when that table isn't pinned or cached.
+        self.vanilla_blocks: dict[str, str] | None = None
 
     def add_libraries(self, entries: dict[str, bytes]) -> int:
         """Make ``entries`` (a dependency jar's classes) visible to lookups;

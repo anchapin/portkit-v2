@@ -40,6 +40,11 @@ class ModMetadata:
     # The Minecraft version the mod declares it runs on (the lower bound of a
     # range, the newest of a list), as written; None when it doesn't say (#160).
     minecraft: str | None = None
+    # A NeoForge jar that declares no minecraft dependency: the game version
+    # its required ``neoforge`` dependency's lower bound names under NeoForge's
+    # versioning (see :func:`_neoforge_minecraft`), else None. Only the vanilla
+    # Blocks table reads it (#280); ``minecraft`` stays as declared.
+    loader_minecraft: str | None = None
     notes: list[str] = field(default_factory=list)
     # Every mod the file declares (id -> version as written), and the mods it
     # declares as required dependencies; None when no metadata was read (#183).
@@ -136,6 +141,33 @@ def _toml_minecraft(data: dict) -> str | None:
     return None
 
 
+_NEOFORGE_VERSION = re.compile(r"^\s*[\[(]?\s*(\d+)\.(\d+)\.")
+
+
+def _neoforge_minecraft(data: dict) -> str | None:
+    """The Minecraft version a ``neoforge`` dependency's versionRange lower bound
+    is built for, when the file names no ``minecraft`` dependency of its own.
+
+    NeoForge's versioning (docs.neoforged.net, Getting Started > Versioning):
+    "The major version is Minecraft's minor version, the minor version is
+    Minecraft's patch version ... NeoForge 20.2.59 is the 60th version ... for
+    Minecraft 1.20.2". Only majors 20-25 are read that way (NeoForge 1.20.1 was
+    Forge's 47.x line, and 26.1+ spells the full version)."""
+    if _toml_minecraft(data) is not None:
+        return None
+    deps = data.get("dependencies")
+    for group in deps.values() if isinstance(deps, dict) else []:
+        for dep in group if isinstance(group, list) else []:
+            if isinstance(dep, dict) and dep.get("modId") == "neoforge" \
+                    and isinstance(dep.get("versionRange"), str):
+                match = _NEOFORGE_VERSION.match(dep["versionRange"])
+                if match and 20 <= int(match.group(1)) <= 25:
+                    major, minor = int(match.group(1)), int(match.group(2))
+                    return f"1.{major}" if minor == 0 else f"1.{major}.{minor}"
+                return None
+    return None
+
+
 def _text(value) -> str | None:
     """A free-text field, trimmed; None when empty or not a string."""
     if not isinstance(value, str):
@@ -228,7 +260,8 @@ def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
     if not mods:
         notes.append(f"{loader} metadata declares no [[mods]] entry")
         return ModMetadata(loader=loader, minecraft=_toml_minecraft(data), notes=notes,
-                           mods={}, requires=_toml_requires(data))
+                           mods={}, requires=_toml_requires(data),
+                           loader_minecraft=_neoforge_minecraft(data) if loader == "neoforge" else None)
     if len(mods) > 1:
         ids = ", ".join(str(m.get("modId")) for m in mods)
         notes.append(f"{loader} metadata declares {len(mods)} mods ({ids}); using the first")
@@ -240,6 +273,7 @@ def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
         version_raw=first.get("version"),
         loader=loader,
         minecraft=_toml_minecraft(data),
+        loader_minecraft=_neoforge_minecraft(data) if loader == "neoforge" else None,
         notes=notes,
         mods=_declared({m.get("modId"): m.get("version") for m in mods if isinstance(m, dict)}),
         requires=_toml_requires(data),

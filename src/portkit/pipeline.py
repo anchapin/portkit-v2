@@ -23,6 +23,7 @@ from .converters.recipes import (
 )
 from .data import worldgen as worldgen_ref
 from .data.mappings import attach as attach_mappings
+from .data.vanilla_blocks import attach as attach_vanilla_blocks
 from .libraries import attach as attach_libraries
 from .icon import resolve as resolve_icon
 from .ingest import ingest
@@ -480,6 +481,8 @@ def convert(
         mapping_note = attach_mappings(staged.classes, meta.loader, meta.minecraft)
         if mapping_note:
             meta.notes.append(mapping_note)
+        # Vanilla Blocks field -> id for the declared game version (#280).
+        attach_vanilla_blocks(staged.classes, meta.minecraft or meta.loader_minecraft)
         if libraries:
             meta.notes.extend(attach_libraries(staged.classes, libraries))
 
