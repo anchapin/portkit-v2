@@ -1638,6 +1638,9 @@ class Machine:
         is not handled here."""
         if not static and name == "getKey" and desc == "(Ljava/lang/Object;)Lnet/minecraft/resources/ResourceLocation;" \
                 and recv == Const(_BUILTIN_REGISTRIES, "BLOCK") and len(rest) == 1:
+            vanilla = self._vanilla_block_id(rest[0])
+            if vanilla is not None:
+                return [RL(f"minecraft:{vanilla}", True)]
             entry = self.names_of.get(id(rest[0])) if isinstance(rest[0], Obj) else None
             if entry is None or entry[0] is not rest[0] or len(entry[1]) != 1:
                 return [UNKNOWN]
@@ -1656,6 +1659,17 @@ class Machine:
             if name == "toString" and desc == "()Ljava/lang/String;":
                 return [loc if isinstance(loc, Tail) or ":" in loc else f"minecraft:{loc}"]
         return _NOT_HANDLED
+
+    def _vanilla_block_id(self, v) -> str | None:
+        """The registry id of a vanilla block constant (``Blocks.OAK_SLAB``, a
+        ``getstatic`` the machine keeps as a :class:`Const`) from the table read
+        out of the declared game version's client jar
+        (:mod:`portkit.data.vanilla_blocks`, #280), or None when it isn't a
+        ``Blocks`` field, the table isn't cached or doesn't list it."""
+        if not isinstance(v, Const) or v.owner != _VANILLA_BLOCKS:
+            return None
+        table = getattr(self.classes, "vanilla_blocks", None)
+        return table.get(v.name) if table else None
 
     def stringify(self, v, kind: str = "L") -> str | None:
         """``String.valueOf(v)`` for a value of JVM type ``kind`` (a
@@ -1835,6 +1849,7 @@ class Machine:
 
 _NOT_HANDLED = object()
 _BUILTIN_REGISTRIES = "net/minecraft/core/registries/BuiltInRegistries"
+_VANILLA_BLOCKS = "net/minecraft/world/level/block/Blocks"
 # A resource location's characters (ResourceLocation#isValidNamespace /
 # isValidPath, MC 1.21.1: namespace [a-z0-9_.-], path [a-z0-9_./-]).
 _RESOURCE_NAME = re.compile(r"([a-z0-9_.-]+:)?[a-z0-9_./-]+")
