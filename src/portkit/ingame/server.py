@@ -280,6 +280,7 @@ def parse(lines: list[str]) -> dict:
         "tool_drops": [d for k, d in tagged if k == "TOOL_DROP"],
         "paired": [d for k, d in tagged if k == "PAIRED"],
         "trapdoors": [d for k, d in tagged if k == "TRAPDOOR"],
+        "plates": [d for k, d in tagged if k == "PLATE"],
         "ores": [d for k, d in tagged if k in ("ORE", "ORE_GENERATE", "ORE_DIMENSION")],
         "geodes": [d for k, d in tagged if k in ("GEODE_GENERATE", "GEODE_DIMENSION")],
         "content_errors": errors,

@@ -3,7 +3,7 @@ name: ingame
 # In-game checks (#238): convert a few corpus and deco packs, install each with
 # a generated check behavior pack on Mojang's Bedrock Dedicated Server, and run
 # the Script API checks headlessly (every block places, every item spawns,
-# container slot counts #226, connection states #221, wired block drops #299, per-tool drops of match_tool tables #299, doors and two-tall blocks #296, trapdoors opened and closed by redstone and broken for one drop #296, ore features placed and generated #281, the Overworld's in a generated-world run, geode features generated #281). A run fails on a failed
+# container slot counts #226, connection states #221, wired block drops #299, per-tool drops of match_tool tables #299, doors and two-tall blocks #296, trapdoors opened and closed by redstone and broken for one drop #296, pressure plates pressed by an armor stand and a stick, powering a lamp and released after the re-check #296, ore features placed and generated #281, the Overworld's in a generated-world run, geode features generated #281). A run fails on a failed
 # check or a content-log error; the server output, content log and report are
 # uploaded per pack.
 #
@@ -52,6 +52,8 @@ jobs:
           - { name: mythicmetals, manifest: fixtures/real/mods.toml, label: mythicmetals-worldgen, world: default }
           # Geodes from Forge biome modifiers (#281 slice 3): a generated world, where a test-only copy of each geode rule places the converted geode feature in every chunk and fresh Overworld chunks are scanned for its crystal blocks.
           - { name: tinkers_construct, manifest: fixtures/real/gauntlet.toml, label: tinkers-worldgen, world: default }
+          # Pressure plates (#296): BetterEnd's ten wooden plates (DEFAULT from the jar's wooden_pressure_plates tag; its stone and metal plates stay residue).
+          - { name: betterend, manifest: fixtures/real/mods.toml }
     # `label` names a run whose jar shares its fixture name with another (one mod, two loader builds).
     name: ${{ matrix.label || matrix.name }}${{ matrix.experiment && format(' ({0})', matrix.experiment) || '' }}
     env:

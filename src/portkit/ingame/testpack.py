@@ -43,6 +43,12 @@ converter wrote, so the checks test the pack as shipped.
   ``powered`` states; ``expect`` as for ``paired``); the check places it, sets
   a redstone block beside it and removes it, reading both states after each,
   then breaks it and counts the drop.
+- ``plates``: blocks carrying the portkit pressure plate component (#296).
+  Each is ``{"id", "powered", "mobs_only", "expect"}`` (``powered`` names its
+  state; ``mobs_only`` from the pack's plate table); the check places it on a
+  stone block beside a redstone lamp, spawns an armor stand on it (pressed,
+  lamp lit) and removes it (released after the re-check, lamp unlit), drops a
+  stick on it (pressed unless mobs only), then breaks it and counts the drop.
 - ``ores``: feature rules whose feature is a ``minecraft:ore_feature`` of the
   pack (#281). Each is ``{"rule", "feature", "blocks", "replaces",
   "dimension", "y"}``. Outside the Overworld (the check world is flat) the
@@ -85,6 +91,7 @@ class Checks:
     tool_drops: list[dict] = field(default_factory=list)
     paired: list[dict] = field(default_factory=list)
     trapdoors: list[dict] = field(default_factory=list)
+    plates: list[dict] = field(default_factory=list)
     ores: list[dict] = field(default_factory=list)
     geodes: list[dict] = field(default_factory=list)
     # "flat" (the default check world) or "default": a generated Overworld,
@@ -102,6 +109,7 @@ class Checks:
             "tool_drops": self.tool_drops,
             "paired": self.paired,
             "trapdoors": self.trapdoors,
+            "plates": self.plates,
             "ores": self.ores,
             "geodes": self.geodes,
         }
@@ -319,6 +327,37 @@ def _trapdoor_check(behavior_pack: Path, ident: str, block: dict) -> dict | None
 _DIMENSION_TAGS = {"nether": "nether", "the_end": "the_end"}
 
 
+PLATE_COMPONENT = ":portkit_pressure_plate"
+
+
+def _plate_tables(behavior_pack: Path) -> dict[str, dict]:
+    """Every plate entry of the pack's pressure plate tables, by block id."""
+    out: dict[str, dict] = {}
+    for path in sorted((behavior_pack / "scripts" / "portkit" / "data").glob("*_pressure_plates.js")):
+        text = path.read_text(encoding="utf-8")
+        _, sep, body = text.partition("export default ")
+        if not sep:
+            continue
+        try:
+            table = json.loads(body.strip().rstrip(";"))
+        except ValueError:
+            continue
+        out.update(table.get("plates") or {})
+    return out
+
+
+def _plate_check(behavior_pack: Path, ident: str, block: dict, tables: dict) -> dict | None:
+    components = block.get("components") or {}
+    if not any(isinstance(k, str) and k.endswith(PLATE_COMPONENT) for k in components):
+        return None
+    states = [s for s in ((block.get("description") or {}).get("states") or {}) if isinstance(s, str)]
+    powered = [s for s in states if s.endswith(":powered")]
+    if len(powered) != 1 or ident not in tables:
+        return None
+    return {"id": ident, "powered": powered[0], "mobs_only": bool(tables[ident].get("mobs_only")),
+            "expect": _block_expect(behavior_pack, ident, block)}
+
+
 def _tags(value) -> set[str]:
     if isinstance(value, dict):
         out = {value["value"]} if value.get("test") == "has_biome_tag" and isinstance(value.get("value"), str) else set()
@@ -428,6 +467,7 @@ def geode_rule_files(behavior_pack: Path, geodes: list[dict]) -> dict[str, dict]
 def read_checks(behavior_pack: Path) -> Checks:
     """What to check in a converted behavior pack, in a stable (sorted) order."""
     checks = Checks()
+    plate_tables = _plate_tables(behavior_pack)
     for path in sorted((behavior_pack / "blocks").rglob("*.json")):
         doc = _read_json(path)
         block = (doc or {}).get("minecraft:block") if isinstance(doc, dict) else None
@@ -455,6 +495,9 @@ def read_checks(behavior_pack: Path) -> Checks:
         trapdoor = _trapdoor_check(behavior_pack, ident, block)
         if trapdoor is not None:
             checks.trapdoors.append(trapdoor)
+        plate = _plate_check(behavior_pack, ident, block, plate_tables)
+        if plate is not None:
+            checks.plates.append(plate)
     for path in sorted((behavior_pack / "items").rglob("*.json")):
         doc = _read_json(path)
         item = (doc or {}).get("minecraft:item") if isinstance(doc, dict) else None
@@ -469,6 +512,7 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks.tool_drops.sort(key=lambda d: (d["id"], d["tool"] or ""))
     checks.paired.sort(key=lambda d: d["id"])
     checks.trapdoors.sort(key=lambda d: d["id"])
+    checks.plates.sort(key=lambda d: d["id"])
     checks.ores = _ore_checks(behavior_pack)
     checks.geodes = _geode_checks(behavior_pack)
     return checks
