@@ -478,6 +478,10 @@ class Registration:
     name: str
     value: object  # Lam or Obj; None when the call can't be read (see why)
     why: str = ""
+    # Recorded while running a method chosen because it may build a name by
+    # concatenation (_piece_methods): it counts only if it builds a block,
+    # never as the reason another name went unread.
+    concat: bool = False
 
 
 class Machine:
@@ -1839,15 +1843,22 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     # one (see _piece_methods) runs the same way, its class initialized
     # first (a static initializer building names in a loop over an enum).
     done = {(cf.name, m.name, m.desc) for cname in wanted for cf, m in _naming_methods(classes, cname, set(names))}
+    first = len(machine.registrations)
     for cf, m in _piece_methods(classes, set(names), done):
         _run_method(machine, cf, m)
+    for reg in machine.registrations[first:]:
+        reg.concat = True
     regs: dict[str, list] = {}
     unread: dict[str, str] = {}
+    concat_only: set = set()
+    plain: set = set()
     for reg in machine.registrations:
         if reg.value is None:
-            unread.setdefault(reg.name, reg.why)
-            regs.setdefault(reg.name, [])
+            if not reg.concat:
+                unread.setdefault(reg.name, reg.why)
+                regs.setdefault(reg.name, [])
             continue
+        (concat_only if reg.concat else plain).add(id(reg.value))
         found = regs.setdefault(reg.name, [])
         # The same object handed on through a library's own registry
         # methods (each recorded, #280) is one registration.
@@ -1871,6 +1882,8 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
                 why = f"its registration can't be followed ({exc})"
                 continue
             objs += [o for o in built if isinstance(o, Obj) and machine.is_block_class(o.cls)]
+            if id(value) in concat_only and id(value) not in plain:
+                continue
             others += [o.cls for o in built if isinstance(o, Obj) and not machine.is_block_class(o.cls)
                        and "Item" not in o.cls.rsplit("/", 1)[-1] and "Entity" not in o.cls.rsplit("/", 1)[-1]]
         others = [o for o in others if not machine.vanilla_base(o).startswith(("java/", "com/mojang/"))]
