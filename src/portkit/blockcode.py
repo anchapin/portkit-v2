@@ -1443,9 +1443,12 @@ class Machine:
         if owner == "java/lang/String" and static and name == "format" and desc.startswith("(Ljava/lang/String;"):
             return [_format(rest) if len(rest) == 2 else UNKNOWN]
         if isinstance(recv, str) and owner == "java/lang/String" and not static:
-            if name in ("toLowerCase", "toUpperCase") and (not rest or isinstance(rest[0], Const)):
-                # With no Locale or Locale.ROOT/ENGLISH/US: name characters
-                # are ASCII here, so the locale doesn't change them.
+            if name in ("toLowerCase", "toUpperCase") and (
+                    not rest or (isinstance(rest[0], Const) and rest[0].owner == "java/util/Locale")):
+                # No Locale, or one of java.util.Locale's constants (ROOT,
+                # ENGLISH, US, ...; none is Turkish or Azeri, the only ones
+                # that case ASCII letters differently): on ASCII text the
+                # result is the plain ASCII case change.
                 if not recv.isascii():
                     return [UNKNOWN]
                 return [recv.lower() if name == "toLowerCase" else recv.upper()]
@@ -1836,13 +1839,14 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     # a module's or an initializer's ``register(event)`` / ``onInitialize()``
     # constructing ``new FooBlock("name", ...)``. Each method of a wanted class
     # that loads one of the names runs once on unknown arguments.
+    done = set()
     for cname in wanted:
         for cf, m in _naming_methods(classes, cname, set(names)):
+            done.add((cf.name, m.name, m.desc))
             _run_method(machine, cf, m)
     # Names built by concatenation (#280): every other method that may build
     # one (see _piece_methods) runs the same way, its class initialized
     # first (a static initializer building names in a loop over an enum).
-    done = {(cf.name, m.name, m.desc) for cname in wanted for cf, m in _naming_methods(classes, cname, set(names))}
     first = len(machine.registrations)
     for cf, m in _piece_methods(classes, set(names), done):
         _run_method(machine, cf, m)

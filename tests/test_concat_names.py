@@ -138,3 +138,21 @@ def test_nested_library_jars_over_the_cap_are_skipped(tmp_path, monkeypatch):
     assert set(libraries.classes(jar)) == {"com/x/Outer", "com/x/Inner"}
     monkeypatch.setattr(libraries, "_MAX_NESTED_JAR_BYTES", 10)
     assert set(libraries.classes(jar)) == {"com/x/Outer"}
+
+
+def test_case_change_only_with_a_known_locale():
+    m = Machine(ClassIndex({}))
+    desc = "(Ljava/util/Locale;)Ljava/lang/String;"
+    assert m._strings("java/lang/String", "toLowerCase", desc, "RUBY",
+                      [blockcode.Const("java/util/Locale", "ROOT")], False) == ["ruby"]
+    assert m._strings("java/lang/String", "toLowerCase", desc, "RUBY",
+                      [Obj("java/util/Locale")], False) == [blockcode.UNKNOWN]
+    assert m._strings("java/lang/String", "toLowerCase", "()Ljava/lang/String;", "RUBY", [], False) == ["ruby"]
+
+
+def test_dye_colours_are_vanilla_names():
+    m = Machine(ClassIndex({}))
+    (arr,) = m._strings(blockcode._DYE_COLOR, "values", "()[Lnet/minecraft/world/item/DyeColor;", None, [], True)
+    got = [m._strings(blockcode._DYE_COLOR, "getSerializedName", "()Ljava/lang/String;", c, [], False)[0]
+           for c in arr.items]
+    assert tuple(got) == COLORS
