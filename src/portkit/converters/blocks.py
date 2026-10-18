@@ -3479,7 +3479,9 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, di
     A spec is ("door", variants), ("trapdoor", variants) or ("two_tall", halves); the reading is
     doors.read_code's. A door the code shows to be the mod's own (or whose
     registration isn't read and which the jar doesn't tag as a wooden door)
-    gets a residue reason instead."""
+    gets a residue reason instead. So does a door, trapdoor or plate read as
+    the vanilla class whose BlockSetType isn't a vanilla constant read here and
+    which the jar's wooden tag doesn't list: the wooden DEFAULT needs the tag."""
     specs: dict[str, tuple] = {}
     why: dict[str, str] = {}
     for stem, blockstate in loaded.items():
@@ -3527,6 +3529,17 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, di
         if r.verdict == "refused":
             what = {"door": "door", "trapdoor": "trapdoor", "plate": "pressure plate"}.get(kind, "two-tall block")
             why[stem] = f"{what}: {r.why} (#296)"
+            del specs[stem]
+        elif r.verdict == "vanilla" and r.door is None and kind in wooden \
+                and f"{mod.namespace}:{stem}" not in wooden[kind]:
+            # Read as the vanilla class, but its BlockSetType isn't a constant
+            # read here: the wooden DEFAULT needs the jar's wooden tag too, as
+            # for an unread block.
+            what = {"plate": "pressure plate"}.get(kind, kind)
+            why[stem] = (f"{what} read as vanilla {r.cls} whose BlockSetType isn't a vanilla constant read "
+                         f"here, and which the jar's minecraft:{tags[kind]} tag doesn't list, so "
+                         + ("what presses it (everything or mobs only) isn't known (#296, #280)" if kind == "plate"
+                            else "whether a hand opens it isn't known (#296, #280)"))
             del specs[stem]
         elif r.verdict == "unread" and kind in wooden \
                 and f"{mod.namespace}:{stem}" not in wooden[kind]:

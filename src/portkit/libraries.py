@@ -34,6 +34,9 @@ MANIFEST = REPO_ROOT / "fixtures" / "real" / "libraries.toml"
 # The same bounds ingest uses for the mod's own jar.
 _MAX_CLASS_BYTES = 4 * 1024 * 1024
 _MAX_CLASSES = 200_000
+# A nested jar (META-INF/jars/) is read into memory whole; larger ones are
+# skipped rather than read (PR #321 review).
+_MAX_NESTED_JAR_BYTES = 64 * 1024 * 1024
 _REQUIRED = ("name", "project", "version_id", "version", "url", "sha512", "license", "for")
 
 
@@ -43,7 +46,8 @@ class LibraryError(Exception):
 
 def classes(jar: Path) -> dict[str, bytes]:
     """Every class file of ``jar`` and of the jars it nests under
-    ``META-INF/jars/`` (one level), by internal name."""
+    ``META-INF/jars/`` (one level, each at most _MAX_NESTED_JAR_BYTES), by
+    internal name."""
     jar = Path(jar)
     if not jar.is_file() or not zipfile.is_zipfile(jar):
         raise LibraryError(f"{jar} is not a jar (zip) archive")
@@ -51,7 +55,8 @@ def classes(jar: Path) -> dict[str, bytes]:
     with zipfile.ZipFile(jar) as zf:
         _read(zf, out)
         for info in zf.infolist():
-            if info.filename.startswith("META-INF/jars/") and info.filename.endswith(".jar"):
+            if info.filename.startswith("META-INF/jars/") and info.filename.endswith(".jar") \
+                    and info.file_size <= _MAX_NESTED_JAR_BYTES:
                 try:
                     with zipfile.ZipFile(io.BytesIO(zf.read(info))) as inner:
                         _read(inner, out)

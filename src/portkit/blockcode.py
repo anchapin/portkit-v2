@@ -157,6 +157,14 @@ _ATTACH_FACE = "net/minecraft/world/level/block/state/properties/AttachFace"
 _CAN_SURVIVE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/LevelReader;"
                      "Lnet/minecraft/core/BlockPos;)Z")
 _ATTACH_ORDER = ("FLOOR", "WALL", "CEILING")  # AttachFace declaration order (dtn a, b, c)
+# net.minecraft.world.item.DyeColor (MC 1.21.1, Mojang mappings): its
+# constants in declaration (ordinal) order, each built as
+# ``NAME(id, "name", ...)`` with id = the ordinal and name = the constant's
+# name in lower case; ``getName()`` and ``getSerializedName()`` return that
+# name (the dye ids on minecraft.wiki "Dye#Data values" are the same 0-15).
+_DYE_COLOR = "net/minecraft/world/item/DyeColor"
+_DYE_ORDER = ("WHITE", "ORANGE", "MAGENTA", "LIGHT_BLUE", "YELLOW", "LIME", "PINK", "GRAY", "LIGHT_GRAY",
+              "CYAN", "PURPLE", "BLUE", "BROWN", "GREEN", "RED", "BLACK")
 
 # Level methods that put a state in the world (MC 1.21.1 Level#setBlock
 # (pos, state, flags) and LevelWriter#setBlockAndUpdate (pos, state)).
@@ -396,6 +404,52 @@ def _arg_count(desc: str) -> tuple[int, bool]:
     return n, desc[i + 1] != "V"
 
 
+def _arg_kinds(desc: str) -> list[str]:
+    """One descriptor letter per argument of ``desc`` (``L`` for any
+    reference, ``[`` arrays included)."""
+    out, i = [], 1
+    while i < len(desc) and desc[i] != ")":
+        c = desc[i]
+        if c == "[":
+            while desc[i] == "[":
+                i += 1
+            if desc[i] == "L":
+                i = desc.index(";", i)
+            out.append("L")
+        elif c == "L":
+            i = desc.index(";", i)
+            out.append("L")
+        else:
+            out.append(c)
+        i += 1
+    return out
+
+
+def _format(rest: list):
+    """``String.format(fmt, args)`` for a format of only ``%s`` (each an
+    argument that is a string) and ``%%``; anything else is unknown."""
+    fmt, arr = rest
+    if not isinstance(fmt, str) or not isinstance(arr, Arr):
+        return UNKNOWN
+    out, k, i = [], 0, 0
+    while i < len(fmt):
+        c = fmt[i]
+        if c != "%":
+            out.append(c)
+            i += 1
+            continue
+        spec = fmt[i + 1:i + 2]
+        if spec == "%":
+            out.append("%")
+        elif spec == "s" and k < len(arr.items) and isinstance(arr.items[k], str):
+            out.append(arr.items[k])
+            k += 1
+        else:
+            return UNKNOWN
+        i += 2
+    return "".join(out)
+
+
 def _snapshot(props):
     if not isinstance(props, Props):
         return props
@@ -424,6 +478,10 @@ class Registration:
     name: str
     value: object  # Lam or Obj; None when the call can't be read (see why)
     why: str = ""
+    # Recorded while running a method chosen because it may build a name by
+    # concatenation (_piece_methods): it counts only if it builds a block,
+    # never as the reason another name went unread.
+    concat: bool = False
 
 
 class Machine:
@@ -983,15 +1041,16 @@ class Machine:
         elif bsm and bsm.owner == "java/lang/invoke/StringConcatFactory" and indy.args \
                 and isinstance(indy.args[0], str):
             recipe, consts = indy.args[0], list(indy.args[1:])
+            kinds = _arg_kinds(indy.desc)
             out, k = [], 0
             for ch in recipe:
                 if ch == "\x01":
-                    v = args[k]
+                    v = self.stringify(args[k], kinds[k] if k < len(kinds) else "L")
                     k += 1
-                    if not isinstance(v, (str, int)) or isinstance(v, bool):
+                    if v is None:
                         f.stack.append(UNKNOWN)
                         return None
-                    out.append(str(v))
+                    out.append(v)
                 elif ch == "\x02":
                     out.append(str(consts.pop(0)))
                 else:
@@ -1008,6 +1067,12 @@ class Machine:
         args = [f.stack.pop() for _ in range(total)][::-1]
         if ref.name == "<init>":
             obj = args[0]
+            if isinstance(obj, Builder):
+                # new StringBuilder(String | CharSequence) starts with it.
+                if ref.desc in ("(Ljava/lang/String;)V", "(Ljava/lang/CharSequence;)V"):
+                    text = self.stringify(args[1])
+                    obj.parts.append(text if text is not None else UNKNOWN)
+                return None
             if isinstance(obj, Obj) and self.is_mod(ref.owner):
                 found = self.find_method(ref.owner, "<init>", ref.desc)
                 if found is not None:
@@ -1065,6 +1130,13 @@ class Machine:
         elif ref.owner.startswith(_VANILLA_BLOCK_PACKAGE) and len(props_at) == 1 \
                 and _only_objects(ref.desc) and props_at[0] + 1 < len(args):
             obj.fields.setdefault("__props", _snapshot(args[props_at[0] + 1]))
+        elif ref.owner == "java/lang/Enum" and ref.desc == "(Ljava/lang/String;I)V" and len(args) == 3:
+            # java.lang.Enum(String name, int ordinal): what name() and
+            # ordinal() return.
+            if isinstance(args[1], str):
+                obj.fields["__enum_name"] = args[1]
+            if isinstance(args[2], int) and not isinstance(args[2], bool):
+                obj.fields["__ordinal"] = args[2]
         elif obj.cls == "net/minecraft/resources/ResourceLocation" and len(args) == 3 \
                 and all(isinstance(a, str) for a in args[1:]):
             obj.fields["__rl"] = f"{args[1]}:{args[2]}"
@@ -1288,12 +1360,18 @@ class Machine:
             return [UNKNOWN]
         if isinstance(recv, Builder):
             if name == "append" and rest:
-                recv.parts.append(rest[0])
+                # StringBuilder#append(x) appends String.valueOf(x); the
+                # descriptor says how a JVM int is printed (char, boolean).
+                text = self.stringify(rest[0], _arg_kinds(desc)[0] if _arg_kinds(desc) else "L")
+                recv.parts.append(text if text is not None else UNKNOWN)
                 return [recv]
             if name == "toString":
-                if all(isinstance(p, (str, int)) and not isinstance(p, bool) for p in recv.parts):
-                    return ["".join(str(p) for p in recv.parts)]
+                if all(isinstance(p, str) for p in recv.parts):
+                    return ["".join(recv.parts)]
                 return [UNKNOWN]
+        strings = self._strings(owner, name, desc, recv, rest, static)
+        if strings is not _NOT_HANDLED:
+            return strings
         if owner == "java/util/stream/Stream" and static and name == "of":
             if len(rest) == 1 and isinstance(rest[0], Arr):
                 return [Strm(tuple(rest[0].items))]
@@ -1314,6 +1392,83 @@ class Machine:
             if name in ("parse", "tryParse", "withDefaultNamespace") and len(strs) == 1 and len(rest) == 1:
                 return [RL(strs[0])]
         if name == "hashCode" or name == "equals":
+            return [UNKNOWN]
+        return _NOT_HANDLED
+
+    def stringify(self, v, kind: str = "L") -> str | None:
+        """``String.valueOf(v)`` for a value of JVM type ``kind`` (a
+        descriptor letter), or None when it isn't known. A mod enum
+        constant prints its name unless its class overrides toString
+        (java.lang.Enum#toString returns name())."""
+        if isinstance(v, bool):
+            v = int(v)
+        if kind == "Z":
+            return {0: "false", 1: "true"}.get(v) if isinstance(v, int) else None
+        if kind == "C":
+            return chr(v) if isinstance(v, int) and 0 <= v <= 0xFFFF else None
+        if kind in "BSIJ":
+            return str(v) if isinstance(v, int) else None
+        if kind in "FD":
+            return None  # Java's float printing isn't Python's
+        if isinstance(v, str):
+            return v
+        if isinstance(v, Obj) and "__enum_name" in v.fields and self.is_mod(v.cls) \
+                and self.find_method(v.cls, "toString", "()Ljava/lang/String;") is None:
+            return v.fields["__enum_name"]
+        return None
+
+    def _strings(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
+        """java.lang.String, java.lang.Enum and the vanilla enums whose
+        constants' names are known (DyeColor), evaluated exactly; anything
+        else is not handled here (#280: names built by concatenation)."""
+        if isinstance(recv, Arr) and name == "clone" and not rest:
+            return [Arr(list(recv.items))]
+        if isinstance(recv, Obj) and "__enum_name" in recv.fields and not rest:
+            if name == "name" and desc == "()Ljava/lang/String;":
+                return [recv.fields["__enum_name"]]
+            if name == "ordinal" and desc == "()I":
+                return [recv.fields.get("__ordinal", UNKNOWN)]
+            if name == "toString" and desc == "()Ljava/lang/String;":
+                return [recv.fields["__enum_name"]]  # not overridden (see call)
+        if owner == _DYE_COLOR and static and name == "values" and not rest:
+            return [Arr([Const(_DYE_COLOR, n) for n in _DYE_ORDER])]
+        if isinstance(recv, Const) and recv.owner == _DYE_COLOR and recv.name in _DYE_ORDER and not rest:
+            if name in ("getName", "getSerializedName", "name") and desc == "()Ljava/lang/String;":
+                return [recv.name.lower() if name != "name" else recv.name]
+            if name in ("ordinal", "getId") and desc == "()I":
+                return [_DYE_ORDER.index(recv.name)]
+        if owner == "java/lang/String" and static and name == "valueOf" and len(rest) == 1:
+            text = self.stringify(rest[0], _arg_kinds(desc)[0])
+            return [text if text is not None else UNKNOWN]
+        if owner == "java/lang/String" and static and name == "format" and desc.startswith("(Ljava/lang/String;"):
+            return [_format(rest) if len(rest) == 2 else UNKNOWN]
+        if isinstance(recv, str) and owner == "java/lang/String" and not static:
+            if name in ("toLowerCase", "toUpperCase") and (
+                    not rest or (isinstance(rest[0], Const) and rest[0].owner == "java/util/Locale")):
+                # No Locale, or one of java.util.Locale's constants (ROOT,
+                # ENGLISH, US, ...; none is Turkish or Azeri, the only ones
+                # that case ASCII letters differently): on ASCII text the
+                # result is the plain ASCII case change.
+                if not recv.isascii():
+                    return [UNKNOWN]
+                return [recv.lower() if name == "toLowerCase" else recv.upper()]
+            if name == "concat" and len(rest) == 1:
+                return [recv + rest[0] if isinstance(rest[0], str) else UNKNOWN]
+            if name == "toString" and not rest:
+                return [recv]
+            if name == "replace" and len(rest) == 2:
+                if desc == "(CC)Ljava/lang/String;" and all(isinstance(a, int) for a in rest):
+                    return [recv.replace(chr(rest[0]), chr(rest[1]))]
+                if desc.startswith("(Ljava/lang/CharSequence;") and all(isinstance(a, str) for a in rest):
+                    return [recv.replace(rest[0], rest[1])]
+                return [UNKNOWN]
+            if name in ("isEmpty", "length") and not rest:
+                return [int(not recv) if name == "isEmpty" else len(recv)]
+            if name in ("startsWith", "endsWith", "contains", "equals") and len(rest) == 1:
+                if not isinstance(rest[0], str):
+                    return [UNKNOWN]
+                return [int({"startsWith": recv.startswith, "endsWith": recv.endswith,
+                             "contains": recv.__contains__, "equals": recv.__eq__}[name](rest[0]))]
             return [UNKNOWN]
         return _NOT_HANDLED
 
@@ -1564,6 +1719,112 @@ def _naming_methods(classes: ClassIndex, cname: str, names: set[str]) -> list:
     return out
 
 
+def _name_pieces(names: set[str]) -> set[str]:
+    """Every run of whole ``_``-separated words of each name in ``names``
+    that is not the whole name (``azalea_pressure_plate``: ``azalea``,
+    ``pressure``, ``plate``, ``azalea_pressure``, ``pressure_plate``)."""
+    out = set()
+    for n in names:
+        words = n.rsplit(":", 1)[-1].split("_")
+        for i in range(len(words)):
+            for j in range(i + 1, len(words) + 1):
+                if j - i < len(words):
+                    out.add("_".join(words[i:j]))
+    out.discard("")
+    return out
+
+
+def _recipe_matcher(recipe: str) -> "re.Pattern":
+    """A StringConcatFactory recipe (``\\x01`` an argument, ``\\x02`` a
+    constant) as a pattern a whole name must match, each slot a non-empty
+    run of name characters."""
+    parts = re.split("[\x01\x02]", recipe)
+    return re.compile("[a-z0-9_./-]+".join(re.escape(p) for p in parts))
+
+
+def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
+    """Methods of the mod's own classes (not a library's, never its static
+    initializers, abstract ones skipped, those in ``done`` skipped) that may
+    build one of ``names`` by concatenation (#280): one that loads (``ldc``)
+    a whole-word piece of a name (``"azalea"`` handed to a helper that
+    appends ``"_planks"``; ``"_shingles"`` appended in a loop), or one whose
+    ``makeConcatWithConstants`` recipe matches a whole name
+    (``"\\x01_pressure_plate"``). Which name it builds is only what the
+    machine evaluates; this only chooses what to run."""
+    pieces = _name_pieces(names)
+    bare = {n.rsplit(":", 1)[-1] for n in names}
+    out = []
+    for cname in classes.names():
+        cf = classes.get(cname)
+        if cf is None:
+            continue
+        strings = {cf.pool[e[1]][1] for e in cf.pool if e is not None and e[0] == 8}
+        if not any(s.strip("_") in pieces or "\x01" in s for s in strings):
+            continue
+        for m in cf.methods:
+            if m.name == "<clinit>" or m.code is None or (cname, m.name, m.desc) in done:
+                continue
+            try:
+                code = instructions(cf, m.code)
+            except Exception:  # noqa: BLE001 - an unreadable method builds nothing
+                continue
+            hit = False
+            for i in code:
+                if i.op in (0x12, 0x13) and isinstance(i.arg, str) and i.arg.strip("_") in pieces:
+                    hit = True
+                elif i.op == 0xBA and isinstance(i.arg, Indy) and i.arg.bootstrap \
+                        and i.arg.bootstrap.ref.owner == "java/lang/invoke/StringConcatFactory" \
+                        and i.arg.args and isinstance(i.arg.args[0], str) and "\x01" in i.arg.args[0]:
+                    pat = _recipe_matcher(i.arg.args[0])
+                    hit = any(pat.fullmatch(n) for n in bare)
+                if hit:
+                    break
+            if hit:
+                out.append((cf, m))
+    # One level up: a method that calls one of those (a module's
+    # register(event) looping over DyeColor.values() into
+    # ``new StoolBlock(this, dye)``, whose constructor appends "_stool").
+    targets = {(cf.name, m.name, m.desc) for cf, m in out}
+    chosen = set(targets)
+    callers = []
+    for cname in classes.names():
+        cf = classes.get(cname)
+        if cf is None:
+            continue
+        for m in cf.methods:
+            key = (cname, m.name, m.desc)
+            if m.name == "<clinit>" or m.code is None or key in chosen or key in done:
+                continue
+            try:
+                code = instructions(cf, m.code)
+            except Exception:  # noqa: BLE001
+                continue
+            if any(i.op in (0xB6, 0xB7, 0xB8, 0xB9) and isinstance(i.arg, Ref)
+                   and (i.arg.owner, i.arg.name, i.arg.desc) in targets for i in code):
+                callers.append((cf, m))
+                chosen.add(key)
+    return out + callers
+
+
+def _run_method(machine: Machine, cf: ClassFile, m: Method) -> None:
+    """Run ``m`` once on unknown arguments for the registrations it makes,
+    its class initialized first. A run that stops part way (Unreadable)
+    leaves the statics it wrote half done (a library's "chain started" flag
+    set and never cleared, which the next run would branch on), so they go
+    back to what they were before it; registrations it recorded stay."""
+    saved = (dict(machine.statics), set(machine._clinit_done), set(machine._clinit_failed))
+    static = bool(m.access & 0x0008)
+    n, _ = _arg_count(m.desc)
+    try:
+        machine.steps = 0
+        machine.init_class(cf.name)
+        machine.steps = 0
+        machine.new_epoch()
+        machine.run(cf, m, [UNKNOWN] * (n + (0 if static else 1)))
+    except Unreadable:
+        machine.statics, machine._clinit_done, machine._clinit_failed = saved
+
+
 def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[str, tuple[list, str]]]:
     """Run the registration code that names each blockstate in ``names`` and
     return, per name, the block objects built for it (``[]`` with the reason
@@ -1578,23 +1839,30 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     # a module's or an initializer's ``register(event)`` / ``onInitialize()``
     # constructing ``new FooBlock("name", ...)``. Each method of a wanted class
     # that loads one of the names runs once on unknown arguments.
+    done = set()
     for cname in wanted:
         for cf, m in _naming_methods(classes, cname, set(names)):
-            machine.steps = 0
-            machine.new_epoch()
-            static = bool(m.access & 0x0008)
-            n, _ = _arg_count(m.desc)
-            try:
-                machine.run(cf, m, [UNKNOWN] * (n + (0 if static else 1)))
-            except Unreadable:
-                pass
+            done.add((cf.name, m.name, m.desc))
+            _run_method(machine, cf, m)
+    # Names built by concatenation (#280): every other method that may build
+    # one (see _piece_methods) runs the same way, its class initialized
+    # first (a static initializer building names in a loop over an enum).
+    first = len(machine.registrations)
+    for cf, m in _piece_methods(classes, set(names), done):
+        _run_method(machine, cf, m)
+    for reg in machine.registrations[first:]:
+        reg.concat = True
     regs: dict[str, list] = {}
     unread: dict[str, str] = {}
+    concat_only: set = set()
+    plain: set = set()
     for reg in machine.registrations:
         if reg.value is None:
-            unread.setdefault(reg.name, reg.why)
-            regs.setdefault(reg.name, [])
+            if not reg.concat:
+                unread.setdefault(reg.name, reg.why)
+                regs.setdefault(reg.name, [])
             continue
+        (concat_only if reg.concat else plain).add(id(reg.value))
         found = regs.setdefault(reg.name, [])
         # The same object handed on through a library's own registry
         # methods (each recorded, #280) is one registration.
@@ -1618,6 +1886,8 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
                 why = f"its registration can't be followed ({exc})"
                 continue
             objs += [o for o in built if isinstance(o, Obj) and machine.is_block_class(o.cls)]
+            if id(value) in concat_only and id(value) not in plain:
+                continue
             others += [o.cls for o in built if isinstance(o, Obj) and not machine.is_block_class(o.cls)
                        and "Item" not in o.cls.rsplit("/", 1)[-1] and "Entity" not in o.cls.rsplit("/", 1)[-1]]
         others = [o for o in others if not machine.vanilla_base(o).startswith(("java/", "com/mojang/"))]
