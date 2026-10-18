@@ -445,6 +445,11 @@ class ClassIndex:
         return sorted({k for src in (self._raw, self._lib) for k in src
                        if k == top or k.startswith(top + "$")})
 
+    def mentions(self, needle: bytes) -> bool:
+        """Whether any class file, the mod's or a library's, holds the bytes
+        ``needle`` (a constant pool name, as compiled)."""
+        return any(needle in raw for src in (self._raw, self._lib) for raw in src.values())
+
     def is_library(self, name: str) -> bool:
         """Whether ``name`` is a dependency jar's class rather than the mod's."""
         return name in self._lib and name not in self._raw
