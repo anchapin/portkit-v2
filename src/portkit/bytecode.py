@@ -86,6 +86,9 @@ class ClassFile:
     # The class's access flags (JVMS 4.1): 0x0200 interface, 0x0400 abstract,
     # 0x2000 annotation, 0x4000 enum.
     access: int = 0
+    # Each field's access flags (JVMS 4.5), with 0x10000 added when it
+    # carries a ConstantValue attribute (a compile-time constant).
+    field_access: dict = field(default_factory=dict)
 
     def method(self, name: str, desc: str | None = None) -> Method | None:
         for m in self.methods:
@@ -247,12 +250,14 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
         return pos, out
 
     fields: dict[str, str] = {}
+    field_access: dict[str, int] = {}
     (n,) = struct.unpack_from(">H", data, pos)
     pos += 2
     for _ in range(n):
-        _a, name, desc = struct.unpack_from(">HHH", data, pos)
-        pos, _attrs = attributes(pos + 6)
+        faccess, name, desc = struct.unpack_from(">HHH", data, pos)
+        pos, fattrs = attributes(pos + 6)
         fields[member(utf(name))] = desc_of(utf(desc))
+        field_access[member(utf(name))] = faccess | (0x10000 if any(a == "ConstantValue" for a, _ in fattrs) else 0)
 
     methods: list[Method] = []
     (n,) = struct.unpack_from(">H", data, pos)
@@ -281,7 +286,7 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
                 args = struct.unpack_from(f">{nargs}H", body, p)
                 p += 2 * nargs
                 bootstrap.append((ref, args))
-    return ClassFile(cls(this), cls(sup), interfaces, fields, methods, pool, bootstrap, access)
+    return ClassFile(cls(this), cls(sup), interfaces, fields, methods, pool, bootstrap, access, field_access)
 
 
 # --- Instructions -----------------------------------------------------------
@@ -430,6 +435,15 @@ class ClassIndex:
                 self._parsed.pop(k, None)
                 added += 1
         return added
+
+    def nest(self, name: str) -> list[str]:
+        """The classes, the mod's or a library's, compiled from the same
+        top-level class as ``name`` (``Outer`` and ``Outer$...``): the only
+        classes that may write a private field of ``name`` (JVMS 5.4.4,
+        nestmates)."""
+        top = name.split("$", 1)[0]
+        return sorted({k for src in (self._raw, self._lib) for k in src
+                       if k == top or k.startswith(top + "$")})
 
     def is_library(self, name: str) -> bool:
         """Whether ``name`` is a dependency jar's class rather than the mod's."""

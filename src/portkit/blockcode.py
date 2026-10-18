@@ -636,6 +636,9 @@ class Machine:
         # BlockEntityType builders and BlockEntityType#create are followed
         # (see _holder_call) instead of being unknown calls.
         self.holders = False
+        # (class, static field) -> whether it reads as null until written
+        # (see _lazy_null).
+        self._lazy: dict = {}
 
     # -- classes ------------------------------------------------------------
 
@@ -803,6 +806,68 @@ class Machine:
         if owner == _DIRECTION and ref.name.lower() in DIRECTIONS:
             return Dir(ref.name.lower())
         return Const(owner, ref.name)
+
+    def _lazy_guard(self, insn: Insn) -> bool:
+        """Whether ``insn``, a ``getstatic F`` the run is at, is the test of
+        a lazy-initialisation guard ``if (F == null) F = <expr>;``
+        (``getstatic F; ifnonnull L; ...; putstatic F; L:``, #280) on a
+        field that only such guards write (see _lazy_field). Such a test
+        may be taken as finding null: when the field is set, it holds what
+        an earlier run of a guard on it computed, so running the guard's
+        computation again yields what the read would have (javac's lazy
+        singleton, e.g. ``getBlockRegistry()``). Only the guard's own test
+        is read this way; any other read of the field is as before."""
+        found = self._code[-1] if self._code else None
+        if found is None:
+            return False
+        _depth, code, at = found
+        k = at.get(insn.offset)
+        if k is None or k + 1 >= len(code) or code[k + 1].op != 0xC7 or not isinstance(insn.arg, Ref):
+            return False
+        owner = self._field_owner(insn.arg.owner, insn.arg.name)
+        if not self.is_mod(owner) or not self._lazy_field(owner, insn.arg.name):
+            return False
+        target = code[k + 1].arg
+        return any(c.op == 0xB3 and isinstance(c.arg, Ref) and c.arg.name == insn.arg.name
+                   and _lazy_guarded(code, i, owner, insn.arg.name, self) and code[i + 1].offset == target
+                   for i, c in enumerate(code[k + 2:], k + 2) if i + 1 < len(code))
+
+    def _lazy_field(self, owner: str, name: str) -> bool:
+        """Whether static ``owner.name`` is written only by lazy-
+        initialisation guards: a private, non-final reference field without
+        a ConstantValue (so only its own nest can write it, JVMS 5.4.4,
+        and it starts null, JVMS 2.3, 5.4.2), every ``putstatic`` to which
+        in its nest's classes, its static initializer included, is guarded
+        (see _lazy_guarded)."""
+        key = (owner, name)
+        if key in self._lazy:
+            return self._lazy[key]
+        self._lazy[key] = False
+        cf = self.classes.get(owner)
+        access = getattr(cf, "field_access", {}).get(name) if cf is not None else None
+        desc = cf.fields.get(name, "") if cf is not None else ""
+        # ACC_STATIC and ACC_PRIVATE set; ACC_FINAL and ConstantValue not.
+        if access is None or access & 0x1001A != 0x000A or not desc.startswith(("L", "[")):
+            return False
+        nest = getattr(self.classes, "nest", None)
+        writers = 0
+        for cname in (nest(owner) if nest else [owner]):
+            other = self.classes.get(cname)
+            if other is None:
+                continue
+            for m in other.methods:
+                if m.code is None:
+                    continue
+                code = instructions(other, m.code)
+                for k, insn in enumerate(code):
+                    if insn.op != 0xB3 or not isinstance(insn.arg, Ref) or insn.arg.name != name \
+                            or self._field_owner(insn.arg.owner, name) != owner:
+                        continue
+                    if not _lazy_guarded(code, k, owner, name, self):
+                        return False
+                    writers += 1
+        self._lazy[key] = writers > 0
+        return self._lazy[key]
 
     # -- running ------------------------------------------------------------
 
@@ -1143,7 +1208,10 @@ class Machine:
         elif op == 0xB1:
             return ("return", None)
         elif op == 0xB2:
-            s.append(self.get_static(insn.arg))
+            value = self.get_static(insn.arg)
+            if (value is UNKNOWN or value is None) and self._lazy_guard(insn):
+                value = None
+            s.append(value)
         elif op == 0xB3:
             ref = insn.arg
             self._write(f)
@@ -2042,6 +2110,41 @@ _VANILLA_BLOCKS = "net/minecraft/world/level/block/Blocks"
 # A resource location's characters (ResourceLocation#isValidNamespace /
 # isValidPath, MC 1.21.1: namespace [a-z0-9_.-], path [a-z0-9_./-]).
 _RESOURCE_NAME = re.compile(r"([a-z0-9_.-]+:)?[a-z0-9_./-]+")
+
+
+def _lazy_guarded(code: list, k: int, owner: str, name: str, machine: "Machine") -> bool:
+    """Whether the ``putstatic`` at ``code[k]`` is guarded as ``getstatic F;
+    ifnonnull L; ...; putstatic F; L:`` with nothing between the guard and
+    the write jumping out of it or into it from elsewhere."""
+    after = code[k + 1].offset if k + 1 < len(code) else None
+    for j in range(k - 1, 0, -1):
+        insn = code[j]
+        if insn.op == 0xC7 and insn.arg == after:
+            prev = code[j - 1]
+            if not (prev.op == 0xB2 and isinstance(prev.arg, Ref) and prev.arg.name == name
+                    and machine._field_owner(prev.arg.owner, name) == owner):
+                return False
+            inside = {c.offset for c in code[j + 1:k + 1]}
+            for i, other in enumerate(code):
+                if j <= i <= k:
+                    targets = _targets(other)
+                    if i > j and any(t not in inside and t != after for t in targets):
+                        return False
+                    continue
+                if any(t in inside for t in _targets(other)):
+                    return False
+            return True
+    return False
+
+
+def _targets(insn) -> list:
+    """The offsets ``insn`` may jump to (not its fall-through)."""
+    if 0x99 <= insn.op <= 0xA8 or insn.op in (0xC6, 0xC7, 0xC8):
+        return [insn.arg]
+    if insn.op in (0xAA, 0xAB):
+        default, table = insn.arg
+        return [default, *table.values()]
+    return []
 
 
 def _join_fields(ends: list) -> dict:
