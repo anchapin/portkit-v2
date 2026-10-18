@@ -87,7 +87,7 @@ def test_a_stopped_run_does_not_leave_its_statics_half_done():
 
 def test_whole_names_still_read_as_before_without_concatenation():
     # The libcode fixture (whole names as ldc constants) is unchanged.
-    from tests.test_libraries import DATA as LIBDATA, NAMES
+    from test_libraries import DATA as LIBDATA, NAMES
     index = ClassIndex(_entries(LIBDATA / "classes"), _entries(LIBDATA / "library"))
     _machine, reg = blockcode._registered(index, NAMES)
     assert all(reg[n][0] for n in NAMES)
@@ -156,3 +156,48 @@ def test_dye_colours_are_vanilla_names():
     got = [m._strings(blockcode._DYE_COLOR, "getSerializedName", "()Ljava/lang/String;", c, [], False)[0]
            for c in arr.items]
     assert tuple(got) == COLORS
+
+
+# -- read as vanilla, BlockSetType not a constant: the wooden tag still decides ---
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("kind", ["plate", "trapdoor", "door"])
+def test_vanilla_read_non_constant_set_type_needs_the_wooden_tag(tmp_path, monkeypatch, kind):
+    """A plate, door or trapdoor read as its vanilla class whose BlockSetType
+    is a field (Quark's WoodSetContext shape) gets the wooden DEFAULT only when
+    the jar's wooden_* tag lists it, like one whose code isn't read."""
+    import test_doors
+    import test_plates
+    import test_trapdoors
+    from portkit.converters import blocks, doors
+
+    helpers = {"plate": (test_plates, test_plates._plate_mod, "oak_pressure_plate", "stone_pressure_plate",
+                         "PressurePlateBlock", "wooden_pressure_plates", "pressure plate"),
+               "trapdoor": (test_trapdoors, test_trapdoors._trapdoor_mod, "oak_trapdoor", "iron_trapdoor",
+                            "TrapDoorBlock", "wooden_trapdoors", "trapdoor"),
+               "door": (test_doors, test_doors._door_mod, "oak_door", "iron_door",
+                        "DoorBlock", "wooden_doors", "door")}
+    module, make, tagged, untagged, cls, tag, what = helpers[kind]
+    monkeypatch.setenv("PORTKIT_MODEL_REFERENCE", str(module._templates(tmp_path)))
+    root = make(tmp_path)
+    real = doors.read_code
+
+    def fake(classes, names, k):
+        out = real(None, names, k)
+        if k == kind:
+            for n in (tagged, untagged):
+                r = out[n]
+                r.verdict, r.cls, r.door, r.door_from = "vanilla", f"net.minecraft.world.level.block.{cls}", None, ""
+        return out
+
+    monkeypatch.setattr(doors, "read_code", fake)
+    result = blocks.convert(module._mod(root))
+    assert f"blocks/{tagged}.json" in result.files
+    note = next(n for n in result.notes if n.startswith(f"{tagged}:"))
+    assert "DEFAULT" in note and "isn't a vanilla constant" in note
+    assert f"blocks/{untagged}.json" not in result.files
+    (residue,) = [u for u in result.unhandled if f"blockstates/{untagged}" in u.source]
+    assert f"{what} read as vanilla" in residue.reason and f"minecraft:{tag} tag doesn't list" in residue.reason
+    assert "#280" in residue.reason
