@@ -16,6 +16,13 @@
 # without), because BetterEnd builds its blocks through WorldWeaver's
 # BlockSet / BlockDefinition builders, whose lazily created registries are
 # written after branches the reader can't decide.
+# Measured again 2026-10-18 (#280, lazy-initialisation guards read): BetterEnd
+# 21.800.2 reads 86 of 722 alone and 16 of 722 with BCLib, WorldWeaver and
+# WunderLib 21.800.3 (the newest 1.21.8 Fabric releases, Modrinth, published
+# 2026-10-18), because the libraries' builder code, once followed, forks on
+# `System.getProperty("fabric-api.datagen")` and iterates trait lists the
+# reader doesn't model, which stops each static initializer at its first
+# block. Still not pinned: they would lower what the readers find.
 
 [[library]]
 name = "zeta"
