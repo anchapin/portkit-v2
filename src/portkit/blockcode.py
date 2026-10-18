@@ -826,8 +826,8 @@ class Machine:
                 return self.run(*found, args)
         if not (owner in _JAVA_MAPS and name in ("put", "putIfAbsent")):
             # A java.util Map#put stores a pair in a map; it registers
-            # nothing (#280: Zeta's ``blocksToColorProviderName.put(crystal,
-            # "myalite")`` had filed the crystal under its stone's name).
+            # nothing (#280: a library's ``colorProviderNames.put(crystal,
+            # "<stone>")`` had filed a crystal block under a stone's name).
             self._record(args)
         _n, returns = _arg_count(desc)
         for a in args:
@@ -2157,9 +2157,9 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
     # ``new StoolBlock(this, dye)``, whose constructor appends "_stool").
     # Callers are searched up to _CALLER_LEVELS levels, and a lambda or method
     # reference (an invokedynamic naming the method) counts as a call (#280:
-    # Quark's VerticalSlabsModule#postRegister hands each slab to a lambda
-    # that builds a QuarkVerticalSlabBlock, whose constructor takes its name
-    # from a lambda appending "_vertical_slab").
+    # a module's register method hands each vanilla slab to a lambda that
+    # builds the mod's vertical slab, whose constructor takes its name from a
+    # lambda appending "_vertical_slab").
     targets = {(cf.name, m.name, m.desc) for cf, m in out}
     chosen = set(targets)
     callers = []
