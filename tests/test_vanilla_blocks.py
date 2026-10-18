@@ -210,15 +210,16 @@ def test_vertical_slabs_of_vanilla_blocks_built_in_a_foreach_are_read():
     assert all(reg[n][0] == [] for n in names)
 
 
-def test_the_constructor_that_writes_after_the_lookup_still_reads_as_partial():
-    # The way of Zeta's lookup that answered unknown stops at the write; the
-    # way that answered the vanilla key registered first. The object is still
-    # one whose constructor couldn't be followed to the end.
+def test_the_constructor_that_writes_after_the_lookup_reads_whole():
+    # Each way of Zeta's lookup writes the same module to the block it builds,
+    # so the ways join where the constructor returns (tests/test_fork_join.py)
+    # and the reading is whole.
     readings = blockcode.read_blocks(_vertical_index({"STONE": "stone", "GLOWSTONE": "glowstone"}),
                                      ["stone_vertical_slab"])
     r = readings["stone_vertical_slab"]
     assert r.cls == "com.example.vmod.VerticalSlab"
-    assert "can't be followed to the end" in r.shape_why
+    assert r.shape_why == ""
+    assert r.shape_from
 
 
 # --- interpreter pieces ---------------------------------------------------------
