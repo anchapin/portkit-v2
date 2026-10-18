@@ -31,6 +31,13 @@
 //              by script, powered by a redstone block beside it (it opens),
 //              unpowered (it closes), broken with `setblock ... air destroy`
 //              and its drop counted (exactly one).
+//   plate      a block carrying the portkit pressure plate component (#296):
+//              placed by script on a stone block with a redstone lamp beside
+//              it; an armor stand spawned on it presses it (powered, lamp
+//              lit), removing it releases it after Java's 20-tick re-check
+//              (unpowered, lamp unlit); a dropped stick presses a plate any
+//              entity presses and leaves a mobs-only plate unpressed; then it
+//              is broken with `setblock ... air destroy` and its drop counted.
 //   ore        an ore feature the converter wrote (#281). Asserted
 //              (ore_generate): outside the flat Overworld, fresh chunks of the
 //              rule's dimension are loaded and the ore blocks the world
@@ -51,7 +58,7 @@ import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
   AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, PAIRED_PART, Tally, connectionVerdict,
   connectionSlot, containerVerdict, describe, doorVerdict, dropSlot, dropVerdict, line,
-  pairedSlot, pairedVerdict, slot, trapdoorSlot, trapdoorVerdict,
+  pairedSlot, pairedVerdict, plateSlot, plateVerdict, slot, trapdoorSlot, trapdoorVerdict,
   GEN_ORIGIN, GEN_SIZE, ORE_CUBE, generateVerdict, oreSlot, oreVerdict, scanRange,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
@@ -86,7 +93,7 @@ async function run() {
   say("START", {
     blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length,
     tool_drops: (CHECKS.tool_drops ?? []).length, paired: (CHECKS.paired ?? []).length,
-    trapdoors: (CHECKS.trapdoors ?? []).length, ores: (CHECKS.ores ?? []).length,
+    trapdoors: (CHECKS.trapdoors ?? []).length, plates: (CHECKS.plates ?? []).length, ores: (CHECKS.ores ?? []).length,
     geodes: (CHECKS.geodes ?? []).length,
   });
   if (!(await loaded(dim))) {
@@ -370,6 +377,82 @@ async function run() {
       fail("trapdoor", id, describe(err));
     }
     say("TRAPDOOR", seen);
+  }
+
+  // plate: one pressure plate at a time (#296)
+  const PLATES = CHECKS.plates ?? [];
+  for (let i = 0; i < PLATES.length; i++) {
+    const { id, powered, mobs_only: mobsOnly, expect } = PLATES[i];
+    const at = plateSlot(i);
+    const below = { x: at.x, y: at.y - 1, z: at.z };
+    const beside = { x: at.x + 1, y: at.y, z: at.z };
+    const centre = { x: at.x + 0.5, y: at.y, z: at.z + 0.5 };
+    const seen = { id };
+    const read = () => ({
+      powered: dim.getBlock(at)?.permutation.getState(powered),
+      lamp: dim.getBlock(beside)?.typeId === "minecraft:lit_redstone_lamp",
+    });
+    const judge = (check, want, state) => {
+      const verdict = plateVerdict(want, { powered: state.powered });
+      if (verdict.ok) tally.record(check, id, true);
+      else fail(check, id, verdict.problems.join("; "));
+      if (check === "plate_press" || check === "plate_release") {
+        const lamp = plateVerdict(want, { powered: want, lamp: state.lamp });
+        if (lamp.ok) tally.record(`${check}_redstone`, id, true);
+        else fail(`${check}_redstone`, id, lamp.problems.join("; "));
+      }
+    };
+    try {
+      for (const e of itemsNear(at)) e.remove();
+      dim.getBlock(below).setPermutation(BlockPermutation.resolve("minecraft:stone"));
+      dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:redstone_lamp"));
+      dim.getBlock(at).setPermutation(BlockPermutation.resolve(id));
+      await system.waitTicks(4);
+      seen.placed = dim.getBlock(at)?.typeId;
+      if (seen.placed !== id) {
+        fail("plate_place", id, `reads back as ${seen.placed}`);
+        say("PLATE", seen);
+        continue;
+      }
+      tally.record("plate_place", id, true);
+      seen.idle = read();
+      judge("plate_idle", false, seen.idle);
+      const stand = dim.spawnEntity("minecraft:armor_stand", centre);
+      await system.waitTicks(8);
+      seen.stepped = read();
+      judge("plate_press", true, seen.stepped);
+      stand.remove();
+      await system.waitTicks(34);
+      seen.left = read();
+      judge("plate_release", false, seen.left);
+      const stick = dim.spawnItem(new ItemStack("minecraft:stick", 1), { x: centre.x, y: at.y + 0.05, z: centre.z });
+      try { stick.clearVelocity(); } catch { /* not every build has it */ }
+      await system.waitTicks(8);
+      seen.item = { ...read(), at: stick.isValid ? stick.location : undefined };
+      judge(mobsOnly ? "plate_item_ignored" : "plate_item", !mobsOnly, seen.item);
+      if (stick.isValid) stick.remove();
+      await system.waitTicks(34);
+      for (const e of itemsNear(at)) e.remove();
+      dim.runCommand(`setblock ${at.x} ${at.y} ${at.z} air destroy`);
+      await system.waitTicks(10);
+      seen.after_break = dim.getBlock(at)?.typeId;
+      const got = [];
+      for (const e of itemsNear(at)) {
+        const stack = e.getComponent("minecraft:item")?.itemStack;
+        if (stack) got.push({ item: stack.typeId, count: stack.amount });
+        e.remove();
+      }
+      seen.drop = got;
+      if (expect) {
+        const verdict = dropVerdict(expect, got);
+        if (verdict.ok) tally.record("plate_drop", id, true);
+        else fail("plate_drop", id, verdict.problems.join("; "));
+      }
+      dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:air"));
+    } catch (err) {
+      fail("plate", id, describe(err));
+    }
+    say("PLATE", seen);
   }
 
   // ore: each ore feature placed into a cube of what it replaces (#281)

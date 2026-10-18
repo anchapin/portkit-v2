@@ -191,6 +191,14 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             f'import trapdoorTable from "./data/{mod.namespace}_trapdoors.js";\n'
             "registerTrapdoors(trapdoorTable);\n"
         )
+    # Pressure plates (#296: blocks.convert wrote the table and the fixed runtime).
+    from .plates import table_path as plate_table_path
+    if plate_table_path(mod.namespace) in files:
+        entries.append(
+            'import { registerPressurePlates } from "./pressure_plate.js";\n'
+            f'import plateTable from "./data/{mod.namespace}_pressure_plates.js";\n'
+            "registerPressurePlates(plateTable);\n"
+        )
     entries.extend(extra_entries or [])
     if entries:
         result.files[ENTRY] = (

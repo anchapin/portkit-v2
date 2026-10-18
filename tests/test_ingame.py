@@ -302,3 +302,24 @@ def test_trapdoor_checks(tmp_path):
     assert checks.as_json()["trapdoors"] == checks.trapdoors
     report = server.parse(['[x] PORTKIT-INGAME TRAPDOOR {"id": "demo:trap", "drop": []}'])
     assert report["trapdoors"] == [{"id": "demo:trap", "drop": []}]
+
+
+def test_plate_checks(tmp_path):
+    """#296: a block carrying the portkit pressure plate component, with its table entry."""
+    bp = tmp_path / "bp"
+    (bp / "blocks").mkdir(parents=True)
+    for name in ("plate", "stray"):
+        (bp / "blocks" / f"{name}.json").write_text(json.dumps({"format_version": "1.21.130", "minecraft:block": {
+            "description": {"identifier": f"demo:{name}", "states": {"demo:powered": [False, True]}},
+            "components": {"demo:portkit_pressure_plate": {}}}}))
+    data = bp / "scripts" / "portkit" / "data"
+    data.mkdir(parents=True)
+    (data / "demo_pressure_plates.js").write_text(
+        "// table\nexport default " + json.dumps({"plates": {"demo:plate": {"mobs_only": True}}}) + ";\n")
+    _block(bp / "blocks" / "plain.json", "demo:plain")
+    checks = testpack.read_checks(bp)
+    assert checks.plates == [{"id": "demo:plate", "powered": "demo:powered", "mobs_only": True,
+                              "expect": [{"item": "demo:plate", "count": 1}]}]
+    assert checks.as_json()["plates"] == checks.plates
+    report = server.parse(['[x] PORTKIT-INGAME PLATE {"id": "demo:plate", "drop": []}'])
+    assert report["plates"] == [{"id": "demo:plate", "drop": []}]

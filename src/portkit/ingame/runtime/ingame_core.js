@@ -163,6 +163,25 @@ export function trapdoorVerdict(want, state) {
   return { ok: problems.length === 0, problems };
 }
 
+// The pressure plate check's layer (#296): one plate each on a stone block,
+// laid out like the paired check (a redstone lamp beside it), a new layer
+// four up every 64; between the trapdoor and drop layers for 128 plates.
+export const PLATE_Y = 66;
+
+/** Where the i-th pressure plate goes (the stone goes one below). */
+export function plateSlot(i) {
+  const at = pairedSlot(i);
+  return { ...at, y: at.y - PAIRED_Y + PLATE_Y };
+}
+
+/** A plate read back: `want` pressed; `seen` {powered, lamp} (lamp undefined: not asked). */
+export function plateVerdict(want, seen) {
+  const problems = [];
+  if (seen.powered !== want) problems.push(`powered=${seen.powered}, expected ${want}`);
+  if (seen.lamp !== undefined && seen.lamp !== want) problems.push(`lamp lit=${seen.lamp}, expected ${want}`);
+  return { ok: problems.length === 0, problems };
+}
+
 /** The container check's verdict: the slot count the converter wrote. */
 export function containerVerdict(expected, size) {
   if (size === undefined) return { ok: false, problems: ["no minecraft:inventory component"] };

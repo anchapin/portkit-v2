@@ -75,6 +75,7 @@ DOOR_TEMPLATES = {
 }
 _DOOR_CLASS = "net/minecraft/world/level/block/DoorBlock"
 _TRAPDOOR_CLASS = "net/minecraft/world/level/block/TrapDoorBlock"
+_PLATE_CLASS = "net/minecraft/world/level/block/PressurePlateBlock"
 _TWO_TALL_CLASSES = {"net/minecraft/world/level/block/DoublePlantBlock",
                      "net/minecraft/world/level/block/TallFlowerBlock"}
 # Methods whose override changes how a door behaves: use, placement, hinge,
@@ -95,6 +96,20 @@ TRAPDOOR_BEHAVIOUR = frozenset({
     "updateShape", "canSurvive", "getShape", "getCollisionShape", "toggle", "playSound",
     "onExplosionHit", "entityInside", "stepOn", "tick", "randomTick", "onPlace", "onRemove",
     "newBlockEntity", "getTicker", "attack",
+})
+# The same for a pressure plate (Mojang names, 1.20.1 / 1.21.1
+# BasePressurePlateBlock and PressurePlateBlock: getSignalStrength,
+# getPressedTime, checkPressed, entityInside, tick, getSignal(ForState),
+# setSignalForState, getDirectSignal, playOnSound/playOffSound (1.19), plus
+# BlockBehaviour's other hooks). A subclass overriding any of them is the
+# mod's own plate (a players-only plate, a longer press).
+PLATE_BEHAVIOUR = frozenset({
+    "use", "useWithoutItem", "useItemOn", "getStateForPlacement", "setPlacedBy", "neighborChanged",
+    "updateShape", "canSurvive", "getShape", "getCollisionShape", "entityInside", "stepOn", "tick",
+    "randomTick", "onPlace", "onRemove", "newBlockEntity", "getTicker", "attack",
+    "getSignalStrength", "getPressedTime", "checkPressed", "getSignal", "getDirectSignal",
+    "getSignalForState", "setSignalForState", "isSignalSource", "getEntityCount", "playOnSound",
+    "playOffSound", "updateNeighbours",
 })
 TWO_TALL_BEHAVIOUR = frozenset({
     "use", "useWithoutItem", "useItemOn", "getStateForPlacement", "setPlacedBy", "neighborChanged",
@@ -202,15 +217,17 @@ _KINDS = {
     "door": ({_DOOR_CLASS}, DOOR_BEHAVIOUR),
     "trapdoor": ({_TRAPDOOR_CLASS}, TRAPDOOR_BEHAVIOUR),
     "two_tall": (_TWO_TALL_CLASSES, TWO_TALL_BEHAVIOUR),
+    "plate": ({_PLATE_CLASS}, PLATE_BEHAVIOUR),
 }
 
 
 def read_code(classes, names: list[str], kind: str) -> dict[str, Reading]:
-    """A :class:`Reading` per name; ``kind`` "door", "trapdoor" or "two_tall".
+    """A :class:`Reading` per name; ``kind`` "door", "trapdoor", "plate" or "two_tall".
 
     For a door or trapdoor read as vanilla, ``Reading.door`` is (opens by
     hand, sound family) from the ``BlockSetType`` constant its vanilla
-    constructor was given (both take ``(BlockSetType, Properties)``)."""
+    constructor was given (both take ``(BlockSetType, Properties)``); for a
+    plate it is (sensitivity, sound family), see :func:`_plate_type`."""
     readings = {n: Reading(n) for n in names}
     if classes is None or not len(classes) or not names:
         for r in readings.values():
@@ -246,7 +263,31 @@ def read_code(classes, names: list[str], kind: str) -> dict[str, Reading]:
                 r.door_from = f"BlockSetType.{consts[0]}"
             else:
                 r.door_from = ""
+        elif kind == "plate":
+            r.door, r.door_from = _plate_type(obj)
     return readings
+
+
+def _plate_type(obj) -> tuple[tuple[str, str] | None, str]:
+    """(sensitivity, sound family) and where they were read, for a plate built
+    as ``new PressurePlateBlock(BlockSetType.X, props)`` (1.21) or
+    ``new PressurePlateBlock(Sensitivity.Y, props, BlockSetType.X)`` (1.20).
+    (None, "") when the constructor's constants aren't vanilla ones read here."""
+    ctor = obj.fields.get("__vanilla_ctor")
+    args = ctor[2] if ctor else ()
+    sets = [a.name for a in args if isinstance(a, blockcode.Const) and a.owner == block_set_types.CLASS]
+    sens = [a.name for a in args if isinstance(a, blockcode.Const)
+            and a.owner == block_set_types.SENSITIVITY_CLASS]
+    if len(sets) != 1 or sets[0] not in block_set_types.PLATE_TYPES or len(sens) > 1:
+        return None, ""
+    sensitivity, family = block_set_types.PLATE_TYPES[sets[0]]
+    where = f"BlockSetType.{sets[0]}"
+    if sens:
+        if sens[0] not in block_set_types.SENSITIVITIES:
+            return None, ""
+        sensitivity = sens[0]
+        where = f"Sensitivity.{sens[0]}, {where}"
+    return (sensitivity, family), where
 
 
 def wooden_doors(mod: SourceMod, tag: str = "wooden_doors") -> set[str]:
