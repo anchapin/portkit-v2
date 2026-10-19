@@ -3100,11 +3100,11 @@ _CP_STRING = 8
 _SETTER_TAGS = frozenset({8, 10, 11, 15})
 _SYSTEM_SETTERS = frozenset({"setProperty", "setProperties", "clearProperty", "getProperties"})
 _NOKEY = object()  # a map key whose equality isn't known (Machine._map_key)
-# Map methods that change nothing (java.util.Map, Java SE 21).
 # Map methods that change a map: an unmodifiable map (Map.of) throws
 # UnsupportedOperationException for each (ImmutableCollections, Java SE 21).
 _MAP_CHANGES = frozenset({"put", "putAll", "putIfAbsent", "remove", "clear", "compute", "computeIfAbsent",
                           "computeIfPresent", "merge", "replace", "replaceAll"})
+# Map methods that change nothing (java.util.Map, Java SE 21).
 _MAP_READS = frozenset({"containsValue", "equals", "hashCode", "toString", "getClass", "forEach"})
 _JAVA_MAPS = frozenset({"java/util/Map", "java/util/HashMap", "java/util/LinkedHashMap", "java/util/TreeMap",
                         "java/util/IdentityHashMap", "java/util/WeakHashMap", "java/util/EnumMap",

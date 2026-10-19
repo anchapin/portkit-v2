@@ -27,9 +27,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-19 (proposed, awaiting Alex's picks): unmodifiable `Map.of`/`Map.ofEntries` maps, `Object#getClass` of a built object, per-way iterator copies and a 2,000,000-step run, so BetterEnd's planks, bookshelves and signs are read (BetterEnd 613 -> 654/722)
+## 2026-10-19 (approved (Alex, 2026-10-19): picks 1a–4a): unmodifiable `Map.of`/`Map.ofEntries` maps, `Object#getClass` of a built object, per-way iterator copies and a 2,000,000-step run, so BetterEnd's planks, bookshelves and signs are read (BetterEnd 613 -> 654/722)
 
-- **Status:** proposed, awaiting Alex's picks (#280, PR #330). The branch implements every "a" below.
+- **Status:** approved (Alex, 2026-10-19): picks 1a–4a (#280, PR #330). The branch implements every "a" below.
 - **Decision** (keyed on JVM shapes, never a mod's or library's name; `blockcode.Machine`):
   1. **Fixed maps (1a; `_fixed_map`, `_MAP_CHANGES`).** `Map.entry(k, v)`, `Map.ofEntries(..)`, `Map.of(..)` and Guava `ImmutableMap.of(..)` build an exact unmodifiable map (Java SE 21, Guava 33): keys compare as `_map_key` compares them (a record by its components), a null key or value throws `NullPointerException`, a duplicate key throws `IllegalArgumentException`, any change (`put`, `remove`, `clear`, `compute*`, `merge`, `replace*` ...) throws `UnsupportedOperationException`. Its order isn't modelled (`Map.of`'s is unspecified), so it is never iterated; only looked up. 1b leaves these maps unknown: the 41 blocks below stay unread (BetterEnd 613/722).
   2. **`getClass` (2a; `Machine.vanilla`).** `Object#getClass()` (final) reads as the class only for an object the run built with `new` of a class in the jar or its libraries, fully initialised; anything else is unknown. 2b keeps it unknown: a javac-style `equals` that compares `getClass()` (WorldWeaver's `BlockTraitKey`) can't decide, and 21 wall signs read today are lost.
