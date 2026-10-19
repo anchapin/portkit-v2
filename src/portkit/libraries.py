@@ -75,6 +75,32 @@ def _read(zf: zipfile.ZipFile, out: dict[str, bytes]) -> None:
             out[name[:-6]] = zf.read(info)
 
 
+_METADATA = ("META-INF/neoforge.mods.toml", "META-INF/mods.toml", "fabric.mod.json", "quilt.mod.json")
+
+
+def metadata(jar: Path) -> list[dict[str, bytes]]:
+    """The loader metadata files of ``jar`` and of each jar it nests under
+    ``META-INF/jars/`` (one level, as :func:`classes`), one ``{path: bytes}``
+    per jar that has any: which classes each loader constructs itself
+    (:mod:`portkit.entrypoints`)."""
+    out = []
+    with zipfile.ZipFile(Path(jar)) as zf:
+        own = {n: zf.read(n) for n in _METADATA if n in zf.namelist()}
+        if own:
+            out.append(own)
+        for info in zf.infolist():
+            if info.filename.startswith("META-INF/jars/") and info.filename.endswith(".jar") \
+                    and info.file_size <= _MAX_NESTED_JAR_BYTES:
+                try:
+                    with zipfile.ZipFile(io.BytesIO(zf.read(info))) as inner:
+                        found = {n: inner.read(n) for n in _METADATA if n in inner.namelist()}
+                except zipfile.BadZipFile:
+                    continue
+                if found:
+                    out.append(found)
+    return out
+
+
 def attach(index, jars) -> list[str]:
     """Add each library jar's classes to ``index`` (a ClassIndex) in order;
     returns one conversion note per jar."""
@@ -82,6 +108,8 @@ def attach(index, jars) -> list[str]:
     for jar in jars or ():
         found = classes(Path(jar))
         added = index.add_libraries(found)
+        if hasattr(index, "entry_meta"):
+            index.entry_meta.extend(metadata(Path(jar)))
         notes.append(f"Read with library jar {Path(jar).name} ({added} classes, read-only for "
                      "registrations and base classes; nothing of it is shipped) (#280).")
     return notes

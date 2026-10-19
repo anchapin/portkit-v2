@@ -44,6 +44,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import entrypoints
 from .bytecode import ClassFile, ClassIndex, Handle, Indy, Insn, Method, Ref, instructions
 
 # Java's Direction enum, in declaration (ordinal) order.
@@ -784,6 +785,20 @@ class Machine:
         self._fork_floor = -1
         # Counts top-level runs (a run entered at depth 0, see run).
         self._top = 0
+        # The closed world's census (#280, see _census and sole_instance):
+        # while a list, every object ``new`` makes is appended to it; then
+        # the objects made by class initializers and loader entry-class
+        # constructors, which classes' initializers and which entry
+        # constructors completed, and the loader entry classes.
+        self._allocating: list | None = None
+        self.census: list = []
+        self.census_clinits: frozenset = frozenset()
+        self.census_entries: frozenset = frozenset()
+        self.census_done: frozenset = frozenset()
+        self.entries: dict = {}
+        self._sites: dict | None = None
+        self._closed: dict = {}
+        self._sole: dict = {}
 
     # -- classes ------------------------------------------------------------
 
@@ -1250,7 +1265,154 @@ class Machine:
                 # to it (by reflection, an event bus, a config loader), so a
                 # field nothing here wrote no longer reads as its default.
                 a._defaults = False
+        if returns and self.registrations is not None:
+            # A reference the call returns is an object of its declared
+            # class or null (JVMS 4.10.1.2); of a class the closed world
+            # makes exactly one object of, it is that object (#280 pick 2,
+            # see sole_instance). DEFAULT (pick 3a): not null.
+            ret = desc[desc.index(")") + 1:]
+            if ret.startswith("L"):
+                sole = self.sole_instance(ret[1:-1])
+                if sole is not None:
+                    return [sole]
         return [UNKNOWN] if returns else [None]
+
+    # -- the closed world's census (#280) -------------------------------------
+
+    def _allocation_sites(self) -> dict:
+        """class -> the methods (class, name, desc) of the mod and its
+        libraries holding a ``new`` of it, each once per instruction;
+        a constructor reference (``X::new``, an invokedynamic
+        REF_newInvokeSpecial handle) makes objects whenever it is called, so
+        it is filed under ``_ANY`` as a site never closed. The key
+        ``_REFLECTS`` lists the methods calling a JVM or library API that
+        makes an object of a class it is handed (Class#newInstance,
+        Constructor#newInstance, Unsafe#allocateInstance,
+        Lookup#findConstructor, ObjectInputStream#readObject, ServiceLoader)
+        and ``_CLONES`` the classes that implement Cloneable."""
+        if self._sites is not None:
+            return self._sites
+        sites: dict = {_REFLECTS: [], _CLONES: set()}
+        for src in (self.classes._raw, getattr(self.classes, "_lib", {})):
+            for cname in src:
+                cf = self.classes.get(cname)
+                if cf is None:
+                    sites[_REFLECTS].append((cname, "?", "?"))  # unreadable: anything
+                    continue
+                if "java/lang/Cloneable" in cf.interfaces:
+                    sites[_CLONES].add(cname)
+                for m in cf.methods:
+                    if m.code is None:
+                        continue
+                    try:
+                        code = instructions(cf, m.code)
+                    except Exception:  # noqa: BLE001 - unreadable code may make anything
+                        sites[_REFLECTS].append((cname, m.name, m.desc))
+                        continue
+                    key = (cname, m.name, m.desc)
+                    for i in code:
+                        if i.op == 0xBB:
+                            made = i.arg[1] if isinstance(i.arg, tuple) else i.arg
+                            if isinstance(made, str):
+                                sites.setdefault(made, []).append(key)
+                        elif i.op in (0xB6, 0xB7, 0xB8, 0xB9) and isinstance(i.arg, Ref) and (
+                                (i.arg.owner, i.arg.name) in _REFLECTIVE_NEW
+                                or i.arg.owner == "java/util/ServiceLoader"):
+                            sites[_REFLECTS].append(key)
+                        elif i.op == 0xBA and isinstance(i.arg, Indy):
+                            for h in i.arg.args:
+                                if isinstance(h, Handle) and h.kind == 8:
+                                    sites.setdefault(h.ref.owner, []).append(_ANY)
+        self._sites = sites
+        return sites
+
+    def _subtypes(self, cls: str) -> set:
+        """``cls`` and every class of the mod or its libraries that extends
+        or implements it, at any depth."""
+        out = {cls}
+        changed = True
+        names = [*self.classes._raw, *getattr(self.classes, "_lib", {})]
+        while changed:
+            changed = False
+            for k in names:
+                if k in out:
+                    continue
+                cf = self.classes.get(k)
+                if cf is not None and (cf.super_name in out or any(i in out for i in cf.interfaces)):
+                    out.add(k)
+                    changed = True
+        return out
+
+    def closed_why(self, cls: str) -> str:
+        """Why the objects of ``cls`` (and of its subclasses) the census
+        holds may not be all the program ever makes; "" when they are.
+        Closed when every ``new`` of the class or a subclass, in the mod or
+        its libraries, sits in code that runs at most once and ran whole in
+        the census: a class initializer the census completed (it runs once,
+        JVMS 5.5), a loader entry class's constructor the loader runs once
+        and the census completed (:mod:`portkit.entrypoints`), or a
+        constructor of a class itself closed, which runs only on an object
+        ``new`` just made of it or a subclass (JVMS 2.9.1, 6.5 new) and
+        so ran, for each of them, in the census. Nothing in the world may
+        make an object of a class it is handed (reflection, a service
+        loader, deserialization) and no class of it may be Cloneable."""
+        if cls in self._closed:
+            return self._closed[cls] or ""
+        self._closed[cls] = "it is made by a constructor of its own class or one that makes it (a cycle)"
+        why = self._closed_why(cls)
+        self._closed[cls] = why
+        return why
+
+    def _closed_why(self, cls: str) -> str:
+        if not self.is_mod(cls):
+            return f"{cls.replace('/', '.')} is not a class of the mod or its libraries (code outside makes them)"
+        sites = self._allocation_sites()
+        if sites[_REFLECTS]:
+            owner, name, _desc = sites[_REFLECTS][0]
+            return (f"{owner.replace('/', '.')}.{name} makes objects of a class it is handed "
+                    f"(reflection, a service loader or deserialization; {len(sites[_REFLECTS])} such methods)")
+        for sub in sorted(self._subtypes(cls)):
+            if sub in sites[_CLONES]:
+                return f"{sub.replace('/', '.')} is Cloneable"
+            if sub in self.entries and sub not in self.census_entries:
+                return (f"the loader may construct {sub.replace('/', '.')} ({self.entries[sub].source}) and "
+                        "the census didn't run its constructor once")
+            for key in sites.get(sub, ()):
+                if key == _ANY:
+                    return f"a constructor reference {sub.replace('/', '.')}::new makes one each time it is called"
+                owner, name, desc = key
+                where = f"{owner.replace('/', '.')}.{name}"
+                if name == "<clinit>":
+                    if owner not in self.census_clinits or key not in self.census_done:
+                        return f"{owner.replace('/', '.')}'s class initializer makes one and didn't run whole in the census"
+                    continue
+                if name != "<init>":
+                    return f"{where} makes one, and nothing bounds how often the game calls it"
+                if owner in self.census_entries:
+                    if key not in self.census_done:
+                        return f"{where} makes one and didn't run whole in the census"
+                    continue
+                inner = self.closed_why(owner)
+                if inner:
+                    return f"{owner.replace('/', '.')}'s constructor makes one, and {inner}"
+                owners = self._subtypes(owner)
+                if any(o.cls in owners for o in self.census) and key not in self.census_done:
+                    return f"{where} makes one and didn't run whole in the census"
+        return ""
+
+    def sole_instance(self, cls: str):
+        """The one object of ``cls`` (or of a subclass) the program ever
+        makes, when the census holds exactly one and is all of them
+        (closed_why); else None."""
+        if cls in self._sole:
+            return self._sole[cls]
+        found = None
+        if not self.closed_why(cls):
+            subs = self._subtypes(cls)
+            objs = [o for o in self.census if o.cls in subs]
+            found = objs[0] if len(objs) == 1 else None
+        self._sole[cls] = found
+        return found
 
     def _system_property(self, key):
         """``System.getProperty(key)`` (#280 pick 1): null for a known key
@@ -1922,6 +2084,8 @@ class Machine:
         if cls in _MUTABLE_LISTS:
             return ListV([])
         obj = Obj(cls)
+        if self._allocating is not None:
+            self._allocating.append(obj)
         obj._uninit = True  # until its constructor is called (see _invoke)
         # A new object's fields hold their default values (null, 0, false)
         # until written (JVMS 2.3, 2.4, 6.5 new); the fields the mod's and
@@ -3257,6 +3421,17 @@ class Machine:
 
 
 _NOT_HANDLED = object()
+# Keys of Machine._allocation_sites, and the calls that make an object of a
+# class they are handed (Java SE 21; sun.misc.Unsafe and its jdk.internal
+# twin; MethodHandles.Lookup#findConstructor hands back a constructor).
+_REFLECTS = "__reflects"
+_CLONES = "__clones"
+_REFLECTIVE_NEW = frozenset({
+    ("java/lang/Class", "newInstance"), ("java/lang/reflect/Constructor", "newInstance"),
+    ("sun/misc/Unsafe", "allocateInstance"), ("jdk/internal/misc/Unsafe", "allocateInstance"),
+    ("java/lang/invoke/MethodHandles$Lookup", "findConstructor"),
+    ("java/io/ObjectInputStream", "readObject"), ("java/io/ObjectInputStream", "readUnshared"),
+})
 # java.util's Map interface and its implementations (Java SE 21).
 # Constant pool tags (JVMS 4.4): String, Methodref, InterfaceMethodref,
 # MethodHandle.
@@ -3823,16 +3998,64 @@ def _run_pass(machine: Machine, cf: ClassFile, m: Method, deferred: list, concat
             reg.concat = True
 
 
+def _census(machine: Machine) -> None:
+    """Run each loader entry class's constructor once, as the loader does
+    (#280 pick 1, :mod:`portkit.entrypoints`): the closed world is the mod's
+    classes and its libraries' plus the objects the loader makes of their
+    entry classes. A constructor is run on a new object of exactly its
+    class with unknown arguments (the loader's event bus, mod container or
+    side), its class initialized first. A run that stops part way puts the
+    statics back as they were (as _run_method) and its census is
+    incomplete. Entry classes constructed only on one physical side or on
+    request (``once`` false) aren't run: whether they ever are isn't known.
+    Ends the census (see Machine.sole_instance)."""
+    entries = entrypoints.entry_classes(getattr(machine.classes, "entry_meta", None), machine.classes)
+    machine.entries = {e.name: e for e in entries}
+    completed = set()
+    for e in entries:
+        cf = machine.classes.get(e.name)
+        if not e.once or cf is None or cf.access & 0x0600:
+            continue
+        ctors = [m for m in cf.methods if m.name == "<init>" and m.access & 0x0001 and m.code is not None]
+        # NeoForge/Forge: the one public constructor (FMLModContainer refuses
+        # two); Fabric/Quilt: the public no-argument one.
+        ctor = ctors[0] if len(ctors) == 1 else next((m for m in ctors if m.desc == "()V"), None)
+        if ctor is None:
+            continue
+        # Its class is initialized first, on its own (JVMS 5.5: before the
+        # loader's newInstance), so a constructor that stops part way leaves
+        # the class initialized.
+        machine.steps = 0
+        machine.init_class(e.name)
+        saved = (dict(machine.statics), set(machine._clinit_done), set(machine._clinit_failed))
+        try:
+            machine.steps = 0
+            machine.new_epoch()
+            obj = machine._new(e.name)
+            machine.run(cf, ctor, [obj] + [UNKNOWN] * _arg_count(ctor.desc)[0])
+            obj._uninit = False
+            completed.add(e.name)
+        except Unreadable:
+            machine.statics, machine._clinit_done, machine._clinit_failed = saved
+    machine.census = list(machine._allocating or ())
+    machine._allocating = None
+    machine.census_clinits = frozenset(machine._clinit_done - machine._clinit_failed)
+    machine.census_entries = frozenset(completed)
+    machine.census_done = frozenset(machine._finished_methods - machine._stopped_methods)
+
+
 def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[str, tuple[list, str]]]:
     """Run the registration code that names each blockstate in ``names`` and
     return, per name, the block objects built for it (``[]`` with the reason
     when none was found or it can't be followed)."""
     machine = Machine(classes)
     machine.registrations = []
+    machine._allocating = []
     wanted = _wanted_classes(classes, set(names))
     for cname in wanted:
         machine.steps = 0
         machine.init_class(cname)
+    _census(machine)
     # Registrations made in a method rather than a static initializer (#280):
     # a module's or an initializer's ``register(event)`` / ``onInitialize()``
     # constructing ``new FooBlock("name", ...)``. Each method of a wanted class

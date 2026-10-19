@@ -143,7 +143,7 @@ def from_directory(root: Path) -> Ingested:
         metadata=metadata,
         class_count=sum(1 for _ in root.rglob("*.class")),
         icons=icons,
-        classes=ClassIndex.from_source(root),
+        classes=_with_meta(ClassIndex.from_source(root), metadata),
     )
 
 
@@ -216,8 +216,15 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
         class_count=class_count,
         nested_jars=nested,
         icons=icons,
-        classes=ClassIndex(classes),
+        classes=_with_meta(ClassIndex(classes), metadata),
     )
+
+
+def _with_meta(index: ClassIndex, metadata: dict[str, bytes]) -> ClassIndex:
+    """``index`` carrying the mod's loader metadata (its entry classes,
+    :mod:`portkit.entrypoints`)."""
+    index.entry_meta = [dict(metadata)]
+    return index
 
 
 def ingest(source: Path, workdir: Path) -> Ingested:
