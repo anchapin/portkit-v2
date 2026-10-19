@@ -1009,12 +1009,15 @@ class Machine:
                     self._havoc(args, f"{found[0].name}.{name}: {exc}")
                     return [UNKNOWN] if _arg_count(desc)[1] else [None]
                 if len(results) > 1 and not all(_value_equal(r, results[0]) for r in results[1:]) \
-                        and not (self._running and self._library(self._running[-1])):
-                    # Its ways return different values: the mod's code goes
-                    # on with one unknown value instead of one way per value
-                    # (what the ways wrote after their branch is only what
-                    # they allocated since, see _write, so nothing else
-                    # differs between them).
+                        and not (self._running and self._library(self._running[-1])) \
+                        and not any(isinstance(r, (str, Tail, RL, RKey)) for r in results):
+                    # Its ways return different values, none of them a name:
+                    # the mod's code goes on with one unknown value instead
+                    # of one way per value (what the ways wrote after their
+                    # branch is only what they allocated since, see _write,
+                    # so nothing else differs between them). A name a way
+                    # returns keeps its own way (#325: the way where the
+                    # library's lookup answered registers that name).
                     return [UNKNOWN]
                 return results
             vowner = self.vanilla_base(start)
