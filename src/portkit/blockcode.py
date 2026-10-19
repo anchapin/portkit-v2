@@ -705,6 +705,7 @@ class Machine:
 
     def __init__(self, classes: ClassIndex):
         self.classes = classes
+        self._subclassed: set | None = None  # see has_subclass
         self.statics: dict[tuple[str, str], object] = {}
         self._clinit_done: set[str] = set()
         self._clinit_failed: set[str] = set()
@@ -787,6 +788,21 @@ class Machine:
     def _library(self, name: str) -> bool:
         lib = getattr(self.classes, "is_library", None)
         return bool(lib and lib(name))
+
+    def has_subclass(self, name: str) -> bool:
+        """Whether any class of the mod or its libraries names ``name`` as
+        its superclass (a class that can't be parsed counts as one)."""
+        if self._subclassed is None:
+            supers = set()
+            for src in (self.classes._raw, self.classes._lib):
+                for k in src:
+                    cf = self.classes.get(k)
+                    if cf is None:
+                        supers.add(None)
+                    elif cf.super_name:
+                        supers.add(cf.super_name)
+            self._subclassed = supers
+        return name in self._subclassed or None in self._subclassed
 
     def is_block_class(self, name: str) -> bool:
         last = self.chain(name)[-1]
@@ -3566,6 +3582,26 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
     return out + callers
 
 
+def _constructed(machine: Machine, cf: ClassFile, m: Method):
+    """The receiver a method of ``cf`` run on its own (see _run_method) is
+    given: for a constructor of a block class that is neither abstract nor
+    an interface and that no class of the mod or its libraries extends, a
+    new object of exactly that class (#280: a block whose constructor hands
+    its own name, ``super("sturdy_stone", module, ..)``, while the module
+    only does ``new SturdyStoneBlock(this)``). An instance initialization
+    method is only ever invoked on an object ``new`` just made of its class
+    or of a subclass, which then calls it as its super constructor (JVMS
+    2.9.1, 4.10.1.9 invokespecial, 6.5 new); with no subclass anywhere in
+    the jar or its libraries (closed: the classes read are the mod's), the
+    object is one of exactly ``cf``. Anything else stays UNKNOWN."""
+    if m.name != "<init>" or cf.access & 0x0600 or not machine.is_block_class(cf.name) \
+            or machine.has_subclass(cf.name):
+        return UNKNOWN
+    obj = machine._new(cf.name)
+    obj._uninit = False
+    return obj
+
+
 def _run_method(machine: Machine, cf: ClassFile, m: Method) -> None:
     """Run ``m`` once on unknown arguments for the registrations it makes,
     its class initialized first. A run that stops part way (Unreadable)
@@ -3580,7 +3616,8 @@ def _run_method(machine: Machine, cf: ClassFile, m: Method) -> None:
         machine.init_class(cf.name)
         machine.steps = 0
         machine.new_epoch()
-        machine.run(cf, m, [UNKNOWN] * (n + (0 if static else 1)))
+        recv = [] if static else [_constructed(machine, cf, m)]
+        machine.run(cf, m, recv + [UNKNOWN] * n)
     except Unreadable:
         machine.statics, machine._clinit_done, machine._clinit_failed = saved
 
