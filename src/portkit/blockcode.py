@@ -2648,13 +2648,23 @@ class Machine:
         see _key_ok) is itself; a record whose ``equals`` is the one javac
         generates (``ObjectMethods.bootstrap``: equal when of the same class
         and each component is equal, java.lang.Record) is its class and its
-        components' keys, when each is known."""
+        components' keys, when each is known.
+
+        A record's key holds after the record was handed to code the machine
+        couldn't follow (which clears ``_defaults``, see _havoc): a record's
+        only instance fields are its components, each ``private final``
+        (JLS 8.10.3), and no code can write them afterwards, reflection
+        included (``Field#set`` refuses a final field of a record class,
+        Java SE 21), so the components its constructor stored are the ones
+        it compares by (#280: WorldWeaver's shared ``SlotType`` keys, handed
+        to a library call by one material set, key the next set's map).
+        Its constructor must still have been followed to the end and have
+        stored every component."""
         if key is UNKNOWN or not _hashable(key):
             return _NOKEY
         if isinstance(key, Obj) and not self._key_ok(key):
             comps = self._record_components(key.cls)
-            if comps is None or "__partial" in key.fields or getattr(key, "_uninit", False) \
-                    or not getattr(key, "_defaults", False):
+            if comps is None or "__partial" in key.fields or getattr(key, "_uninit", False):
                 return _NOKEY
             parts = []
             for c in comps:
