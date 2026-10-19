@@ -27,9 +27,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-18 (proposed, awaiting Alex's picks): builders a mod reaches through its libraries are read through deterministic models of system properties, `java.util` collections, trait Properties and havoc, and BetterEnd's BCLib-family libraries are pinned (BetterEnd 86 -> 199/722, Quark 498 -> 686/809)
+## 2026-10-18 (approved (Alex, 2026-10-18): picks 1a–5a): builders a mod reaches through its libraries are read through deterministic models of system properties, `java.util` collections, trait Properties and havoc, and BetterEnd's BCLib-family libraries are pinned (BetterEnd 86 -> 199/722, Quark 498 -> 686/809)
 
-- **Status:** proposed, awaiting Alex's picks (#280). The defaults below ("a" in the PR's picks comment) are what the branch implements.
+- **Status:** approved (Alex, 2026-10-18): picks 1a–5a (#280, PR #327). The defaults below ("a" in the PR's picks comment) are what the branch implements.
 - **Decision** (keyed on JVM shapes, never a mod's or library's name; `blockcode.Machine`):
   1. **System properties** (`_system_property`, `_RESERVED_PROPERTIES`). `System.getProperty(key)` for a constant key outside the JVM's and the game launchers' namespaces (`java.`, `os.`, `user.`, `fabric.`, `fml.`, `mixin.`, `minecraft.` and the rest of the list) reads null, as in a player's game started without `-D<key>`, unless any class of the mod or its libraries mentions `setProperty`, `setProperties`, `clearProperty` or `getProperties()`; then, and for any reserved or non-constant key, it is unknown. `Class.desiredAssertionStatus()` reads false (assertions are off unless the JVM is started with `-ea`).
   2. **`java.util` collections.** `ArrayList`/`LinkedList` built here, their iterators, `stream()` (a deterministic subset of `Stream`), `Optional`, and a subset of `Map` are modelled exactly; any method outside the model makes the collection unknown, and a loop over an unknown list stops that way instead of guessing a count. A library's registration code gets up to 16 ways (`_MAX_LIBRARY_PATHS`).
