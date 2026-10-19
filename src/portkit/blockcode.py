@@ -173,7 +173,7 @@ _LEVEL = "net/minecraft/world/level/Level"
 # Marks a state built from StateDefinition#any (see Machine.vanilla).
 _ANY = "__any"
 
-_MAX_STEPS = 400_000
+_MAX_STEPS = 1_000_000
 _MAX_PATHS = 256
 # While registrations are collected, a dependency jar's method gives up
 # sooner (#280): its caller takes it as havoc (Machine._havoc), so
@@ -330,6 +330,38 @@ class MapV:
     # Set when a call the machine couldn't follow may have changed the map
     # (Machine._havoc, #280): a lookup in it is then unknown.
     havoc: bool = False
+    # ``"linked"`` for a ``java.util.LinkedHashMap`` built here in insertion
+    # order (its no-argument, capacity or capacity+load-factor constructor):
+    # the only kind whose iteration order is known (see Machine._map_view).
+    kind: str | None = None
+    # Structural changes (a key added or removed, a clear), as the map's
+    # ``modCount`` (HashMap): an iterator made before one fails fast.
+    mod: int = 0
+    # False once anything the machine can't model exactly reached the map
+    # (a key whose equality isn't known, a change on a way of a branch the
+    # run can't decide, a call outside the model): then which keys it holds
+    # isn't known in full (a lookup that misses is unknown, and it isn't
+    # iterated).
+    exact: bool = True
+    # canonical key (Machine._map_key) -> the key object the map holds.
+    canon: dict = field(default_factory=dict)
+    # False once the map was changed on a way past a branch the run can't
+    # decide (Machine._map_touch): it is then not iterated.
+    clean: bool = True
+    # The top-level run that allocated the map (Machine._top).
+    run: int = -1
+
+    def __post_init__(self):
+        self._serial = _next_serial()
+
+
+@dataclass(eq=False)
+class MapView:
+    """``values()`` / ``keySet()`` of a :class:`MapV` whose iteration order
+    and keys are known (#280): a live view, iterated in the map's order."""
+
+    map: MapV
+    kind: str
 
     def __post_init__(self):
         self._serial = _next_serial()
@@ -710,6 +742,12 @@ class Machine:
         # The frame of the call being made (see _invoke): a modelled change
         # to a mutable java.util collection is a write by it (see _write).
         self._frame: Frame | None = None
+        # The latest ``fork_serial`` of any frame on the call stack that is
+        # past a branch it can't decide (see _invoke, _map_touch): a change
+        # to a map allocated before it may happen on one way only.
+        self._fork_floor = -1
+        # Counts top-level runs (a run entered at depth 0, see run).
+        self._top = 0
 
     # -- classes ------------------------------------------------------------
 
@@ -1044,7 +1082,7 @@ class Machine:
             if isinstance(a, Arr):
                 a.items = [UNKNOWN] * len(a.items)
             elif isinstance(a, MapV):
-                a.items = {}
+                a.items, a.havoc, a.exact = {}, True, False
             elif isinstance(a, ListV):
                 a.items, a.havoc = [], True
                 a.mod += 1
@@ -1099,7 +1137,7 @@ class Machine:
         while todo:
             v = todo.pop()
             if id(v) in seen or not isinstance(v, (Obj, Arr, MapV, Builder, Props, Coll, PairV, Opt, Strm,
-                                                   ListV, IterV, RKey)):
+                                                   ListV, IterV, RKey, MapView)):
                 continue
             seen.add(id(v))
             if isinstance(v, Obj):
@@ -1120,7 +1158,9 @@ class Machine:
             elif isinstance(v, MapV):
                 todo.extend(v.items.keys())
                 todo.extend(v.items.values())
-                v.items, v.havoc = {}, True
+                v.items, v.havoc, v.exact = {}, True, False
+            elif isinstance(v, MapView):
+                todo.append(v.map)
             elif isinstance(v, Builder):
                 v.parts = [UNKNOWN]
             elif isinstance(v, ListV):
@@ -1203,6 +1243,8 @@ class Machine:
         """Every value ``m`` may return (None for void), over all paths."""
         if self.depth >= _MAX_DEPTH:
             raise Unreadable("calls nest too deeply")
+        if self.depth == 0:
+            self._top += 1
         self.depth += 1
         try:
             return self._run(cf, m, args)
@@ -1644,7 +1686,7 @@ class Machine:
     def _new(self, cls: str):
         if cls in ("java/util/EnumMap", "java/util/HashMap", "java/util/LinkedHashMap",
                    "java/util/TreeMap"):
-            return MapV({})
+            return MapV({}, kind="linked" if cls == "java/util/LinkedHashMap" else None, run=self._top)
         if cls == "java/lang/StringBuilder":
             return Builder([])
         if cls in _MUTABLE_LISTS:
@@ -1710,6 +1752,17 @@ class Machine:
         return None
 
     def _invoke(self, op: int, ref: Ref, f: Frame):
+        # What the call does happens on this way only when ``f`` is past a
+        # branch it can't decide (see _map_touch).
+        saved = self._fork_floor
+        if f.forked:
+            self._fork_floor = max(saved, f.fork_serial)
+        try:
+            return self._invoke_on(op, ref, f)
+        finally:
+            self._fork_floor = saved
+
+    def _invoke_on(self, op: int, ref: Ref, f: Frame):
         n, returns = _arg_count(ref.desc)
         static = op == 0xB8
         total = n + (0 if static else 1)
@@ -1728,6 +1781,14 @@ class Machine:
                         obj.items = list(items)
                 elif ref.desc not in ("()V", "(I)V"):
                     obj.havoc = True
+                return None
+            if isinstance(obj, MapV):
+                # new HashMap() / (int) / (int, float) start empty, and a
+                # LinkedHashMap so built keeps insertion order (Java SE 21);
+                # any other constructor (a copy, a comparator, access order)
+                # leaves what it holds, or its order, not modelled.
+                if ref.desc not in ("()V", "(I)V", "(IF)V"):
+                    obj.items, obj.havoc, obj.exact, obj.kind = {}, True, False, None
                 return None
             if isinstance(obj, Builder):
                 # new StringBuilder(String | CharSequence) starts with it.
@@ -2062,40 +2123,7 @@ class Machine:
             if name in ("newEnumMap", "newHashMap"):
                 return [MapV({})] if not rest or isinstance(rest[0], ClassLit) else [UNKNOWN]
         if isinstance(recv, MapV):
-            if recv.havoc:
-                return [UNKNOWN] if _arg_count(desc)[1] else [None]
-            if name in ("get", "getOrDefault") and rest:
-                if not _hashable(rest[0]):
-                    return [UNKNOWN]
-                default = rest[1] if name == "getOrDefault" and len(rest) > 1 else None
-                return [recv.items.get(rest[0], default if rest[0] is not UNKNOWN else UNKNOWN)]
-            if name == "put" and len(rest) == 2:
-                if not _hashable(rest[0]) or rest[0] is UNKNOWN:
-                    recv.items = {}
-                    return [UNKNOWN]
-                old = recv.items.get(rest[0])
-                recv.items[rest[0]] = rest[1]
-                return [old]
-            if name in ("isEmpty", "size") and not rest:
-                return [int(not recv.items)] if name == "isEmpty" else [len(recv.items)]
-            if name == "containsKey" and len(rest) == 1 and self._key_ok(rest[0]):
-                return [int(rest[0] in recv.items)]
-            if name == "computeIfAbsent" and len(rest) == 2 and self._key_ok(rest[0]):
-                # Map#computeIfAbsent (Java SE 21, HashMap): the value held
-                # for the key, else the function's value for it, kept unless
-                # null.
-                if rest[0] in recv.items and recv.items[rest[0]] is not None:
-                    return [recv.items[rest[0]]]
-                out = self._apply(rest[1], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [rest[0]])
-                if out is UNKNOWN or isinstance(out, _Many):
-                    self._write_by_call(recv)
-                    recv.items, recv.havoc = {}, True
-                    return [UNKNOWN]
-                if out is not None:
-                    self._write_by_call(recv)
-                    recv.items[rest[0]] = out
-                return [out]
-            return [UNKNOWN]
+            return self._map_call(recv, name, desc, rest)
         if isinstance(recv, Builder):
             if name == "append" and rest:
                 # StringBuilder#append(x) appends String.valueOf(x); the
@@ -2426,6 +2454,10 @@ class Machine:
             return None if v.havoc else list(v.items)
         if isinstance(v, (Coll, Strm)):
             return list(v.items)
+        if isinstance(v, MapView):
+            if self._map_view(v.map, v.kind) is None:
+                return None
+            return list(v.map.items.values() if v.kind == "values" else v.map.items.keys())
         return None
 
     def _weak_ok(self) -> bool:
@@ -2448,6 +2480,190 @@ class Machine:
             if not isinstance(target, (ListV, IterV)):
                 raise
             raise _WeakWrite()
+
+    def _map_call(self, recv: "MapV", name: str, desc: str, rest: list) -> list:
+        """A call on a map built here (java.util HashMap / LinkedHashMap /
+        TreeMap / EnumMap, Java SE 21). A lookup that misses answers the
+        default only when the map's keys are known exactly (MapV.exact) and
+        the key compares as it does here (_map_key); a change the model
+        doesn't cover leaves the map unknown."""
+        returns = _arg_count(desc)[1]
+        if recv.havoc:
+            return [UNKNOWN] if returns else [None]
+        if name in ("get", "getOrDefault", "containsKey") and rest:
+            key = rest[0]
+            if key is UNKNOWN or not _hashable(key):
+                return [UNKNOWN]
+            found, value = self._map_find(recv, key)
+            if name == "containsKey":
+                if found:
+                    return [1]
+                return [0] if recv.exact and self._map_key(key) is not _NOKEY else [UNKNOWN]
+            if found:
+                return [value]
+            if not recv.exact or self._map_key(key) is _NOKEY:
+                return [UNKNOWN]
+            return [rest[1] if name == "getOrDefault" and len(rest) > 1 else None]
+        if name == "put" and len(rest) == 2:
+            key = rest[0]
+            if key is UNKNOWN or not _hashable(key):
+                recv.items, recv.havoc, recv.exact = {}, True, False
+                return [UNKNOWN]
+            self._map_touch(recv)
+            found, old = self._map_find(recv, key)
+            if found:
+                stored = key if key in recv.items else recv.canon[self._map_key(key)]
+                recv.items[stored] = rest[1]
+                return [old]
+            canon = self._map_key(key)
+            if canon is _NOKEY:
+                recv.exact = False
+            else:
+                recv.canon[canon] = key
+            recv.items[key] = rest[1]
+            recv.mod += 1
+            return [None if recv.exact else UNKNOWN]
+        if name == "remove" and desc == "(Ljava/lang/Object;)Ljava/lang/Object;" and len(rest) == 1:
+            key = rest[0]
+            found, old = self._map_find(recv, key) if key is not UNKNOWN and _hashable(key) else (False, None)
+            if not found and (not recv.exact or key is UNKNOWN or not _hashable(key)
+                              or self._map_key(key) is _NOKEY):
+                recv.items, recv.havoc, recv.exact = {}, True, False
+                return [UNKNOWN]
+            self._map_touch(recv)
+            if found:
+                stored = key if key in recv.items else recv.canon[self._map_key(key)]
+                del recv.items[stored]
+                recv.canon = {c: k for c, k in recv.canon.items() if k is not stored}
+                recv.mod += 1
+            return [old]
+        if name == "clear" and not rest:
+            self._map_touch(recv)
+            if recv.items:
+                recv.mod += 1
+            recv.items, recv.canon, recv.exact = {}, {}, True
+            return [None]
+        if name in ("isEmpty", "size") and not rest:
+            return [int(not recv.items)] if name == "isEmpty" else [len(recv.items)]
+        if name in ("values", "keySet") and not rest:
+            view = self._map_view(recv, name)
+            if view is None:
+                # A view the machine doesn't model may change the map
+                # (``values().removeIf``), so nothing about it is known.
+                recv.items, recv.havoc, recv.exact = {}, True, False
+                return [UNKNOWN]
+            return [view]
+        if name == "computeIfAbsent" and len(rest) == 2 and self._key_ok(rest[0]):
+            # Map#computeIfAbsent (Java SE 21, HashMap): the value held
+            # for the key, else the function's value for it, kept unless
+            # null.
+            if rest[0] in recv.items and recv.items[rest[0]] is not None:
+                return [recv.items[rest[0]]]
+            out = self._apply(rest[1], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [rest[0]])
+            if out is UNKNOWN or isinstance(out, _Many):
+                self._write_by_call(recv)
+                recv.items, recv.havoc, recv.exact = {}, True, False
+                return [UNKNOWN]
+            if out is not None:
+                self._write_by_call(recv)
+                self._map_touch(recv)
+                if rest[0] not in recv.items:
+                    recv.mod += 1
+                    recv.canon[self._map_key(rest[0])] = rest[0]
+                recv.items[rest[0]] = out
+            return [out]
+        if name in _MAP_READS:
+            return [UNKNOWN] if returns else [None]
+        # Any other call (putAll, merge, compute, replace, entrySet, ...) may
+        # change the map in a way not modelled here.
+        recv.items, recv.havoc, recv.exact = {}, True, False
+        return [UNKNOWN] if returns else [None]
+
+    def _map_find(self, m: "MapV", key) -> tuple:
+        """(found, value) for ``key`` in ``m``: the same key object, or a key
+        the map holds that Java's ``equals`` finds equal (_map_key)."""
+        if key in m.items:
+            return True, m.items[key]
+        canon = self._map_key(key)
+        if canon is not _NOKEY and canon in m.canon:
+            return True, m.items[m.canon[canon]]
+        return False, None
+
+    def _map_touch(self, m: "MapV") -> None:
+        """A modelled change to ``m``: made on a way past a branch the run
+        can't decide (any frame on the call stack, see _invoke) to a map
+        allocated before that branch, it may not happen in the game, so the
+        map is no longer iterated (MapV.clean)."""
+        if m._serial <= self._fork_floor or (self._frame is not None and self._frame.forked
+                                             and m._serial <= self._frame.fork_serial):
+            m.clean = False
+
+    def _map_view(self, m: "MapV", kind: str):
+        """``values()`` / ``keySet()`` of ``m`` when its iteration is known
+        exactly (#280): a LinkedHashMap built here in insertion order
+        (LinkedHashMap: "the order in which keys were inserted into the map
+        ... not affected if a key is re-inserted", Java SE 21) whose every
+        change was modelled exactly, on keys that compare as they do here,
+        in this top-level run and on no way of an undecided branch; else
+        None."""
+        if m.kind != "linked" or m.havoc or not m.exact or not m.clean or m.run != self._top:
+            return None
+        return MapView(m, kind)
+
+    def _map_key(self, key):
+        """``key`` as a map compares it (Object#equals / hashCode, Java SE
+        21), or _NOKEY when that isn't known here: a known string, number or
+        constant, or an object whose class declares no ``equals`` (identity,
+        see _key_ok) is itself; a record whose ``equals`` is the one javac
+        generates (``ObjectMethods.bootstrap``: equal when of the same class
+        and each component is equal, java.lang.Record) is its class and its
+        components' keys, when each is known."""
+        if key is UNKNOWN or not _hashable(key):
+            return _NOKEY
+        if isinstance(key, Obj) and not self._key_ok(key):
+            comps = self._record_components(key.cls)
+            if comps is None or "__partial" in key.fields or getattr(key, "_uninit", False) \
+                    or not getattr(key, "_defaults", False):
+                return _NOKEY
+            parts = []
+            for c in comps:
+                if c not in key.fields:
+                    return _NOKEY
+                v = key.fields[c]
+                if isinstance(v, float):
+                    return _NOKEY  # Float/Double#equals isn't Python's ==
+                k = self._map_key(v) if v is not None else None
+                if k is _NOKEY:
+                    return _NOKEY
+                parts.append(k)
+            return ("__record", key.cls, tuple(parts))
+        if not self._key_ok(key):
+            return _NOKEY
+        return key
+
+    def _record_components(self, cls: str):
+        """The component names of ``cls`` when it is a record (a direct
+        subclass of java.lang.Record) whose ``equals`` is javac's generated
+        one (``aload_0; aload_1; invokedynamic equals ObjectMethods.bootstrap;
+        ireturn``), else None."""
+        cf = self.classes.get(cls)
+        if cf is None or cf.super_name != "java/lang/Record":
+            return None
+        m = cf.method("equals", "(Ljava/lang/Object;)Z")
+        if m is None or m.code is None:
+            return None
+        code = instructions(cf, m.code)
+        if [i.op for i in code] != [0x2A, 0x2B, 0xBA, 0xAC]:
+            return None
+        indy = code[2].arg
+        bsm = indy.bootstrap.ref if isinstance(indy, Indy) and indy.bootstrap else None
+        if bsm is None or bsm.owner != "java/lang/runtime/ObjectMethods" or bsm.name != "bootstrap" \
+                or indy.name != "equals" or len(indy.args) < 2 or not isinstance(indy.args[1], str):
+            return None
+        names = [n for n in indy.args[1].split(";") if n]
+        if len(names) != len(indy.args) - 2:
+            return None
+        return names
 
     def _key_ok(self, key) -> bool:
         """Whether ``key`` compares in a Java map as it does here: a known
@@ -2514,6 +2730,34 @@ class Machine:
         a call on a list not modelled here may change it, so it leaves the
         list unknown."""
         returns = _arg_count(desc)[1]
+        if isinstance(recv, IterV) and isinstance(recv.source, MapView):
+            # An iterator over a map's values() / keySet() (#280): the map's
+            # order; a change to the map since the iterator was made fails
+            # fast (HashMap$HashIterator, ConcurrentModificationException).
+            view = recv.source
+            items = self._known_items(view)
+            if items is None:
+                raise Unreadable("iterates a map whose contents aren't known")
+            if view.map.mod != recv.mod:
+                raise Unreadable("a map changes while it is iterated (ConcurrentModificationException)")
+            if name == "hasNext" and not rest:
+                return [int(recv.pos < len(items))]
+            if name == "next" and not rest:
+                if recv.pos >= len(items):
+                    return []  # NoSuchElementException
+                self._write_by_call(recv)
+                recv.pos += 1
+                return [items[recv.pos - 1]]
+            view.map.items, view.map.havoc, view.map.exact = {}, True, False
+            return [UNKNOWN] if returns else [None]
+        if isinstance(recv, MapView) and not static:
+            items = self._known_items(recv)
+            if name == "iterator" and not rest and items is not None:
+                return [IterV(recv, 0, recv.map.mod)]
+            if name in ("isEmpty", "size") and not rest and items is not None:
+                return [int(not items)] if name == "isEmpty" else [len(items)]
+            recv.map.items, recv.map.havoc, recv.map.exact = {}, True, False
+            return [UNKNOWN] if returns else [None]
         if isinstance(recv, IterV):
             src = recv.source
             items = self._known_items(src)
@@ -2708,6 +2952,9 @@ class Machine:
 
 _NOT_HANDLED = object()
 # java.util's Map interface and its implementations (Java SE 21).
+_NOKEY = object()  # a map key whose equality isn't known (Machine._map_key)
+# Map methods that change nothing (java.util.Map, Java SE 21).
+_MAP_READS = frozenset({"containsValue", "equals", "hashCode", "toString", "getClass", "forEach"})
 _JAVA_MAPS = frozenset({"java/util/Map", "java/util/HashMap", "java/util/LinkedHashMap", "java/util/TreeMap",
                         "java/util/IdentityHashMap", "java/util/WeakHashMap", "java/util/EnumMap",
                         "java/util/SortedMap", "java/util/NavigableMap", "java/util/AbstractMap",
