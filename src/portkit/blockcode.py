@@ -1074,10 +1074,12 @@ class Machine:
 
     def _havoc(self, roots: list, why: str) -> None:
         """What a call the machine couldn't follow may have written is made
-        unknown (#280 pick 4): every static field a class may still write
-        (one that isn't final) reads unknown, and every object, array, map
-        and string builder reachable from the call's arguments or from any
-        static loses what it held: its non-final fields (as the mod's and
+        unknown (#280 pick 4a): every object, array, map and string builder
+        reachable from the call's receiver and arguments loses what it held
+        (statics are kept unless ``_HAVOC_STATICS``, pick 4b, which also
+        drops every non-final static and havocs what the finals reach;
+        measured worse: Quark reads 145 fewer, BetterEnd the same): its
+        non-final fields (as the mod's and
         libraries' classes declare them; every field of a vanilla object)
         read unknown, an array's elements and a builder's text are unknown,
         a map's lookups are unknown, and a Properties object's collision
