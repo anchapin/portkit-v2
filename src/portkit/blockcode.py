@@ -1269,7 +1269,8 @@ class Machine:
             # A reference the call returns is an object of its declared
             # class or null (JVMS 4.10.1.2); of a class the closed world
             # makes exactly one object of, it is that object (#280 pick 2,
-            # see sole_instance). DEFAULT (pick 3a): not null.
+            # see sole_instance; in the registration runs only). DEFAULT
+            # (pick 3a): not null.
             ret = desc[desc.index(")") + 1:]
             if ret.startswith("L"):
                 sole = self.sole_instance(ret[1:-1])
@@ -4028,6 +4029,14 @@ def _census(machine: Machine) -> None:
         machine.steps = 0
         machine.init_class(e.name)
         saved = (dict(machine.statics), set(machine._clinit_done), set(machine._clinit_failed))
+        # A list other runs add to (Machine._mark_shared) is used as in the
+        # first registration pass: an append is kept, a read stops the run
+        # (the loader constructs the mod before its registration events, so
+        # the list isn't full yet) and what it appended makes those lists
+        # unknown, as a deferred run's (_run_pass).
+        machine.pass_no = 1
+        machine._deferred_now = False
+        machine._shared_wrote = {}
         try:
             machine.steps = 0
             machine.new_epoch()
@@ -4037,6 +4046,11 @@ def _census(machine: Machine) -> None:
             completed.add(e.name)
         except Unreadable:
             machine.statics, machine._clinit_done, machine._clinit_failed = saved
+            if machine._deferred_now:
+                for lst in machine._shared_wrote.values():
+                    machine._escape_shared(lst)
+        finally:
+            machine.pass_no = 0
     machine.census = list(machine._allocating or ())
     machine._allocating = None
     machine.census_clinits = frozenset(machine._clinit_done - machine._clinit_failed)
