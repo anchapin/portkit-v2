@@ -179,6 +179,7 @@ _MAX_PATHS = 256
 # sooner (#280): its caller takes it as havoc (Machine._havoc), so
 # exploring more of its ways only spends the step budget.
 _MAX_LIBRARY_PATHS = 16
+_HAVOC_STATICS = False
 _MAX_DEPTH = 24
 
 
@@ -1047,6 +1048,11 @@ class Machine:
             elif isinstance(a, ListV):
                 a.items, a.havoc = [], True
                 a.mod += 1
+            elif isinstance(a, Obj):
+                # Code that isn't there may set any field of an object handed
+                # to it (by reflection, an event bus, a config loader), so a
+                # field nothing here wrote no longer reads as its default.
+                a._defaults = False
         return [UNKNOWN] if returns else [None]
 
     def _system_property(self, key):
@@ -1081,11 +1087,12 @@ class Machine:
         way of a fork, so it is allowed after a branch the run can't decide."""
         self.havocs.append(why)
         todo = list(roots)
-        for (owner, fname), value in list(self.statics.items()):
-            if self._final_field(owner, fname):
-                todo.append(value)
-            else:
-                del self.statics[(owner, fname)]
+        if _HAVOC_STATICS:
+            for (owner, fname), value in list(self.statics.items()):
+                if self._final_field(owner, fname):
+                    todo.append(value)
+                else:
+                    del self.statics[(owner, fname)]
         seen: set = set()
         while todo:
             v = todo.pop()
