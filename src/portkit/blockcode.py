@@ -392,6 +392,10 @@ class ListV:
     items: list
     mod: int = 0
     havoc: bool = False
+    # Set on a list a static final field holds once its class initializer
+    # has run (see Machine.init_class, _shared_list): other top-level runs
+    # add to it, so a run reads it only in the second pass (#280).
+    shared: tuple | None = None
 
     def __post_init__(self):
         self._serial = _next_serial()
@@ -698,6 +702,10 @@ class Registration:
     # concatenation (_piece_methods): it counts only if it builds a block,
     # never as the reason another name went unread.
     concat: bool = False
+    # Recorded while running a block constructor on a new object of its own
+    # class (_constructed): it counts only for a name no other run reads, as
+    # the module run building that block makes the same registration.
+    own: bool = False
 
 
 class Machine:
@@ -705,6 +713,18 @@ class Machine:
 
     def __init__(self, classes: ClassIndex):
         self.classes = classes
+        self._subclassed: set | None = None  # see has_subclass
+        # Two-pass reading of lists shared between top-level runs (#280,
+        # see _mark_shared): which pass, whether the current run read one,
+        # which shared lists it appended to, and the methods that stopped or
+        # finished at any depth.
+        self.pass_no = 0
+        self._clinit_depth = 0
+        self._deferred_now = False
+        self._shared_wrote: dict = {}
+        self._stopped_methods: set = set()
+        self._finished_methods: set = set()
+        self._shared_ok: dict = {}
         self.statics: dict[tuple[str, str], object] = {}
         self._clinit_done: set[str] = set()
         self._clinit_failed: set[str] = set()
@@ -787,6 +807,21 @@ class Machine:
     def _library(self, name: str) -> bool:
         lib = getattr(self.classes, "is_library", None)
         return bool(lib and lib(name))
+
+    def has_subclass(self, name: str) -> bool:
+        """Whether any class of the mod or its libraries names ``name`` as
+        its superclass (a class that can't be parsed counts as one)."""
+        if self._subclassed is None:
+            supers = set()
+            for src in (self.classes._raw, self.classes._lib):
+                for k in src:
+                    cf = self.classes.get(k)
+                    if cf is None:
+                        supers.add(None)
+                    elif cf.super_name:
+                        supers.add(cf.super_name)
+            self._subclassed = supers
+        return name in self._subclassed or None in self._subclassed
 
     def is_block_class(self, name: str) -> bool:
         last = self.chain(name)[-1]
@@ -926,12 +961,120 @@ class Machine:
             return
         saved = self.epoch
         self.new_epoch()
+        serial = _ALLOCATED[0]
+        self._clinit_depth += 1
         try:
             self.run(cf, m, [])
         except Unreadable:
             self._clinit_failed.add(name)
+        else:
+            self._mark_shared(cf, serial)
         finally:
             self.epoch = saved
+            self._clinit_depth -= 1
+
+    def _mark_shared(self, cf: ClassFile, serial: int) -> None:
+        """While registrations are collected, a list this class initializer
+        made (``new ArrayList``) and left in one of the class's own static
+        final fields is shared by every later top-level run (#280: a
+        module's ``register`` adds its trees to ``static final List
+        blossomTrees``, another module's ``postRegister`` loops over it).
+        In the game every run that adds to it may come before one that
+        reads it, so a read waits for the second pass (_shared_list)."""
+        if self.registrations is None:
+            return
+        for fname, flags in getattr(cf, "field_access", {}).items():
+            v = self.statics.get((cf.name, fname))
+            if flags & 0x0018 == 0x0018 and isinstance(v, ListV) and v._serial > serial \
+                    and not v.havoc and v.shared is None:
+                v.shared = (cf.name, fname)
+
+    def _shared_list(self, lst: "ListV", write: bool) -> bool:
+        """Gate every modelled call on a shared list (see _mark_shared);
+        True when the call may go on as on any list. First pass: an append
+        is kept (each run's in turn; a run that also reads it is rerun, so
+        its appends make the list unknown), a read stops the run, which is
+        run again in the second pass once every other run has added its
+        elements; any other change makes the list unknown. Second pass: the
+        list reads in full when every method that loads its field ran to
+        the end without stopping, or only reads it there (see
+        _shared_complete); any change stops the run. Inside a class
+        initializer (run once, when the class is first used) a shared list is
+        read and changed as before (#280: AE2's initializers fill and read
+        each other's static lists)."""
+        if self._clinit_depth:
+            return True
+        if self.pass_no == 1:
+            if write == "append":
+                self._shared_wrote[id(lst)] = lst
+                return True
+            if write:
+                lst.items, lst.havoc = [], True
+                lst.mod += 1
+                return False
+            self._deferred_now = True
+            raise Unreadable("reads a list other registration runs add to (read once they have all run)")
+        if write:
+            raise Unreadable("changes a list other registration runs read")
+        if not self._shared_complete(lst):
+            lst.items, lst.havoc = [], True
+            lst.mod += 1
+            return False
+        return True
+
+    def _escape_shared(self, v) -> None:
+        """A shared list (see _mark_shared) stored in a field, another
+        static or an array, or captured by a lambda, can be reached without
+        loading its own field, so a method that adds to it may not be found
+        (_shared_complete): it is unknown from then on."""
+        if isinstance(v, ListV) and v.shared is not None:
+            v.items, v.havoc = [], True
+            v.mod += 1
+
+    def _shared_complete(self, lst: "ListV") -> bool:
+        """Whether every element any run adds to the shared list ``lst`` is
+        in it: each method of the mod or its libraries that loads its field
+        (``getstatic``) either only reads it there (the next instruction
+        calls one of java.util's reading methods on it) or ran to the end
+        without stopping, at any depth, in the first pass; and nothing
+        stored the list anywhere else (_escape_shared). Cached per list."""
+        if lst.havoc:
+            return False
+        key = id(lst)
+        if key in self._shared_ok:
+            return self._shared_ok[key]
+        owner, fname = lst.shared
+        ok = True
+        for src in (self.classes._raw, self.classes._lib):
+            for cname, raw in src.items():
+                if fname.encode() not in raw:
+                    continue
+                cf = self.classes.get(cname)
+                if cf is None:
+                    ok = False
+                    break
+                for m in cf.methods:
+                    if m.code is None:
+                        continue
+                    try:
+                        code = instructions(cf, m.code)
+                    except Exception:  # noqa: BLE001
+                        ok = False
+                        break
+                    sites = [k for k, i in enumerate(code) if i.op == 0xB2 and isinstance(i.arg, Ref)
+                             and i.arg.name == fname and self._field_owner(i.arg.owner, fname) == owner]
+                    if not sites or all(_reads_only(code, k) for k in sites):
+                        continue
+                    mk = (cf.name, m.name, m.desc)
+                    if mk not in self._finished_methods or mk in self._stopped_methods:
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if not ok:
+                break
+        self._shared_ok[key] = ok
+        return ok
 
     def new_epoch(self) -> None:
         self._epochs += 1
@@ -1293,10 +1436,16 @@ class Machine:
         if self.depth == 0:
             self._top += 1
         self.depth += 1
+        key = (cf.name, m.name, m.desc)
         try:
-            return self._run(cf, m, args)
+            out = self._run(cf, m, args)
+        except Unreadable:
+            self._stopped_methods.add(key)
+            raise
         finally:
             self.depth -= 1
+        self._finished_methods.add(key)
+        return out
 
     def _run(self, cf: ClassFile, m: Method, args: list) -> list:
         code = instructions(cf, m.code)
@@ -1492,6 +1641,7 @@ class Machine:
             val, idx, arr = s.pop(), s.pop(), s.pop()
             if isinstance(val, IterV):
                 val.escaped = True
+            self._escape_shared(val)
             if isinstance(arr, Arr):
                 try:
                     self._write(f, arr)
@@ -1577,6 +1727,8 @@ class Machine:
             v = s.pop()
             if isinstance(v, IterV):
                 v.escaped = True
+            if isinstance(v, ListV) and v.shared is not None and v.shared != (owner, ref.name):
+                self._escape_shared(v)
             self.statics[(owner, ref.name)] = v
         elif op == 0xB4:
             obj = s.pop()
@@ -1589,6 +1741,7 @@ class Machine:
             val, obj = s.pop(), s.pop()
             if isinstance(val, IterV):
                 val.escaped = True
+            self._escape_shared(val)
             if isinstance(obj, Obj):
                 self._write(f, obj)
                 obj.fields[insn.arg.name] = val
@@ -1803,6 +1956,7 @@ class Machine:
         for a in args:
             if isinstance(a, IterV):
                 a.escaped = True
+            self._escape_shared(a)
         bsm = indy.bootstrap.ref if indy.bootstrap else None
         if bsm and bsm.owner == "java/lang/invoke/LambdaMetafactory" and len(indy.args) >= 2 \
                 and isinstance(indy.args[1], Handle):
@@ -2554,6 +2708,8 @@ class Machine:
         """The elements of a collection known in full, in iteration order,
         or None."""
         if isinstance(v, ListV):
+            if v.shared is not None and not v.havoc:
+                self._shared_list(v, False)
             return None if v.havoc else list(v.items)
         if isinstance(v, (Coll, Strm)):
             return list(v.items)
@@ -2872,6 +3028,14 @@ class Machine:
         a call on a list not modelled here may change it, so it leaves the
         list unknown."""
         returns = _arg_count(desc)[1]
+        shared = recv if isinstance(recv, ListV) else recv.source if isinstance(recv, IterV) else None
+        if isinstance(shared, ListV) and shared.shared is not None and not shared.havoc and not static:
+            write = "append" if isinstance(recv, ListV) and (
+                (name == "add" and desc == "(Ljava/lang/Object;)Z")
+                or (name == "addAll" and desc == "(Ljava/util/Collection;)Z")) else (
+                name not in _COLLECTION_READS and name not in ("hasNext", "next", "equals", "hashCode",
+                                                                "toString"))
+            self._shared_list(shared, write)
         if isinstance(recv, IterV) and isinstance(recv.source, MapView):
             # An iterator over a map's values() / keySet() (#280): the map's
             # order; a change to the map since the iterator was made fails
@@ -3203,6 +3367,24 @@ def _lazy_guarded(code: list, k: int, owner: str, name: str, machine: "Machine")
     return None
 
 
+_COLLECTION_TYPES = frozenset({"java/util/List", "java/util/Collection", "java/lang/Iterable",
+                               "java/util/ArrayList", "java/util/LinkedList"})
+_COLLECTION_READS = frozenset({"iterator", "listIterator", "size", "isEmpty", "get", "stream", "forEach",
+                               "contains", "toArray", "getFirst", "getLast", "indexOf"})
+
+
+def _reads_only(code: list, k: int) -> bool:
+    """Whether the value ``code[k]`` loads is only read there: the next
+    instruction calls one of java.util's reading methods (_COLLECTION_READS)
+    on it, with no other argument loaded in between (#280, a shared list's
+    loop or size)."""
+    if k + 1 >= len(code):
+        return False
+    nxt = code[k + 1]
+    return nxt.op in (0xB6, 0xB9) and isinstance(nxt.arg, Ref) and nxt.arg.owner in _COLLECTION_TYPES \
+        and nxt.arg.name in _COLLECTION_READS and _arg_count(nxt.arg.desc)[0] == 0
+
+
 def _local_load(insn) -> int | None:
     """The local variable slot ``insn`` reads (xload, iinc, ret), if any."""
     op = insn.op
@@ -3529,6 +3711,13 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
     # builds the mod's vertical slab, whose constructor takes its name from a
     # lambda appending "_vertical_slab").
     targets = {(cf.name, m.name, m.desc) for cf, m in out}
+    # A block constructor that loads a whole name (run on its own object,
+    # see _constructed) is a target too: a module's ``register(event)``
+    # doing ``thatch = new ThatchBlock(this)`` and then handing it to a
+    # library's ``addSlabAndStairs`` names the slab from the block's
+    # registered name, which only that run holds (#280).
+    ctors = {k for k in done if k[1] == "<init>"}
+    targets |= ctors
     chosen = set(targets)
     callers = []
     codes = []
@@ -3557,6 +3746,10 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
             key = (cf.name, m.name, m.desc)
             if key in chosen or key in done or not called & targets:
                 continue
+            if m.name == "<init>" and not called & (targets - ctors):
+                # A subclass's constructor calling its super constructor:
+                # which class a run of it registers isn't the named one's.
+                continue
             found.append((cf, m))
             chosen.add(key)
         if not found:
@@ -3566,7 +3759,29 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
     return out + callers
 
 
-def _run_method(machine: Machine, cf: ClassFile, m: Method) -> None:
+def _constructed(machine: Machine, cf: ClassFile, m: Method):
+    """The receiver a method of ``cf`` run on its own (see _run_method) is
+    given: for a constructor that loads a whole blockstate name itself
+    (_naming_methods, never a caller or a name built from pieces) of a block
+    class that is neither abstract nor an interface and that no class of the
+    mod or its libraries extends, a
+    new object of exactly that class (#280: a block whose constructor hands
+    its own name, ``super("sturdy_stone", module, ..)``, while the module
+    only does ``new SturdyStoneBlock(this)``). An instance initialization
+    method is only ever invoked on an object ``new`` just made of its class
+    or of a subclass, which then calls it as its super constructor (JVMS
+    2.9.1, 4.10.1.9 invokespecial, 6.5 new); with no subclass anywhere in
+    the jar or its libraries (closed: the classes read are the mod's), the
+    object is one of exactly ``cf``. Anything else stays UNKNOWN."""
+    if m.name != "<init>" or cf.access & 0x0600 or not machine.is_block_class(cf.name) \
+            or machine.has_subclass(cf.name):
+        return UNKNOWN
+    obj = machine._new(cf.name)
+    obj._uninit = False
+    return obj
+
+
+def _run_method(machine: Machine, cf: ClassFile, m: Method, names: bool = False) -> None:
     """Run ``m`` once on unknown arguments for the registrations it makes,
     its class initialized first. A run that stops part way (Unreadable)
     leaves the statics it wrote half done (a library's "chain started" flag
@@ -3580,9 +3795,32 @@ def _run_method(machine: Machine, cf: ClassFile, m: Method) -> None:
         machine.init_class(cf.name)
         machine.steps = 0
         machine.new_epoch()
-        machine.run(cf, m, [UNKNOWN] * (n + (0 if static else 1)))
+        recv = [] if static else [_constructed(machine, cf, m) if names else UNKNOWN]
+        machine.run(cf, m, recv + [UNKNOWN] * n)
     except Unreadable:
         machine.statics, machine._clinit_done, machine._clinit_failed = saved
+
+
+def _run_pass(machine: Machine, cf: ClassFile, m: Method, deferred: list, concat: bool) -> None:
+    """_run_method in the first pass (#280): a run that reads a list other
+    runs add to (see Machine._mark_shared) is dropped, its registrations
+    with it, and queued for the second pass; what it appended to a shared
+    list makes that list unknown (the rerun would append it again)."""
+    first = len(machine.registrations)
+    machine._deferred_now = False
+    machine._shared_wrote = {}
+    _run_method(machine, cf, m, names=not concat)
+    if m.name == "<init>" and not concat:
+        for reg in machine.registrations[first:]:
+            reg.own = True
+    if machine._deferred_now:
+        del machine.registrations[first:]
+        for lst in machine._shared_wrote.values():
+            machine._escape_shared(lst)
+        deferred.append((cf, m, concat))
+    elif concat:
+        for reg in machine.registrations[first:]:
+            reg.concat = True
 
 
 def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[str, tuple[list, str]]]:
@@ -3600,18 +3838,30 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     # constructing ``new FooBlock("name", ...)``. Each method of a wanted class
     # that loads one of the names runs once on unknown arguments.
     done = set()
+    deferred: list = []
+    machine.pass_no = 1
     for cname in wanted:
         for cf, m in _naming_methods(classes, cname, set(names)):
             done.add((cf.name, m.name, m.desc))
-            _run_method(machine, cf, m)
+            _run_pass(machine, cf, m, deferred, False)
     # Names built by concatenation (#280): every other method that may build
     # one (see _piece_methods) runs the same way, its class initialized
     # first (a static initializer building names in a loop over an enum).
-    first = len(machine.registrations)
     for cf, m in _piece_methods(classes, set(names), done):
-        _run_method(machine, cf, m)
-    for reg in machine.registrations[first:]:
-        reg.concat = True
+        _run_pass(machine, cf, m, deferred, True)
+    # Second pass (#280): the runs that read a list other runs add to, once
+    # every first-pass run has added its elements (see Machine._mark_shared).
+    machine.pass_no = 2
+    for cf, m, concat in deferred:
+        first = len(machine.registrations)
+        _run_method(machine, cf, m, names=not concat)
+        if concat:
+            for reg in machine.registrations[first:]:
+                reg.concat = True
+    # A constructor's own run (Registration.own) only stands in for a name
+    # no other run registered.
+    others = {r.name for r in machine.registrations if not r.own and r.value is not None}
+    machine.registrations = [r for r in machine.registrations if not (r.own and r.name in others)]
     regs: dict[str, list] = {}
     unread: dict[str, str] = {}
     concat_only: set = set()
