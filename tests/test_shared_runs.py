@@ -94,3 +94,12 @@ def test_without_registrations_a_static_list_is_not_shared():
     m = Machine(_index())
     m.init_class("com/example/smod/TreesModule")
     assert m.statics[("com/example/smod/TreesModule", "trees")].shared is None
+
+
+def test_inside_a_class_initializer_a_shared_list_is_used_as_before():
+    # Initializers run once, when the class is first used (AE2's fill and read each other's lists).
+    m, _reg = _read()
+    trees = m.statics[("com/example/smod/TreesModule", "trees")]
+    m.pass_no, m._clinit_depth = 1, 1
+    assert m._shared_list(trees, False) is True
+    assert m._shared_list(trees, True) is True

@@ -719,6 +719,7 @@ class Machine:
         # which shared lists it appended to, and the methods that stopped or
         # finished at any depth.
         self.pass_no = 0
+        self._clinit_depth = 0
         self._deferred_now = False
         self._shared_wrote: dict = {}
         self._stopped_methods: set = set()
@@ -961,6 +962,7 @@ class Machine:
         saved = self.epoch
         self.new_epoch()
         serial = _ALLOCATED[0]
+        self._clinit_depth += 1
         try:
             self.run(cf, m, [])
         except Unreadable:
@@ -969,6 +971,7 @@ class Machine:
             self._mark_shared(cf, serial)
         finally:
             self.epoch = saved
+            self._clinit_depth -= 1
 
     def _mark_shared(self, cf: ClassFile, serial: int) -> None:
         """While registrations are collected, a list this class initializer
@@ -995,7 +998,12 @@ class Machine:
         elements; any other change makes the list unknown. Second pass: the
         list reads in full when every method that loads its field ran to
         the end without stopping, or only reads it there (see
-        _shared_complete); any change stops the run."""
+        _shared_complete); any change stops the run. Inside a class
+        initializer (run once, when the class is first used) a shared list is
+        read and changed as before (#280: AE2's initializers fill and read
+        each other's static lists)."""
+        if self._clinit_depth:
+            return True
         if self.pass_no == 1:
             if write == "append":
                 self._shared_wrote[id(lst)] = lst
