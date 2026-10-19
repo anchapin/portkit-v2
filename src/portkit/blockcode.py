@@ -175,6 +175,11 @@ _ANY = "__any"
 
 _MAX_STEPS = 400_000
 _MAX_PATHS = 256
+# While registrations are collected, a dependency jar's method gives up
+# sooner (#280): its caller takes it as havoc (Machine._havoc), so
+# exploring more of its ways only spends the step budget.
+_MAX_LIBRARY_PATHS = 16
+_HAVOC_STATICS = False
 _MAX_DEPTH = 24
 
 
@@ -284,6 +289,11 @@ class Lam:
     # Supplier and ``(Lcom/x/LampBlock;)Lcom/x/LampItem;`` for an item
     # Function. None when the call site doesn't carry one.
     itype: str | None = None
+    # The functional interface the lambda object implements (the call
+    # site's return type), when made by LambdaMetafactory.metafactory: its
+    # class extends Object and implements only that interface (Java SE 21,
+    # LambdaMetafactory); None otherwise (altMetafactory may add markers).
+    iface: str | None = None
 
 
 # Every object, array, map and string builder the machine makes is numbered
@@ -317,6 +327,9 @@ class Arr:
 @dataclass(eq=False)
 class MapV:
     items: dict
+    # Set when a call the machine couldn't follow may have changed the map
+    # (Machine._havoc, #280): a lookup in it is then unknown.
+    havoc: bool = False
 
     def __post_init__(self):
         self._serial = _next_serial()
@@ -328,6 +341,53 @@ class Builder:
 
     def __post_init__(self):
         self._serial = _next_serial()
+
+
+@dataclass(eq=False)
+class ListV:
+    """A mutable ``java.util.ArrayList`` / ``LinkedList`` (#280 pick 2):
+    its elements in order, how often it was structurally changed
+    (``modCount``, AbstractList), and whether a call the machine couldn't
+    follow may have changed it (then nothing about it is known)."""
+
+    items: list
+    mod: int = 0
+    havoc: bool = False
+
+    def __post_init__(self):
+        self._serial = _next_serial()
+
+
+@dataclass(eq=False)
+class IterV:
+    """An iterator over a :class:`ListV` or an immutable collection: the
+    next index, and the list's ``modCount`` when it was made (a list changed
+    other than through the iterator fails fast, ArrayList$Itr)."""
+
+    source: object
+    pos: int = 0
+    mod: int = 0
+
+    def __post_init__(self):
+        self._serial = _next_serial()
+
+
+@dataclass(frozen=True)
+class CollectorV:
+    """A ``java.util.stream.Collectors`` collector: ``toList`` /
+    ``toUnmodifiableList`` / ``toSet``-less list kinds, or ``toCollection``
+    with its supplier."""
+
+    kind: str
+    supplier: object = None
+
+
+@dataclass(frozen=True)
+class RKey:
+    """A ``ResourceKey``: the location it names (ResourceKey#create(registry,
+    location), MC 1.21; ``location()`` returns it)."""
+
+    location: object
 
 
 @dataclass(frozen=True)
@@ -609,6 +669,8 @@ class Machine:
         # (instructions, offset -> index) of each method being run, innermost
         # last (see _throws_only).
         self._code: list = []
+        # The class of each method being run, innermost last.
+        self._running: list = []
         self.depth = 0
         # Whether the instruction being run sits after an undecided branch.
         self._forked = False
@@ -639,6 +701,15 @@ class Machine:
         # (class, static field) -> whether it reads as null until written
         # (see _lazy_null).
         self._lazy: dict = {}
+        # Whether a class of the mod or its libraries can change a system
+        # property (see _system_property); computed on first use.
+        self._sets_properties: bool | None = None
+        # How many library calls the run couldn't follow and took as havoc
+        # (see _havoc), with the first reason.
+        self.havocs: list = []
+        # The frame of the call being made (see _invoke): a modelled change
+        # to a mutable java.util collection is a write by it (see _write).
+        self._frame: Frame | None = None
 
     # -- classes ------------------------------------------------------------
 
@@ -718,6 +789,25 @@ class Machine:
             return 0
         if isinstance(cls, str) and self._vanilla_block_id(v) is not None and self.is_mod(cls):
             # A vanilla Blocks constant is an object of a vanilla class (#280).
+            return 0
+        if isinstance(v, Lam) and v.iface is not None and isinstance(cls, str) and self.is_mod(cls):
+            # A lambda's class extends Object and implements only its
+            # functional interface (#280: ``setter instanceof TraitOp``).
+            target = self.classes.get(cls)
+            if not target.access & 0x0200:
+                return 0
+            seen, todo = set(), [v.iface]
+            while todo:
+                name = todo.pop()
+                if name == cls:
+                    return 1
+                if name in seen:
+                    continue
+                seen.add(name)
+                icf = self.classes.get(name)
+                if icf is None:
+                    return UNKNOWN  # a vanilla or java interface: its supers aren't known here
+                todo.extend(icf.interfaces)
             return 0
         if not isinstance(v, Obj) or not isinstance(cls, str) or not self.is_mod(v.cls):
             return UNKNOWN
@@ -894,13 +984,43 @@ class Machine:
             # A call into a dependency jar's code (#280) is a registration
             # the same way a call into code that isn't there is (a name and
             # the block handed to it, see _record), and is followed as well.
-            self._record(args)
+            # The object it is called on, when it is one of the jar's own
+            # objects and no block (a library's registry or block builder),
+            # is what the call is made on, not something handed to it (#280
+            # pick 4: ``registry.defineDefaultBlock(name, factory)`` once the
+            # registry is known).
+            handed = args[1:] if recv is not None and isinstance(recv, Obj) and self.is_mod(recv.cls) \
+                and not self.is_block_class(recv.cls) else args
+            self._record(handed)
         if self.is_mod(start):
             if static:
                 self.init_class(start)
             found = self.find_method(start, name, desc)
             if found is not None:
-                return self.run(*found, args)
+                if self.registrations is None or not self._library(found[0].name):
+                    return self.run(*found, args)
+                try:
+                    results = self.run(*found, args)
+                except Unreadable as exc:
+                    if str(exc) == _TOO_MUCH:
+                        raise
+                    # A dependency jar's method the registration run can't
+                    # follow (#280 pick 4): taken as havoc on everything it
+                    # could write, what it returns unknown.
+                    self._havoc(args, f"{found[0].name}.{name}: {exc}")
+                    return [UNKNOWN] if _arg_count(desc)[1] else [None]
+                if len(results) > 1 and not all(_value_equal(r, results[0]) for r in results[1:]) \
+                        and not (self._running and self._library(self._running[-1])) \
+                        and not any(isinstance(r, (str, Tail, RL, RKey)) for r in results):
+                    # Its ways return different values, none of them a name:
+                    # the mod's code goes on with one unknown value instead
+                    # of one way per value (what the ways wrote after their
+                    # branch is only what they allocated since, see _write,
+                    # so nothing else differs between them). A name a way
+                    # returns keeps its own way (#325: the way where the
+                    # library's lookup answered registers that name).
+                    return [UNKNOWN]
+                return results
             vowner = self.vanilla_base(start)
         else:
             vowner = owner
@@ -925,13 +1045,120 @@ class Machine:
                 a.items = [UNKNOWN] * len(a.items)
             elif isinstance(a, MapV):
                 a.items = {}
+            elif isinstance(a, ListV):
+                a.items, a.havoc = [], True
+                a.mod += 1
+            elif isinstance(a, Obj):
+                # Code that isn't there may set any field of an object handed
+                # to it (by reflection, an event bus, a config loader), so a
+                # field nothing here wrote no longer reads as its default.
+                a._defaults = False
         return [UNKNOWN] if returns else [None]
+
+    def _system_property(self, key):
+        """``System.getProperty(key)`` (#280 pick 1): null for a known key
+        outside what the JVM and the game's launchers define
+        (_RESERVED_PROPERTIES) when no class of the mod or its libraries
+        can set a system property (``System.setProperty``,
+        ``setProperties``, ``clearProperty`` or the mutable
+        ``getProperties()``), as in a player's game started without
+        ``-D<key>``; anything else is unknown."""
+        if not isinstance(key, str) or not key or key.startswith(_RESERVED_PROPERTIES):
+            return UNKNOWN
+        if self._sets_properties is None:
+            mentions = getattr(self.classes, "mentions", None)
+            self._sets_properties = mentions is None or any(
+                mentions(n) for n in (b"setProperty", b"setProperties", b"clearProperty",
+                                      b"()Ljava/util/Properties;"))
+        return UNKNOWN if self._sets_properties else None
+
+    def _havoc(self, roots: list, why: str) -> None:
+        """What a call the machine couldn't follow may have written is made
+        unknown (#280 pick 4a): every object, array, map and string builder
+        reachable from the call's receiver and arguments loses what it held
+        (statics are kept unless ``_HAVOC_STATICS``, pick 4b, which also
+        drops every non-final static and havocs what the finals reach;
+        measured worse: Quark reads 145 fewer, BetterEnd the same): its
+        non-final fields (as the mod's and
+        libraries' classes declare them; every field of a vanilla object)
+        read unknown, an array's elements and a builder's text are unknown,
+        a map's lookups are unknown, and a Properties object's collision
+        and light are unknown. Final fields keep their values (JVMS 6.5
+        putfield/putstatic: a final field is written only by its own class's
+        constructor or initializer). Making a value unknown holds for every
+        way of a fork, so it is allowed after a branch the run can't decide."""
+        self.havocs.append(why)
+        todo = list(roots)
+        if _HAVOC_STATICS:
+            for (owner, fname), value in list(self.statics.items()):
+                if self._final_field(owner, fname):
+                    todo.append(value)
+                else:
+                    del self.statics[(owner, fname)]
+        seen: set = set()
+        while todo:
+            v = todo.pop()
+            if id(v) in seen or not isinstance(v, (Obj, Arr, MapV, Builder, Props, Coll, PairV, Opt, Strm,
+                                                   ListV, IterV, RKey)):
+                continue
+            seen.add(id(v))
+            if isinstance(v, Obj):
+                v._defaults = False
+                for key, val in list(v.fields.items()):
+                    # ``__`` keys are what the machine keeps of an object's
+                    # construction (the Properties a block took, which
+                    # vanilla copies into each state when it is built; a
+                    # vanilla constructor's arguments; a name), not fields.
+                    if key.startswith("__"):
+                        continue
+                    todo.append(val)
+                    if not self._final_field(v.cls, key, static=False):
+                        v.fields[key] = UNKNOWN
+            elif isinstance(v, Arr):
+                todo.extend(v.items)
+                v.items = [UNKNOWN] * len(v.items)
+            elif isinstance(v, MapV):
+                todo.extend(v.items.keys())
+                todo.extend(v.items.values())
+                v.items, v.havoc = {}, True
+            elif isinstance(v, Builder):
+                v.parts = [UNKNOWN]
+            elif isinstance(v, ListV):
+                todo.extend(v.items)
+                v.items, v.havoc = [], True
+                v.mod += 1
+            elif isinstance(v, IterV):
+                todo.append(v.source)
+            elif isinstance(v, RKey):
+                todo.append(v.location)
+            elif isinstance(v, Props):
+                v.has_collision, v.light = UNKNOWN, UNKNOWN
+            elif isinstance(v, (Coll, Strm)):
+                todo.extend(v.items)
+            elif isinstance(v, PairV):
+                todo += [v.left, v.right]
+            elif isinstance(v, Opt):
+                todo.append(v.value)
+
+    def _final_field(self, owner: str, name: str, static: bool = True) -> bool:
+        """Whether ``owner`` (or the class in its chain declaring ``name``)
+        declares field ``name`` final; False for a field no class of the
+        mod or its libraries declares (a vanilla object's)."""
+        for cname in self.chain(owner):
+            cf = self.classes.get(cname)
+            if cf is None:
+                return False
+            access = getattr(cf, "field_access", {}).get(name)
+            if access is not None:
+                return bool(access & 0x0010) and bool(access & 0x0008) == static
+        return False
 
     def _record(self, args: list) -> None:
         if self.registrations is None:
             return
         if any(isinstance(a, RL) and a.lookup for a in args):
             return
+        args = [a.location if isinstance(a, RKey) else a for a in args]
         names = [a.path if isinstance(a, RL) else a.fields["__rl"] if isinstance(a, Obj) and "__rl" in a.fields
                  else a for a in args
                  if isinstance(a, (str, RL, Tail)) or (isinstance(a, Obj) and "__rl" in a.fields)]
@@ -986,10 +1213,12 @@ class Machine:
         code = instructions(cf, m.code)
         at = {insn.offset: k for k, insn in enumerate(code)}
         self._code.append((self.depth, code, at))
+        self._running.append(cf.name)
         try:
             return self._run_code(cf, m, args, code, at)
         finally:
             self._code.pop()
+            self._running.pop()
 
     def _run_code(self, cf: ClassFile, m: Method, args: list, code: list, at: dict) -> list:
         # Longs and doubles take two local slots (JVMS 2.6.1).
@@ -1024,7 +1253,7 @@ class Machine:
                 while True:
                     self.steps += 1
                     if self.steps > _MAX_STEPS:
-                        raise Unreadable("too much code to follow")
+                        raise Unreadable(_TOO_MUCH)
                     insn = code[at[frame.pc]] if frame.pc in at else None
                     if insn is None:
                         raise Unreadable(f"jump into the middle of an instruction in {cf.name}.{m.name}")
@@ -1046,7 +1275,7 @@ class Machine:
                         for g in payload:
                             g.fork_serial = _ALLOCATED[0]
                         paths += len(payload) - 1
-                        if paths > _MAX_PATHS:
+                        if paths > (_MAX_LIBRARY_PATHS if self._weak_ok() else _MAX_PATHS):
                             raise Unreadable(f"too many paths through {cf.name}.{m.name}")
                         if recv is not None:
                             # Every way starts from the receiver as it is now.
@@ -1153,7 +1382,16 @@ class Machine:
         elif 0x4F <= op <= 0x56:  # xastore
             val, idx, arr = s.pop(), s.pop(), s.pop()
             if isinstance(arr, Arr):
-                self._write(f, arr)
+                try:
+                    self._write(f, arr)
+                except Unreadable:
+                    if not self._weak_ok():
+                        raise
+                    # A dependency jar's store into an array on one way of
+                    # a branch the run can't decide (#280 pick 2): the
+                    # array's elements are unknown from then on, on every way.
+                    arr.items = [UNKNOWN] * len(arr.items)
+                    return None
                 if isinstance(idx, int) and 0 <= idx < len(arr.items):
                     arr.items[idx] = val
                 else:
@@ -1227,7 +1465,7 @@ class Machine:
             obj = s.pop()
             name = insn.arg.name
             if isinstance(obj, Obj):
-                s.append(obj.fields.get(name, UNKNOWN))
+                s.append(obj.fields[name] if name in obj.fields else self._field_default(obj, name))
             else:
                 s.append(UNKNOWN)
         elif op == 0xB5:
@@ -1409,9 +1647,36 @@ class Machine:
             return MapV({})
         if cls == "java/lang/StringBuilder":
             return Builder([])
+        if cls in _MUTABLE_LISTS:
+            return ListV([])
         obj = Obj(cls)
         obj._uninit = True  # until its constructor is called (see _invoke)
+        # A new object's fields hold their default values (null, 0, false)
+        # until written (JVMS 2.3, 2.4, 6.5 new); the fields the mod's and
+        # libraries' classes declare are read so (see _field_default).
+        obj._defaults = self.is_mod(cls)
         return obj
+
+    def _field_default(self, obj: "Obj", name: str):
+        """The default value a field ``name`` of ``obj`` that nothing wrote
+        holds (null, 0, 0.0), when a class of the mod or its libraries in
+        ``obj``'s chain declares it, the object was made by ``new`` here,
+        its constructor was followed to the end and nothing the machine
+        couldn't follow has had it since; else UNKNOWN."""
+        if not getattr(obj, "_defaults", False) or "__partial" in obj.fields:
+            return UNKNOWN
+        for cname in self.chain(obj.cls):
+            cf = self.classes.get(cname)
+            if cf is None:
+                return UNKNOWN
+            desc = cf.fields.get(name)
+            if desc is not None:
+                if getattr(cf, "field_access", {}).get(name, 0) & 0x0008:
+                    return UNKNOWN  # a static, not this object's
+                if desc[0] in "L[":
+                    return None
+                return 0.0 if desc[0] in "FD" else 0
+        return UNKNOWN
 
     def _indy(self, indy: Indy, f: Frame):
         n, _ = _arg_count(indy.desc)
@@ -1421,7 +1686,9 @@ class Machine:
                 and isinstance(indy.args[1], Handle):
             itype = indy.args[2] if len(indy.args) >= 3 else None
             itype = itype[1] if isinstance(itype, tuple) and itype[:1] == ("methodtype",) else None
-            f.stack.append(Lam(indy.args[1], tuple(args), itype))
+            ret = indy.desc.rsplit(")", 1)[-1]
+            iface = ret[1:-1] if bsm.name == "metafactory" and ret.startswith("L") else None
+            f.stack.append(Lam(indy.args[1], tuple(args), itype, iface))
         elif bsm and bsm.owner == "java/lang/invoke/StringConcatFactory" and indy.args \
                 and isinstance(indy.args[0], str):
             recipe, consts = indy.args[0], list(indy.args[1:])
@@ -1449,6 +1716,19 @@ class Machine:
         args = [f.stack.pop() for _ in range(total)][::-1]
         if ref.name == "<init>":
             obj = args[0]
+            if isinstance(obj, ListV):
+                # new ArrayList() / ArrayList(int capacity) / LinkedList()
+                # start empty; ArrayList(Collection) / LinkedList(Collection)
+                # start with the collection's elements in its iteration order.
+                if ref.desc == "(Ljava/util/Collection;)V":
+                    items = self._known_items(args[1])
+                    if items is None:
+                        obj.havoc = True
+                    else:
+                        obj.items = list(items)
+                elif ref.desc not in ("()V", "(I)V"):
+                    obj.havoc = True
+                return None
             if isinstance(obj, Builder):
                 # new StringBuilder(String | CharSequence) starts with it.
                 if ref.desc in ("(Ljava/lang/String;)V", "(Ljava/lang/CharSequence;)V"):
@@ -1488,6 +1768,7 @@ class Machine:
             self._vanilla_init(ref, args, f)
             return None
         self._forked = f.forked
+        self._frame = f
         if self.effects is not None and ref.name in _SET_BLOCK and not static and args \
                 and isinstance(args[0], Obj) and args[0].cls == _LEVEL:
             if self.depth != self.effects_depth:
@@ -1500,6 +1781,13 @@ class Machine:
             return None
         if not results:
             return ("throw", None)
+        if len(results) > 1 and all(_value_equal(r, results[0]) for r in results[1:]):
+            # Every way of the callee returned the same value (#280): a
+            # string, number, constant or name (equal by value), or the same
+            # object. What its ways wrote after the branch they split at is
+            # only what they allocated since (see _write), which nothing but
+            # an equal value can carry out, so the caller goes on as one way.
+            results = results[:1]
         if len(results) == 1:
             f.stack.append(results[0])
             return None
@@ -1569,6 +1857,31 @@ class Machine:
     def vanilla(self, owner: str, name: str, desc: str, args: list, static: bool):
         recv = None if static else (args[0] if args else None)
         rest = args if static else args[1:]
+        if owner == "java/lang/System" and static and name == "getProperty" \
+                and desc == "(Ljava/lang/String;)Ljava/lang/String;" and len(rest) == 1:
+            return [self._system_property(rest[0])]
+        if owner == "java/lang/Class" and name == "desiredAssertionStatus" and not static and not rest \
+                and isinstance(recv, ClassLit):
+            # javac's ``$assertionsDisabled`` test: assertions are off unless
+            # the JVM is started with -ea (Class#desiredAssertionStatus,
+            # Java SE 21), which a player's game isn't (#280 pick 1).
+            return [0]
+        if recv is UNKNOWN and name == "hasNext" and owner == "java/util/Iterator" and not static \
+                and self.registrations is not None and self._running and self._library(self._running[-1]):
+            # A dependency jar's loop over a collection whose contents aren't
+            # known (#280 pick 2): it can't be followed, and each way would
+            # only add another unknown turn.
+            raise Unreadable("iterates a collection whose contents aren't known")
+        try:
+            handled = self._mutable(owner, name, desc, recv, rest, static)
+        except _WeakWrite:
+            target = recv.source if isinstance(recv, IterV) else recv
+            if isinstance(target, ListV):
+                target.items, target.havoc = [], True
+                target.mod += 1
+            return [UNKNOWN] if _arg_count(desc)[1] else [None]
+        if handled is not _NOT_HANDLED:
+            return handled
         if self.holders:
             held = self._holder_call(owner, name, desc, recv, rest, static)
             if held is not _NOT_HANDLED:
@@ -1749,6 +2062,8 @@ class Machine:
             if name in ("newEnumMap", "newHashMap"):
                 return [MapV({})] if not rest or isinstance(rest[0], ClassLit) else [UNKNOWN]
         if isinstance(recv, MapV):
+            if recv.havoc:
+                return [UNKNOWN] if _arg_count(desc)[1] else [None]
             if name in ("get", "getOrDefault") and rest:
                 if not _hashable(rest[0]):
                     return [UNKNOWN]
@@ -1761,6 +2076,25 @@ class Machine:
                 old = recv.items.get(rest[0])
                 recv.items[rest[0]] = rest[1]
                 return [old]
+            if name in ("isEmpty", "size") and not rest:
+                return [int(not recv.items)] if name == "isEmpty" else [len(recv.items)]
+            if name == "containsKey" and len(rest) == 1 and self._key_ok(rest[0]):
+                return [int(rest[0] in recv.items)]
+            if name == "computeIfAbsent" and len(rest) == 2 and self._key_ok(rest[0]):
+                # Map#computeIfAbsent (Java SE 21, HashMap): the value held
+                # for the key, else the function's value for it, kept unless
+                # null.
+                if rest[0] in recv.items and recv.items[rest[0]] is not None:
+                    return [recv.items[rest[0]]]
+                out = self._apply(rest[1], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [rest[0]])
+                if out is UNKNOWN or isinstance(out, _Many):
+                    self._write_by_call(recv)
+                    recv.items, recv.havoc = {}, True
+                    return [UNKNOWN]
+                if out is not None:
+                    self._write_by_call(recv)
+                    recv.items[rest[0]] = out
+                return [out]
             return [UNKNOWN]
         if isinstance(recv, Builder):
             if name == "append" and rest:
@@ -1783,7 +2117,22 @@ class Machine:
             return [Strm(tuple(rest[0].items))]
         if isinstance(recv, Strm) and name == "reduce":
             return self._reduce(recv, rest)
+        if isinstance(recv, Strm):
+            return self._stream(recv, name, desc, rest)
+        if owner == "java/util/stream/Collectors" and static:
+            if name in ("toList", "toUnmodifiableList") and not rest:
+                return [CollectorV(name)]
+            if name == "toCollection" and len(rest) == 1:
+                return [CollectorV(name, rest[0])]
+            return [UNKNOWN]
+        if owner == "net/minecraft/resources/ResourceKey" and static and name == "create" and len(rest) == 2 \
+                and (isinstance(rest[1], RL) or (isinstance(rest[1], Obj) and "__rl" in rest[1].fields)):
+            return [RKey(rest[1])]
+        if isinstance(recv, RKey) and name == "location" and not rest:
+            return [recv.location]
         if isinstance(recv, Opt):
+            if name in ("isPresent", "isEmpty") and not rest:
+                return [int((recv.value is not None) == (name == "isPresent"))]
             if name in ("get", "orElseThrow"):
                 return [recv.value] if recv.value is not None else []
             if name == "orElse" and rest:
@@ -2068,6 +2417,275 @@ class Machine:
             return [UNKNOWN] if _arg_count(desc)[1] else [None]
         return _NOT_HANDLED
 
+    # -- mutable java.util collections (#280 pick 2) ------------------------
+
+    def _known_items(self, v):
+        """The elements of a collection known in full, in iteration order,
+        or None."""
+        if isinstance(v, ListV):
+            return None if v.havoc else list(v.items)
+        if isinstance(v, (Coll, Strm)):
+            return list(v.items)
+        return None
+
+    def _weak_ok(self) -> bool:
+        """Whether a write after an undecided branch may make what it writes
+        unknown on every way instead of stopping the run: while
+        registrations are collected, in a dependency jar's code."""
+        return self.registrations is not None and bool(self._running) and self._library(self._running[-1])
+
+    def _write_by_call(self, target) -> None:
+        """A modelled change to ``target`` made by the call being run is a
+        write by that call's frame (see _write). A list changed on one way
+        of a branch the run can't decide (not one that way allocated) is
+        unknown from then on, on every way (whichever way the game takes,
+        nothing about it is claimed), instead of stopping the run."""
+        if self._frame is None:
+            return
+        try:
+            self._write(self._frame, target)
+        except Unreadable:
+            if not isinstance(target, (ListV, IterV)):
+                raise
+            raise _WeakWrite()
+
+    def _key_ok(self, key) -> bool:
+        """Whether ``key`` compares in a Java map as it does here: a known
+        string, number or constant, or an object whose class (the mod's or a
+        library's, up to java.lang.Object or Enum) declares no ``equals``,
+        so Object#equals (identity) decides."""
+        if key is UNKNOWN or not _hashable(key):
+            return False
+        if isinstance(key, (ListV, IterV, MapV, Arr, Builder, Props)):
+            return False
+        if isinstance(key, Obj):
+            chain = self.chain(key.cls)
+            if chain[-1] not in ("java/lang/Object", "java/lang/Enum"):
+                return False
+            return not any(self.classes.get(c) is not None
+                           and self.classes.get(c).method("equals", "(Ljava/lang/Object;)Z") is not None
+                           for c in chain)
+        return True
+
+    def _apply(self, fn, method: str, desc: str, args: list):
+        """The one value ``fn`` (a lambda, or an object of the mod's or a
+        library's class implementing a functional interface's ``method``)
+        returns for ``args``; UNKNOWN when it can't be called or returns
+        unknown, a :class:`_Many` when its ways return different values."""
+        frame = self._frame
+        try:
+            if isinstance(fn, Lam):
+                out = self.call_lambda(fn, args)
+            elif isinstance(fn, Obj) and self.is_mod(fn.cls):
+                found = self.find_method(fn.cls, method, desc)
+                if found is None:
+                    return UNKNOWN
+                out = self.run(*found, [fn, *args])
+            else:
+                return UNKNOWN
+        finally:
+            self._frame = frame
+        if not out:
+            raise Unreadable("a function handed to a collection throws")
+        first = out[0]
+        if all(o is first or _equal(o, first) for o in out[1:]):
+            return first
+        return _Many(tuple(out))
+
+    def _test(self, fn, item):
+        """``fn.test(item)`` as 1 or 0, or None when not known."""
+        out = self._apply(fn, "test", "(Ljava/lang/Object;)Z", [item])
+        if isinstance(out, bool):
+            out = int(out)
+        return out if out in (0, 1) and not isinstance(out, _Many) else None
+
+    def _havoc_list(self, lst: "ListV", returns: bool) -> list:
+        self._write_by_call(lst)
+        lst.items, lst.havoc = [], True
+        lst.mod += 1
+        return [UNKNOWN] if returns else [None]
+
+    def _mutable(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
+        """Calls on a mutable list (:class:`ListV`), an iterator
+        (:class:`IterV`), and ``iterator`` / ``isEmpty`` / ``get`` /
+        ``contains`` on an immutable collection (:class:`Coll`), as
+        java.util's ArrayList, LinkedList and their iterators do them
+        (Java SE 21). A change is a write by the calling frame (see _write);
+        a call on a list not modelled here may change it, so it leaves the
+        list unknown."""
+        returns = _arg_count(desc)[1]
+        if isinstance(recv, IterV):
+            src = recv.source
+            items = self._known_items(src)
+            if isinstance(src, ListV) and src.havoc and name in ("hasNext", "next"):
+                # A loop over a list whose contents aren't known can't be
+                # followed (each way would only add another unknown turn).
+                raise Unreadable("iterates a list whose contents aren't known")
+            if items is None or (isinstance(src, ListV) and src.mod != recv.mod):
+                if name == "next" and isinstance(src, ListV) and not src.havoc and src.mod != recv.mod:
+                    raise Unreadable("a list changes while it is iterated (ConcurrentModificationException)")
+                return [UNKNOWN] if returns else [None]
+            if name == "hasNext" and not rest:
+                return [int(recv.pos < len(items))]
+            if name == "next" and not rest:
+                if recv.pos >= len(items):
+                    return []  # NoSuchElementException
+                self._write_by_call(recv)
+                recv.pos += 1
+                return [items[recv.pos - 1]]
+            if name == "remove" and not rest and isinstance(src, ListV) and recv.pos > 0:
+                self._write_by_call(recv)
+                self._write_by_call(src)
+                del src.items[recv.pos - 1]
+                recv.pos -= 1
+                src.mod += 1
+                recv.mod = src.mod
+                return [None]
+            if isinstance(src, ListV):
+                return self._havoc_list(src, returns)
+            return [UNKNOWN] if returns else [None]
+        if isinstance(recv, Coll) and not static:
+            if name == "iterator" and not rest:
+                return [IterV(recv)]
+            if name == "isEmpty" and not rest:
+                return [int(not recv.items)]
+            if name == "get" and len(rest) == 1 and isinstance(rest[0], int) and not isinstance(rest[0], bool):
+                return [recv.items[rest[0]]] if 0 <= rest[0] < len(recv.items) else []
+            return _NOT_HANDLED
+        if not isinstance(recv, ListV) or static:
+            return _NOT_HANDLED
+        lst = recv
+        if name in ("equals", "hashCode", "toString"):
+            return [UNKNOWN]
+        if lst.havoc:
+            if name in ("iterator", "listIterator") and not rest:
+                return [IterV(lst, 0, lst.mod)]
+            if name in ("forEach", "removeIf"):
+                raise Unreadable("iterates a list whose contents aren't known")
+            if name in ("size", "isEmpty", "get", "stream", "contains", "toArray", "indexOf",
+                        "getFirst", "getLast", "peek"):
+                return [UNKNOWN]
+            return self._havoc_list(lst, returns)
+        items = lst.items
+        if name == "add" and desc == "(Ljava/lang/Object;)Z":
+            self._write_by_call(lst)
+            items.append(rest[0])
+            lst.mod += 1
+            return [1]
+        if name == "add" and desc == "(ILjava/lang/Object;)V" and isinstance(rest[0], int) \
+                and 0 <= rest[0] <= len(items):
+            self._write_by_call(lst)
+            items.insert(rest[0], rest[1])
+            lst.mod += 1
+            return [None]
+        if name == "addAll" and desc == "(Ljava/util/Collection;)Z":
+            more = self._known_items(rest[0])
+            if more is None:
+                return self._havoc_list(lst, returns)
+            self._write_by_call(lst)
+            items.extend(more)
+            lst.mod += 1
+            return [int(bool(more))]
+        if name == "size" and not rest:
+            return [len(items)]
+        if name == "isEmpty" and not rest:
+            return [int(not items)]
+        if name == "get" and desc == "(I)Ljava/lang/Object;":
+            i = rest[0]
+            if isinstance(i, int) and not isinstance(i, bool):
+                return [items[i]] if 0 <= i < len(items) else []
+            return [UNKNOWN]
+        if name in ("iterator", "listIterator") and not rest:
+            return [IterV(lst, 0, lst.mod)]
+        if name == "stream" and not rest:
+            return [Strm(tuple(items))]
+        if name == "toArray" and desc in ("()[Ljava/lang/Object;", "(Ljava/util/function/IntFunction;)[Ljava/lang/Object;"):
+            return [Arr(list(items))]
+        if name == "clear" and not rest:
+            self._write_by_call(lst)
+            lst.items = []
+            lst.mod += 1
+            return [None]
+        if name == "forEach" and desc == "(Ljava/util/function/Consumer;)V":
+            # ArrayList#forEach: each element in order; a change to the list
+            # meanwhile throws ConcurrentModificationException at the end.
+            mod = lst.mod
+            for item in list(items):
+                out = self._apply(rest[0], "accept", "(Ljava/lang/Object;)V", [item])
+                if out is UNKNOWN and not isinstance(rest[0], (Lam, Obj)):
+                    return self._havoc_list(lst, False)
+            if lst.mod != mod:
+                raise Unreadable("a list changes while it is iterated (ConcurrentModificationException)")
+            return [None]
+        if name == "removeIf" and desc == "(Ljava/util/function/Predicate;)Z":
+            # Collection#removeIf / ArrayList#removeIf: the elements the
+            # predicate holds for are removed, in one pass.
+            verdicts = [self._test(rest[0], item) for item in items]
+            if None in verdicts:
+                return self._havoc_list(lst, True)
+            if any(verdicts):
+                self._write_by_call(lst)
+                lst.items = [i for i, v in zip(items, verdicts) if not v]
+                lst.mod += 1
+            return [int(any(verdicts))]
+        if name == "contains" and len(rest) == 1:
+            same = [_same(rest[0], i) for i in items]
+            if None in same:
+                return [UNKNOWN]
+            return [int(any(same))]
+        return self._havoc_list(lst, returns)
+
+    def _stream(self, strm: "Strm", name: str, desc: str, rest: list):
+        """Sequential ``java.util.stream.Stream`` operations on known
+        elements (Java SE 21): ``filter``, ``map``, ``count``, ``toList``,
+        ``collect`` with ``Collectors.toList`` / ``toUnmodifiableList`` /
+        ``toCollection``, ``anyMatch`` / ``allMatch`` / ``noneMatch``,
+        ``findFirst`` and ``forEach``, each in encounter order. Anything
+        else, or a function whose value isn't known, is unknown."""
+        items = list(strm.items)
+        if name == "filter" and len(rest) == 1:
+            verdicts = [self._test(rest[0], i) for i in items]
+            if None in verdicts:
+                return [UNKNOWN]
+            return [Strm(tuple(i for i, v in zip(items, verdicts) if v))]
+        if name == "map" and len(rest) == 1:
+            out = [self._apply(rest[0], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [i]) for i in items]
+            if any(o is UNKNOWN or isinstance(o, _Many) for o in out):
+                return [UNKNOWN]
+            return [Strm(tuple(out))]
+        if name == "count" and not rest:
+            return [len(items)]
+        if name == "toList" and not rest:
+            return [Coll(tuple(items))]
+        if name in ("anyMatch", "allMatch", "noneMatch") and len(rest) == 1:
+            verdicts = [self._test(rest[0], i) for i in items]
+            if None in verdicts:
+                return [UNKNOWN]
+            return [int({"anyMatch": any, "allMatch": all}.get(name, lambda v: not any(v))(verdicts))]
+        if name == "findFirst" and not rest:
+            return [Opt(items[0] if items else None)]
+        if name == "findAny" and not rest:
+            # Any element (Stream#findAny is free to pick); whether there is
+            # one is known.
+            return [Opt(None if not items else items[0] if len(items) == 1 else UNKNOWN)]
+        if name == "forEach" and len(rest) == 1:
+            for i in items:
+                self._apply(rest[0], "accept", "(Ljava/lang/Object;)V", [i])
+            return [None]
+        if name == "collect" and len(rest) == 1 and isinstance(rest[0], CollectorV):
+            c = rest[0]
+            if c.kind == "toUnmodifiableList":
+                return [Coll(tuple(items))]
+            if c.kind == "toList":
+                return [ListV(items)]
+            made = self._apply(c.supplier, "get", "()Ljava/lang/Object;", [])
+            if isinstance(made, ListV) and not made.havoc:
+                made.items.extend(items)
+                made.mod += 1
+                return [made]
+            return [UNKNOWN]
+        return [UNKNOWN] if _arg_count(desc)[1] else [None]
+
     def _reduce(self, strm: Strm, rest: list):
         if len(rest) == 1:
             op, items, acc = rest[0], list(strm.items), None
@@ -2106,6 +2724,37 @@ _PAIR_OF_DESC = {
 # any of them matches only itself.
 _REGEX_META = set("\\^$.|?*+()[]{}")
 _FORKED_WRITE = "writes to memory after a branch it can't decide"
+_TOO_MUCH = "too much code to follow"
+# java.util's mutable lists the machine models (#280 pick 2).
+_MUTABLE_LISTS = frozenset({"java/util/ArrayList", "java/util/LinkedList"})
+
+
+class _WeakWrite(Exception):
+    """A modelled list change on one way of an undecided branch (see
+    Machine._write_by_call)."""
+
+
+@dataclass(frozen=True)
+class _Many:
+    """The values a function's ways return when they differ."""
+
+    values: tuple
+# System properties the JVM or a game launcher may define (#280 pick 1):
+# the standard properties of System#getProperties (Java SE 21 javadoc:
+# java.*, os.*, file.*, path.*, line.*, user.*, native.*, stdout.*, stderr.*;
+# implementation properties jdk.*, sun.*, com.sun.*; javax.*, awt.*), the
+# networking properties (java.net docs, "Networking Properties": http.*,
+# https.*, ftp.*, socksProxy*, socksNonProxyHosts, networkaddress.*), and the
+# namespaces of the mod loaders and their launch stack (Fabric Loader
+# ``fabric.*``, Quilt ``quilt.*`` / ``loader.*``, Forge/NeoForge FML
+# ``fml.*`` / ``forge*`` / ``neoforge*``, ``mixin.*``, ``log4j*``,
+# ``org.lwjgl.*``, ``minecraft.*``). Any other property is unset in a
+# player's game unless something sets it.
+_RESERVED_PROPERTIES = ("java.", "javax.", "jdk.", "sun.", "com.sun.", "os.", "file.", "path.", "line.",
+                        "user.", "native.", "stdout.", "stderr.", "awt.", "http.", "https.", "ftp.",
+                        "socksProxy", "socksNonProxyHosts", "networkaddress.", "fabric.", "quilt.",
+                        "loader.", "fml.", "forge", "neoforge", "mixin.", "log4j", "org.lwjgl.",
+                        "minecraft.")
 # Static ``of`` factories of immutable collections (Guava, java.util; Java SE 21 /
 # Guava 32 javadoc: a list keeps the order given, an ImmutableSet the first of
 # equal elements in the order given).
@@ -2229,6 +2878,18 @@ def _equal(a, b) -> bool:
         return bool(a == b)
     except Exception:
         return False
+
+
+def _value_equal(a, b) -> bool:
+    """Whether two returned values are the same value: the same object, or
+    equal immutable values (strings, numbers, constants, names, directions,
+    shapes); never UNKNOWN or a mutable value of the machine's."""
+    if a is b:
+        return a is not UNKNOWN
+    if isinstance(a, (str, int, float, Const, ClassLit, RL, RKey, Dir, Shape, Tail)) \
+            and type(a) is type(b):
+        return _equal(a, b)
+    return False
 
 
 def _hashable(v) -> bool:
