@@ -333,6 +333,8 @@ class MapV:
     # ``"linked"`` for a ``java.util.LinkedHashMap`` built here in insertion
     # order (its no-argument, capacity or capacity+load-factor constructor):
     # the only kind whose iteration order is known (see Machine._map_view).
+    # ``"fixed"`` for an unmodifiable ``Map.of`` / ``Map.ofEntries`` /
+    # ``ImmutableMap.of`` map (see Machine._fixed_map).
     kind: str | None = None
     # Structural changes (a key added or removed, a clear), as the map's
     # ``modCount`` (HashMap): an iterator made before one fails fast.
@@ -399,6 +401,15 @@ class IterV:
     source: object
     pos: int = 0
     mod: int = 0
+    # (depth, method run) of the frame that called ``iterator()`` and got
+    # this iterator back, while nothing else can reach it (see
+    # Machine._own_iterators): each way of a branch that frame can't decide
+    # then advances its own copy.
+    home: tuple | None = None
+    # Set once the iterator is handed anywhere but its own hasNext / next /
+    # remove: stored in a field, a static or an array, passed to a call or
+    # a lambda, or returned.
+    escaped: bool = False
 
     def __post_init__(self):
         self._serial = _next_serial()
@@ -1347,6 +1358,8 @@ class Machine:
                     if kind == "fork":
                         for g in payload:
                             g.fork_serial = _ALLOCATED[0]
+                        for g in payload:
+                            self._own_iterators(g, code)
                         paths += len(payload) - 1
                         if paths > (_MAX_LIBRARY_PATHS if self._weak_ok() else _MAX_PATHS):
                             raise Unreadable(f"too many paths through {cf.name}.{m.name}")
@@ -1374,6 +1387,24 @@ class Machine:
         if stopped is not None:
             raise stopped
         return results
+
+    def _own_iterators(self, g: Frame, code: list) -> None:
+        """Each way of a branch the run can't decide gets its own copy of an
+        iterator only this frame can reach (#280): one the frame's own
+        ``iterator()`` call returned (IterV.home) and that hasn't escaped
+        (IterV.escaped). In the game each way is a run of its own, so its
+        iterator's position is its own; with no field, array, static, call
+        or lambda holding it, nothing but this frame's locals and stack can
+        see which object it is. A copy is allocated after the branch, so
+        advancing it is a write this way alone makes (see _write)."""
+        home = (self.depth, id(code))
+        copies: dict = {}
+        for slots in (g.locals, g.stack):
+            for i, v in enumerate(slots):
+                if isinstance(v, IterV) and not v.escaped and v.home == home:
+                    if id(v) not in copies:
+                        copies[id(v)] = IterV(v.source, v.pos, v.mod, home)
+                    slots[i] = copies[id(v)]
 
     def _wide_locals(self, m: Method, args: list) -> list:
         out = []
@@ -1454,6 +1485,8 @@ class Machine:
             f.locals[(op - 0x3B) % 4] = s.pop()
         elif 0x4F <= op <= 0x56:  # xastore
             val, idx, arr = s.pop(), s.pop(), s.pop()
+            if isinstance(val, IterV):
+                val.escaped = True
             if isinstance(arr, Arr):
                 try:
                     self._write(f, arr)
@@ -1521,7 +1554,10 @@ class Machine:
                     frames.append(g)
                 return ("fork", frames)
         elif 0xAC <= op <= 0xB0:
-            return ("return", s.pop())
+            v = s.pop()
+            if isinstance(v, IterV):
+                v.escaped = True
+            return ("return", v)
         elif op == 0xB1:
             return ("return", None)
         elif op == 0xB2:
@@ -1533,7 +1569,10 @@ class Machine:
             ref = insn.arg
             self._write(f)
             owner = self._field_owner(ref.owner, ref.name)
-            self.statics[(owner, ref.name)] = s.pop()
+            v = s.pop()
+            if isinstance(v, IterV):
+                v.escaped = True
+            self.statics[(owner, ref.name)] = v
         elif op == 0xB4:
             obj = s.pop()
             name = insn.arg.name
@@ -1543,6 +1582,8 @@ class Machine:
                 s.append(UNKNOWN)
         elif op == 0xB5:
             val, obj = s.pop(), s.pop()
+            if isinstance(val, IterV):
+                val.escaped = True
             if isinstance(obj, Obj):
                 self._write(f, obj)
                 obj.fields[insn.arg.name] = val
@@ -1754,6 +1795,9 @@ class Machine:
     def _indy(self, indy: Indy, f: Frame):
         n, _ = _arg_count(indy.desc)
         args = [f.stack.pop() for _ in range(n)][::-1]
+        for a in args:
+            if isinstance(a, IterV):
+                a.escaped = True
         bsm = indy.bootstrap.ref if indy.bootstrap else None
         if bsm and bsm.owner == "java/lang/invoke/LambdaMetafactory" and len(indy.args) >= 2 \
                 and isinstance(indy.args[1], Handle):
@@ -1798,6 +1842,14 @@ class Machine:
         static = op == 0xB8
         total = n + (0 if static else 1)
         args = [f.stack.pop() for _ in range(total)][::-1]
+        for k, a in enumerate(args):
+            # An iterator's own hasNext / next / remove (modelled in
+            # _mutable) keep it this frame's; anything else it is handed to
+            # may keep it (see _own_iterators).
+            if isinstance(a, IterV) and not (k == 0 and not static and not n
+                                             and ref.name in ("hasNext", "next", "remove")):
+                a.escaped = True
+        serial = _ALLOCATED[0]
         if ref.name == "<init>":
             obj = args[0]
             if isinstance(obj, ListV):
@@ -1871,6 +1923,10 @@ class Machine:
         results = self.call(ref.owner, ref.name, ref.desc, args, special=op == 0xB7, static=static)
         if not returns:
             return None
+        if len(results) == 1 and isinstance(results[0], IterV) and results[0]._serial > serial \
+                and ref.name in ("iterator", "listIterator") and n == 0 and not static:
+            # A new iterator this frame's own call made (see _own_iterators).
+            results[0].home = (self.depth, id(self._code[-1][1]))
         if not results:
             return ("throw", None)
         if len(results) > 1 and all(_value_equal(r, results[0]) for r in results[1:]):
@@ -1949,6 +2005,13 @@ class Machine:
     def vanilla(self, owner: str, name: str, desc: str, args: list, static: bool):
         recv = None if static else (args[0] if args else None)
         rest = args if static else args[1:]
+        if name == "getClass" and desc == "()Ljava/lang/Class;" and not static and not rest \
+                and isinstance(recv, Obj) and self.is_mod(recv.cls) and not getattr(recv, "_uninit", False):
+            # Object#getClass (final, Java SE 21) of an object the run built
+            # with ``new`` of a class in the jar or its libraries: that
+            # class (#280: a trait key's javac-style ``equals`` compares
+            # ``getClass()`` of both sides).
+            return [ClassLit(recv.cls)]
         if owner == "java/lang/System" and static and name == "getProperty" \
                 and desc == "(Ljava/lang/String;)Ljava/lang/String;" and len(rest) == 1:
             return [self._system_property(rest[0])]
@@ -2138,15 +2201,19 @@ class Machine:
         coll = self._collections(owner, name, desc, recv, rest, static)
         if coll is not _NOT_HANDLED:
             return coll
+        if owner == "java/util/Map" and static and name == "entry" and len(rest) == 2:
+            # Map.entry(k, v) (Java SE 21): an unmodifiable pair; a null key
+            # or value throws NullPointerException.
+            if rest[0] is None or rest[1] is None:
+                return []
+            return [PairV(rest[0], rest[1])]
         if owner in ("com/google/common/collect/ImmutableMap", "java/util/Map") and static \
                 and name in ("of", "ofEntries"):
             if name == "of" and len(rest) % 2 == 0:
-                items = {}
-                for k in range(0, len(rest), 2):
-                    if not _hashable(rest[k]):
-                        return [UNKNOWN]
-                    items[rest[k]] = rest[k + 1]
-                return [MapV(items)]
+                return self._fixed_map([(rest[k], rest[k + 1]) for k in range(0, len(rest), 2)])
+            if name == "ofEntries" and owner == "java/util/Map" and len(rest) == 1 \
+                    and isinstance(rest[0], Arr) and all(isinstance(e, PairV) for e in rest[0].items):
+                return self._fixed_map([(e.left, e.right) for e in rest[0].items])
             return [UNKNOWN]
         if owner == "com/google/common/collect/Maps" and static:
             if name == "newEnumMap" and rest and isinstance(rest[0], MapV):
@@ -2521,6 +2588,8 @@ class Machine:
         returns = _arg_count(desc)[1]
         if recv.havoc:
             return [UNKNOWN] if returns else [None]
+        if recv.kind == "fixed" and name in _MAP_CHANGES:
+            return []  # UnsupportedOperationException (ImmutableCollections)
         if name in ("get", "getOrDefault", "containsKey") and rest:
             key = rest[0]
             if key is UNKNOWN or not _hashable(key):
@@ -2609,6 +2678,33 @@ class Machine:
         # change the map in a way not modelled here.
         recv.items, recv.havoc, recv.exact = {}, True, False
         return [UNKNOWN] if returns else [None]
+
+    def _fixed_map(self, pairs: list) -> list:
+        """``Map.of(k1, v1, ..)`` / ``Map.ofEntries(Map.entry(k, v), ..)`` /
+        Guava ``ImmutableMap.of`` (Java SE 21, Guava 33): an unmodifiable map
+        of the pairs. A null key or value throws NullPointerException and a
+        key equal to an earlier one throws IllegalArgumentException; its
+        keys are looked up as a map compares them (_map_key, a record by its
+        components), and when one doesn't compare exactly here a lookup that
+        misses is unknown (MapV.exact). Its iteration order isn't modelled
+        (``Map.of``'s is unspecified), so it is never iterated; a change to
+        it throws UnsupportedOperationException."""
+        m = MapV({}, kind="fixed")
+        for key, value in pairs:
+            if key is None or value is None:
+                return []
+            if key is UNKNOWN or not _hashable(key):
+                return [UNKNOWN]
+            found, _old = self._map_find(m, key)
+            if found:
+                return []
+            canon = self._map_key(key)
+            if canon is _NOKEY:
+                m.exact = False
+            else:
+                m.canon[canon] = key
+            m.items[key] = value
+        return [m]
 
     def _map_find(self, m: "MapV", key) -> tuple:
         """(found, value) for ``key`` in ``m``: the same key object, or a key
@@ -3000,6 +3096,10 @@ _SETTER_TAGS = frozenset({8, 10, 11, 15})
 _SYSTEM_SETTERS = frozenset({"setProperty", "setProperties", "clearProperty", "getProperties"})
 _NOKEY = object()  # a map key whose equality isn't known (Machine._map_key)
 # Map methods that change nothing (java.util.Map, Java SE 21).
+# Map methods that change a map: an unmodifiable map (Map.of) throws
+# UnsupportedOperationException for each (ImmutableCollections, Java SE 21).
+_MAP_CHANGES = frozenset({"put", "putAll", "putIfAbsent", "remove", "clear", "compute", "computeIfAbsent",
+                          "computeIfPresent", "merge", "replace", "replaceAll"})
 _MAP_READS = frozenset({"containsValue", "equals", "hashCode", "toString", "getClass", "forEach"})
 _JAVA_MAPS = frozenset({"java/util/Map", "java/util/HashMap", "java/util/LinkedHashMap", "java/util/TreeMap",
                         "java/util/IdentityHashMap", "java/util/WeakHashMap", "java/util/EnumMap",
