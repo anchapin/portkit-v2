@@ -1104,11 +1104,42 @@ class Machine:
         if not isinstance(key, str) or not key or key.startswith(_RESERVED_PROPERTIES):
             return UNKNOWN
         if self._sets_properties is None:
-            mentions = getattr(self.classes, "mentions", None)
-            self._sets_properties = mentions is None or any(
-                mentions(n) for n in (b"setProperty", b"setProperties", b"clearProperty",
-                                      b"()Ljava/util/Properties;"))
+            self._sets_properties = self._can_set_properties()
         return UNKNOWN if self._sets_properties else None
+
+    def _can_set_properties(self) -> bool:
+        """Whether a class of the mod or its libraries can change a system
+        property: its constant pool refers to ``java.lang.System``'s
+        ``setProperty``, ``setProperties``, ``clearProperty`` or
+        ``getProperties`` (the one way to the mutable system Properties
+        object, java.lang.System, Java SE 21), or holds one of those names
+        as a string constant (a reflective lookup). A method or field of
+        another class that happens to carry such a name (a server.properties
+        ``Properties#setProperty``, a builder's ``setProperties``) can't."""
+        classes = self.classes
+        mentions = getattr(classes, "mentions", None)
+        raws = getattr(classes, "_raw", None), getattr(classes, "_lib", None)
+        if mentions is None or raws[0] is None or raws[1] is None:
+            return True
+        needles = (b"setProperty", b"setProperties", b"clearProperty", b"getProperties")
+        for src in raws:
+            for name, raw in src.items():
+                if not any(n in raw for n in needles):
+                    continue
+                cf = classes.get(name, remap=False)
+                if cf is None:
+                    return True
+                for k, entry in enumerate(cf.pool):
+                    if entry is None or entry[0] not in _SETTER_TAGS:
+                        continue
+                    c = cf.constant(k)
+                    if isinstance(c, Handle):
+                        c = c.ref
+                    if isinstance(c, Ref) and c.owner == "java/lang/System" and c.name in _SYSTEM_SETTERS:
+                        return True
+                    if entry[0] == _CP_STRING and c in _SYSTEM_SETTERS:
+                        return True
+        return False
 
     def _havoc(self, roots: list, why: str) -> None:
         """What a call the machine couldn't follow may have written is made
@@ -2952,6 +2983,11 @@ class Machine:
 
 _NOT_HANDLED = object()
 # java.util's Map interface and its implementations (Java SE 21).
+# Constant pool tags (JVMS 4.4): String, Methodref, InterfaceMethodref,
+# MethodHandle.
+_CP_STRING = 8
+_SETTER_TAGS = frozenset({8, 10, 11, 15})
+_SYSTEM_SETTERS = frozenset({"setProperty", "setProperties", "clearProperty", "getProperties"})
 _NOKEY = object()  # a map key whose equality isn't known (Machine._map_key)
 # Map methods that change nothing (java.util.Map, Java SE 21).
 _MAP_READS = frozenset({"containsValue", "equals", "hashCode", "toString", "getClass", "forEach"})
