@@ -3704,7 +3704,8 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
     # doing ``thatch = new ThatchBlock(this)`` and then handing it to a
     # library's ``addSlabAndStairs`` names the slab from the block's
     # registered name, which only that run holds (#280).
-    targets |= {k for k in done if k[1] == "<init>"}
+    ctors = {k for k in done if k[1] == "<init>"}
+    targets |= ctors
     chosen = set(targets)
     callers = []
     codes = []
@@ -3733,6 +3734,10 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
             key = (cf.name, m.name, m.desc)
             if key in chosen or key in done or not called & targets:
                 continue
+            if m.name == "<init>" and not called & (targets - ctors):
+                # A subclass's constructor calling its super constructor:
+                # which class a run of it registers isn't the named one's.
+                continue
             found.append((cf, m))
             chosen.add(key)
         if not found:
@@ -3744,8 +3749,10 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
 
 def _constructed(machine: Machine, cf: ClassFile, m: Method):
     """The receiver a method of ``cf`` run on its own (see _run_method) is
-    given: for a constructor of a block class that is neither abstract nor
-    an interface and that no class of the mod or its libraries extends, a
+    given: for a constructor that loads a whole blockstate name itself
+    (_naming_methods, never a caller or a name built from pieces) of a block
+    class that is neither abstract nor an interface and that no class of the
+    mod or its libraries extends, a
     new object of exactly that class (#280: a block whose constructor hands
     its own name, ``super("sturdy_stone", module, ..)``, while the module
     only does ``new SturdyStoneBlock(this)``). An instance initialization
@@ -3762,7 +3769,7 @@ def _constructed(machine: Machine, cf: ClassFile, m: Method):
     return obj
 
 
-def _run_method(machine: Machine, cf: ClassFile, m: Method) -> None:
+def _run_method(machine: Machine, cf: ClassFile, m: Method, names: bool = False) -> None:
     """Run ``m`` once on unknown arguments for the registrations it makes,
     its class initialized first. A run that stops part way (Unreadable)
     leaves the statics it wrote half done (a library's "chain started" flag
@@ -3776,7 +3783,7 @@ def _run_method(machine: Machine, cf: ClassFile, m: Method) -> None:
         machine.init_class(cf.name)
         machine.steps = 0
         machine.new_epoch()
-        recv = [] if static else [_constructed(machine, cf, m)]
+        recv = [] if static else [_constructed(machine, cf, m) if names else UNKNOWN]
         machine.run(cf, m, recv + [UNKNOWN] * n)
     except Unreadable:
         machine.statics, machine._clinit_done, machine._clinit_failed = saved
@@ -3790,7 +3797,7 @@ def _run_pass(machine: Machine, cf: ClassFile, m: Method, deferred: list, concat
     first = len(machine.registrations)
     machine._deferred_now = False
     machine._shared_wrote = {}
-    _run_method(machine, cf, m)
+    _run_method(machine, cf, m, names=not concat)
     if machine._deferred_now:
         del machine.registrations[first:]
         for lst in machine._shared_wrote.values():
@@ -3832,7 +3839,7 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     machine.pass_no = 2
     for cf, m, concat in deferred:
         first = len(machine.registrations)
-        _run_method(machine, cf, m)
+        _run_method(machine, cf, m, names=not concat)
         if concat:
             for reg in machine.registrations[first:]:
                 reg.concat = True
