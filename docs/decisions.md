@@ -27,9 +27,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-18 (proposed, awaiting Alex's picks): WorldWeaver's `BlockSet` material sets are read: only `java.lang.System`'s own setters make a system property settable, a run gets 1,000,000 steps, and a `LinkedHashMap` built in the run is iterated in insertion order (BetterEnd 199 -> 393/722)
+## 2026-10-18 (approved (Alex, 2026-10-19): picks 1a–4a): WorldWeaver's `BlockSet` material sets are read: only `java.lang.System`'s own setters make a system property settable, a run gets 1,000,000 steps, and a `LinkedHashMap` built in the run is iterated in insertion order (BetterEnd 199 -> 393/722)
 
-- **Status:** proposed, awaiting Alex's picks (#280). The branch implements every "a" in the PR's picks comment.
+- **Status:** approved (Alex, 2026-10-19): picks 1a–4a (#280, PR #328). The branch implements every "a" in the PR's picks comment.
 - **Decision** (keyed on JVM shapes, never a mod's or library's name; `blockcode.Machine`):
   1. **Who can set a system property (1a; `_can_set_properties`, `_SYSTEM_SETTERS`).** #327's rule reads an unset non-reserved property as null only when no class can set one. A class now counts as a setter only when its constant pool holds a method reference to `java/lang/System` `setProperty`, `setProperties`, `clearProperty` or `getProperties` (the one way to the mutable system Properties object, Java SE 21), or one of those names as a string constant (a reflective lookup). A class that can't be parsed counts as a setter. A method of another class with the same name (a `server.properties` `Properties#setProperty` in a mixin, a builder's `setProperties`) no longer does. 1b keeps #327's byte test, under which BetterEnd stays at 242/722 with the rest of this slice.
   2. **Step budget (2a; `_MAX_STEPS`).** 1,000,000 steps per top-level run, up from 400,000. `EndBlockEntities` needs about 548k and `EndWaterPlantBlocks` about 554k once the sets are followed; at 400k, 22 blocks read today are lost. 2b keeps 400k.
