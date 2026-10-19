@@ -702,6 +702,10 @@ class Registration:
     # concatenation (_piece_methods): it counts only if it builds a block,
     # never as the reason another name went unread.
     concat: bool = False
+    # Recorded while running a block constructor on a new object of its own
+    # class (_constructed): it counts only for a name no other run reads, as
+    # the module run building that block makes the same registration.
+    own: bool = False
 
 
 class Machine:
@@ -3798,6 +3802,9 @@ def _run_pass(machine: Machine, cf: ClassFile, m: Method, deferred: list, concat
     machine._deferred_now = False
     machine._shared_wrote = {}
     _run_method(machine, cf, m, names=not concat)
+    if m.name == "<init>" and not concat:
+        for reg in machine.registrations[first:]:
+            reg.own = True
     if machine._deferred_now:
         del machine.registrations[first:]
         for lst in machine._shared_wrote.values():
@@ -3843,6 +3850,10 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
         if concat:
             for reg in machine.registrations[first:]:
                 reg.concat = True
+    # A constructor's own run (Registration.own) only stands in for a name
+    # no other run registered.
+    others = {r.name for r in machine.registrations if not r.own and r.value is not None}
+    machine.registrations = [r for r in machine.registrations if not (r.own and r.name in others)]
     regs: dict[str, list] = {}
     unread: dict[str, str] = {}
     concat_only: set = set()

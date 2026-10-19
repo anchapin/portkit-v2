@@ -39,8 +39,14 @@ def _cls(reg, name):
 
 
 def test_a_constructor_handing_its_own_name_is_read_on_a_new_object_of_its_class():
-    _m, reg = _read()
+    _m, reg = _read(["sturdy_stone"])
     assert _cls(reg, "sturdy_stone") == "com/example/smod/SturdyBlock"
+
+
+def test_the_constructor_run_only_stands_in_when_no_other_run_registers_the_name():
+    # SturdyModule.register (new SturdyBlock(this)) is run too; one registration, not two.
+    _m, reg = _read()
+    assert len(reg["sturdy_stone"][0]) == 1
 
 
 def test_a_constructor_of_a_class_something_extends_is_not_read_as_that_class():
