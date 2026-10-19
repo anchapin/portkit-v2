@@ -173,7 +173,12 @@ _LEVEL = "net/minecraft/world/level/Level"
 # Marks a state built from StateDefinition#any (see Machine.vanilla).
 _ANY = "__any"
 
-_MAX_STEPS = 1_000_000
+# Steps per top-level run (#280 pick 4a of PR #330; 1,000,000 under #328 pick
+# 2a): a class initializer reached from another top-level run shares that
+# run's budget, and BetterEnd's EndWoodBlocks, once its wood sets' planks,
+# bookshelves and signs are followed, needs about 934k on top of the 159k
+# its caller used.
+_MAX_STEPS = 2_000_000
 _MAX_PATHS = 256
 # While registrations are collected, a dependency jar's method gives up
 # sooner (#280): its caller takes it as havoc (Machine._havoc), so
