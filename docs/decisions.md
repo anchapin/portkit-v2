@@ -27,9 +27,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-19 (proposed, awaiting Alex's picks): a block constructor that names its own block stands in for its registration, and a static final list its class initializer builds is shared across top-level runs in two passes (Quark 686 -> 699/809)
+## 2026-10-19 (approved (Alex, 2026-10-19): picks 1a–3a): a block constructor that names its own block stands in for its registration, and a static final list its class initializer builds is shared across top-level runs in two passes (Quark 686 -> 699/809)
 
-- **Status:** proposed, awaiting Alex's picks (#280, PR #331). The branch implements every "a" below.
+- **Status:** approved (Alex, 2026-10-19): picks 1a–3a (#280, PR #331). The branch implements every "a" below.
 - **Decision** (keyed on JVM shapes, never a mod's or library's name; `blockcode.Machine`, `_constructed`, `_run_method`, `_run_pass`):
   1. **Own-name constructors (1a; `_constructed`, `Machine.has_subclass`).** A block constructor that loads its own whole name (`super("sturdy_stone", module, ..)`), run on its own, gets a fresh object of exactly its class, but only when the class is concrete, nothing in the jar or its libraries extends it (JVMS: `<init>` runs only on an object `new` made of that class or a subclass), and no other run registers the name. A module run that calls such a constructor is run too (thatch, then its slab and stairs). 1b leaves these blocks unread.
   2. **Two-pass shared lists (2a; `_mark_shared`, `_shared_list`, `_escape_shared`, `_shared_complete`, `_reads_only`).** A list a static final field holds after its class initializer built it is shared across top-level runs. Pass 1 keeps every append and queues a run that reads the list. Pass 2 reruns the queued readers, which see the full list only when every method that loads the field only reads it or ran to the end, and the list wasn't stored anywhere else; otherwise the list is unknown. This assumes every add happens before any read in the game (mod construction before registration). Class initializers use such a list as before: without that rule AE2 fell from 102 to 1. 2b keeps today's order-dependent behaviour (a later run iterates the list with only the elements of the runs that happened to run first); 2c never reads a list another run fills.
