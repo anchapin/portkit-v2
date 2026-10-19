@@ -89,6 +89,11 @@ class ClassFile:
     # Each field's access flags (JVMS 4.5), with 0x10000 added when it
     # carries a ConstantValue attribute (a compile-time constant).
     field_access: dict = field(default_factory=dict)
+    # The class's RuntimeVisibleAnnotations (JVMS 4.7.16): annotation type
+    # descriptor -> {element name: value}, a value a str (String, or a
+    # class descriptor for a class literal), int/float, ``(enum type,
+    # constant)`` or a tuple of values; a nested annotation reads as None.
+    annotations: dict = field(default_factory=dict)
 
     def method(self, name: str, desc: str | None = None) -> Method | None:
         for m in self.methods:
@@ -286,7 +291,64 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
                 args = struct.unpack_from(f">{nargs}H", body, p)
                 p += 2 * nargs
                 bootstrap.append((ref, args))
-    return ClassFile(cls(this), cls(sup), interfaces, fields, methods, pool, bootstrap, access, field_access)
+    annotations: dict = {}
+    for aname, body in attrs:
+        if aname == "RuntimeVisibleAnnotations":
+            try:
+                annotations = _annotations(body, pool)
+            except (struct.error, IndexError, TypeError):
+                annotations = {}  # a malformed table names no annotation
+    return ClassFile(cls(this), cls(sup), interfaces, fields, methods, pool, bootstrap, access, field_access,
+                     annotations)
+
+
+def _annotations(body: bytes, pool: list) -> dict:
+    """A RuntimeVisibleAnnotations attribute's annotations (JVMS 4.7.16)."""
+    def utf(idx: int):
+        return pool[idx][1]
+
+    def value(pos: int):
+        tag = chr(body[pos])
+        pos += 1
+        if tag in "BCDFIJSZs":
+            (idx,) = struct.unpack_from(">H", body, pos)
+            return pool[idx][1], pos + 2
+        if tag == "e":
+            t, c = struct.unpack_from(">HH", body, pos)
+            return (utf(t), utf(c)), pos + 4
+        if tag == "c":
+            (idx,) = struct.unpack_from(">H", body, pos)
+            return utf(idx), pos + 2
+        if tag == "@":
+            _t, pos = annotation(pos)
+            return None, pos
+        if tag == "[":
+            (n,) = struct.unpack_from(">H", body, pos)
+            pos += 2
+            out = []
+            for _ in range(n):
+                v, pos = value(pos)
+                out.append(v)
+            return tuple(out), pos
+        raise IndexError(f"unknown element value tag {tag!r}")
+
+    def annotation(pos: int):
+        t, n = struct.unpack_from(">HH", body, pos)
+        pos += 4
+        elems = {}
+        for _ in range(n):
+            (name,) = struct.unpack_from(">H", body, pos)
+            v, pos = value(pos + 2)
+            elems[utf(name)] = v
+        return (utf(t), elems), pos
+
+    (n,) = struct.unpack_from(">H", body, 0)
+    pos = 2
+    out = {}
+    for _ in range(n):
+        (t, elems), pos = annotation(pos)
+        out[t] = elems
+    return out
 
 
 # --- Instructions -----------------------------------------------------------
@@ -423,6 +485,10 @@ class ClassIndex:
         # version the mod declares (:mod:`portkit.data.vanilla_blocks`, #280),
         # or None when that table isn't pinned or cached.
         self.vanilla_blocks: dict[str, str] | None = None
+        # The loader metadata files of the mod's jar and of each library jar
+        # (one {path: bytes} per jar, the mod's first): which classes the
+        # loader constructs itself (:mod:`portkit.entrypoints`, #280).
+        self.entry_meta: list[dict[str, bytes]] = []
 
     def add_libraries(self, entries: dict[str, bytes]) -> int:
         """Make ``entries`` (a dependency jar's classes) visible to lookups;
