@@ -267,6 +267,49 @@ def test_a_key_whose_class_writes_its_own_equals_is_not_a_known_key():
     assert _v(m, "java/util/Map", "get", GET, [mp, Obj(own, {"suffix": "a"})]) == [UNKNOWN]
 
 
+def test_a_record_handed_to_code_that_isn_t_followed_still_compares_by_its_components():
+    # #280: WorldWeaver's ``SlotType`` keys are shared statics; one material
+    # set hands them to a library call the machine can't follow (havoc), and
+    # the next set keys its own map by them. A record's components are its
+    # only instance fields, private final, and Field#set refuses a record's
+    # final field (Java SE 21), so nothing can have changed them.
+    m = _machine()
+    shared = _slot("bark")
+    m._havoc([shared], "a library call the machine can't follow")
+    assert shared._defaults is False and shared.fields == {"suffix": "bark"}
+    mp = _linked(m)
+    _put(m, mp, shared, "one")
+    assert mp.exact
+    assert _v(m, "java/util/Map", "get", GET, [mp, _slot("bark")]) == ["one"]
+    assert isinstance(_v(m, "java/util/Map", "values", "()Ljava/util/Collection;", [mp])[0], MapView)
+
+
+def test_a_record_whose_constructor_wasn_t_followed_to_the_end_is_not_a_known_key():
+    m = _machine()
+    for key in (Obj(SLOT, {"suffix": "bark", "__partial": "its constructor can't be followed to the end"}),
+                Obj(SLOT, {})):  # partial, or a component never stored
+        mp = _linked(m)
+        _put(m, mp, key, 1)
+        assert not mp.exact
+    unbuilt = Obj(SLOT, {"suffix": "bark"})
+    unbuilt._uninit = True  # ``new`` ran, its constructor hasn't
+    mp = _linked(m)
+    _put(m, mp, unbuilt, 1)
+    assert not mp.exact
+
+
+def test_an_object_that_isn_t_a_record_is_still_compared_by_identity_only():
+    # Havoc doesn't make a class that writes its own ``equals`` a known key.
+    own = "com/example/sets/OwnKey2"
+    m = _machine({own: _assemble(own, "java/lang/Record", fields=[("suffix", "Ljava/lang/String;")],
+                                 equals="custom")})
+    key = Obj(own, {"suffix": "a"})
+    m._havoc([key], "x")
+    mp = _linked(m)
+    _put(m, mp, key, 1)
+    assert not mp.exact
+
+
 def test_a_record_s_components_are_read_from_its_generated_equals():
     m = _machine()
     assert m._record_components(SLOT) == ["suffix"]
