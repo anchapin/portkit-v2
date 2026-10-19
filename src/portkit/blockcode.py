@@ -3545,6 +3545,12 @@ def _piece_methods(classes: ClassIndex, names: set[str], done: set) -> list:
     # builds the mod's vertical slab, whose constructor takes its name from a
     # lambda appending "_vertical_slab").
     targets = {(cf.name, m.name, m.desc) for cf, m in out}
+    # A block constructor that loads a whole name (run on its own object,
+    # see _constructed) is a target too: a module's ``register(event)``
+    # doing ``thatch = new ThatchBlock(this)`` and then handing it to a
+    # library's ``addSlabAndStairs`` names the slab from the block's
+    # registered name, which only that run holds (#280).
+    targets |= {k for k in done if k[1] == "<init>"}
     chosen = set(targets)
     callers = []
     codes = []
