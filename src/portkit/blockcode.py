@@ -52,6 +52,14 @@ DIRECTIONS = ("down", "up", "north", "south", "west", "east")
 HORIZONTAL = ("north", "east", "south", "west")  # clockwise from above
 _VANILLA_BLOCK_PACKAGE = "net/minecraft/world/level/block/"
 _BLOCK = "net/minecraft/world/level/block/Block"
+_BLOCK_SET_TYPE = "net/minecraft/world/level/block/state/properties/BlockSetType"
+# BlockSetType's record components whose accessors return a reference other
+# than a String (client.txt 1.21.1 and 1.21.8: pressurePlateSensitivity,
+# soundType and eight SoundEvents; 1.20.1 has all but the sensitivity). A
+# boolean component or the name read off a constant stays unknown.
+_BLOCK_SET_TYPE_PARTS = frozenset((
+    "pressurePlateSensitivity", "soundType", "doorClose", "doorOpen", "trapdoorClose", "trapdoorOpen",
+    "pressurePlateClickOff", "pressurePlateClickOn", "buttonClickOff", "buttonClickOn"))
 # Vanilla classes known (see the module docstring) not to override
 # getStateForPlacement, getShape or getCollisionShape below Block.
 # HorizontalDirectionalBlock, TransparentBlock, HalfTransparentBlock and
@@ -274,6 +282,19 @@ class Const:
     """A vanilla static constant whose value doesn't matter, only identity."""
 
     owner: str
+    name: str
+
+
+@dataclass(frozen=True)
+class Part:
+    """A record component of a vanilla constant, read by its accessor
+    (``BlockSetType.STONE.pressurePlateSensitivity()``), whose value isn't
+    modelled here: only which constant and which component. A converter
+    resolves it from its reference data (#280: Fabric API's
+    ``BlockSetTypeBuilder.copyOf(BlockSetType.STONE)`` copies each component
+    of the vanilla set type it is given)."""
+
+    of: Const
     name: str
 
 
@@ -2336,6 +2357,18 @@ class Machine:
             # class (#280: a trait key's javac-style ``equals`` compares
             # ``getClass()`` of both sides).
             return [ClassLit(recv.cls)]
+        if owner == _BLOCK_SET_TYPE and not static and not rest and isinstance(recv, Const) \
+                and recv.owner == _BLOCK_SET_TYPE and name in _BLOCK_SET_TYPE_PARTS \
+                and desc.startswith("()L") and desc != "()Ljava/lang/String;":
+            # A record accessor of a vanilla BlockSetType constant (#280):
+            # which constant's which component (see Part).
+            return [Part(recv, name)]
+        if owner == _BLOCK_SET_TYPE and static and name == "register" \
+                and desc == f"(L{_BLOCK_SET_TYPE};)L{_BLOCK_SET_TYPE};" and len(rest) == 1:
+            # BlockSetType#register files the set type under its name (a Map
+            # in 1.21.1 and 1.21.8, a Set in 1.20.1) and returns it: aload_0;
+            # areturn (Mojang's client jars, read through client.txt).
+            return [rest[0]]
         if owner == "java/lang/System" and static and name == "getProperty" \
                 and desc == "(Ljava/lang/String;)Ljava/lang/String;" and len(rest) == 1:
             return [self._system_property(rest[0])]

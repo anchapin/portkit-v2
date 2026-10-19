@@ -123,9 +123,9 @@ def test_the_repo_manifest_pins_zeta_for_quark():
     zeta = [lib for lib in pinned if lib.name == "zeta"]
     assert zeta and zeta[0].used_by == ("quark",) and len(zeta[0].sha512) == 128
     assert libraries.for_mod("quark", pinned) == zeta
-    # BetterEnd gets exactly its three BCLib-family jars, and none of Quark's
+    # BetterEnd gets exactly its three BCLib-family jars and Fabric API, and none of Quark's
     better = libraries.for_mod("betterend", pinned)
-    assert sorted(lib.name for lib in better) == ["bclib", "worldweaver", "wunderlib"]
+    assert sorted(lib.name for lib in better) == ["bclib", "fabric_api", "worldweaver", "wunderlib"]
     assert all(lib.used_by == ("betterend",) and len(lib.sha512) == 128 for lib in better)
     assert libraries.for_mod("comforts", pinned) == []
 
