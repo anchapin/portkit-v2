@@ -10,19 +10,17 @@
 # mod's loader and game version that satisfies the mod's own declared range,
 # pinned only when measured to change what the readers find.
 #
-# Not pinned, measured 2026-10-17: BCLib 21.800.2, WorldWeaver 21.800.2 (with
-# its 19 nested wover jars) and WunderLib 21.800.2 for BetterEnd 21.800.2: with
-# them the readers find 0 of BetterEnd's 722 blockstate registrations (as
-# without), because BetterEnd builds its blocks through WorldWeaver's
-# BlockSet / BlockDefinition builders, whose lazily created registries are
-# written after branches the reader can't decide.
-# Measured again 2026-10-18 (#280, lazy-initialisation guards read): BetterEnd
-# 21.800.2 reads 86 of 722 alone and 16 of 722 with BCLib, WorldWeaver and
-# WunderLib 21.800.3 (the newest 1.21.8 Fabric releases, Modrinth, published
-# 2026-10-18), because the libraries' builder code, once followed, forks on
-# `System.getProperty("fabric-api.datagen")` and iterates trait lists the
-# reader doesn't model, which stops each static initializer at its first
-# block. Still not pinned: they would lower what the readers find.
+# Measured 2026-10-17: BCLib 21.800.2, WorldWeaver 21.800.2 (with its 19
+# nested wover jars) and WunderLib 21.800.2 for BetterEnd 21.800.2 read 0 of
+# BetterEnd's 722 blockstate registrations (as without them); on 2026-10-18
+# (#280, lazy-initialisation guards read) 21.800.3 read 16 of 722 against 86
+# alone, so they weren't pinned then. Pinned 2026-10-18 (#280 PR "WorldWeaver
+# builders", pick 5a: pinned once the reading is at least the no-library
+# baseline): with System.getProperty of a property nothing defines read as
+# null (pick 1a), java.util lists, iterators and streams modelled (pick 2a)
+# and a library call the registration run can't follow taken as havoc
+# (pick 4a), BetterEnd reads 199 of 722 with them (86 alone; every block read
+# alone is read with them, as the same class).
 
 [[library]]
 name = "zeta"
@@ -37,3 +35,45 @@ source = "https://github.com/VazkiiMods/Zeta"
 url = "https://cdn.modrinth.com/data/MVARlG2f/versions/9GjNW2Gf/Zeta-1.1-40.jar"
 sha512 = "a81dcf44f2bfd0fc1a52f00d9ca47a84ad2baf067adedb35eec859f6b9cec7b61ca432e549a3342b10902f84e76d70224cd54400285c8b13a0926835a62c667c"
 notes = "Quark 4.1-487 requires zeta [1,1.2) (its META-INF/neoforge.mods.toml); 1.1-40 is the newest 1.21.1 NeoForge build (Modrinth, published 2026-04-24)"
+
+[[library]]
+name = "bclib"
+for = ["betterend"]
+project = "bclib"
+version_id = "cT6SaL2o"
+version = "21.800.3"
+loader = "fabric"
+minecraft = "1.21.8"
+license = "MIT"
+source = "https://github.com/quiqueck/BCLib"
+url = "https://cdn.modrinth.com/data/BgNRHReB/versions/cT6SaL2o/bclib-21.800.3.jar"
+sha512 = "726b84331f983026c8081318bf8cc310fee889e541e3103019ca2defb247f14a2472e2cbc41cd3e9542f664c92ed4b4172303f814bb9ac52a2255737ecaa358e"
+notes = "BetterEnd 21.800.2 requires bclib 21.800.x (its fabric.mod.json); 21.800.3 is the newest 1.21.8 Fabric build (Modrinth, published 2026-10-18)"
+
+[[library]]
+name = "worldweaver"
+for = ["betterend"]
+project = "worldweaver"
+version_id = "7AzzWJ94"
+version = "21.800.3"
+loader = "fabric"
+minecraft = "1.21.8"
+license = "MIT"
+source = "https://github.com/quiqueck/WorldWeaver"
+url = "https://cdn.modrinth.com/data/RiN8rDVs/versions/7AzzWJ94/worldweaver-21.800.3.jar"
+sha512 = "3d073a5640e526e5fb5ea28d63480a3a1ae640f6a7be2bdfa50c4820d6c58f63dfbaf71c79fb7940c67e8e75b083eabccb14f206d7a4b3c074661357ca189e2b"
+notes = "BetterEnd 21.800.2 requires wover 21.800.x (its fabric.mod.json; WorldWeaver's mod id); 21.800.3 is the newest 1.21.8 Fabric build (Modrinth, published 2026-10-18); its wover-*-api jars are nested under META-INF/jars/"
+
+[[library]]
+name = "wunderlib"
+for = ["betterend"]
+project = "wunderlib"
+version_id = "QxVEDpO5"
+version = "21.800.3"
+loader = "fabric"
+minecraft = "1.21.8"
+license = "MIT"
+source = "https://github.com/quiqueck/WunderLib"
+url = "https://cdn.modrinth.com/data/8O0Adq7w/versions/QxVEDpO5/wunderlib-21.800.3.jar"
+sha512 = "02d5bcb5e773bd8fbeadd896411f8a454c07ca37477d8ff1ed9055d002d7c82a4a00f00b8900dc36622edf5d82ec6aa26f046f7e73aa1e8fa72a10fb1db4a492"
+notes = "BetterEnd 21.800.2 requires wunderlib 21.800.x (its fabric.mod.json); 21.800.3 is the newest 1.21.8 Fabric build (Modrinth, published 2026-10-18)"
