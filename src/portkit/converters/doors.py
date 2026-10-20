@@ -14,8 +14,9 @@ Two Java block shapes whose two halves are one block to the player:
     block whose class *is* vanilla ``DoorBlock``, or a mod subclass that
     overrides none of the methods that make a door behave
     (:data:`DOOR_BEHAVIOUR`); whether a hand opens it and its sound are then
-    the ``BlockSetType`` constant it was built with
-    (:mod:`portkit.data.block_set_types`), else the labelled DEFAULT;
+    the ``BlockSetType`` it was built with: a vanilla constant
+    (:mod:`portkit.data.block_set_types`) or one built in code from vanilla
+    constants (#280, :func:`_set_type_door`), else the labelled DEFAULT;
   - **unread** (the registration isn't followed, #280): the DEFAULT door
     (pick 6a) only when the jar's own ``minecraft:wooden_doors`` tag lists it
     (a wooden door opens by hand and sounds like wood); otherwise residue;

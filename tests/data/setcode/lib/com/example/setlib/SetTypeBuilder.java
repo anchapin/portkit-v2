@@ -21,6 +21,7 @@ public final class SetTypeBuilder {
   public SetTypeBuilder pressurePlateActivationRule(BlockSetType.PressurePlateSensitivity v) { rule = v; return this; }
   public SetTypeBuilder soundGroup(SoundType v) { sound = v; return this; }
   public SetTypeBuilder pressurePlateClickOnSound(SoundEvent v) { pOn = v; return this; }
+  public SetTypeBuilder doorOpenSound(SoundEvent v) { dopen = v; return this; }
   public BlockSetType build(ResourceLocation id) {
     return new BlockSetType(String.valueOf(id), hand, wind, arrows, rule, sound, dc, dopen, tc, topen, pOff, pOn, bOff, bOn);
   }

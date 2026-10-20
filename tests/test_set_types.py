@@ -85,9 +85,11 @@ def test_register_returns_its_argument_and_accessors_are_parts():
     sens = machine.vanilla(cls, "pressurePlateSensitivity", f"()L{block_set_types.SET_SENSITIVITY_CLASS};",
                            [stone], False)
     assert sens == [blockcode.Part(stone, "pressurePlateSensitivity")]
-    # a boolean component, or the name, stays unknown
-    assert machine.vanilla(cls, "canOpenByHand", "()Z", [stone], False) is not None
-    assert machine.vanilla(cls, "canOpenByHand", "()Z", [stone], False) != [blockcode.Part(stone, "canOpenByHand")]
+    # canOpenByHand is a Part too (#280: what a copied door opens by); the
+    # other booleans and the name stay unknown
+    assert machine.vanilla(cls, "canOpenByHand", "()Z", [stone], False) == [blockcode.Part(stone, "canOpenByHand")]
+    assert machine.vanilla(cls, "canOpenByWindCharge", "()Z", [stone], False) != \
+        [blockcode.Part(stone, "canOpenByWindCharge")]
     assert machine.vanilla(cls, "name", "()Ljava/lang/String;", [stone], False) != \
         [blockcode.Part(stone, "name")]
 
@@ -123,7 +125,8 @@ def test_an_unknown_constructor_or_component_is_not_read():
             blockcode.Part(blockcode.Const(block_set_types.CLASS, "STONE"), "pressurePlateClickOff"),
             blockcode.Part(blockcode.Const(block_set_types.CLASS, "STONE"), "pressurePlateClickOn"), None, None]
     assert doors._set_type_plate(_built(desc, tuple(args)))[1] is None
-    args[4] = blockcode.Part(blockcode.Const(block_set_types.CLASS, "PALE_OAK"), "pressurePlateSensitivity")
+    # a constant the table doesn't hold
+    args[4] = blockcode.Part(blockcode.Const(block_set_types.CLASS, "NOT_A_SET"), "pressurePlateSensitivity")
     assert doors._set_type_plate(_built(desc, tuple(args)))[1] is None
     args[4] = blockcode.Part(blockcode.Const(block_set_types.CLASS, "STONE"), "pressurePlateSensitivity")
     assert doors._set_type_plate(_built(desc, tuple(args)))[:2] == ("MOBS", "STONE")
@@ -139,3 +142,116 @@ def test_a_part_compares_unknown_except_with_itself():
     assert blockcode._same(part, blockcode.Part(blockcode.Const(block_set_types.CLASS, "OAK"),
                                                 "pressurePlateSensitivity")) is None
     assert not blockcode.Machine(ClassIndex({}))._key_ok(part)
+
+
+# -- doors and trapdoors (#280) ----------------------------------------------
+
+DOORS = ["rock_door", "alloy_door", "wood_door", "locked_door", "mixed_door", "named_door", "verdigris_door",
+         "pale_door"]
+TRAPDOORS = ["alloy_trapdoor", "mixed_trapdoor", "verdigris_trapdoor", "swapped_trapdoor", "named_trapdoor"]
+
+
+@pytest.fixture(scope="module")
+def door_classes():
+    return ClassIndex(_entries(DATA / "classes"), _entries(DATA / "library"))
+
+
+@pytest.fixture(scope="module")
+def door_run(door_classes):
+    return blockcode._registered(door_classes, sorted(NAMES + DOORS + TRAPDOORS))
+
+
+def test_doors_built_by_a_builder_copy_read_hand_and_sounds(door_classes, door_run):
+    got = doors.read_code(door_classes, DOORS, "door", run=door_run)
+    # STONE opens by hand with the iron sounds (1.21.8 BlockSetType#<clinit>)
+    assert got["rock_door"].door == (True, "IRON")
+    assert got["rock_door"].door_from == ("new BlockSetType(BlockSetType.STONE.canOpenByHand(), "
+                                          "BlockSetType.STONE.doorClose(), BlockSetType.STONE.doorOpen())")
+    assert got["alloy_door"].door == (False, "IRON")
+    assert got["wood_door"].door == (True, "WOODEN")
+    # a setter's literal false overrides the copied hand
+    assert got["locked_door"].door == (False, "WOODEN")
+    assert got["locked_door"].door_from.startswith("new BlockSetType(false, BlockSetType.OAK.doorClose()")
+
+
+def test_door_sounds_of_two_families_are_not_read(door_classes, door_run):
+    got = doors.read_code(door_classes, DOORS, "door", run=door_run)
+    assert got["mixed_door"].verdict == "vanilla" and got["mixed_door"].door is None
+
+
+def test_door_constructors_spelled_out_and_pale_oak(door_classes, door_run):
+    got = doors.read_code(door_classes, DOORS, "door", run=door_run)
+    assert got["named_door"].door == block_set_types.ONE_ARG_DOOR == (True, "WOODEN")
+    assert got["verdigris_door"].door == (True, "COPPER")
+    assert got["verdigris_door"].door_from == ("new BlockSetType(true, SoundEvents.COPPER_DOOR_CLOSE, "
+                                               "SoundEvents.COPPER_DOOR_OPEN)")
+    assert got["pale_door"].door == (True, "WOODEN") and got["pale_door"].door_from == "BlockSetType.PALE_OAK"
+
+
+def test_trapdoors_read_the_trapdoor_sounds(door_classes, door_run):
+    got = doors.read_code(door_classes, TRAPDOORS, "trapdoor", run=door_run)
+    assert got["alloy_trapdoor"].door == (False, "IRON")
+    assert got["alloy_trapdoor"].door_from == (
+        "new BlockSetType(BlockSetType.IRON.canOpenByHand(), BlockSetType.IRON.trapdoorClose(), "
+        "BlockSetType.IRON.trapdoorOpen())")
+    # the mixed set's door open sound doesn't touch its trapdoor sounds
+    assert got["mixed_trapdoor"].door == (False, "IRON")
+    assert got["verdigris_trapdoor"].door == (True, "COPPER")
+    # door sounds where the trapdoor sounds go are not trapdoor sounds
+    assert got["swapped_trapdoor"].verdict == "vanilla" and got["swapped_trapdoor"].door is None
+    assert got["named_trapdoor"].door == (True, "WOODEN")
+
+
+def test_without_the_library_a_copied_doors_set_type_is_unknown():
+    classes = ClassIndex(_entries(DATA / "classes"))
+    got = doors.read_code(classes, DOORS, "door", run_names=NAMES + DOORS + TRAPDOORS)
+    for name in ("rock_door", "alloy_door", "wood_door", "locked_door"):
+        assert got[name].verdict == "vanilla" and got[name].door is None
+    assert got["named_door"].door == (True, "WOODEN") and got["pale_door"].door == (True, "WOODEN")
+
+
+def test_set_type_door_1_20_constructor_positions():
+    desc = next(d for d, slots in block_set_types.DOOR_CTORS.items() if slots[1] == 3)
+    snd = block_set_types.SOUND_EVENTS
+    args = ("x", 0, None, blockcode.Const(snd, "IRON_DOOR_CLOSE"), blockcode.Const(snd, "IRON_DOOR_OPEN"),
+            blockcode.Const(snd, "IRON_TRAPDOOR_CLOSE"), blockcode.Const(snd, "IRON_TRAPDOOR_OPEN"),
+            None, None, None, None)
+    assert doors._set_type_door(_built(desc, args), "door")[:2] == (False, "IRON")
+    assert doors._set_type_door(_built(desc, args), "trapdoor")[:2] == (False, "IRON")
+    # an unknown hand is not read
+    unknown = ("x", blockcode.UNKNOWN) + args[2:]
+    assert doors._set_type_door(_built(desc, unknown), "door") == (None, None, "")
+
+
+def test_pale_oak_is_the_one_argument_constructors_values():
+    assert block_set_types.DOOR_TYPES["PALE_OAK"] == block_set_types.ONE_ARG_DOOR
+    assert block_set_types.PLATE_TYPES["PALE_OAK"] == block_set_types.ONE_ARG_PLATE
+
+
+def test_paired_blocks_read_with_one_run_on_every_blockstate(monkeypatch, tmp_path):
+    """_read_paired runs the registration code once, on every blockstate of
+    the mod, not on one kind's names (#280: a material set's door names are
+    built by concatenation a doors-only run doesn't reach)."""
+    from portkit.converters import blocks as B
+
+    calls = []
+    real = blockcode._registered
+
+    def spy(classes, names):
+        calls.append(list(names))
+        return real(classes, names)
+
+    monkeypatch.setattr(blockcode, "_registered", spy)
+
+    class Mod:
+        namespace = "setmod"
+        root = tmp_path
+        classes = ClassIndex(_entries(DATA / "classes"), _entries(DATA / "library"))
+
+    door = {"variants": {f"facing={f},half={h},hinge={g},open={o}": {"model": "minecraft:block/door_bottom_left"}
+                         for f in ("north", "east", "south", "west") for h in ("lower", "upper")
+                         for g in ("left", "right") for o in ("true", "false")}}
+    loaded = {"alloy_door": door, "rock_plate_like": {"variants": {"": {"model": "x"}}}}
+    specs, readings, why = B._read_paired(Mod(), {}, loaded)
+    assert calls == [sorted(loaded)]
+    assert readings["alloy_door"].door == (False, "IRON")

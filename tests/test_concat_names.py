@@ -184,7 +184,7 @@ def test_vanilla_read_non_constant_set_type_needs_the_wooden_tag(tmp_path, monke
     root = make(tmp_path)
     real = doors.read_code
 
-    def fake(classes, names, k):
+    def fake(classes, names, k, **kw):
         out = real(None, names, k)
         if k == kind:
             for n in (tagged, untagged):
