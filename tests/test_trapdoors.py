@@ -258,7 +258,7 @@ def test_read_iron_trapdoor_opens_only_by_redstone(tmp_path, templates, monkeypa
     root = _trapdoor_mod(tmp_path)
     real = doors.read_code
 
-    def fake(classes, names, kind):
+    def fake(classes, names, kind, **kw):
         out = real(None, names, kind)
         if kind == "trapdoor" and "iron_trapdoor" in out:
             r = out["iron_trapdoor"]

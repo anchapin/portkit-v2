@@ -20,6 +20,14 @@ constants for the door fields, copper and cherry aside.
 vanilla Bedrock plays for the same block sound family
 (Mojang/bedrock-samples@46ba6ea9 resource_pack/sounds.json ``block_sounds``:
 wood ``door.open`` -> ``open.wooden_door`` and so on).
+``PALE_OAK`` (#280; 1.21.4+, absent from 1.20.1 and 1.21.1) is
+``register(new BlockSetType("pale_oak"))``, the one-argument constructor, in
+the ``<clinit>`` of Mojang's 1.21.4 client jar (piston-data sha1
+a7e5a6024bfd3cd614625aa05629adf760020304, ``dxn`` through client.txt sha1
+0cf2a0b7f056da1a5a5dd99fc6dc752f33987150) and 1.21.8 client jar (sha1
+a19d9badbea944a4369fd0059e53bf7286597576, ``eeq`` through client.txt sha1
+bdeb624c3aefba11d9d40f34bc96176350b549b6), read 2026-10-19: so the wooden
+values of the one-argument constructor in both tables below.
 """
 from __future__ import annotations
 
@@ -37,6 +45,7 @@ DOOR_TYPES: dict[str, tuple[bool, str]] = {
     "CHERRY": (True, "CHERRY_WOOD"),
     "JUNGLE": (True, "WOODEN"),
     "DARK_OAK": (True, "WOODEN"),
+    "PALE_OAK": (True, "WOODEN"),
     "CRIMSON": (True, "NETHER_WOOD"),
     "WARPED": (True, "NETHER_WOOD"),
     "MANGROVE": (True, "WOODEN"),
@@ -100,6 +109,7 @@ PLATE_TYPES: dict[str, tuple[str, str]] = {
     "CHERRY": ("EVERYTHING", "CHERRY_WOOD"),
     "JUNGLE": ("EVERYTHING", "WOODEN"),
     "DARK_OAK": ("EVERYTHING", "WOODEN"),
+    "PALE_OAK": ("EVERYTHING", "WOODEN"),
     "CRIMSON": ("EVERYTHING", "NETHER_WOOD"),
     "WARPED": ("EVERYTHING", "NETHER_WOOD"),
     "MANGROVE": ("EVERYTHING", "WOODEN"),
@@ -153,3 +163,26 @@ ONE_ARG_PLATE = ("EVERYTHING", "WOODEN")
 # ``BlockSetType#<clinit>``: METAL_, STONE_, CHERRY_WOOD_, NETHER_WOOD_,
 # BAMBOO_WOOD_ and, through the one-argument constructor, WOODEN_).
 SOUND_EVENTS = "net/minecraft/sounds/SoundEvents"
+
+# A door's or trapdoor's facts in a BlockSetType built in code (#280, the
+# same canonical constructors as SET_CTORS): descriptor -> argument positions
+# (after ``this``) of canOpenByHand, doorClose, doorOpen, trapdoorClose,
+# trapdoorOpen. 1.21.1 / 1.21.8: name, canOpenByHand, canOpenByWindCharge,
+# canButtonBeActivatedByArrows, pressurePlateSensitivity, soundType, then
+# doorClose, doorOpen, trapdoorClose, trapdoorOpen; 1.20.1: name,
+# canOpenByHand, soundType, then the same four.
+DOOR_CTORS: dict[str, tuple[int, int, int, int, int]] = {
+    f"(Ljava/lang/String;ZZZL{SET_SENSITIVITY_CLASS};Lnet/minecraft/world/level/block/SoundType;{_SOUND * 8})V":
+        (1, 6, 7, 8, 9),
+    f"(Ljava/lang/String;ZLnet/minecraft/world/level/block/SoundType;{_SOUND * 8})V": (1, 3, 4, 5, 6),
+}
+# The one-argument constructor's door: canOpenByHand true, WOODEN_DOOR_* and
+# WOODEN_TRAPDOOR_* (1.21.1 and 1.21.8 ``BlockSetType(String)`` bytecode:
+# iconst_1, then SoundEvents WOODEN_DOOR_CLOSE / _OPEN, WOODEN_TRAPDOOR_CLOSE /
+# _OPEN through client.txt).
+ONE_ARG_DOOR = (True, "WOODEN")
+# ``SoundEvents`` fields a set type's door and trapdoor sounds are:
+# <family>_DOOR_CLOSE / _DOOR_OPEN and <family>_TRAPDOOR_CLOSE / _OPEN for
+# each family of SOUNDS (all twelve in 1.21.8 client.txt ``SoundEvents``:
+# WOODEN_, IRON_, COPPER_, CHERRY_WOOD_, NETHER_WOOD_, BAMBOO_WOOD_), fields
+# of :data:`SOUND_EVENTS`; both sounds of a pair must be one family.

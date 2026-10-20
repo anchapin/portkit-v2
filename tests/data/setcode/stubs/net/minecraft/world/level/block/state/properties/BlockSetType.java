@@ -5,7 +5,7 @@ public record BlockSetType(String name, boolean canOpenByHand, boolean canOpenBy
     boolean canButtonBeActivatedByArrows, PressurePlateSensitivity pressurePlateSensitivity, SoundType soundType,
     SoundEvent doorClose, SoundEvent doorOpen, SoundEvent trapdoorClose, SoundEvent trapdoorOpen,
     SoundEvent pressurePlateClickOff, SoundEvent pressurePlateClickOn, SoundEvent buttonClickOff, SoundEvent buttonClickOn) {
-  public static final BlockSetType IRON = null, STONE = null, OAK = null;
+  public static final BlockSetType IRON = null, STONE = null, OAK = null, PALE_OAK = null;
   public BlockSetType(String name) { this(name, true, true, true, null, null, null, null, null, null, null, null, null, null); }
   public static BlockSetType register(BlockSetType t) { return t; }
   public enum PressurePlateSensitivity { EVERYTHING, MOBS }

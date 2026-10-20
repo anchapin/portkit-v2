@@ -14,7 +14,8 @@ rule (docs/decisions.md, 2026-10-17 doors, pick 6a):
 - **read**: the registration was followed (``portkit.blockcode``) to vanilla
   ``TrapDoorBlock`` or a subclass overriding none of
   :data:`doors.TRAPDOOR_BEHAVIOUR`; whether a hand opens it and its sounds are
-  the ``BlockSetType`` constant it was built with, else the labelled DEFAULT;
+  the ``BlockSetType`` it was built with, a vanilla constant or one built in
+  code (#280, ``doors._set_type_door``), else the labelled DEFAULT;
 - **unread** (#280): the DEFAULT wooden trapdoor (opens by hand, wooden
   sounds) only when the jar's own ``minecraft:wooden_trapdoors`` tag lists it;
   otherwise residue;

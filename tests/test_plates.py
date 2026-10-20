@@ -221,7 +221,7 @@ def test_read_stone_plate_is_mobs_only(tmp_path, templates, monkeypatch):
     root = _plate_mod(tmp_path)
     real = doors.read_code
 
-    def fake(classes, names, kind):
+    def fake(classes, names, kind, **kw):
         out = real(None, names, kind)
         if kind == "plate" and "stone_pressure_plate" in out:
             r = out["stone_pressure_plate"]

@@ -3517,10 +3517,16 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, di
         return {}, {}, why
     classes = getattr(mod, "classes", None)
     readings = {}
+    # One registration run on every blockstate of the mod, as the other block
+    # readers run it (#280: a run on one kind's names alone misses names a
+    # library's material set builds by concatenation).
+    run = None
+    if classes is not None and len(classes):
+        run = blockcode._registered(classes, sorted(loaded))
     for kind in ("door", "trapdoor", "two_tall", "plate"):
         names = sorted(n for n, s in specs.items() if s[0] == kind)
         if names:
-            readings.update(doors.read_code(classes, names, kind))
+            readings.update(doors.read_code(classes, names, kind, run=run))
     tags = {"door": "wooden_doors", "trapdoor": "wooden_trapdoors", "plate": "wooden_pressure_plates"}
     wooden = {kind: doors.wooden_doors(mod, tag) for kind, tag in tags.items()}
     for stem in list(specs):
