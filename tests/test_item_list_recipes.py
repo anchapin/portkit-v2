@@ -128,8 +128,10 @@ def test_list_over_the_cap_stays_residue(tmp_path):
     recipe = dict(FURNACE, ingredient=[{"item": f"examplemod:{n}"} for n in names])
     result = recipes.convert(_mod(tmp_path, recipe), _emitted(*names, "tin_ingot"))
     assert not _recipes(result)
-    (reason,) = _reasons(result)
-    assert f"more than the {recipes.EXPANSION_CAP}" in reason
+    # #342 (pending Alex, pick 2a): only the cap refuses it, so it is explained.
+    (u,) = result.unhandled
+    assert u.kind == recipes.OVER_CAP
+    assert f"more than the {recipes.EXPANSION_CAP}" in u.reason and "17 recipes" in u.reason
 
 
 def test_alloy_forging_residue_names_the_forge(tmp_path):

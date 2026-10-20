@@ -1674,7 +1674,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 reason += f"; not converted: {', '.join(missing)}"
             if over_cap is not None and not missing:
                 # Nothing but the count stops it (#342, pending Alex).
-                result.unhandled.append(Unhandled(rel, OVER_CAP, over_cap))
+                result.unhandled.append(Unhandled(rel, OVER_CAP, f"{over_cap} (the ingredient: {reason})"))
                 continue
             result.unhandled.append(Unhandled(rel, "recipe", reason))
             unconverted = _all_unconverted(failing, multis, positions, mapped, tag_resolver, emitted)
