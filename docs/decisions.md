@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-20 (pending Alex: picks 1a–7a, PR #343): a refused recipe whose result is residue is `owned_by_residue`; a recipe refused only for the #302 expansion cap is the explained `recipe_over_cap` (still not converted)
+## 2026-10-20 (pending Alex: picks 1a–8a, PR #343): a refused recipe whose result is residue is `owned_by_residue`; a recipe refused only for the #302 expansion cap is the explained `recipe_over_cap` (still not converted)
 
 - **Status:** pending Alex (#342, part of #277, PR #343; picks comment on the PR). The branch implements every "a" pick.
 - **Decision** (`src/portkit/converters/recipes.py`, `src/portkit/agent/residue.py`; keyed on the recipe's own JSON and the residue entries, never a mod's name):
@@ -38,8 +38,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   5. **Result ownership wins over `recipe_over_cap` (5a):** a recipe that is both is `owned_by_residue` (its reason keeps `recipe_over_cap: ...`).
   6. **Advancements follow unchanged (6a):** #341 pick 1a already owns a recipe advancement whose recipes all have residue entries of any kind but `unowned`, so the advancements of these recipes stay `owned_by_residue`; nothing new.
   7. **The residue agent skips `recipe_over_cap` (7a):** writing a narrowed recipe would break #302's "a recipe is never narrowed to part of a tag".
+  8. **Every `recipe` refusal counts for 1, unsupported types included (8a):** a recipe of a type the converter doesn't support (`unsupported recipe type ...`, kind `recipe`) whose result is residue is owned too (26 files on the gauntlet: AE2 8, Immersive Engineering 15, Botania 3), for the same reason. Types an adapter or the code-recipe table explains (`machine_recipe`, `code_recipe`, ...) keep their own kinds; `conditional_recipe` (Java doesn't load it) is never touched.
 - **Why:** #277: Iron Chests' last unexplained residue was 8 recipe files (4 chest recipes whose result chests are `code_drawn_block`, 4 upgrade recipes over the cap with `forge:glass`, 18 members), and Nature's Compass' recipe names its residue compass.
-- **Measured:** see the runs comment on PR #343 (gauntlet board 37 → 38/50 done; no pack byte changes).
+- **Measured** (gauntlet, gap-leaderboard 39499922058 on 0f23246 vs develop's board 39485986978): done 37 → 38/50 (Iron Chests), mean 10.77% unchanged; files, residue, coverage and validator errors identical for all 50 mods (no pack byte changes; only `unhandled.json` kinds and reasons). `recipe` 1288 → 1130 files (11 → 9 mods); `owned_by_residue` +145; `recipe_over_cap` 13 files in 6 mods (Iron Chests 4, Immersive Engineering 3, AE2 2, Tinkers 2, Storage Drawers 1, Twilight Forest 1); 17 more over-cap recipes are owned by their result (5a). Per mod `recipe` before → after: Iron Chests 8 → 0, Nature's Compass 1 → 0 (item still open), Quark 157 → 115, AE2 126 → 104, Immersive Engineering 505 → 450, Botania 309 → 300, Twilight Forest 70 → 59, Tinkers 34 → 28, Cooking for Blockheads 69 → 66, Storage Drawers 2 → 1 (`c:obsidians` is 2 members over 8 slots, 2^8 = 256, so over the cap, not under it).
 - **Rejected:** raising or dropping the cap for these recipes (#302 decided against flooding the recipe book); narrowing a tag to some members (#302, #160); owning only when the other refusal is itself explained (1b: leaves the dirt chest and Nature's Compass' recipe open for a reason that can't matter until the result ships); counting a result the pack ships under its id (Bedrock knows it).
 - **Links:** #342, #277, #302, #303, #341, #296, #169, #181, #238.
 
