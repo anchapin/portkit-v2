@@ -49,6 +49,14 @@ converter wrote, so the checks test the pack as shipped.
   stone block beside a redstone lamp, spawns an armor stand on it (pressed,
   lamp lit) and removes it (released after the re-check, lamp unlit), drops a
   stick on it (pressed unless mobs only), then breaks it and counts the drop.
+- ``buttons``: blocks carrying the portkit button component (#280). Each is
+  ``{"id", "powered", "ticks", "arrows", "event", "expect"}`` (``ticks``,
+  ``arrows`` and the press scriptevent from the pack's button table); the
+  check places it on the floor (on a stone block) beside a redstone lamp,
+  presses it with the runtime's scriptevent (powered, lamp lit), reads it
+  again a few ticks before its press time is up (still pressed) and after
+  (released, lamp unlit), then breaks it and counts the drop. Reported, not
+  asserted: what an arrow fired at it does.
 - ``ores``: feature rules whose feature is a ``minecraft:ore_feature`` of the
   pack (#281). Each is ``{"rule", "feature", "blocks", "replaces",
   "dimension", "y"}``. Outside the Overworld (the check world is flat) the
@@ -92,6 +100,7 @@ class Checks:
     paired: list[dict] = field(default_factory=list)
     trapdoors: list[dict] = field(default_factory=list)
     plates: list[dict] = field(default_factory=list)
+    buttons: list[dict] = field(default_factory=list)
     ores: list[dict] = field(default_factory=list)
     geodes: list[dict] = field(default_factory=list)
     # "flat" (the default check world) or "default": a generated Overworld,
@@ -110,6 +119,7 @@ class Checks:
             "paired": self.paired,
             "trapdoors": self.trapdoors,
             "plates": self.plates,
+            "buttons": self.buttons,
             "ores": self.ores,
             "geodes": self.geodes,
         }
@@ -358,6 +368,39 @@ def _plate_check(behavior_pack: Path, ident: str, block: dict, tables: dict) -> 
             "expect": _block_expect(behavior_pack, ident, block)}
 
 
+BUTTON_COMPONENT = ":portkit_button"
+
+
+def _button_tables(behavior_pack: Path) -> dict[str, dict]:
+    """Every button entry of the pack's button tables, by block id, each with
+    its table's press scriptevent."""
+    out: dict[str, dict] = {}
+    for path in sorted((behavior_pack / "scripts" / "portkit" / "data").glob("*_buttons.js")):
+        _, sep, body = path.read_text(encoding="utf-8").partition("export default ")
+        if not sep:
+            continue
+        try:
+            table = json.loads(body.strip().rstrip(";"))
+        except ValueError:
+            continue
+        for ident, row in (table.get("buttons") or {}).items():
+            out[ident] = {**row, "event": table.get("press_event")}
+    return out
+
+
+def _button_check(behavior_pack: Path, ident: str, block: dict, tables: dict) -> dict | None:
+    components = block.get("components") or {}
+    if not any(isinstance(k, str) and k.endswith(BUTTON_COMPONENT) for k in components):
+        return None
+    states = [s for s in ((block.get("description") or {}).get("states") or {}) if isinstance(s, str)]
+    powered = [s for s in states if s.endswith(":powered")]
+    row = tables.get(ident)
+    if len(powered) != 1 or row is None or not isinstance(row.get("ticks"), int) or not row.get("event"):
+        return None
+    return {"id": ident, "powered": powered[0], "ticks": row["ticks"], "arrows": bool(row.get("arrows")),
+            "event": row["event"], "expect": _block_expect(behavior_pack, ident, block)}
+
+
 def _tags(value) -> set[str]:
     if isinstance(value, dict):
         out = {value["value"]} if value.get("test") == "has_biome_tag" and isinstance(value.get("value"), str) else set()
@@ -468,6 +511,7 @@ def read_checks(behavior_pack: Path) -> Checks:
     """What to check in a converted behavior pack, in a stable (sorted) order."""
     checks = Checks()
     plate_tables = _plate_tables(behavior_pack)
+    button_tables = _button_tables(behavior_pack)
     for path in sorted((behavior_pack / "blocks").rglob("*.json")):
         doc = _read_json(path)
         block = (doc or {}).get("minecraft:block") if isinstance(doc, dict) else None
@@ -498,6 +542,9 @@ def read_checks(behavior_pack: Path) -> Checks:
         plate = _plate_check(behavior_pack, ident, block, plate_tables)
         if plate is not None:
             checks.plates.append(plate)
+        button = _button_check(behavior_pack, ident, block, button_tables)
+        if button is not None:
+            checks.buttons.append(button)
     for path in sorted((behavior_pack / "items").rglob("*.json")):
         doc = _read_json(path)
         item = (doc or {}).get("minecraft:item") if isinstance(doc, dict) else None
@@ -513,6 +560,7 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks.paired.sort(key=lambda d: d["id"])
     checks.trapdoors.sort(key=lambda d: d["id"])
     checks.plates.sort(key=lambda d: d["id"])
+    checks.buttons.sort(key=lambda d: d["id"])
     checks.ores = _ore_checks(behavior_pack)
     checks.geodes = _geode_checks(behavior_pack)
     return checks

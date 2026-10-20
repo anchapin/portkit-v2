@@ -163,3 +163,18 @@ def test_runtime_with_the_generated_table(tmp_path, result):
                          cwd=ROOT, capture_output=True, text=True, timeout=120,
                          env={**os.environ, "PORTKIT_BUTTON_TABLE": str(table)})
     assert run.returncode == 0, run.stdout + run.stderr
+
+
+def test_ingame_check_rows(tmp_path, result):
+    from portkit.ingame import testpack
+    import json
+    bp = tmp_path / "bp"
+    for rel, body in result.files.items():
+        if rel.startswith(("blocks/", "scripts/", "loot_tables/")):
+            path = bp / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body if isinstance(body, str) else json.dumps(body))
+    checks = testpack.read_checks(bp)
+    assert checks.buttons == [{"id": f"{NS}:oak_knob", "powered": f"{NS}:powered", "ticks": 30, "arrows": True,
+                               "event": "portkit:button_press", "expect": [{"item": f"{NS}:oak_knob", "count": 1}]}]
+    assert checks.as_json()["buttons"] == checks.buttons

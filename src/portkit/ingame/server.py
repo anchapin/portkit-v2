@@ -281,6 +281,7 @@ def parse(lines: list[str]) -> dict:
         "paired": [d for k, d in tagged if k == "PAIRED"],
         "trapdoors": [d for k, d in tagged if k == "TRAPDOOR"],
         "plates": [d for k, d in tagged if k == "PLATE"],
+        "buttons": [d for k, d in tagged if k == "BUTTON"],
         "ores": [d for k, d in tagged if k in ("ORE", "ORE_GENERATE", "ORE_DIMENSION")],
         "geodes": [d for k, d in tagged if k in ("GEODE_GENERATE", "GEODE_DIMENSION")],
         "content_errors": errors,
