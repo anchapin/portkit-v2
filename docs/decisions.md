@@ -27,9 +27,9 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-20: Zeta's `zeta:flag` load condition is decided at the flag's default read from the mod's and Zeta's bytecode (module `@ZetaLoadModule` defaults, `@Config(flag)` field initialisers, `ZGatherAdditionalFlags` handlers), so Quark recipes gated on a flag on by default convert
+## 2026-10-20 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #338): Zeta's `zeta:flag` load condition is decided at the flag's default read from the mod's and Zeta's bytecode (module `@ZetaLoadModule` defaults, `@Config(flag)` field initialisers, `ZGatherAdditionalFlags` handlers), so Quark recipes gated on a flag on by default convert
 
-- **Status:** pending review (#280, "Part of #280: Zeta flag conditions from @ZetaLoadModule defaults").
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order) (#280, PR #338, "Part of #280: Zeta flag conditions from @ZetaLoadModule defaults").
 - **Decision** (`src/portkit/adapters/zeta/`, a library adapter; generic class-file reading in `portkit.bytecode`):
   1. **What a flag is, from Zeta 1.1-40's code.** `FlagCondition#test` answers `extraCondition (default true) && ConfigFlagManager#getFlag(flag)`; `putFlag(module, flag, value)` stores `value && module.isEnabled()`. Flags come from each module (`putModuleFlag`: its lowerCaseName, `TentativeModule#from` naming), each `@Config(flag = ...)` boolean field of a module (`ConfigObjectMapper#readInto`: the field's value is the option's default) and each `@LoadEvent` handler of `ZGatherAdditionalFlags` (its `putFlag(this, "<name>", <constant or field>)` calls). Client replacements add none.
   2. **Defaults read, never tabled (#220).** A module is enabled by default when its `enabledByDefault` (the class's `@ZetaLoadModule` element, else the annotation class's AnnotationDefault) is true, its category's option defaults on (read from `ConfigManager`'s option builder), its category's required mod (`new ZetaCategory(name, icon, requiredMod)` in the mod's code) is loaded, and none of its `antiOverlap` mods is loaded. A config field's default is the constant its initialiser stores (`<clinit>` for a static field, the no-argument `<init>` for an instance one), false when it stores none (JVMS 2.3).
