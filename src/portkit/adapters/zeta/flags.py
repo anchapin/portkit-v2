@@ -19,7 +19,10 @@ pinned library, ``fixtures/real/libraries.toml``):
   every module's own flag (``putModuleFlag``); every ``@Config(flag = "...")``
   boolean field of a module (``ConfigObjectMapper#readInto``: the field's value
   is the option's default); and the ``ZGatherAdditionalFlags`` load event, whose
-  ``@LoadEvent`` handlers call ``putFlag`` themselves.
+  ``@LoadEvent`` handlers call ``putFlag`` themselves
+  (``ZetaModuleManager#constructAndSetup`` subscribes every module to the load
+  bus, enabled or not, so a disabled module's handler still runs and its
+  flags read false).
 - ``TentativeModule#from``: a module's name is ``@ZetaLoadModule(name)``, else
   its simple class name without a trailing ``Module``, a space before each
   inner capital (regex ``(?<=.)([A-Z])``); ``lowerCaseName`` is that in lower
@@ -119,7 +122,8 @@ def _option_defaults(index: ClassIndex) -> tuple[bool | None, bool]:
     cf = index.get(_CONFIG_MANAGER)
     if cf is None:
         return None, False
-    category, module = None, False
+    categories: set[bool] = set()
+    module = False
     for m in cf.methods:
         if m.code is None:
             continue
@@ -134,11 +138,12 @@ def _option_defaults(index: ClassIndex) -> tuple[bool | None, bool]:
             if not (box.op == 0xB8 and isinstance(box.arg, Ref) and box.arg.owner == "java/lang/Boolean"):
                 continue
             if value.op in _ICONST and names_category:
-                category = _ICONST[value.op]
+                categories.add(_ICONST[value.op])
             elif (value.op == 0xB6 and isinstance(value.arg, Ref) and value.arg.owner == _MODULE
                   and value.arg.name == "enabledByDefault"):
                 module = True
-    return category, module
+    # Two category builders disagreeing: not the shape this reader knows.
+    return (next(iter(categories)) if len(categories) == 1 else None), module
 
 
 def _categories(index: ClassIndex) -> dict[str, str | None]:
@@ -209,6 +214,8 @@ def field_default(index: ClassIndex, cls: str, name: str) -> tuple[bool | None, 
     cf = index.get(cls)
     if cf is None or cf.fields.get(name) != "Z":
         return None, "not a boolean field"
+    if cf.field_access.get(name, 0) & 0x10000:
+        return None, "a compile-time constant (ConstantValue), not read here"
     static = bool(cf.field_access.get(name, 0) & 0x0008)
     if static:
         stores = _stores(index, cls, "<clinit>", "()V", 0xB3)
