@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod
-from . import armor, blocks, entities, items, lang, loot, recipes, sounds, stations, textures
+from . import armor, blocks, entities, items, lang, loot, loot_modifiers, recipes, sounds, stations, textures
 from .station_kit import unresolved_imports
 
 
@@ -116,6 +116,9 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
             # code gives them (#274) before the recipe converter decides
             # which of them carry minecraft:trimmable_armors (#272).
             result = result.merge(armor.convert(mod, result.files))
+    # Loot a NeoForge loot modifier adds to a vanilla block (#280): after the
+    # items, since an added drop must name an item the pack ships.
+    result = result.merge(loot_modifiers.convert(mod, context, result.files))
     book_entries = []
     for reader, book_plan in zip(readers, book_plans):
         book_result, book_entry = reader.convert(mod, book_plan)

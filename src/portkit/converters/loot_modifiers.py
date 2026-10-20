@@ -261,6 +261,8 @@ def convert(mod: SourceMod, context: LoadContext | None = None, files: dict | No
     by_block: dict[str, list[dict]] = {}
     carried: list[str] = []
     for path in sorted(src.rglob("*.json")):
+        if path == mod.root / GLOBAL:
+            continue  # the list itself, read by listed()
         rel = result.claim(mod, path)
         mid = f"{mod.namespace}:{path.relative_to(src).with_suffix('').as_posix()}"
         try:
