@@ -383,6 +383,10 @@ class MapV:
     clean: bool = True
     # The top-level run that allocated the map (Machine._top).
     run: int = -1
+    # (class, field) when this map stands for what the per-object map in
+    # that final instance field holds over every object of the class
+    # (Machine._site_map, #280): shared by the registration runs.
+    shared: tuple | None = None
 
     def __post_init__(self):
         self._serial = _next_serial()
@@ -751,6 +755,12 @@ class Machine:
         self._stopped_methods: set = set()
         self._finished_methods: set = set()
         self._shared_ok: dict = {}
+        # Per-class maps of a final instance field read through an object
+        # the run can't pin (#280, see _site_map): (class, field) -> MapV,
+        # whether the field qualifies, and whether the union is complete.
+        self._site_maps: dict = {}
+        self._site_fields: dict = {}
+        self._site_ok: dict = {}
         self.statics: dict[tuple[str, str], object] = {}
         self._clinit_done: set[str] = set()
         self._clinit_failed: set[str] = set()
@@ -1114,6 +1124,152 @@ class Machine:
             if not ok:
                 break
         self._shared_ok[key] = ok
+        return ok
+
+    # -- per-class maps of a final instance field (#280) ----------------------
+
+    def _site_map(self, ref: Ref):
+        """``getfield C.f`` on an object the registration run can't pin
+        (unknown: a library's event hands it over, two objects of its class
+        exist) when ``f`` is a final instance field every constructor of
+        ``C`` sets, once, to a new empty ``java.util.LinkedHashMap``
+        (_site_field): one map per (C, f) shared by every top-level
+        registration run, standing for what the maps of all of C's objects
+        hold together (an allocation-site reading of the field). A put made
+        through any such read adds to it; a read waits for the second pass
+        and sees every element only when every method of the mod and its
+        libraries that loads the field either only reads it there or ran
+        to the end in the first pass (_shared_map). What it holds may be in
+        another object's map than the one read (pick 1a, DEFAULT): a block
+        it names counts only when the mod ships that name's blockstate,
+        which every reading is keyed on. Else None (the value is unknown,
+        as before)."""
+        if self.registrations is None or self._clinit_depth or self.pass_no not in (1, 2):
+            return None
+        owner = self._field_owner(ref.owner, ref.name)
+        key = (owner, ref.name)
+        if key not in self._site_fields:
+            self._site_fields[key] = self._site_field(owner, ref.name)
+        if not self._site_fields[key]:
+            return None
+        found = self._site_maps.get(key)
+        if found is None:
+            found = MapV({}, kind="linked", shared=key)
+            self._site_maps[key] = found
+        return found
+
+    def _site_field(self, owner: str, name: str) -> bool:
+        """Whether ``owner.name`` is a final instance field (JVMS 4.5:
+        ACC_FINAL, not ACC_STATIC) of a class of the mod or its libraries
+        whose every constructor either delegates to another of its own
+        (``this(..)``, no write of the field) or writes the field exactly
+        once, with ``new java/util/LinkedHashMap; dup; invokespecial
+        <init>()V; putfield`` (javac's ``this.f = new LinkedHashMap<>()``),
+        so each object holds its own map, empty when built and kept in
+        insertion order (Java SE 21)."""
+        if not self.is_mod(owner):
+            return False
+        cf = self.classes.get(owner)
+        if cf is None:
+            return False
+        flags = getattr(cf, "field_access", {}).get(name)
+        if flags is None or flags & 0x0018 != 0x0010:
+            return False
+        ctors = [m for m in cf.methods if m.name == "<init>"]
+        if not ctors:
+            return False
+        for m in ctors:
+            if m.code is None:
+                return False
+            try:
+                code = instructions(cf, m.code)
+            except Exception:  # noqa: BLE001
+                return False
+            writes = [k for k, i in enumerate(code) if i.op == 0xB5 and isinstance(i.arg, Ref)
+                      and i.arg.name == name and self._field_owner(i.arg.owner, name) == owner]
+            delegates = any(i.op == 0xB7 and isinstance(i.arg, Ref) and i.arg.name == "<init>"
+                            and i.arg.owner == owner for i in code)
+            if not writes and delegates:
+                continue
+            if len(writes) != 1 or writes[0] < 3:
+                return False
+            k = writes[0]
+            new, dup, init = code[k - 3], code[k - 2], code[k - 1]
+            new_cls = new.arg[1] if isinstance(new.arg, tuple) else new.arg
+            if not (new.op == 0xBB and new_cls == "java/util/LinkedHashMap" and dup.op == 0x59
+                    and init.op == 0xB7 and isinstance(init.arg, Ref) and init.arg.name == "<init>"
+                    and init.arg.owner == "java/util/LinkedHashMap" and init.arg.desc == "()V"):
+                return False
+        return True
+
+    def _shared_map(self, m: "MapV", name: str, rest: list) -> bool:
+        """Gate a call on a per-class map (see _site_map), as a shared
+        list's (_shared_list); True when the call goes on as on any map,
+        False when it answers unknown (the map is left as it is). First
+        pass: a put is kept and any other change makes the map unknown; a
+        read in the mod's own code stops the run, which runs again in the
+        second pass, and a read in a dependency jar's code answers unknown
+        (as before: the jar's code is followed for what it registers, not
+        waited on). Second pass: a read sees the map in full when it is
+        complete (_site_complete), else answers unknown; a put of a key it
+        already holds to the same value changes nothing, any other change
+        stops the run."""
+        write = name in _MAP_CHANGES
+        if self.pass_no == 1:
+            if name == "put" and len(rest) == 2:
+                return True
+            if write:
+                m.items, m.havoc, m.exact = {}, True, False
+                return True
+            if self._running and self._library(self._running[-1]):
+                return False
+            self._deferred_now = True
+            raise Unreadable("reads a map other registration runs add to (read once they have all run)")
+        if write:
+            if name == "put" and len(rest) == 2 and rest[0] in m.items and m.items[rest[0]] is rest[1]:
+                return True
+            raise Unreadable("changes a map other registration runs read")
+        return self._site_complete(m.shared)
+
+    def _site_complete(self, key: tuple) -> bool:
+        """Whether a per-class map (see _site_map) holds every element any
+        run puts in it: each method of the mod or its libraries that loads
+        the field (``getfield``) either only reads the map there
+        (_map_read_only) or ran to the end without stopping, at any depth,
+        in the first pass. Cached per field."""
+        if key in self._site_ok:
+            return self._site_ok[key]
+        owner, fname = key
+        ok = True
+        for src in (self.classes._raw, self.classes._lib):
+            for cname, raw in src.items():
+                if fname.encode() not in raw:
+                    continue
+                cf = self.classes.get(cname)
+                if cf is None:
+                    ok = False
+                    break
+                for m in cf.methods:
+                    if m.code is None:
+                        continue
+                    try:
+                        code = instructions(cf, m.code)
+                    except Exception:  # noqa: BLE001
+                        ok = False
+                        break
+                    sites = [k for k, i in enumerate(code) if i.op == 0xB4 and isinstance(i.arg, Ref)
+                             and i.arg.name == fname and self._field_owner(i.arg.owner, fname) == owner]
+                    if not sites or all(_map_read_only(code, k) for k in sites):
+                        continue
+                    mk = (cf.name, m.name, m.desc)
+                    if mk not in self._finished_methods or mk in self._stopped_methods:
+                        ok = False
+                        break
+                if not ok:
+                    break
+            if not ok:
+                break
+        self._site_ok[key] = ok
         return ok
 
     def new_epoch(self) -> None:
@@ -1924,7 +2080,8 @@ class Machine:
             if isinstance(obj, Obj):
                 s.append(obj.fields[name] if name in obj.fields else self._field_default(obj, name))
             else:
-                s.append(UNKNOWN)
+                site = self._site_map(insn.arg) if obj is UNKNOWN else None
+                s.append(UNKNOWN if site is None else site)
         elif op == 0xB5:
             val, obj = s.pop(), s.pop()
             if isinstance(val, IterV):
@@ -2952,6 +3109,8 @@ class Machine:
         the key compares as it does here (_map_key); a change the model
         doesn't cover leaves the map unknown."""
         returns = _arg_count(desc)[1]
+        if recv.shared is not None and not recv.havoc and not self._shared_map(recv, name, rest):
+            return [UNKNOWN] if returns else [None]
         if recv.havoc:
             return [UNKNOWN] if returns else [None]
         if recv.kind == "fixed" and name in _MAP_CHANGES:
@@ -2972,6 +3131,12 @@ class Machine:
             return [rest[1] if name == "getOrDefault" and len(rest) > 1 else None]
         if name == "put" and len(rest) == 2:
             key = rest[0]
+            if (key is UNKNOWN or not _hashable(key)) and recv.shared is not None:
+                # A per-class map (see _site_map) only ever answers what is
+                # surely in some object's map: a pair whose key isn't known
+                # is left out and the map is no longer exact.
+                recv.exact = False
+                return [UNKNOWN]
             if key is UNKNOWN or not _hashable(key):
                 recv.items, recv.havoc, recv.exact = {}, True, False
                 return [UNKNOWN]
@@ -3099,6 +3264,10 @@ class Machine:
         change was modelled exactly, on keys that compare as they do here,
         in this top-level run and on no way of an undecided branch; else
         None."""
+        if m.shared is not None and not m.havoc:
+            # A per-class map (see _site_map): the elements surely put in
+            # some object's map, in the order the runs put them.
+            return MapView(m, kind)
         if m.kind != "linked" or m.havoc or not m.exact or not m.clean or m.run != self._top:
             return None
         return MapView(m, kind)
@@ -3267,6 +3436,16 @@ class Machine:
                 return [IterV(recv, 0, recv.map.mod)]
             if name in ("isEmpty", "size") and not rest and items is not None:
                 return [int(not items)] if name == "isEmpty" else [len(items)]
+            if name == "forEach" and len(rest) == 1 and isinstance(rest[0], Lam) and items is not None:
+                # Iterable#forEach on values() / keySet() (Java SE 21: the
+                # action for each element in iteration order; a change to the
+                # map meanwhile fails fast, HashMap$Values#forEach).
+                mod = recv.map.mod
+                for item in items:
+                    self.call_lambda(rest[0], [item])
+                    if recv.map.mod != mod:
+                        raise Unreadable("a map changes while it is iterated (ConcurrentModificationException)")
+                return [None]
             recv.map.items, recv.map.havoc, recv.map.exact = {}, True, False
             return [UNKNOWN] if returns else [None]
         if isinstance(recv, IterV):
@@ -3599,6 +3778,45 @@ def _reads_only(code: list, k: int) -> bool:
     nxt = code[k + 1]
     return nxt.op in (0xB6, 0xB9) and isinstance(nxt.arg, Ref) and nxt.arg.owner in _COLLECTION_TYPES \
         and nxt.arg.name in _COLLECTION_READS and _arg_count(nxt.arg.desc)[0] == 0
+
+
+# Map methods that only read a map and hand out nothing that changes it
+# (java.util.Map, Java SE 21; values()/keySet() views are read through the
+# model, which stops at any change made through them).
+_MAP_READ_CALLS = frozenset({"get", "getOrDefault", "containsKey", "containsValue", "isEmpty", "size",
+                             "values", "keySet", "forEach"})
+# Instructions that push one value and read nothing off the stack (constants,
+# local loads, getstatic).
+_PUSH_ONE = frozenset({*range(0x01, 0x14), 0x19, 0x15, 0x16, 0x17, 0x18, *range(0x1A, 0x2E), 0xB2})
+
+
+def _map_read_only(code: list, k: int) -> bool:
+    """Whether the map ``code[k]`` (a getfield) loads is only read there:
+    followed, with only constants, local loads, getstatic, getfield and
+    checkcast and calls taking no part of the stack below it in between, by
+    a call of one of java.util.Map's reading methods (_MAP_READ_CALLS) on
+    it (#280: a datagen provider's ``slabs.get(block)``)."""
+    depth = 0  # values pushed above the map
+    for insn in code[k + 1:k + 40]:
+        op = insn.op
+        if op in _PUSH_ONE:
+            depth += 1
+        elif op in (0xB4, 0xC0):
+            if depth == 0:
+                return False
+        elif op in (0xB6, 0xB7, 0xB8, 0xB9) and isinstance(insn.arg, Ref):
+            n, returns = _arg_count(insn.arg.desc)
+            taken = n + (0 if op == 0xB8 else 1)
+            if taken > depth + 1:
+                return False
+            if taken == depth + 1:
+                return op in (0xB6, 0xB9) and insn.arg.owner in _JAVA_MAPS \
+                    and insn.arg.name in _MAP_READ_CALLS
+            depth -= taken
+            depth += 1 if returns else 0
+        else:
+            return False
+    return False
 
 
 def _local_load(insn) -> int | None:
