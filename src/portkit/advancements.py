@@ -183,8 +183,8 @@ def _reason(kind: str, category: str, members: list[tuple[str, dict]]) -> str:
         kinds = sorted({k for _, d in members for k in d["kinds"]})
         return (f"{n} recipe advancement(s) whose rewarded recipes are residue with entries of their own "
                 f"({_shown(owners)}; {', '.join(kinds)}): their one effect is unlocking those recipes in the "
-                f"recipe book, which the recipe converter carries as the converted recipe's Bedrock `unlock` "
-                f"(#260), so they go with their recipes when those convert")
+                f"recipe book, so they go with their recipes; when one converts, the recipe converter reads "
+                f"them again (a crafting recipe's Bedrock `unlock`, #260)")
     if category == "story":
         triggers = sorted({t for _, d in members for t in d["triggers"]})
         rewarded = [(r.rsplit("/", 1)[-1], d["rewards"]) for r, d in members if d["rewards"]]
