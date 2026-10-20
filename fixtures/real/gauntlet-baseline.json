@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "kind": "gauntlet-baseline",
- "generated": "2026-10-20T14:51:52+00:00",
+ "generated": "2026-10-20T18:26:36+00:00",
  "manifest": "fixtures/real/gauntlet.toml",
  "mods": {
   "jei": {
@@ -316,9 +316,9 @@
   "quark": {
    "class": "content",
    "status": "ok",
-   "coverage": 52.61,
-   "files": 3612,
-   "residue": 3254,
+   "coverage": 52.9,
+   "files": 3615,
+   "residue": 3219,
    "errors": 0,
    "done": false
   },
@@ -336,7 +336,7 @@
    "status": "ok",
    "coverage": 24.67,
    "files": 2267,
-   "residue": 6923,
+   "residue": 6922,
    "errors": 0,
    "done": false
   },
@@ -363,7 +363,7 @@
    "status": "ok",
    "coverage": 25.89,
    "files": 2279,
-   "residue": 6525,
+   "residue": 6524,
    "errors": 0,
    "done": false
   },
