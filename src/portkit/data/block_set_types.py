@@ -186,3 +186,71 @@ ONE_ARG_DOOR = (True, "WOODEN")
 # each family of SOUNDS (all twelve in 1.21.8 client.txt ``SoundEvents``:
 # WOODEN_, IRON_, COPPER_, CHERRY_WOOD_, NETHER_WOOD_, BAMBOO_WOOD_), fields
 # of :data:`SOUND_EVENTS`; both sounds of a pair must be one family.
+
+# Buttons (#280): constant -> (canButtonBeActivatedByArrows, Java button click
+# family). Read from Mojang's 1.21.1 client jar (sha1 30c73b1c, client.txt
+# 2244b6f0) ``BlockSetType#<clinit>``, read 2026-10-20: IRON, COPPER, GOLD,
+# STONE and POLISHED_BLACKSTONE pass canButtonBeActivatedByArrows false (the
+# 4th argument, iconst_0) with STONE_BUTTON_CLICK_OFF / _ON; CHERRY, CRIMSON,
+# WARPED and BAMBOO pass true with their own family's; the one-argument
+# constructor ``BlockSetType(String)`` passes true with WOODEN_BUTTON_CLICK_*
+# (its bytecode: iconst_1 x3, then SoundEvents CZ / Da = WOODEN_BUTTON_CLICK_OFF
+# / _ON through client.txt). 1.20.1 (sha1 0c3ec587, client.txt 6c48521e) passes
+# the same click sounds per constant (no COPPER) and keeps the arrows flag on
+# the button: ``ButtonBlock(Properties, BlockSetType, int, boolean arrowsCanPress)``.
+BUTTON_TYPES: dict[str, tuple[bool, str]] = {
+    "IRON": (False, "STONE"),
+    "COPPER": (False, "STONE"),
+    "GOLD": (False, "STONE"),
+    "STONE": (False, "STONE"),
+    "POLISHED_BLACKSTONE": (False, "STONE"),
+    "OAK": (True, "WOODEN"),
+    "SPRUCE": (True, "WOODEN"),
+    "BIRCH": (True, "WOODEN"),
+    "ACACIA": (True, "WOODEN"),
+    "CHERRY": (True, "CHERRY_WOOD"),
+    "JUNGLE": (True, "WOODEN"),
+    "DARK_OAK": (True, "WOODEN"),
+    "PALE_OAK": (True, "WOODEN"),
+    "CRIMSON": (True, "NETHER_WOOD"),
+    "WARPED": (True, "NETHER_WOOD"),
+    "MANGROVE": (True, "WOODEN"),
+    "BAMBOO": (True, "BAMBOO_WOOD"),
+}
+
+# Java button click family -> Bedrock (click on, click off) sound definitions
+# and pitches, the ``button.click_on`` / ``button.click_off`` events of the
+# bedrock-samples ``block_sounds`` families (Mojang/bedrock-samples@46ba6ea9
+# resource_pack/sounds.json: wood -> random.wood_click at 0.6 / 0.5, stone ->
+# random.stone_click, cherry_wood / nether_wood / bamboo_wood ->
+# click_on.<family>_button / click_off.<family>_button).
+BUTTON_SOUNDS: dict[str, tuple[str, str, float, float]] = {
+    "WOODEN": ("random.wood_click", "random.wood_click", 0.6, 0.5),
+    "STONE": ("random.stone_click", "random.stone_click", 0.6, 0.5),
+    "CHERRY_WOOD": ("click_on.cherry_wood_button", "click_off.cherry_wood_button", 0.6, 0.5),
+    "NETHER_WOOD": ("click_on.nether_wood_button", "click_off.nether_wood_button", 0.6, 0.5),
+    "BAMBOO_WOOD": ("click_on.bamboo_wood_button", "click_off.bamboo_wood_button", 0.6, 0.5),
+}
+
+# A button's facts in a BlockSetType built in code (the canonical
+# constructors of SET_CTORS): descriptor -> argument positions (after
+# ``this``) of canButtonBeActivatedByArrows (None in 1.20.1, where the button
+# carries it), buttonClickOff and buttonClickOn (1.21.1 / 1.21.8: 4th, 13th,
+# 14th; 1.20.1: 10th, 11th).
+BUTTON_CTORS: dict[str, tuple[int | None, int, int]] = {
+    f"(Ljava/lang/String;ZZZL{SET_SENSITIVITY_CLASS};Lnet/minecraft/world/level/block/SoundType;{_SOUND * 8})V":
+        (3, 12, 13),
+    f"(Ljava/lang/String;ZLnet/minecraft/world/level/block/SoundType;{_SOUND * 8})V": (None, 9, 10),
+}
+# The one-argument constructor's button: arrows press it, wooden clicks.
+ONE_ARG_BUTTON = (True, "WOODEN")
+BUTTON_CLASS = "net/minecraft/world/level/block/ButtonBlock"
+# ButtonBlock's constructors (client.txt): 1.21.1 / 1.21.8
+# ``(BlockSetType, int ticksToStayPressed, Properties)``; 1.20.1
+# ``(Properties, BlockSetType, int ticksToStayPressed, boolean arrowsCanPress)``.
+# descriptor -> (set type, ticks, arrows) argument positions (after ``this``).
+_PROPS = "Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;"
+BUTTON_BLOCK_CTORS: dict[str, tuple[int, int, int | None]] = {
+    f"(L{CLASS};I{_PROPS})V": (0, 1, None),
+    f"({_PROPS}L{CLASS};IZ)V": (1, 2, 3),
+}
