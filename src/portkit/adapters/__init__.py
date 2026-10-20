@@ -257,7 +257,7 @@ def station_hooks() -> list[StationHooks]:
 
 from . import (  # noqa: E402  (each imports Adapter above)
     alloy_forgery, bclib, betterend, citadel, create, farmersdelight, mantle, mekanism, mythicmetals, silentgear,
-    supplementaries, tconstruct, waystones,
+    supplementaries, tconstruct, waystones, zeta,
 )
 
 ADAPTERS = (
@@ -274,4 +274,5 @@ ADAPTERS = (
     supplementaries.ADAPTER,
     tconstruct.ADAPTER,
     waystones.ADAPTER,
+    zeta.ADAPTER,
 )

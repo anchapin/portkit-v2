@@ -72,6 +72,12 @@ class Method:
     desc: str
     access: int
     code: bytes | None
+    # An annotation interface element's AnnotationDefault (JVMS 4.7.22): the
+    # value as ``ClassFile.annotations`` reads one; None when it has none.
+    default: object = None
+    has_default: bool = False
+    # The method's RuntimeVisibleAnnotations, read as ``ClassFile.annotations``.
+    annotations: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -94,6 +100,9 @@ class ClassFile:
     # class descriptor for a class literal), int/float, ``(enum type,
     # constant)`` or a tuple of values; a nested annotation reads as None.
     annotations: dict = field(default_factory=dict)
+    # Each field's RuntimeVisibleAnnotations, read as ``annotations`` is
+    # (fields with none are left out).
+    field_annotations: dict = field(default_factory=dict)
 
     def method(self, name: str, desc: str | None = None) -> Method | None:
         for m in self.methods:
@@ -256,6 +265,7 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
 
     fields: dict[str, str] = {}
     field_access: dict[str, int] = {}
+    field_annotations: dict[str, dict] = {}
     (n,) = struct.unpack_from(">H", data, pos)
     pos += 2
     for _ in range(n):
@@ -263,6 +273,12 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
         pos, fattrs = attributes(pos + 6)
         fields[member(utf(name))] = desc_of(utf(desc))
         field_access[member(utf(name))] = faccess | (0x10000 if any(a == "ConstantValue" for a, _ in fattrs) else 0)
+        for aname, body in fattrs:
+            if aname == "RuntimeVisibleAnnotations":
+                try:
+                    field_annotations[member(utf(name))] = _annotations(body, pool)
+                except (struct.error, IndexError, TypeError):
+                    pass  # a malformed table names no annotation
 
     methods: list[Method] = []
     (n,) = struct.unpack_from(">H", data, pos)
@@ -273,11 +289,22 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
         maccess, name, desc = struct.unpack_from(">HHH", data, pos)
         pos, attrs = attributes(pos + 6)
         code = None
+        default, has_default, manns = None, False, {}
         for aname, body in attrs:
             if aname == "Code":
                 (length,) = struct.unpack_from(">I", body, 4)
                 code = body[8:8 + length]
-        methods.append(Method(member(utf(name)), desc_of(utf(desc)), maccess, code))
+            elif aname == "AnnotationDefault":
+                try:
+                    default, has_default = _element_value(body, 0, pool)[0], True
+                except (struct.error, IndexError, TypeError):
+                    pass  # a malformed default reads as none
+            elif aname == "RuntimeVisibleAnnotations":
+                try:
+                    manns = _annotations(body, pool)
+                except (struct.error, IndexError, TypeError):
+                    manns = {}  # a malformed table names no annotation
+        methods.append(Method(member(utf(name)), desc_of(utf(desc)), maccess, code, default, has_default, manns))
 
     pos, attrs = attributes(pos)
     bootstrap = []
@@ -299,11 +326,20 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
             except (struct.error, IndexError, TypeError):
                 annotations = {}  # a malformed table names no annotation
     return ClassFile(cls(this), cls(sup), interfaces, fields, methods, pool, bootstrap, access, field_access,
-                     annotations)
+                     annotations, field_annotations)
 
 
 def _annotations(body: bytes, pool: list) -> dict:
     """A RuntimeVisibleAnnotations attribute's annotations (JVMS 4.7.16)."""
+    return _annotation_reader(body, pool)[1]()
+
+
+def _element_value(body: bytes, pos: int, pool: list):
+    """One element_value (JVMS 4.7.16.1) at ``pos``: (value, next pos)."""
+    return _annotation_reader(body, pool)[0](pos)
+
+
+def _annotation_reader(body: bytes, pool: list):
     def utf(idx: int):
         return pool[idx][1]
 
@@ -342,13 +378,16 @@ def _annotations(body: bytes, pool: list) -> dict:
             elems[utf(name)] = v
         return (utf(t), elems), pos
 
-    (n,) = struct.unpack_from(">H", body, 0)
-    pos = 2
-    out = {}
-    for _ in range(n):
-        (t, elems), pos = annotation(pos)
-        out[t] = elems
-    return out
+    def table() -> dict:
+        (n,) = struct.unpack_from(">H", body, 0)
+        pos = 2
+        out = {}
+        for _ in range(n):
+            (t, elems), pos = annotation(pos)
+            out[t] = elems
+        return out
+
+    return value, table
 
 
 # --- Instructions -----------------------------------------------------------

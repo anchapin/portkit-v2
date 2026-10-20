@@ -135,6 +135,10 @@ class FlagDefault:
     default: bool  # the value the verdict used: the cited default, or the user's setting
     url: str
     user: bool = False  # set by user config rather than read from the cited default
+    # Read from the mod's (and its libraries') bytecode by an adapter rather
+    # than cited in config_flag_defaults.json (Zeta's flags, #280); ``url``
+    # then says what it was read from.
+    read: bool = False
 
 
 @lru_cache(maxsize=1)
@@ -205,6 +209,18 @@ class Verdict:
         if self.unknown:
             return f"unknown load condition {', '.join(dict.fromkeys(self.unknown))}"
         return f"load condition can't be decided here: {self.why}"
+
+
+def _by_mod(assumed: dict) -> str:
+    by_mod: dict[str, dict[bool, list[str]]] = {}
+    for (kind, flag), found in sorted(assumed.items()):
+        by_mod.setdefault(f"{found.mod} {found.version}", {}).setdefault(found.default, []).append(
+            f"{kind}/{flag}" if flag else kind)
+    parts = []
+    for mod, flags in sorted(by_mod.items()):
+        said = [f"{'on' if on else 'off'}: {', '.join(flags[on])}" for on in (True, False) if on in flags]
+        parts.append(f"{mod} ({'; '.join(said)})")
+    return "; ".join(parts)
 
 
 def _kind(cond: dict) -> str | None:
@@ -578,20 +594,18 @@ class LoadContext:
 
     def note(self) -> str | None:
         """One line naming every flag the conversion assumed at its cited default."""
-        assumed = {k: f for k, f in self.assumed.items() if not f.user}
-        if not assumed:
-            return None
-        by_mod: dict[str, dict[bool, list[str]]] = {}
-        for (kind, flag), found in sorted(assumed.items()):
-            by_mod.setdefault(f"{found.mod} {found.version}", {}).setdefault(found.default, []).append(
-                f"{kind}/{flag}" if flag else kind)
-        parts = []
-        for mod, flags in sorted(by_mod.items()):
-            said = [f"{'on' if on else 'off'}: {', '.join(flags[on])}" for on in (True, False) if on in flags]
-            parts.append(f"{mod} ({'; '.join(said)})")
-        return ("files gated on mod config flags were decided at each flag's default, cited from "
-                "the mod's own source (portkit/data/config_flag_defaults.json); a pack that changes "
-                "these options would load a different set. Assumed " + "; ".join(parts))
+        cited = {k: f for k, f in self.assumed.items() if not f.user and not f.read}
+        read = {k: f for k, f in self.assumed.items() if not f.user and f.read}
+        lines = []
+        if cited:
+            lines.append("files gated on mod config flags were decided at each flag's default, cited from "
+                         "the mod's own source (portkit/data/config_flag_defaults.json); a pack that changes "
+                         "these options would load a different set. Assumed " + _by_mod(cited))
+        if read:
+            lines.append("files gated on mod config flags were decided at each flag's default, read from "
+                         "the bytecode of the mod and its library jars; a pack that changes these options "
+                         "would load a different set. Assumed " + _by_mod(read))
+        return " ".join(lines) or None
 
 
     def user_note(self) -> str | None:
