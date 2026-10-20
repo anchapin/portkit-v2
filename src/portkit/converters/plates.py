@@ -14,7 +14,10 @@ doors' rule (docs/decisions.md, 2026-10-17 doors, pick 6a):
   ``PressurePlateBlock`` or a subclass overriding none of
   :data:`doors.PLATE_BEHAVIOUR`; the detection rule and sounds come from the
   constants its constructor was given (``BlockSetType`` in 1.21, plus a
-  ``PressurePlateBlock$Sensitivity`` in 1.20), else the labelled DEFAULT;
+  ``PressurePlateBlock$Sensitivity`` in 1.20), or from a ``BlockSetType``
+  built in code (``new BlockSetType(...)``, as Fabric API's
+  ``BlockSetTypeBuilder`` builds one: #280, ``doors._set_type_plate``), else
+  the labelled DEFAULT;
 - **unread** (#280): the DEFAULT wooden plate (everything presses it, wooden
   clicks) only when the jar's own ``minecraft:wooden_pressure_plates`` tag lists
   it; otherwise residue;

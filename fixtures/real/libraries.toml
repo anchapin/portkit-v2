@@ -21,6 +21,16 @@
 # and a library call the registration run can't follow taken as havoc
 # (pick 4a), BetterEnd reads 199 of 722 with them (86 alone; every block read
 # alone is read with them, as the same class).
+#
+# Fabric API pinned 2026-10-19 (#280, "Fabric API BlockSetType"): with
+# 0.136.1+1.21.8 BetterEnd's set types are read (WorldWeaver's BlockSet,
+# MetalBlockSet and WoodenBlockSet build them with Fabric API's
+# BlockSetTypeBuilder.copyOf(BlockSetType.STONE / IRON / OAK)...register(id)),
+# so its 19 plates read what presses them and their clicks; without it the
+# builder isn't there and they read as an unknown set type. The blockstates
+# whose registration is read are the same with it (every block read alone is
+# read with it, as the same class). Its 43 module jars are nested under
+# META-INF/jars/ and read with it.
 
 [[library]]
 name = "zeta"
@@ -77,3 +87,17 @@ source = "https://github.com/quiqueck/WunderLib"
 url = "https://cdn.modrinth.com/data/8O0Adq7w/versions/QxVEDpO5/wunderlib-21.800.3.jar"
 sha512 = "02d5bcb5e773bd8fbeadd896411f8a454c07ca37477d8ff1ed9055d002d7c82a4a00f00b8900dc36622edf5d82ec6aa26f046f7e73aa1e8fa72a10fb1db4a492"
 notes = "BetterEnd 21.800.2 requires wunderlib 21.800.x (its fabric.mod.json); 21.800.3 is the newest 1.21.8 Fabric build (Modrinth, published 2026-10-18)"
+
+[[library]]
+name = "fabric_api"
+for = ["betterend"]
+project = "fabric-api"
+version_id = "g58ofrov"
+version = "0.136.1+1.21.8"
+loader = "fabric"
+minecraft = "1.21.8"
+license = "Apache-2.0"
+source = "https://github.com/FabricMC/fabric"
+url = "https://cdn.modrinth.com/data/P7dR8mSH/versions/g58ofrov/fabric-api-0.136.1%2B1.21.8.jar"
+sha512 = "eb1a6b5fc9912c68409493f10f43c3b61adda1d789ede9c83b16d0a95a2eb96bd630472866e163960479eb1b4d1196d09ade5aadc9da62624e800640c706c4a9"
+notes = "BetterEnd 21.800.2 requires fabric-api >=0.100.0 (its fabric.mod.json; BCLib, WorldWeaver and WunderLib 21.800.3 ask >=0.120.0, >=0.100.0, >=0.126.0); 0.136.1+1.21.8 is the newest 1.21.8 Fabric build (Modrinth, published 2025-11-16); its module jars (fabric-object-builder-api-v1 21.1.10 has BlockSetTypeBuilder) are nested under META-INF/jars/"

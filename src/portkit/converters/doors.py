@@ -271,23 +271,93 @@ def read_code(classes, names: list[str], kind: str) -> dict[str, Reading]:
 def _plate_type(obj) -> tuple[tuple[str, str] | None, str]:
     """(sensitivity, sound family) and where they were read, for a plate built
     as ``new PressurePlateBlock(BlockSetType.X, props)`` (1.21) or
-    ``new PressurePlateBlock(Sensitivity.Y, props, BlockSetType.X)`` (1.20).
-    (None, "") when the constructor's constants aren't vanilla ones read here."""
+    ``new PressurePlateBlock(Sensitivity.Y, props, BlockSetType.X)`` (1.20),
+    where the set type is a vanilla constant or one built in code (#280, see
+    :func:`_set_type_plate`). (None, "") when that can't be read here."""
     ctor = obj.fields.get("__vanilla_ctor")
     args = ctor[2] if ctor else ()
-    sets = [a.name for a in args if isinstance(a, blockcode.Const) and a.owner == block_set_types.CLASS]
+    sets = [a for a in args if (isinstance(a, blockcode.Const) and a.owner == block_set_types.CLASS)
+            or (isinstance(a, blockcode.Obj) and a.cls == block_set_types.CLASS)]
     sens = [a.name for a in args if isinstance(a, blockcode.Const)
             and a.owner == block_set_types.SENSITIVITY_CLASS]
-    if len(sets) != 1 or sets[0] not in block_set_types.PLATE_TYPES or len(sens) > 1:
+    if len(sets) != 1 or len(sens) > 1:
         return None, ""
-    sensitivity, family = block_set_types.PLATE_TYPES[sets[0]]
-    where = f"BlockSetType.{sets[0]}"
+    sensitivity, family, where = _set_type_plate(sets[0])
+    if family is None:
+        return None, ""
     if sens:
         if sens[0] not in block_set_types.SENSITIVITIES:
             return None, ""
         sensitivity = sens[0]
         where = f"Sensitivity.{sens[0]}, {where}"
+    if sensitivity is None:
+        return None, ""
     return (sensitivity, family), where
+
+
+def _set_type_plate(v) -> tuple[str | None, str | None, str]:
+    """(sensitivity, click sound family, where) of a set type: a vanilla
+    ``BlockSetType`` constant (:data:`block_set_types.PLATE_TYPES`), or one
+    built in code with ``new BlockSetType(...)`` (#280; Fabric API's
+    ``BlockSetTypeBuilder`` builds one), whose arguments are the
+    one-argument constructor's name, or vanilla constants
+    (``PressurePlateSensitivity.MOBS``, ``SoundEvents.STONE_PRESSURE_PLATE_CLICK_ON``)
+    and components of a vanilla set type (``BlockSetType.STONE.pressurePlateClickOn()``,
+    what ``BlockSetTypeBuilder.copyOf`` copies). The family is None when it
+    can't be read: an argument that isn't one of those, or click on and off
+    sounds of two families."""
+    types = block_set_types.PLATE_TYPES
+    if isinstance(v, blockcode.Const):
+        if v.name not in types:
+            return None, None, ""
+        return types[v.name][0], types[v.name][1], f"BlockSetType.{v.name}"
+    ctor = v.fields.get("__vanilla_ctor") if isinstance(v, blockcode.Obj) else None
+    if not ctor or ctor[0] != block_set_types.CLASS:
+        return None, None, ""
+    desc, args = ctor[1], ctor[2]
+    if desc == block_set_types.ONE_ARG_CTOR:
+        sensitivity, family = block_set_types.ONE_ARG_PLATE
+        return sensitivity, family, "new BlockSetType(String)"
+    slots = block_set_types.SET_CTORS.get(desc)
+    if slots is None or len(args) <= slots[2]:
+        return None, None, ""
+    at_sens, at_off, at_on = slots
+
+    def part(a, component):
+        if isinstance(a, blockcode.Part) and a.name == component and a.of.owner == block_set_types.CLASS \
+                and a.of.name in types:
+            return a.of.name
+        return None
+
+    sensitivity, sens_from = None, ""
+    if at_sens is not None:
+        a = args[at_sens]
+        if isinstance(a, blockcode.Const) and a.owner == block_set_types.SET_SENSITIVITY_CLASS \
+                and a.name in block_set_types.SENSITIVITIES:
+            sensitivity, sens_from = a.name, f"PressurePlateSensitivity.{a.name}"
+        elif part(a, "pressurePlateSensitivity"):
+            k = part(a, "pressurePlateSensitivity")
+            sensitivity, sens_from = types[k][0], f"BlockSetType.{k}.pressurePlateSensitivity()"
+        else:
+            return None, None, ""
+    families, clicks = [], []
+    for at, component, suffix in ((at_off, "pressurePlateClickOff", "_PRESSURE_PLATE_CLICK_OFF"),
+                                  (at_on, "pressurePlateClickOn", "_PRESSURE_PLATE_CLICK_ON")):
+        a = args[at]
+        if isinstance(a, blockcode.Const) and a.owner == block_set_types.SOUND_EVENTS \
+                and a.name.endswith(suffix) and a.name[:-len(suffix)] in block_set_types.PLATE_SOUNDS:
+            families.append(a.name[:-len(suffix)])
+            clicks.append(f"SoundEvents.{a.name}")
+        elif part(a, component):
+            k = part(a, component)
+            families.append(types[k][1])
+            clicks.append(f"BlockSetType.{k}.{component}()")
+        else:
+            return None, None, ""
+    if families[0] != families[1]:
+        return None, None, ""
+    where = "new BlockSetType(" + ", ".join(x for x in (sens_from, *clicks) if x) + ")"
+    return sensitivity, families[0], where
 
 
 def wooden_doors(mod: SourceMod, tag: str = "wooden_doors") -> set[str]:

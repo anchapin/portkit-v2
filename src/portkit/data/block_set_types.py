@@ -122,3 +122,34 @@ PLATE_SOUNDS: dict[str, tuple[str, str, float, float]] = {
     "BAMBOO_WOOD": ("click_on.bamboo_wood_pressure_plate", "click_off.bamboo_wood_pressure_plate", 1.0, 1.0),
     "METAL": ("random.click", "random.click", 0.6, 0.5),
 }
+
+# A BlockSetType built in code (#280: Fabric API's ``BlockSetTypeBuilder``
+# ends in ``new BlockSetType(...)`` handed to ``BlockSetType.register``, which
+# returns it): its constructor descriptor -> the argument positions (after
+# ``this``) of the pressure plate sensitivity (None where the record has none)
+# and of ``pressurePlateClickOff`` / ``pressurePlateClickOn``. The canonical
+# constructor takes the record components in declaration order (client.txt
+# 1.21.1 sha1 2244b6f072256667bcd9a73df124d6c58de77992 and 1.21.8 sha1
+# bdeb624c3aefba11d9d40f34bc96176350b549b6: name, canOpenByHand,
+# canOpenByWindCharge, canButtonBeActivatedByArrows, pressurePlateSensitivity,
+# soundType, doorClose, doorOpen, trapdoorClose, trapdoorOpen,
+# pressurePlateClickOff, pressurePlateClickOn, buttonClickOff, buttonClickOn;
+# 1.20.1 sha1 6c48521eed01fe2e8ecdadbd5ae348415f3c47da: name, canOpenByHand,
+# soundType, then the same eight sounds).
+_SOUND = "Lnet/minecraft/sounds/SoundEvent;"
+SET_SENSITIVITY_CLASS = CLASS + "$PressurePlateSensitivity"
+SET_CTORS: dict[str, tuple[int | None, int, int]] = {
+    f"(Ljava/lang/String;ZZZL{SET_SENSITIVITY_CLASS};Lnet/minecraft/world/level/block/SoundType;{_SOUND * 8})V":
+        (4, 10, 11),
+    f"(Ljava/lang/String;ZLnet/minecraft/world/level/block/SoundType;{_SOUND * 8})V": (None, 7, 8),
+}
+# The one-argument constructor ``BlockSetType(String)`` (1.21.1, 1.21.8
+# bytecode): EVERYTHING with WOODEN_PRESSURE_PLATE_CLICK_OFF / _ON, as the
+# wooden constants above (1.20.1: the wooden clicks, sensitivity on the plate).
+ONE_ARG_CTOR = "(Ljava/lang/String;)V"
+ONE_ARG_PLATE = ("EVERYTHING", "WOODEN")
+# ``SoundEvents`` fields a set type's plate clicks are: <family>_PRESSURE_PLATE_CLICK_OFF / _ON
+# for each family of :data:`PLATE_SOUNDS` (the constants' sounds in the 1.21.8
+# ``BlockSetType#<clinit>``: METAL_, STONE_, CHERRY_WOOD_, NETHER_WOOD_,
+# BAMBOO_WOOD_ and, through the one-argument constructor, WOODEN_).
+SOUND_EVENTS = "net/minecraft/sounds/SoundEvents"
