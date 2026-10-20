@@ -104,7 +104,7 @@ class _Reader:
         if method is not None and method.code and method.access & 0x0008:
             ins = [i for i in instructions(cf, method.code) if i.name not in ("nop",)]
             ops = [i.name for i in ins]
-            if len(ins) >= 4 and ops[-1] == "areturn":
+            if len(ins) >= 3 and ops[-1] == "areturn":
                 call = ins[-2]
                 ref = call.arg
                 if (call.op == _INVOKESTATIC and getattr(ref, "owner", None) == _RL
