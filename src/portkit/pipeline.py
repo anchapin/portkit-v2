@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import biomecode, codeonly, datatags, ownership, worldgen
+from . import advancements, biomecode, codeonly, datatags, ownership, worldgen
 from .converters import features, lang, loot, recipes
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
@@ -547,7 +547,7 @@ def convert(
         # Now that the pack's blocks, items and entities are final, its .lang
         # keeps only the lines naming one of them (#277 lang).
         lang.settle(result, selected)
-        shorten_paths(result)
+        renames = shorten_paths(result)
         counts = {ns: len(r.files) for ns, r in per_namespace.items()}
         icon, icon_source, icon_note = resolve_icon(staged.icons, namespace)
         if icon_note:
@@ -597,6 +597,11 @@ def convert(
             # data the jar explains (#277; PR #316 picks 1a 2a 3a).
             unhandled = worldgen.refine(unhandled, staged.root, result.consumed,
                                         datatags.jar_namespaces(staged.root), staged.classes)
+            # And its leftover advancements: recipe advancements go with their
+            # residue recipes, the rest Bedrock has no place for (#340).
+            unhandled = advancements.refine(
+                unhandled, staged.root, result.consumed,
+                advancements.recipe_bodies(result.files, result.recipe_sources, renames))
         if outcome is None and (out_dir / codeonly.REPORT_NAME).is_file():
             # An earlier run's report would make this tree read as explained-empty.
             (out_dir / codeonly.REPORT_NAME).unlink()
