@@ -258,7 +258,10 @@ def test_vanilla_only_combinations_over_the_cap_stay_residue(tmp_path, reference
     """2 members over 5 slots is 32 combinations, over EXPANSION_CAP (16)."""
     result = recipes.convert(_mod(tmp_path, _shaped("forge:chests/wooden", ("GGG", "G G"))), emitted={})
     assert _recipe_files(result) == {}
-    assert "covers 2 items" in result.unhandled[0].reason
+    (u,) = result.unhandled
+    # #342 (pending Alex, pick 2a): still not converted, but explained.
+    assert u.kind == recipes.OVER_CAP
+    assert "covers 2 items" in u.reason and "(2^5 mixes)" in u.reason and "32 recipes" in u.reason
 
 
 def test_four_slots_of_two_members_is_at_the_cap(tmp_path, reference):

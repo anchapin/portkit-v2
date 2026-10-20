@@ -129,6 +129,8 @@ def merge_namespaces(results: dict[str, "ConversionResult"]) -> "ConversionResul
             merged.recipe_sources.setdefault(path, source)
         for source, names in result.unshipped_names.items():
             merged.unshipped_names.setdefault(source, names)
+        for source, made in result.recipe_results.items():
+            merged.recipe_results.setdefault(source, made)
         for path, value in result.files.items():
             if path not in merged.files:
                 merged.files[path] = value
@@ -586,8 +588,9 @@ def convert(
                               if isinstance(b, dict) and "minecraft:block" in b} - {None}
             unhandled = loot.refine_owned(unhandled, blocks_shipped)
             # And a recipe withdrawn for naming items that are residue of
-            # their own goes with them (#302).
-            unhandled = recipes.refine_owned(unhandled, result.unshipped_names)
+            # their own goes with them (#302), as does a refused recipe whose
+            # result is residue of its own (#342).
+            unhandled = recipes.refine_owned(unhandled, result.unshipped_names, result.recipe_results, shipped)
             # And its leftover data tags: what reads them, and whether their
             # members shipped (#293).
             unhandled = datatags.refine(unhandled, staged.root, result.consumed, shipped,

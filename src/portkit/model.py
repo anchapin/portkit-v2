@@ -126,6 +126,10 @@ class ConversionResult:
     # the pipeline re-files it as owned_by_residue when each of those items is
     # residue of its own (#302).
     unshipped_names: dict[str, list[str]] = field(default_factory=dict)
+    # Source recipe -> the namespaced id of the one item it makes, for every
+    # recipe the recipe converter read; the pipeline files a refused recipe
+    # whose result is residue of its own as owned_by_residue (#342).
+    recipe_results: dict[str, str] = field(default_factory=dict)
     # Converted block id -> the Java state naming its two halves (``half``),
     # for a block written on Bedrock's two-part multi_block trait (#296):
     # Java drops the lower half's table whichever half is broken, Bedrock
@@ -196,6 +200,7 @@ class ConversionResult:
         merged.recipe_sources = {**other.recipe_sources, **self.recipe_sources}
         merged.java_states = {**self.java_states, **other.java_states}
         merged.unshipped_names = {**self.unshipped_names, **other.unshipped_names}
+        merged.recipe_results = {**other.recipe_results, **self.recipe_results}
         merged.paired_halves = {**self.paired_halves, **other.paired_halves}
         return merged
 

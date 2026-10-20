@@ -64,6 +64,15 @@ a mod item this conversion didn't emit) records those members in
 ``owned_by_residue`` when each has a residue entry of its own (#302 pick 3,
 :func:`refine_owned`).
 
+A recipe refused only because writing every mix Java accepts takes more than
+:data:`EXPANSION_CAP` recipes (every ingredient's membership known, every
+member vanilla or emitted and with a Bedrock id, and a form above fitting but
+for the count) is still not converted (#302), but it is the explained kind
+:data:`OVER_CAP`, naming each tag, its members, the slots it fills and the
+count (#342, pending Alex). The converter records every recipe's result
+(``ConversionResult.recipe_results``), so a refused recipe whose result is
+itself residue goes with it (:func:`refine_owned`, #342).
+
 An ingredient written as a JSON list of items (Java's "any of these"; Mythic
 Metals' ``[{"item": "...:deepslate_adamantite_ore"}, {"item":
 "...:adamantite_ore"}]``) is a membership the recipe states outright, so it
@@ -107,6 +116,9 @@ from .tags import MultiMembers, TagResolver
 # 16 covers a full dye-colour set; a bigger tag is a family (every drawer, every
 # cast) whose recipe would flood the recipe book, so it stays residue.
 EXPANSION_CAP = 16
+
+# The explained kind for a recipe refused only for the cap (#342, pending Alex).
+OVER_CAP = "recipe_over_cap"
 
 # minecraft:tags on an item needs item format_version 1.20.50 or later
 # (learn.microsoft.com, Items Documentation - minecraft:tags).
@@ -1065,6 +1077,67 @@ def _vanilla_only(multi: "_Multi | None") -> bool:
             and all(m.startswith("minecraft:") for m in multi.found.members))
 
 
+def _result_id(recipe: dict) -> str | None:
+    """The namespaced id of the one item a recipe makes, or None (#342).
+
+    Java's ``result`` is ``{"item": id}`` (to 1.20.4), ``{"id": id}`` (1.20.5+)
+    or a bare id string; a bare path is ``minecraft:`` (minecraft.wiki,
+    Identifier). A ``#`` name is not an item, so it gives None.
+    """
+    spec = recipe.get("result")
+    ident = spec.get("id", spec.get("item")) if isinstance(spec, dict) else spec
+    if not isinstance(ident, str) or not ident or ident.startswith("#"):
+        return None
+    return ident if ":" in ident else f"minecraft:{ident}"
+
+
+def _over_cap(rest: list[int], multis: dict, positions: list, furnace: bool) -> str | None:
+    """Why a recipe whose tags fit no written form is refused only for the cap, else None (#342).
+
+    Called once every refused ingredient is a fully known membership whose
+    members are vanilla or emitted (``multis`` all set) and no form fits. Only
+    two forms are capped: one tag or list in one slot, one recipe per member
+    (n recipes), and vanilla-only tags filling several slots, one recipe per
+    combination (nᵏ, multiplied over the tags; #302 pick 1, never for a
+    furnace). When the count of the form that fits but for its size is over
+    :data:`EXPANSION_CAP` and every vanilla member has a Bedrock id of its own,
+    the cap is all that refuses it: the reason names each tag, its member
+    count, the slots it fills and the total. Anything else (a mixed tag over
+    several slots, a list over several slots, a member with no Bedrock id)
+    gives None and the recipe stays ``recipe``.
+    """
+    if not rest or any(multis.get(i) is None for i in rest):
+        return None
+    if len(rest) == 1 and positions[rest[0]][1] == 1:
+        total = len(multis[rest[0]].found.members)
+        form = "one recipe per member"
+    elif not furnace and all(_vanilla_only(multis[i]) for i in rest):
+        total = 1
+        for i in rest:
+            total *= len(multis[i].found.members) ** positions[i][1]
+        form = "one recipe per combination the player can put in the slots (#302 pick 1)"
+    else:
+        return None
+    if total <= EXPANSION_CAP:
+        return None
+    for i in rest:
+        for member in multis[i].found.members:
+            if member.startswith("minecraft:") and isinstance(bedrock_item(member), str):
+                return None  # a member Bedrock can't name: not the cap alone
+    parts = []
+    for i in rest:
+        multi = multis[i]
+        label = multi.found.tag if multi.listed else repr(multi.found.tag)
+        what = "list" if multi.listed else "tag"
+        n, k = len(multi.found.members), positions[i][1]
+        parts.append(f"{what} {label} ({n} members) in {k} grid slot{'s' if k != 1 else ''}"
+                     + (f" ({n}^{k} mixes)" if k != 1 else ""))
+    return (f"{'; '.join(parts)}: writing every mix Java accepts takes {form}, {total:,} recipes, "
+            f"over the {EXPANSION_CAP} the expansion is capped at (#302: over-cap combinations stay "
+            "residue, so the recipe book isn't flooded); nothing else refuses it, so it is not "
+            "converted on purpose")
+
+
 def _combinations(rest: list[int], multis: dict, positions: list, ingredients: list,
                   pattern: list | None, symbols: list | None):
     """Every combination of the vanilla-only tags in ``rest``, one recipe each (#302 pick 1).
@@ -1396,6 +1469,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             recipe = with_namespaced_type(chosen)
 
         java_type = recipe.get("type")
+        produced = _result_id(recipe)
+        if produced is not None:
+            # What the recipe makes, for refine_owned (#342).
+            result.recipe_results[rel] = produced
         if deferred is not None and java_type in station_types:
             deferred.append((rel, recipe))
             continue
@@ -1497,6 +1574,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         expanded: int | None = None  # the ingredient written once per member
         rest: list[int] = []  # tag ingredients only a per-member expansion could write
         combos: list[int] = []  # vanilla-only tags written once per combination (#302 pick 1)
+        over_cap: str | None = None  # why only the cap refuses it (#342), else None
         shaped_forms: dict[str, tuple[list, dict]] = {}  # suffix -> (pattern, key) of a combination
         if failing and all(multis.values()):
             ingredients = list(mapped)
@@ -1580,6 +1658,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 combos = rest
             else:
                 native = set()
+                over_cap = _over_cap(rest, multis, positions, furnace)
         if any(m is None for _, ms in variants for m in ms):
             # Not expressible (or not fully known): the reason is the one the
             # first failing ingredient always had, plus which members this
@@ -1593,6 +1672,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             missing = _not_emitted(bad, tag_resolver, emitted)
             if missing:
                 reason += f"; not converted: {', '.join(missing)}"
+            if over_cap is not None and not missing:
+                # Nothing but the count stops it (#342, pending Alex).
+                result.unhandled.append(Unhandled(rel, OVER_CAP, f"{over_cap} (the ingredient: {reason})"))
+                continue
             result.unhandled.append(Unhandled(rel, "recipe", reason))
             unconverted = _all_unconverted(failing, multis, positions, mapped, tag_resolver, emitted)
             if unconverted:
@@ -1913,7 +1996,7 @@ def drop_unshipped_recipes(result: ConversionResult) -> None:
 OWNED = "owned_by_residue"
 # Kinds that don't explain why an item is missing: a file nobody claimed, and
 # the recipe entries themselves.
-_NOT_AN_OWNER = frozenset({"unowned", "recipe"})
+_NOT_AN_OWNER = frozenset({"unowned", "recipe", OVER_CAP})
 
 
 def _owner_entry(item: str, residue: dict[str, str]) -> str | None:
@@ -1935,8 +2018,10 @@ def _owner_entry(item: str, residue: dict[str, str]) -> str | None:
     return None
 
 
-def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]]) -> list[Unhandled]:
-    """Re-file a recipe withdrawn for naming unshipped items that are residue (#302).
+def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]],
+                 results: dict[str, str] | None = None,
+                 shipped: set[str] | None = None) -> list[Unhandled]:
+    """Re-file a refused recipe that goes with residue items (#302, #342).
 
     :func:`drop_unshipped_recipes` withdraws a recipe naming (as its result or
     an ingredient) a mod item the pack doesn't ship, since Bedrock refuses a
@@ -1948,8 +2033,19 @@ def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]]) ->
     withdrawn, and it converts when its items do. A recipe naming an item with
     no entry of its own (another mod's, or one the jar never defines) stays
     ``recipe``. Pack bytes don't change.
+
+    #342 (pending Alex, pick 1a): a ``recipe`` or :data:`OVER_CAP` entry whose
+    result (``results``: source -> the item it makes, recorded by
+    :func:`convert`) is a mod item with a residue entry of its own goes with
+    that item too, whatever else refused it: Bedrock refuses a recipe whose
+    result it doesn't know, so the recipe can't ship before its result does,
+    and when it does the recipe converter reads it again (the original
+    reason is kept). A ``minecraft:`` result never counts, and neither does
+    one the pack ships under that id (``shipped``: a block refused while an
+    item of the same id converted), since Bedrock knows it.
     """
     residue = {u.source: u.kind for u in unhandled}
+    results = results or {}
     out: list[Unhandled] = []
     for u in unhandled:
         named = unshipped.get(u.source) if u.kind == "recipe" else None
@@ -1962,6 +2058,17 @@ def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]]) ->
                 source=u.source, kind=OWNED, count=u.count,
                 reason=(f"a recipe whose items are residue: {shown}, each refused with an entry of its own, "
                         f"so the recipe goes with them when they convert (the recipe itself: {u.reason})")))
+            continue
+        made = results.get(u.source) if u.kind in ("recipe", OVER_CAP) else None
+        entry = (_owner_entry(made, residue)
+                 if made and not made.startswith("minecraft:") and made not in (shipped or ()) else None)
+        if entry is not None:
+            out.append(Unhandled(
+                source=u.source, kind=OWNED, count=u.count,
+                reason=(f"a recipe whose result is residue: {made} ({entry}: {residue[entry]}) is refused "
+                        f"with an entry of its own, and Bedrock refuses a recipe whose result it doesn't "
+                        f"know, so the recipe goes with it when it converts (the recipe itself, "
+                        f"{u.kind}: {u.reason})")))
             continue
         out.append(u)
     return out
