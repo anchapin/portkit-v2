@@ -1141,6 +1141,7 @@ def cmd_reference(args) -> int:
     # Vanilla Blocks field -> id tables (#280): every pinned set, or the one
     # the mod's declared game version needs.
     from .data import vanilla_blocks as block_id_data
+    from .data import vanilla_block_tools as block_tool_data
     if meta is None:
         block_id_sets = list(block_id_data.SETS)
     else:
@@ -1153,6 +1154,10 @@ def cmd_reference(args) -> int:
         for block_ids in block_id_sets:
             state = "cached" if block_id_data.cached(block_ids, cache) else "missing"
             print(f"{block_ids.id:28} {block_ids.label} {state}")
+            tool_set = block_tool_data.select(block_ids.minecraft)
+            if tool_set is not None:
+                state = "cached" if block_tool_data.cached(tool_set, cache) else "missing"
+                print(f"{tool_set.id:28} {tool_set.label} {state}")
         state = "cached" if data.cached_sounds(cache) else "missing"
         print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
         state = "cached" if model_data.cached(cache) else "missing"
@@ -1219,12 +1224,23 @@ def cmd_reference(args) -> int:
         print(f"{'fetched' if downloaded else 'cached ':7} {mapping.id} -> {path}")
     for block_ids in block_id_sets:
         try:
-            path, downloaded = block_id_data.fetch(block_ids, cache)
+            path, downloaded = block_id_data.fetch(block_ids, cache, keep=True)
         except data.ReferenceDataError as exc:
             print(f"FAILED {exc}", file=sys.stderr)
             failed += 1
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} {block_ids.id} -> {path}")
+        # Which vanilla blocks need the correct tool (#280), from the same jar.
+        tool_set = block_tool_data.select(block_ids.minecraft)
+        if tool_set is not None:
+            try:
+                path, downloaded = block_tool_data.fetch(tool_set, cache)
+            except data.ReferenceDataError as exc:
+                print(f"FAILED {exc}", file=sys.stderr)
+                failed += 1
+                continue
+            print(f"{'fetched' if downloaded else 'cached ':7} {tool_set.id} -> {path}")
+    block_id_data._last_inputs.clear()
     for tag_set in sets:
         try:
             path, downloaded = tags.fetch(tag_set, cache)

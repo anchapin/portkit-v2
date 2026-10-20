@@ -34,6 +34,11 @@ class SourceMod:
     # The jar's compiled classes (portkit.bytecode.ClassIndex), or None when
     # the source has none to offer: what a block's code says is then unknown.
     classes: Any = field(default=None, compare=False, repr=False)
+    # The game version the loader dependency implies when the metadata names
+    # none for Minecraft itself (NeoForge 21.1.x is 1.21.1): what a vanilla
+    # table read per game version falls back to (#280), as
+    # ``pipeline.attach_vanilla_blocks`` does. Tag selection keeps ``minecraft``.
+    loader_minecraft: str | None = None
 
     @classmethod
     def from_metadata(cls, root: Path, namespace: str, meta, classes=None) -> "SourceMod":
@@ -46,7 +51,8 @@ class SourceMod:
         requires = getattr(meta, "requires", None)
         return cls(root=root, namespace=namespace, loader=getattr(meta, "loader", None),
                    minecraft=getattr(meta, "minecraft", None), mods=getattr(meta, "mods", None),
-                   requires=frozenset(requires) if requires is not None else None, classes=classes)
+                   requires=frozenset(requires) if requires is not None else None, classes=classes,
+                   loader_minecraft=getattr(meta, "loader_minecraft", None))
 
     @property
     def assets(self) -> Path:

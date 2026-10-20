@@ -258,8 +258,17 @@ def _get(url: str, opener) -> bytes:
         return response.read()
 
 
-def download(mapping: BlockIdSet, opener=urllib.request.urlopen) -> bytes:
-    """The derived table from upstream; each input is checked against its sha1 pin."""
+_last_inputs: dict = {}
+
+
+def inputs(mapping: BlockIdSet, opener=urllib.request.urlopen, keep: bool = False) -> tuple[bytes, bytes]:
+    """(client.jar, client.txt) for ``mapping``, each checked against its sha1 pin.
+    With ``keep`` the verified pair is kept (only the last one) and handed to the
+    next ``keep`` call for the same pins, so ``portkit reference fetch`` derives
+    :mod:`portkit.data.vanilla_block_tools` from the jar it just downloaded."""
+    key = (mapping.jar_sha1, mapping.mojang_sha1)
+    if keep and key in _last_inputs:
+        return _last_inputs[key]
     try:
         jar = _get(mapping.jar_url, opener)
         mojang = _get(mapping.mojang_url, opener)
@@ -269,6 +278,15 @@ def download(mapping: BlockIdSet, opener=urllib.request.urlopen) -> bytes:
         raise ReferenceDataError(f"{mapping.id}: sha1 mismatch for {mapping.jar_url}")
     if hashlib.sha1(mojang).hexdigest() != mapping.mojang_sha1:
         raise ReferenceDataError(f"{mapping.id}: sha1 mismatch for {mapping.mojang_url}")
+    _last_inputs.clear()
+    if keep:
+        _last_inputs[key] = (jar, mojang)
+    return jar, mojang
+
+
+def download(mapping: BlockIdSet, opener=urllib.request.urlopen, keep: bool = False) -> bytes:
+    """The derived table from upstream; each input is checked against its sha1 pin."""
+    jar, mojang = inputs(mapping, opener, keep)
     try:
         return derive(mapping, jar, mojang)
     except (ValueError, KeyError, IndexError, zipfile.BadZipFile, UnicodeDecodeError) as exc:
@@ -276,13 +294,13 @@ def download(mapping: BlockIdSet, opener=urllib.request.urlopen) -> bytes:
 
 
 def fetch(mapping: BlockIdSet, cache: Path | None = None,
-          opener=urllib.request.urlopen) -> tuple[Path, bool]:
+          opener=urllib.request.urlopen, keep: bool = False) -> tuple[Path, bool]:
     """Return (cached path, downloaded?). Raises ReferenceDataError on failure or a hash mismatch."""
     cache = Path(cache or cache_dir())
     hit = cached(mapping, cache)
     if hit:
         return hit, False
-    data = download(mapping, opener)
+    data = download(mapping, opener, keep)
     digest = _sha256(data)
     if digest != mapping.sha256:
         raise ReferenceDataError(

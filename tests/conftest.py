@@ -38,6 +38,8 @@ def _offline_vanilla_sounds(request, monkeypatch):
     monkeypatch.delenv("PORTKIT_VANILLA_ITEMS", raising=False)
     # Java -> Bedrock vanilla item ids (#261): none unless a test points at its own.
     monkeypatch.delenv("PORTKIT_JAVA_ITEMS", raising=False)
+    # Which vanilla blocks need the correct tool (#280): none unless a test points at its own.
+    monkeypatch.delenv("PORTKIT_VANILLA_BLOCK_TOOLS", raising=False)
 
 
 @pytest.fixture(autouse=True)

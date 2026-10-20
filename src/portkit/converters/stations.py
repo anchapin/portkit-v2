@@ -207,6 +207,15 @@ def convert(mod: SourceMod, deferred: list[tuple[str, dict]], files: dict,
             f'import buttonTable from "./data/{mod.namespace}_buttons.js";\n'
             "registerButtons(buttonTable);\n"
         )
+    # Drops a loot modifier adds to vanilla blocks (#280: loot_modifiers.convert
+    # wrote the table and the fixed runtime).
+    from .loot_modifiers import table_path as drops_table_path
+    if drops_table_path(mod.namespace) in files:
+        entries.append(
+            'import { registerBlockDrops } from "./block_drops.js";\n'
+            f'import blockDropsTable from "./data/{mod.namespace}_block_drops.js";\n'
+            "registerBlockDrops(blockDropsTable);\n"
+        )
     entries.extend(extra_entries or [])
     if entries:
         result.files[ENTRY] = (
