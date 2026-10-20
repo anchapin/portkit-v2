@@ -5335,6 +5335,7 @@ class DirStateReading(DirReading):
     bools: tuple = ()
     vanilla_parent: str = ""
     button_ctor: tuple | None = None
+    button_ctors: list = field(default_factory=list)
     button_overrides: list = field(default_factory=list)
     button_why: str = ""
     defaults: dict = field(default_factory=dict)
@@ -5386,8 +5387,9 @@ def read_directional_states(classes: ClassIndex | None,
     read like a plain attach-face block too (its placement is
     FaceAttachedHorizontalDirectionalBlock's, supplied); ``button_ctor`` is
     the vanilla constructor call its object was built with and
-    ``button_overrides`` the button behaviour its own classes override
-    (converters/buttons.py judges both)."""
+    ``button_overrides`` the button behaviour its own classes override;
+    ``button_ctors`` holds the constructor call of every object its
+    registration can build (converters/buttons.py judges them)."""
     readings = {n: DirStateReading(n, kind=k, bools=tuple(sorted(b))) for n, (k, b) in specs.items()}
     if classes is None or not len(classes):
         for r in readings.values():
@@ -5407,11 +5409,12 @@ def read_directional_states(classes: ClassIndex | None,
             r.vanilla_parent = base.replace("/", ".")
             if base != _BUTTON:
                 continue
+            # Every object the registration can build (one per way through
+            # branches the reader can't decide): buttons.py reads each and
+            # takes the button only when all ways agree.
             r.button_ctor = obj.fields.get("__vanilla_ctor")
-            r.button_overrides = _own_overrides(machine, obj.cls, BUTTON_BEHAVIOUR)
-            if len(objs) > 1 and objs[1].fields.get("__vanilla_ctor") != r.button_ctor:
-                r.button_ctor = None
-                r.button_why = "registered twice with different constructor arguments"
+            r.button_ctors = [o.fields.get("__vanilla_ctor") for o in objs]
+            r.button_overrides = sorted({x for o in objs for x in _own_overrides(machine, o.cls, BUTTON_BEHAVIOUR)})
         _read_states(machine, obj, r)
         r.behaviour = _behaviour(machine, obj.cls)
         _read_rule(machine, obj, r)

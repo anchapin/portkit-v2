@@ -140,14 +140,40 @@ def set_type_button(v) -> tuple[bool | None, str | None, str]:
 def read(reading) -> tuple[dict | None, str]:
     """The button's facts from a :class:`blockcode.DirStateReading` read as
     vanilla ``ButtonBlock``: ({"ticks", "arrows", "family", "from"}, "") or
-    (None, why it stays residue)."""
+    (None, why it stays residue). Its registration may build the block on
+    more than one way through branches the reader can't decide (one object
+    per way); the facts must be the same on every way."""
     cls = reading.cls
     if reading.button_overrides:
         return None, (f"button: its class {cls} overrides vanilla ButtonBlock behaviour "
                       f"({', '.join(reading.button_overrides)}), which is its own code")
     if reading.button_why:
         return None, f"button: {reading.button_why}"
-    ctor = reading.button_ctor
+    ctors = list(getattr(reading, "button_ctors", None) or [reading.button_ctor])
+    got = [_read_one(cls, c) for c in ctors]
+    for facts, why in got:
+        if facts is None:
+            return None, why
+    distinct = {(f["ticks"], f["arrows"], f["family"]) for f, _ in got}
+    if len(distinct) > 1:
+        ticks = sorted({t for t, _, _ in distinct})
+        arrows = sorted({a for _, a, _ in distinct})
+        families = sorted({f for _, _, f in distinct})
+        what = []
+        if len(ticks) > 1:
+            what.append("press time " + ", ".join(map(str, ticks)) + " ticks")
+        if len(arrows) > 1:
+            what.append("whether arrows press it")
+        if len(families) > 1:
+            what.append("click sounds " + ", ".join(f.lower() for f in families))
+        return None, (f"button: its registration builds it on {len(ctors)} ways through branches the reader "
+                      f"can't decide, and they disagree ({'; '.join(what)}), so which one the game makes isn't "
+                      "known (no DEFAULT, #87)")
+    return got[0][0], ""
+
+
+def _read_one(cls: str, ctor) -> tuple[dict | None, str]:
+    """One ButtonBlock constructor call's facts, as :func:`read`."""
     if not ctor or ctor[0] != block_set_types.BUTTON_CLASS:
         return None, (f"button: {cls} reaches vanilla ButtonBlock, but the ButtonBlock constructor call "
                       "isn't read, so its press time and set type aren't known")
