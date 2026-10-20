@@ -150,10 +150,12 @@ SKIP_KINDS = {
     "lang_unreadable": ("Java's own reader (Gson) rejects the file too, so Java never shows its text and "
                         "there is nothing to carry over"),
     # #277 unowned: leftover models and textures the jar's references explain (portkit.ownership);
-    # block loot tables of refused blocks (#299) and recipes naming refused items (#302).
+    # block loot tables of refused blocks (#299), recipes naming refused items (#302) and
+    # recipe advancements of residue recipes (#340).
     "owned_by_residue": ("only residue that has its own entry uses these files (a refused block's blockstate, "
                          "a particle definition), or they need such residue (a refused block's loot table, a "
-                         "recipe naming refused items): they ship with their owner when it converts, not alone"),
+                         "recipe naming refused items, a recipe advancement of a residue recipe): they ship "
+                         "with their owner when it converts, not alone"),
     "java_only_asset": ("nothing in the jar's JSON names these files, so only the mod's Java code draws them "
                         "(screens, entity and block-entity renderers, effect icons, armor layers, custom model "
                         "loaders) or, for atlases, Java's texture stitcher reads them; nothing in a Bedrock "
@@ -179,6 +181,12 @@ SKIP_KINDS = {
                        "class of this jar registers it): neither Minecraft, the mod loader nor this mod reads "
                        "it, and that mod isn't converted with this jar; the reason names the mod and what the "
                        "jar shows"),
+    # #340 leftover advancements (portkit.advancements).
+    "no_bedrock_advancement": ("Bedrock has no data-driven advancements (its achievements are a fixed list, "
+                               "minecraft.wiki Achievement): a story or challenge advancement has nothing to "
+                               "track or show it and its rewards are not given; a recipe advancement whose "
+                               "recipe ships as a furnace recipe (no `unlock` field) or that names no recipe of "
+                               "the jar has no converted recipe to carry it; the reason says which"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
