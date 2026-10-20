@@ -1,4 +1,5 @@
 """NeoForge loot modifiers that add a table to a vanilla block (#280)."""
+import dataclasses
 import json
 import subprocess
 import shutil
@@ -52,8 +53,15 @@ def build(tmp_path, mods: dict, tables: dict, listed: list[str] | None):
 @pytest.fixture
 def vanilla(tmp_path_factory, monkeypatch):
     path = tmp_path_factory.mktemp("vanilla") / "items.txt"
-    path.write_text("minecraft:glass\nminecraft:red_stained_glass\n")
+    path.write_text("minecraft:glass\nminecraft:red_stained_glass\nminecraft:stone\nminecraft:oak_stairs\n")
     monkeypatch.setenv("PORTKIT_VANILLA_ITEMS", str(path))
+    # Which vanilla blocks need the correct tool (pick 6a), in the shape
+    # portkit.data.vanilla_block_tools derives from Mojang's 1.21.1 client jar
+    # (oak_stairs left out: its flag is unread there, copied from a parameter).
+    tools = tmp_path_factory.mktemp("tools")
+    (tools / "vanilla-block-tools-1.21.1.json").write_text(json.dumps({"requires_correct_tool": {
+        "glass": False, "red_stained_glass": False, "stone": True}}))
+    monkeypatch.setenv("PORTKIT_VANILLA_BLOCK_TOOLS", str(tools))
 
 
 def test_an_added_block_drop_becomes_a_runtime_row(tmp_path, vanilla):
@@ -101,6 +109,43 @@ def test_an_unshipped_item_or_unknown_block_stays_residue(tmp_path, vanilla):
     reasons = {u.source: u.reason for u in result.unhandled}
     assert "doesn't ship" in reasons["data/examplemod/loot_modifiers/a.json"]
     assert "no Bedrock vanilla block" in reasons["data/examplemod/loot_modifiers/b.json"]
+
+
+def test_a_block_that_needs_the_correct_tool_or_isnt_read_stays_residue(tmp_path, vanilla):
+    """Pick 6a: Java rolls the block's loot, modifiers included, only for a tool that
+    may harvest it; the runtime can't tell, so it would give more than Java."""
+    mod = build(tmp_path, {"glass": modifier("minecraft:blocks/glass", "examplemod:glass"),
+                           "stone": modifier("minecraft:blocks/stone", "examplemod:stone"),
+                           "stairs": modifier("minecraft:blocks/oak_stairs", "examplemod:stairs")},
+                {"glass": SHARDS, "stone": SHARDS, "stairs": SHARDS},
+                ["examplemod:glass", "examplemod:stone", "examplemod:stairs"])
+    result = loot_modifiers.convert(mod, files=SHARD_ITEM)
+    reasons = {u.source: u.reason for u in result.unhandled}
+    assert "needs the correct tool for drops in Minecraft 1.21.1" in reasons["data/examplemod/loot_modifiers/stone.json"]
+    assert "pick 6a" in reasons["data/examplemod/loot_table/stone.json"]
+    assert "can't be read" in reasons["data/examplemod/loot_modifiers/stairs.json"]
+    assert "glass.json" not in " ".join(reasons)
+    table = result.files[loot_modifiers.table_path("examplemod")]
+    assert '"minecraft:glass"' in table and "minecraft:stone" not in table and "oak_stairs" not in table
+
+
+def test_the_game_version_falls_back_to_the_loaders(tmp_path, vanilla):
+    """Quark declares no Minecraft version, only NeoForge 21.1 (1.21.1)."""
+    mod = build(tmp_path, {"glass": modifier("minecraft:blocks/glass", "examplemod:glass")}, {"glass": SHARDS},
+                ["examplemod:glass"])
+    mod = dataclasses.replace(mod, minecraft=None, loader_minecraft="1.21.1")
+    assert loot_modifiers.convert(mod, files=SHARD_ITEM).unhandled == []
+    mod = dataclasses.replace(mod, loader_minecraft=None)
+    result = loot_modifiers.convert(mod, files=SHARD_ITEM)
+    assert not result.files and all("no Minecraft version" in u.reason for u in result.unhandled)
+
+
+def test_no_tool_table_means_no_conversion(tmp_path, vanilla, monkeypatch):
+    monkeypatch.setenv("PORTKIT_VANILLA_BLOCK_TOOLS", str(tmp_path / "empty"))
+    mod = build(tmp_path, {"glass": modifier("minecraft:blocks/glass", "examplemod:glass")}, {"glass": SHARDS},
+                ["examplemod:glass"])
+    result = loot_modifiers.convert(mod, files=SHARD_ITEM)
+    assert not result.files and all("isn't cached" in u.reason for u in result.unhandled)
 
 
 @pytest.mark.parametrize("change, why", [

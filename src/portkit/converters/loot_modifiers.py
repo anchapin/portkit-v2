@@ -25,7 +25,10 @@ vanilla **block** table (``minecraft:blocks/<name>``): Bedrock fires
 runtime ``portkit/runtime/block_drops.js`` adds the converted drop when a
 player breaks that block (never replacing or shipping a vanilla table). What
 converts is the shape :mod:`block_drops_core.js` rolls; anything else is
-residue naming what defeated it. Explosions and other non-player breaks add
+residue naming what defeated it. A target block that needs the correct tool for
+drops in Java, or whose flag can't be read from Mojang's client jar
+(:mod:`portkit.data.vanilla_block_tools`), is residue too (pick 6a): Java rolls its
+loot only for a tool that may harvest it, which the runtime can't see. Explosions and other non-player breaks add
 nothing on Bedrock: fewer drops than Java, never more, and said in a note.
 
 Every other target (a chest, gameplay or entity table) would need Bedrock's
@@ -39,7 +42,7 @@ from pathlib import Path
 
 from ..conditions import LoadContext
 from ..model import ConversionResult, SourceMod, Unhandled
-from ..data import vanilla_items
+from ..data import vanilla_block_tools, vanilla_items
 from .station_kit import js_module, runtime_source
 
 GLOBAL = "data/neoforge/loot_modifiers/global_loot_modifiers.json"
@@ -247,6 +250,33 @@ def _bedrock_vanilla(java_id: str) -> tuple[str | None, str]:
     return ident, ""
 
 
+def needs_tool_reason(mod: SourceMod, block_java: str) -> str | None:
+    """Why a drop added to vanilla ``block_java`` can't be carried because of the tool
+    (pick 6a), or None when the block drops its loot to any tool.
+
+    Java rolls a block's loot table, and so every modifier on it, only when the
+    breaking player may harvest it (``ServerPlayerGameMode#destroyBlock`` drops only
+    when ``Player#hasCorrectToolForDrops``: ``!state.requiresCorrectToolForDrops() ||
+    tool.isCorrectToolForDrops(state)``). The block drop runtime can't see Java's tool
+    rules, so a block that needs the correct tool, or whose flag isn't read
+    (:mod:`portkit.data.vanilla_block_tools`, from Mojang's client jar), is refused
+    rather than given the drop from a bare hand. Glass and the stained glasses need
+    none (minecraft.wiki/w/Glass, minecraft.wiki/w/Stained_Glass: "Tool: Any tool")."""
+    version = mod.minecraft or mod.loader_minecraft
+    needs, why = vanilla_block_tools.needs_correct_tool(version, block_java)
+    if needs is False:
+        return None
+    if needs is None:
+        return (f"whether vanilla {block_java} needs the correct tool for drops can't be read ({why}); "
+                "Java adds the drop only when the player's tool may harvest the block, and the block drop "
+                "runtime can't tell, so it isn't carried (#280 pick 6a)")
+    return (f"vanilla {block_java} needs the correct tool for drops in Minecraft {version} "
+            "(BlockBehaviour.Properties#requiresCorrectToolForDrops, read from Mojang's client jar): Java adds "
+            "the drop only when the player's tool may harvest it (ServerPlayerGameMode#destroyBlock, "
+            "Player#hasCorrectToolForDrops), and the block drop runtime can't tell, so it would drop from a bare "
+            "hand, more than Java (#280 pick 6a)")
+
+
 def convert(mod: SourceMod, context: LoadContext | None = None, files: dict | None = None) -> ConversionResult:
     """The namespace's loot modifiers and the tables they add (see the module doc)."""
     result = ConversionResult()
@@ -331,6 +361,10 @@ def convert(mod: SourceMod, context: LoadContext | None = None, files: dict | No
         block_java = "minecraft:" + target.split("/", 1)[1]
         block, why = _bedrock_vanilla(block_java)
         if block is None:
+            refuse(f"it adds to {target}: {why}")
+            continue
+        why = needs_tool_reason(mod, block_java)
+        if why:
             refuse(f"it adds to {target}: {why}")
             continue
         got, why = rows(table_data)
