@@ -221,19 +221,29 @@ _KINDS = {
 }
 
 
-def read_code(classes, names: list[str], kind: str) -> dict[str, Reading]:
+def read_code(classes, names: list[str], kind: str, run_names: list[str] | None = None,
+              run=None) -> dict[str, Reading]:
     """A :class:`Reading` per name; ``kind`` "door", "trapdoor", "plate" or "two_tall".
 
     For a door or trapdoor read as vanilla, ``Reading.door`` is (opens by
-    hand, sound family) from the ``BlockSetType`` constant its vanilla
-    constructor was given (both take ``(BlockSetType, Properties)``); for a
-    plate it is (sensitivity, sound family), see :func:`_plate_type`."""
+    hand, sound family) from the ``BlockSetType`` its vanilla constructor was
+    given (both take ``(BlockSetType, Properties)``), a vanilla constant or
+    one built in code (:func:`_set_type_door`); for a plate it is
+    (sensitivity, sound family), see :func:`_plate_type`.
+
+    The registration code runs on ``run_names`` (default ``names``): every
+    blockstate of the mod, as the other block readers run it (#280: a
+    library's material set builds its door names by concatenation, which a
+    run on the doors' names alone doesn't reach), or ``run``, a
+    ``blockcode._registered`` result already made for them."""
     readings = {n: Reading(n) for n in names}
     if classes is None or not len(classes) or not names:
         for r in readings.values():
             r.why = "the mod ships no class files"
         return readings
-    machine, registered = blockcode._registered(classes, names)
+    if run is None:
+        run = blockcode._registered(classes, sorted(set(run_names or ()) | set(names)))
+    machine, registered = run
     wanted, behaviour = _KINDS[kind]
     for name, r in readings.items():
         objs, why = registered[name]
@@ -256,13 +266,12 @@ def read_code(classes, names: list[str], kind: str) -> dict[str, Reading]:
         r.verdict = "vanilla"
         if kind in ("door", "trapdoor"):
             ctor = obj.fields.get("__vanilla_ctor")
-            consts = [a.name for a in (ctor[2] if ctor else ()) if isinstance(a, blockcode.Const)
-                      and a.owner == block_set_types.CLASS]
-            if len(consts) == 1 and consts[0] in block_set_types.DOOR_TYPES:
-                r.door = block_set_types.DOOR_TYPES[consts[0]]
-                r.door_from = f"BlockSetType.{consts[0]}"
-            else:
-                r.door_from = ""
+            sets = [a for a in (ctor[2] if ctor else ()) if _is_set_type(a)]
+            r.door, r.door_from = None, ""
+            if len(sets) == 1:
+                hand, family, where = _set_type_door(sets[0], kind)
+                if family is not None:
+                    r.door, r.door_from = (hand, family), where
         elif kind == "plate":
             r.door, r.door_from = _plate_type(obj)
     return readings
@@ -276,8 +285,7 @@ def _plate_type(obj) -> tuple[tuple[str, str] | None, str]:
     :func:`_set_type_plate`). (None, "") when that can't be read here."""
     ctor = obj.fields.get("__vanilla_ctor")
     args = ctor[2] if ctor else ()
-    sets = [a for a in args if (isinstance(a, blockcode.Const) and a.owner == block_set_types.CLASS)
-            or (isinstance(a, blockcode.Obj) and a.cls == block_set_types.CLASS)]
+    sets = [a for a in args if _is_set_type(a)]
     sens = [a.name for a in args if isinstance(a, blockcode.Const)
             and a.owner == block_set_types.SENSITIVITY_CLASS]
     if len(sets) != 1 or len(sens) > 1:
@@ -293,6 +301,87 @@ def _plate_type(obj) -> tuple[tuple[str, str] | None, str]:
     if sensitivity is None:
         return None, ""
     return (sensitivity, family), where
+
+
+def _is_set_type(a) -> bool:
+    """A vanilla ``BlockSetType`` constant or a ``BlockSetType`` object built in code."""
+    return (isinstance(a, blockcode.Const) and a.owner == block_set_types.CLASS) \
+        or (isinstance(a, blockcode.Obj) and a.cls == block_set_types.CLASS)
+
+
+def _set_type_door(v, kind: str) -> tuple[bool | None, str | None, str]:
+    """(opens by hand, door sound family, where) of a set type, for a
+    ``kind`` "door" or "trapdoor": a vanilla ``BlockSetType`` constant
+    (:data:`block_set_types.DOOR_TYPES`), or one built in code with
+    ``new BlockSetType(...)`` (#280; Fabric API's ``BlockSetTypeBuilder``
+    builds one) whose arguments are the one-argument constructor's name, or
+    vanilla constants (``1``/``0`` for canOpenByHand,
+    ``SoundEvents.IRON_DOOR_CLOSE``) and components of a vanilla set type
+    (``BlockSetType.IRON.canOpenByHand()``, ``.doorClose()``: what
+    ``BlockSetTypeBuilder.copyOf`` copies). A trapdoor reads the trapdoor
+    sounds; their family names the same Bedrock family table
+    (:data:`block_set_types.TRAPDOOR_SOUNDS`, whose families follow the
+    door's for every vanilla constant). The family is None when it can't be
+    read: an argument that isn't one of those, or close and open sounds of
+    two families."""
+    types = block_set_types.DOOR_TYPES
+    if isinstance(v, blockcode.Const):
+        if v.name not in types:
+            return None, None, ""
+        return types[v.name][0], types[v.name][1], f"BlockSetType.{v.name}"
+    ctor = v.fields.get("__vanilla_ctor") if isinstance(v, blockcode.Obj) else None
+    if not ctor or ctor[0] != block_set_types.CLASS:
+        return None, None, ""
+    desc, args = ctor[1], ctor[2]
+    if desc == block_set_types.ONE_ARG_CTOR:
+        hand, family = block_set_types.ONE_ARG_DOOR
+        return hand, family, "new BlockSetType(String)"
+    slots = block_set_types.DOOR_CTORS.get(desc)
+    if slots is None or len(args) <= max(slots):
+        return None, None, ""
+    at_hand, door_close, door_open, trap_close, trap_open = slots
+
+    def part(a, component):
+        if isinstance(a, blockcode.Part) and a.name == component and a.of.owner == block_set_types.CLASS \
+                and a.of.name in types:
+            return a.of.name
+        return None
+
+    a = args[at_hand]
+    if isinstance(a, int) and not isinstance(a, bool) and a in (0, 1):
+        hand, hand_from = bool(a), str(bool(a)).lower()
+    elif isinstance(a, bool):
+        hand, hand_from = a, str(a).lower()
+    elif part(a, "canOpenByHand"):
+        k = part(a, "canOpenByHand")
+        hand, hand_from = types[k][0], f"BlockSetType.{k}.canOpenByHand()"
+    else:
+        return None, None, ""
+    if kind == "trapdoor":
+        pair = ((trap_close, "trapdoorClose", "_TRAPDOOR_CLOSE"), (trap_open, "trapdoorOpen", "_TRAPDOOR_OPEN"))
+        known = block_set_types.TRAPDOOR_SOUNDS
+    else:
+        pair = ((door_close, "doorClose", "_DOOR_CLOSE"), (door_open, "doorOpen", "_DOOR_OPEN"))
+        known = block_set_types.SOUNDS
+    families, sounds = [], []
+    for at, component, suffix in pair:
+        a = args[at]
+        family = a.name[:-len(suffix)] if isinstance(a, blockcode.Const) \
+            and a.owner == block_set_types.SOUND_EVENTS and a.name.endswith(suffix) else None
+        # IRON_DOOR_CLOSE ends in _DOOR_CLOSE but IRON_TRAPDOOR_CLOSE's
+        # family would read "IRON_TRAP": only a known family counts.
+        if family in known:
+            families.append(family)
+            sounds.append(f"SoundEvents.{a.name}")
+        elif part(a, component):
+            k = part(a, component)
+            families.append(types[k][1])
+            sounds.append(f"BlockSetType.{k}.{component}()")
+        else:
+            return None, None, ""
+    if families[0] != families[1]:
+        return None, None, ""
+    return hand, families[0], "new BlockSetType(" + ", ".join((hand_from, *sounds)) + ")"
 
 
 def _set_type_plate(v) -> tuple[str | None, str | None, str]:

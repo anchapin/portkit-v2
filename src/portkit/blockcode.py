@@ -55,11 +55,14 @@ _BLOCK = "net/minecraft/world/level/block/Block"
 _BLOCK_SET_TYPE = "net/minecraft/world/level/block/state/properties/BlockSetType"
 # BlockSetType's record components whose accessors return a reference other
 # than a String (client.txt 1.21.1 and 1.21.8: pressurePlateSensitivity,
-# soundType and eight SoundEvents; 1.20.1 has all but the sensitivity). A
-# boolean component or the name read off a constant stays unknown.
+# soundType and eight SoundEvents; 1.20.1 has all but the sensitivity), and
+# the boolean canOpenByHand (all three; #280: what a door or trapdoor built
+# with BlockSetTypeBuilder.copyOf(constant) copies). The other booleans and
+# the name read off a constant stay unknown.
 _BLOCK_SET_TYPE_PARTS = frozenset((
     "pressurePlateSensitivity", "soundType", "doorClose", "doorOpen", "trapdoorClose", "trapdoorOpen",
     "pressurePlateClickOff", "pressurePlateClickOn", "buttonClickOff", "buttonClickOn"))
+_BLOCK_SET_TYPE_FLAGS = frozenset(("canOpenByHand",))
 # Vanilla classes known (see the module docstring) not to override
 # getStateForPlacement, getShape or getCollisionShape below Block.
 # HorizontalDirectionalBlock, TransparentBlock, HalfTransparentBlock and
@@ -2358,10 +2361,13 @@ class Machine:
             # ``getClass()`` of both sides).
             return [ClassLit(recv.cls)]
         if owner == _BLOCK_SET_TYPE and not static and not rest and isinstance(recv, Const) \
-                and recv.owner == _BLOCK_SET_TYPE and name in _BLOCK_SET_TYPE_PARTS \
-                and desc.startswith("()L") and desc != "()Ljava/lang/String;":
+                and recv.owner == _BLOCK_SET_TYPE \
+                and ((name in _BLOCK_SET_TYPE_PARTS and desc.startswith("()L") and desc != "()Ljava/lang/String;")
+                     or (name in _BLOCK_SET_TYPE_FLAGS and desc == "()Z")):
             # A record accessor of a vanilla BlockSetType constant (#280):
-            # which constant's which component (see Part).
+            # which constant's which component (see Part). A boolean Part
+            # decides no branch and is no number: _branch and _arith take
+            # it as unknown.
             return [Part(recv, name)]
         if owner == _BLOCK_SET_TYPE and static and name == "register" \
                 and desc == f"(L{_BLOCK_SET_TYPE};)L{_BLOCK_SET_TYPE};" and len(rest) == 1:
