@@ -62,6 +62,20 @@ entry `scripts/portkit/main.js` that wires the two.
   writes the table (`scripts/portkit/data/<namespace>_pressure_plates.js`)
   only for plates read as vanilla `PressurePlateBlock`, or the labelled
   DEFAULT wooden plate (`converters/plates.py`).
+- `button_core.js`: the pure rules of a button (#280), from vanilla
+  `ButtonBlock` (1.21.1, checked against 1.20.1): a use presses an unpowered
+  button and schedules its release `ticksToStayPressed` later; the release
+  (`checkPressed`) keeps it pressed while an arrow is in it where its set type
+  lets arrows press it; an arrow presses an unpowered one; no imports.
+- `button.js`: its Bedrock binding, `@minecraft/server` 2.0.0: the custom
+  component's `onPlayerInteract`, `world.afterEvents.projectileHitBlock`
+  (arrows, tridents) and `/scriptevent portkit:button_press <x> <y> <z>`
+  press; `system.runTimeout` releases; the block's `minecraft:tick` releases
+  a powered button whose timer a reload dropped. The redstone output is the
+  block's own `minecraft:redstone_producer` on the powered permutations. The
+  converter writes the table (`scripts/portkit/data/<namespace>_buttons.js`)
+  only for buttons read as vanilla `ButtonBlock` with a press time and set
+  type read from code (`converters/buttons.py`); there is no DEFAULT.
 - `book_core.js`: not a station: what one page of a guide book shows (#182):
   title, text and the page's buttons as translation keys, back to its parent;
   no imports.

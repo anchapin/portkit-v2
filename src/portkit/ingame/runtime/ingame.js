@@ -38,6 +38,15 @@
 //              (unpowered, lamp unlit); a dropped stick presses a plate any
 //              entity presses and leaves a mobs-only plate unpressed; then it
 //              is broken with `setblock ... air destroy` and its drop counted.
+//   button     a block carrying the portkit button component (#280): placed
+//              by script on top of a stone block with a redstone lamp beside
+//              it; pressed with the runtime's scriptevent (the same press a
+//              player's use takes): powered, lamp lit; read again a few ticks
+//              before its press time is up (still powered) and after it
+//              (unpowered, lamp unlit); then broken with `setblock ... air
+//              destroy` and its drop counted. Reported, not asserted: an
+//              arrow spawned flying at it (pressed where its set type lets
+//              arrows press it).
 //   ore        an ore feature the converter wrote (#281). Asserted
 //              (ore_generate): outside the flat Overworld, fresh chunks of the
 //              rule's dimension are loaded and the ore blocks the world
@@ -58,7 +67,7 @@ import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
   AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, PAIRED_PART, Tally, connectionVerdict,
   connectionSlot, containerVerdict, describe, doorVerdict, dropSlot, dropVerdict, line,
-  pairedSlot, pairedVerdict, plateSlot, plateVerdict, slot, trapdoorSlot, trapdoorVerdict,
+  pairedSlot, pairedVerdict, plateSlot, plateVerdict, slot, trapdoorSlot, trapdoorVerdict, buttonSlot,
   GEN_ORIGIN, GEN_SIZE, ORE_CUBE, generateVerdict, oreSlot, oreVerdict, scanRange,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
@@ -93,7 +102,8 @@ async function run() {
   say("START", {
     blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length,
     tool_drops: (CHECKS.tool_drops ?? []).length, paired: (CHECKS.paired ?? []).length,
-    trapdoors: (CHECKS.trapdoors ?? []).length, plates: (CHECKS.plates ?? []).length, ores: (CHECKS.ores ?? []).length,
+    trapdoors: (CHECKS.trapdoors ?? []).length, plates: (CHECKS.plates ?? []).length,
+    buttons: (CHECKS.buttons ?? []).length, ores: (CHECKS.ores ?? []).length,
     geodes: (CHECKS.geodes ?? []).length,
   });
   if (!(await loaded(dim))) {
@@ -453,6 +463,97 @@ async function run() {
       fail("plate", id, describe(err));
     }
     say("PLATE", seen);
+  }
+
+  // button: one button at a time (#280)
+  const BUTTONS = CHECKS.buttons ?? [];
+  for (let i = 0; i < BUTTONS.length; i++) {
+    const { id, powered, ticks, arrows, event, expect } = BUTTONS[i];
+    const at = buttonSlot(i);
+    const below = { x: at.x, y: at.y - 1, z: at.z };
+    const beside = { x: at.x + 1, y: at.y, z: at.z };
+    const seen = { id, ticks, arrows };
+    const read = () => ({
+      powered: dim.getBlock(at)?.permutation.getState(powered),
+      lamp: dim.getBlock(beside)?.typeId === "minecraft:lit_redstone_lamp",
+    });
+    const judge = (check, want, state, lamp) => {
+      const verdict = plateVerdict(want, { powered: state.powered });
+      if (verdict.ok) tally.record(check, id, true);
+      else fail(check, id, verdict.problems.join("; "));
+      if (lamp) {
+        const lit = plateVerdict(want, { powered: want, lamp: state.lamp });
+        if (lit.ok) tally.record(`${check}_redstone`, id, true);
+        else fail(`${check}_redstone`, id, lit.problems.join("; "));
+      }
+    };
+    try {
+      for (const e of itemsNear(at)) e.remove();
+      dim.getBlock(below).setPermutation(BlockPermutation.resolve("minecraft:stone"));
+      dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:redstone_lamp"));
+      let placed;
+      try {
+        placed = BlockPermutation.resolve(id, { "minecraft:block_face": "up" });
+      } catch {
+        placed = BlockPermutation.resolve(id);
+      }
+      dim.getBlock(at).setPermutation(placed);
+      await system.waitTicks(4);
+      seen.placed = dim.getBlock(at)?.typeId;
+      if (seen.placed !== id) {
+        fail("button_place", id, `reads back as ${seen.placed}`);
+        say("BUTTON", seen);
+        continue;
+      }
+      tally.record("button_place", id, true);
+      seen.idle = read();
+      judge("button_idle", false, seen.idle, false);
+      dim.runCommand(`scriptevent ${event} ${at.x} ${at.y} ${at.z}`);
+      await system.waitTicks(2);
+      seen.pressed = read();
+      judge("button_press", true, seen.pressed, true);
+      if (ticks > 6) {
+        await system.waitTicks(ticks - 6);
+        seen.held = read();
+        judge("button_hold", true, seen.held, false);
+        await system.waitTicks(10);
+      } else {
+        await system.waitTicks(ticks + 4);
+      }
+      seen.released = read();
+      judge("button_release", false, seen.released, true);
+      // Reported only: an arrow flying down onto it.
+      try {
+        const arrow = dim.spawnEntity("minecraft:arrow", { x: at.x + 0.5, y: at.y + 1.5, z: at.z + 0.5 });
+        arrow.applyImpulse({ x: 0, y: -1.5, z: 0 });
+        await system.waitTicks(6);
+        seen.arrow = read();
+        if (arrow.isValid) arrow.remove();
+        await system.waitTicks(ticks + 4);
+      } catch (err) {
+        seen.arrow = { error: describe(err) };
+      }
+      for (const e of itemsNear(at)) e.remove();
+      dim.runCommand(`setblock ${at.x} ${at.y} ${at.z} air destroy`);
+      await system.waitTicks(10);
+      seen.after_break = dim.getBlock(at)?.typeId;
+      const got = [];
+      for (const e of itemsNear(at)) {
+        const stack = e.getComponent("minecraft:item")?.itemStack;
+        if (stack) got.push({ item: stack.typeId, count: stack.amount });
+        e.remove();
+      }
+      seen.drop = got;
+      if (expect) {
+        const verdict = dropVerdict(expect, got);
+        if (verdict.ok) tally.record("button_drop", id, true);
+        else fail("button_drop", id, verdict.problems.join("; "));
+      }
+      dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:air"));
+    } catch (err) {
+      fail("button", id, describe(err));
+    }
+    say("BUTTON", seen);
   }
 
   // ore: each ore feature placed into a cube of what it replaces (#281)

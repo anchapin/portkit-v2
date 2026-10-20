@@ -174,6 +174,17 @@ export function plateSlot(i) {
   return { ...at, y: at.y - PAIRED_Y + PLATE_Y };
 }
 
+// The button check's layer (#280): one button each on a stone block, laid
+// out like the paired check (a redstone lamp beside it), a new layer four up
+// every 64; above the plate layers, below the drop layer.
+export const BUTTON_Y = 74;
+
+/** Where the i-th button goes (the stone goes one below). */
+export function buttonSlot(i) {
+  const at = pairedSlot(i);
+  return { ...at, y: at.y - PAIRED_Y + BUTTON_Y };
+}
+
 /** A plate read back: `want` pressed; `seen` {powered, lamp} (lamp undefined: not asked). */
 export function plateVerdict(want, seen) {
   const problems = [];

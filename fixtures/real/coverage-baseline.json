@@ -7,9 +7,9 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 39.8,
-      "files": 3469,
-      "residue": 5258,
+      "coverage": 39.0,
+      "files": 3409,
+      "residue": 5338,
       "errors": 0
     },
     "create": {

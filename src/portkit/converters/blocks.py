@@ -32,7 +32,7 @@ from portkit import png as png_reader
 
 from .. import blockcode
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import doors, models, plates, trapdoors
+from . import buttons, doors, models, plates, trapdoors
 
 _MENU_CATEGORY = "construction"
 
@@ -1513,8 +1513,9 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             water_why[stem] = why
     readings = _read_facing_code(mod, src, stations or {}, loaded)
     bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded)
-    dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded)
-    paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded)
+    shared = _SharedRun(mod, loaded)
+    dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared)
+    paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded, shared)
     paired_records: list[dict] = []
     directional: list[dict] = []
     directional_bool: list[dict] = []
@@ -1690,6 +1691,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     doors.door_table(mod, result, [r for r in paired_records if r["kind"] in ("door", "two_tall")])
     trapdoors.table(mod, result, [r for r in paired_records if r["kind"] == "trapdoor"])
     plates.table(mod, result, [r for r in paired_records if r["kind"] == "plate"])
+    buttons.table(mod.namespace, result, [r for r in directional_bool if r.get("button")])
     _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
     _add_water(mod, result, sorted(water_dropped))
     later, result.notes = result.notes, notes
@@ -1706,6 +1708,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(doors.notes([r for r in paired_records if r["kind"] in ("door", "two_tall")]))
     result.notes.extend(trapdoors.notes([r for r in paired_records if r["kind"] == "trapdoor"]))
     result.notes.extend(plates.notes([r for r in paired_records if r["kind"] == "plate"]))
+    result.notes.extend(buttons.notes([r for r in directional_bool if r.get("button")]))
     result.notes.extend(later)
     result.notes.extend(containers.pop("", []))
     return result
@@ -3473,7 +3476,27 @@ def _bool_state_notes(records: list[dict]) -> list[str]:
 # Doors, trapdoors, pressure plates and plain two-tall blocks (#296):
 # converters/doors.py, converters/trapdoors.py, converters/plates.py.
 
-def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, dict, dict]:
+class _SharedRun:
+    """One registration run over every blockstate of the mod, made the first
+    time a reader asks for it (#280): the attach-face reader with booleans
+    and the paired reader read off the same run, as a run on one kind's
+    names alone misses names a library's material set builds by
+    concatenation."""
+
+    def __init__(self, mod: SourceMod, loaded: dict):
+        self.mod, self.loaded, self.run, self.made = mod, loaded, None, False
+
+    def __call__(self):
+        if not self.made:
+            self.made = True
+            classes = getattr(self.mod, "classes", None)
+            if classes is not None and len(classes):
+                self.run = blockcode._registered(classes, sorted(self.loaded))
+        return self.run
+
+
+def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
+                 shared: "_SharedRun | None" = None) -> tuple[dict, dict, dict]:
     """(spec, reading, residue reason) per door, trapdoor or plain two-tall blockstate.
 
     A spec is ("door", variants), ("trapdoor", variants) or ("two_tall", halves); the reading is
@@ -3520,9 +3543,7 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, di
     # One registration run on every blockstate of the mod, as the other block
     # readers run it (#280: a run on one kind's names alone misses names a
     # library's material set builds by concatenation).
-    run = None
-    if classes is not None and len(classes):
-        run = blockcode._registered(classes, sorted(loaded))
+    run = (shared or _SharedRun(mod, loaded))()
     for kind in ("door", "trapdoor", "two_tall", "plate"):
         names = sorted(n for n, s in specs.items() if s[0] == kind)
         if names:
@@ -3997,7 +4018,8 @@ def _directional_bool_variants(blockstate: dict) -> tuple[str | None, tuple, dic
     return kind, bools, cells, ""
 
 
-def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict) -> tuple[dict, dict]:
+def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
+                           shared: "_SharedRun | None" = None) -> tuple[dict, dict]:
     specs, why, bool_specs = {}, {}, {}
     for stem, blockstate in loaded.items():
         if stem in stations:
@@ -4020,7 +4042,12 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict) -> tupl
         out.update({n: (specs[n][0], {(k, ()): v for k, v in specs[n][1].items()}, readings[n], ())
                     for n in specs})
     if bool_specs:
-        readings = blockcode.read_directional_states(classes, {n: (k, b) for n, (k, b, _) in bool_specs.items()})
+        # On the shared run over every blockstate (#280: BetterEnd's wood
+        # buttons, built by a library's material set, weren't reached by a
+        # run on these names alone).
+        run = (shared or _SharedRun(mod, loaded))()
+        readings = blockcode.read_directional_states(classes, {n: (k, b) for n, (k, b, _) in bool_specs.items()},
+                                                     run=run)
         out.update({n: (k, c, readings[n], b) for n, (k, b, c) in bool_specs.items()})
     return out, why
 
@@ -4079,11 +4106,21 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
     ``bools`` (with a :class:`blockcode.DirStateReading`)."""
     ns = mod.namespace
     label = _DIR_LABEL[kind] + (" and booleans" if bools else "")
+    button = None
     if bools and reading.vanilla_parent:
-        result.unhandled.append(Unhandled(rel, "block", (
-            f"{label}: {reading.cls} is a vanilla {reading.vanilla_parent.rsplit('.', 1)[-1]}, "
-            "whose state changes are vanilla code that isn't read")))
-        return None
+        if reading.vanilla_parent.replace(".", "/") == buttons.block_set_types.BUTTON_CLASS \
+                and kind == "attach" and tuple(bools) == ("powered",):
+            # #280: vanilla ButtonBlock's press and release are ported
+            # (converters/buttons.py) when its constructor is read.
+            button, why = buttons.read(reading)
+            if button is None:
+                result.unhandled.append(Unhandled(rel, "block", f"{label}: {why}"))
+                return None
+        else:
+            result.unhandled.append(Unhandled(rel, "block", (
+                f"{label}: {reading.cls} is a vanilla {reading.vanilla_parent.rsplit('.', 1)[-1]}, "
+                "whose state changes are vanilla code that isn't read")))
+            return None
     if reading.rule_conflict:
         result.unhandled.append(Unhandled(rel, "block", f"{_DIR_LABEL[kind]}: {reading.rule_conflict}"))
         return None
@@ -4311,6 +4348,21 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         from .station_kit import SCRIPT_FORMAT
         components[toggle_component(ns)] = {}
         fmt = SCRIPT_FORMAT
+    if button is not None:
+        # Java's getSignal (15 every side while powered) and getDirectSignal
+        # (15 into the block it hangs on), per attachment (buttons.py).
+        components["minecraft:redstone_producer"] = {"power": 0}
+        components[buttons.component(ns)] = {}
+        # Releases a button whose release timer a world reload dropped.
+        components["minecraft:tick"] = {"interval_range": [button["ticks"], button["ticks"]], "looping": True}
+        by_face: dict = {}
+        for key in reachable:
+            by_face.setdefault(buttons.attached_face(key), []).append(key)
+        for face, keys in by_face.items():
+            block.setdefault("permutations", []).append({
+                "condition": condition(keys, (1,)),
+                "components": {"minecraft:redstone_producer": {"power": 15, "strongly_powered_face": face}}})
+        fmt = buttons.BUTTON_FORMAT
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = {"format_version": fmt, "minecraft:block": block}
     if kind == "vslab":
@@ -4343,6 +4395,8 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         "uvlock": any(cells[c][3] for c in live),
         "unreachable": [_key_label(k, kind) for k in unreachable],
     }
+    if button is not None:
+        record["button"] = button
     if bools:
         record.update({
             "bools": bools,

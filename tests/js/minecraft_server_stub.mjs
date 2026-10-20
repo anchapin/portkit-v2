@@ -72,7 +72,7 @@ export class ItemStack {
 const properties = new Map();
 // World events a runtime subscribes to (skillet: itemUse, entityHitEntity),
 // by name; tests fire them through _fire.
-const subscribed = { before: {}, after: {} };
+const subscribed = { before: {}, after: {}, system: {} };
 function events(side) {
   return new Proxy({}, {
     get: (_, name) => ({ subscribe: (fn) => { (subscribed[side][name] ??= []).push(fn); return fn; } }),
@@ -104,11 +104,23 @@ const startup = [];
 // are kept with their period and run by _runIntervals().
 const queue = [];
 const intervals = [];
+// system.runTimeout callbacks wait in timeouts with their delay until a test
+// calls _runTimeouts() (#280 buttons).
+const timeouts = [];
 export const system = {
   beforeEvents: { startup: { subscribe: (fn) => startup.push(fn) } },
+  afterEvents: events("system"),
   run: (fn) => { queue.push(fn); return queue.length; },
   runInterval: (fn, period) => { intervals.push({ fn, period }); return intervals.length; },
+  runTimeout: (fn, ticks) => { timeouts.push({ fn, ticks }); return timeouts.length; },
 };
+
+/** Run (and drop) every pending system.runTimeout callback; returns their delays. */
+export function _runTimeouts() {
+  const now = timeouts.splice(0);
+  for (const { fn } of now) fn();
+  return now.map((t) => t.ticks);
+}
 
 /** Run every queued system.run callback. */
 export function _flush() {

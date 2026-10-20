@@ -76,10 +76,16 @@ def test_switch_inherits_vanilla_attach_placement(readings):
     assert sw.shapes_by[(("ceiling", "west"), (1,))] == ((5.0, 14.0, 4.0, 11.0, 16.0, 12.0),)
 
 
-def test_vanilla_button_is_a_vanilla_parent(readings):
+def test_vanilla_button_is_a_vanilla_parent_read_as_attach_face(readings):
     knob = readings["oak_knob"]
     assert knob.vanilla_parent == "net.minecraft.world.level.block.ButtonBlock"
-    assert knob.rule is None and knob.toggle is None
+    # #280: read like a plain attach-face block (FaceAttached placement,
+    # supplied) and its ButtonBlock constructor call kept for buttons.py.
+    assert knob.rule == blockcode.default_rule("attach") and knob.toggle is None
+    owner, desc, args = knob.button_ctor
+    assert owner == "net/minecraft/world/level/block/ButtonBlock"
+    assert args[0] == blockcode.Const("net/minecraft/world/level/block/state/properties/BlockSetType", "OAK")
+    assert args[1] == 30 and knob.button_overrides == []
 
 
 def test_start_that_depends_on_the_clicked_face_is_the_registered_one(readings):
@@ -231,11 +237,12 @@ def test_switch_conditions_and_toggle(converted):
     assert f'"{NS}:switch": "{NS}:enabled"' in table and f'"{NS}:ceiling_fan": "{NS}:lit"' in table
 
 
-def test_button_residue_and_start_fallback(converted):
-    assert "blocks/oak_knob.json" not in converted.files
-    why = [u.reason for u in converted.unhandled if u.source.endswith("oak_knob.json")]
-    assert why == ["attach face and booleans: net.minecraft.world.level.block.ButtonBlock is a vanilla "
-                   "ButtonBlock, whose state changes are vanilla code that isn't read"]
+def test_button_converts_and_start_fallback(converted):
+    # #280: vanilla ButtonBlock(BlockSetType.OAK, 30, ...) converts with the
+    # button runtime (tests/test_buttons.py has the rest).
+    knob = _block(converted, "oak_knob")
+    assert f"{NS}:portkit_button" in knob["components"]
+    assert not [u.reason for u in converted.unhandled if u.source.endswith("oak_knob.json")]
     top = _block(converted, "top_lit")
     assert top["description"]["states"] == {f"{NS}:lit": [False, True]}
     assert f"{NS}:portkit_toggle" not in top["components"]
@@ -243,7 +250,7 @@ def test_button_residue_and_start_fallback(converted):
 
 def test_notes(converted):
     notes = "\n".join(converted.notes)
-    assert "3 6-way facing / attach-face block(s) with boolean states convert" in notes
+    assert "4 6-way facing / attach-face block(s) with boolean states convert" in notes
     assert "lit (com.example.deco.FanBlock#useWithoutItem): ceiling_fan" in notes
     assert "enabled (com.example.deco.SwitchBlock#useWithoutItem): switch" in notes
     assert "powered: no method of the block's own classes sets it" in notes

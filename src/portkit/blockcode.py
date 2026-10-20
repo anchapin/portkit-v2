@@ -57,12 +57,13 @@ _BLOCK_SET_TYPE = "net/minecraft/world/level/block/state/properties/BlockSetType
 # than a String (client.txt 1.21.1 and 1.21.8: pressurePlateSensitivity,
 # soundType and eight SoundEvents; 1.20.1 has all but the sensitivity), and
 # the boolean canOpenByHand (all three; #280: what a door or trapdoor built
-# with BlockSetTypeBuilder.copyOf(constant) copies). The other booleans and
-# the name read off a constant stay unknown.
+# with BlockSetTypeBuilder.copyOf(constant) copies) and canButtonBeActivatedByArrows
+# (1.21.1 and 1.21.8; #280 buttons: what a button built the same way copies).
+# canOpenByWindCharge and the name read off a constant stay unknown.
 _BLOCK_SET_TYPE_PARTS = frozenset((
     "pressurePlateSensitivity", "soundType", "doorClose", "doorOpen", "trapdoorClose", "trapdoorOpen",
     "pressurePlateClickOff", "pressurePlateClickOn", "buttonClickOff", "buttonClickOn"))
-_BLOCK_SET_TYPE_FLAGS = frozenset(("canOpenByHand",))
+_BLOCK_SET_TYPE_FLAGS = frozenset(("canOpenByHand", "canButtonBeActivatedByArrows"))
 # Vanilla classes known (see the module docstring) not to override
 # getStateForPlacement, getShape or getCollisionShape below Block.
 # HorizontalDirectionalBlock, TransparentBlock, HalfTransparentBlock and
@@ -5297,6 +5298,32 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
 # vanilla parent, as FenceGateBlock is for read_state_blocks.
 
 _DIR_STATE_PLAIN = _PLAIN_VANILLA | {_FACE_ATTACHED}
+_BUTTON = "net/minecraft/world/level/block/ButtonBlock"
+# Methods whose override in a mod class between the block and vanilla
+# ButtonBlock makes the button the mod's own code (#280; Mojang names,
+# 1.20.1 / 1.21.1 ButtonBlock: use / useWithoutItem, press, playSound,
+# getSound, onRemove, getSignal, getDirectSignal, isSignalSource, tick,
+# entityInside, checkPressed, updateNeighbours, onExplosionHit, getShape;
+# plus BlockBehaviour's other hooks a block's behaviour runs through).
+BUTTON_BEHAVIOUR = frozenset({
+    "use", "useWithoutItem", "useItemOn", "press", "playSound", "getSound", "onRemove", "getSignal",
+    "getDirectSignal", "isSignalSource", "tick", "entityInside", "checkPressed", "updateNeighbours",
+    "onExplosionHit", "getShape", "getCollisionShape", "getStateForPlacement", "canSurvive", "updateShape",
+    "neighborChanged", "setPlacedBy", "onPlace", "randomTick", "attack", "stepOn", "newBlockEntity", "getTicker",
+})
+
+
+def _own_overrides(machine: "Machine", cls: str, behaviour: frozenset) -> list[str]:
+    """``Class#method`` for each method of ``behaviour`` a mod class between
+    ``cls`` and its vanilla base declares with code."""
+    found = []
+    for cname in machine.chain(cls)[:-1]:
+        cf = machine.classes.get(cname)
+        if cf is None:
+            break
+        found += [f"{cname.rsplit('/', 1)[-1]}#{m.name}" for m in cf.methods
+                  if m.name in behaviour and m.code is not None]
+    return sorted(set(found))
 
 
 @dataclass
@@ -5307,6 +5334,10 @@ class DirStateReading(DirReading):
 
     bools: tuple = ()
     vanilla_parent: str = ""
+    button_ctor: tuple | None = None
+    button_ctors: list = field(default_factory=list)
+    button_overrides: list = field(default_factory=list)
+    button_why: str = ""
     defaults: dict = field(default_factory=dict)
     toggle: str | None = None
     toggle_from: str = ""
@@ -5345,18 +5376,29 @@ def _dir_cell(kind: str, key: tuple):
 
 
 def read_directional_states(classes: ClassIndex | None,
-                            specs: dict[str, tuple[str, tuple]]) -> dict[str, DirStateReading]:
+                            specs: dict[str, tuple[str, tuple]], run=None) -> dict[str, DirStateReading]:
     """A :class:`DirStateReading` per blockstate name in ``specs`` (name ->
-    (kind, the boolean state names its blockstate draws))."""
+    (kind, the boolean state names its blockstate draws)).
+
+    ``run`` is a ``_registered`` result already made over every blockstate of
+    the mod (#280: a run on these names alone misses names a library's
+    material set builds by concatenation, as BetterEnd's wood buttons were).
+    A block read as vanilla ``ButtonBlock`` keeps ``vanilla_parent`` and is
+    read like a plain attach-face block too (its placement is
+    FaceAttachedHorizontalDirectionalBlock's, supplied); ``button_ctor`` is
+    the vanilla constructor call its object was built with and
+    ``button_overrides`` the button behaviour its own classes override;
+    ``button_ctors`` holds the constructor call of every object its
+    registration can build (converters/buttons.py judges them)."""
     readings = {n: DirStateReading(n, kind=k, bools=tuple(sorted(b))) for n, (k, b) in specs.items()}
     if classes is None or not len(classes):
         for r in readings.values():
             r.rule_why = r.shape_why = r.collision_why = r.toggle_why = r.light_why = \
                 "the mod ships no class files"
         return readings
-    machine, registered = _registered(classes, list(specs))
+    machine, registered = run if run is not None else _registered(classes, list(specs))
     for name, r in readings.items():
-        objs, why = registered[name]
+        objs, why = registered.get(name) or ([], "no registration found")
         if not objs:
             r.rule_why = r.shape_why = r.collision_why = r.toggle_why = r.light_why = why
             continue
@@ -5365,7 +5407,14 @@ def read_directional_states(classes: ClassIndex | None,
         base = machine.vanilla_base(obj.cls)
         if base not in _DIR_STATE_PLAIN:
             r.vanilla_parent = base.replace("/", ".")
-            continue
+            if base != _BUTTON:
+                continue
+            # Every object the registration can build (one per way through
+            # branches the reader can't decide): buttons.py reads each and
+            # takes the button only when all ways agree.
+            r.button_ctor = obj.fields.get("__vanilla_ctor")
+            r.button_ctors = [o.fields.get("__vanilla_ctor") for o in objs]
+            r.button_overrides = sorted({x for o in objs for x in _own_overrides(machine, o.cls, BUTTON_BEHAVIOUR)})
         _read_states(machine, obj, r)
         r.behaviour = _behaviour(machine, obj.cls)
         _read_rule(machine, obj, r)
