@@ -152,6 +152,14 @@ def test_a_result_with_no_entry_of_its_own_or_a_vanilla_result_stays():
     assert out["data/ex/recipes/d.json"] == "conditional_recipe"
 
 
+def test_a_result_the_pack_ships_under_that_id_stays():
+    """A block refused while an item of the same id converted: Bedrock knows the result."""
+    unhandled = [_u("assets/ex/blockstates/lamp.json", "block"), _u("data/ex/recipes/lamp.json", "recipe")]
+    results = {"data/ex/recipes/lamp.json": "ex:lamp"}
+    assert [u.kind for u in recipes.refine_owned(unhandled, {}, results, {"ex:lamp"})] == ["block", "recipe"]
+    assert [u.kind for u in recipes.refine_owned(unhandled, {}, results, set())] == ["block", "owned_by_residue"]
+
+
 def test_without_results_refine_owned_is_as_before():
     unhandled = [_u("assets/ex/blockstates/a.json", "block"), _u("data/ex/recipes/a.json", "recipe")]
     assert [u.kind for u in recipes.refine_owned(unhandled, {})] == ["block", "recipe"]

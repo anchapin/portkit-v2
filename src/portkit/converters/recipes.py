@@ -2019,7 +2019,8 @@ def _owner_entry(item: str, residue: dict[str, str]) -> str | None:
 
 
 def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]],
-                 results: dict[str, str] | None = None) -> list[Unhandled]:
+                 results: dict[str, str] | None = None,
+                 shipped: set[str] | None = None) -> list[Unhandled]:
     """Re-file a refused recipe that goes with residue items (#302, #342).
 
     :func:`drop_unshipped_recipes` withdraws a recipe naming (as its result or
@@ -2039,7 +2040,9 @@ def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]],
     that item too, whatever else refused it: Bedrock refuses a recipe whose
     result it doesn't know, so the recipe can't ship before its result does,
     and when it does the recipe converter reads it again (the original
-    reason is kept). A ``minecraft:`` result never counts.
+    reason is kept). A ``minecraft:`` result never counts, and neither does
+    one the pack ships under that id (``shipped``: a block refused while an
+    item of the same id converted), since Bedrock knows it.
     """
     residue = {u.source: u.kind for u in unhandled}
     results = results or {}
@@ -2057,7 +2060,8 @@ def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]],
                         f"so the recipe goes with them when they convert (the recipe itself: {u.reason})")))
             continue
         made = results.get(u.source) if u.kind in ("recipe", OVER_CAP) else None
-        entry = _owner_entry(made, residue) if made and not made.startswith("minecraft:") else None
+        entry = (_owner_entry(made, residue)
+                 if made and not made.startswith("minecraft:") and made not in (shipped or ()) else None)
         if entry is not None:
             out.append(Unhandled(
                 source=u.source, kind=OWNED, count=u.count,

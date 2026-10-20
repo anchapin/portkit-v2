@@ -590,7 +590,7 @@ def convert(
             # And a recipe withdrawn for naming items that are residue of
             # their own goes with them (#302), as does a refused recipe whose
             # result is residue of its own (#342).
-            unhandled = recipes.refine_owned(unhandled, result.unshipped_names, result.recipe_results)
+            unhandled = recipes.refine_owned(unhandled, result.unshipped_names, result.recipe_results, shipped)
             # And its leftover data tags: what reads them, and whether their
             # members shipped (#293).
             unhandled = datatags.refine(unhandled, staged.root, result.consumed, shipped,
