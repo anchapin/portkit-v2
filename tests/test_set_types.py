@@ -127,3 +127,15 @@ def test_an_unknown_constructor_or_component_is_not_read():
     assert doors._set_type_plate(_built(desc, tuple(args)))[1] is None
     args[4] = blockcode.Part(blockcode.Const(block_set_types.CLASS, "STONE"), "pressurePlateSensitivity")
     assert doors._set_type_plate(_built(desc, tuple(args)))[:2] == ("MOBS", "STONE")
+
+
+def test_a_part_compares_unknown_except_with_itself():
+    stone = blockcode.Const(block_set_types.CLASS, "STONE")
+    part = blockcode.Part(stone, "pressurePlateSensitivity")
+    mobs = blockcode.Const(block_set_types.SET_SENSITIVITY_CLASS, "MOBS")
+    # STONE's sensitivity is MOBS, which the reader doesn't model: undecided, never "not equal"
+    assert blockcode._same(part, mobs) is None and blockcode._same(mobs, part) is None
+    assert blockcode._same(part, blockcode.Part(stone, "pressurePlateSensitivity")) is True
+    assert blockcode._same(part, blockcode.Part(blockcode.Const(block_set_types.CLASS, "OAK"),
+                                                "pressurePlateSensitivity")) is None
+    assert not blockcode.Machine(ClassIndex({}))._key_ok(part)

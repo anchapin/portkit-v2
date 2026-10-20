@@ -3168,7 +3168,7 @@ class Machine:
         so Object#equals (identity) decides."""
         if key is UNKNOWN or not _hashable(key):
             return False
-        if isinstance(key, (ListV, IterV, MapV, Arr, Builder, Props)):
+        if isinstance(key, (ListV, IterV, MapV, Arr, Builder, Props, Part)):
             return False
         if isinstance(key, Obj):
             chain = self.chain(key.cls)
@@ -3675,7 +3675,7 @@ def _value_equal(a, b) -> bool:
     shapes); never UNKNOWN or a mutable value of the machine's."""
     if a is b:
         return a is not UNKNOWN
-    if isinstance(a, (str, int, float, Const, ClassLit, RL, RKey, Dir, Shape, Tail)) \
+    if isinstance(a, (str, int, float, Const, Part, ClassLit, RL, RKey, Dir, Shape, Tail)) \
             and type(a) is type(b):
         return _equal(a, b)
     return False
@@ -3693,6 +3693,10 @@ def _same(a, b):
     """Reference equality of two abstract values, or None when undecidable."""
     if a is UNKNOWN or b is UNKNOWN:
         return None
+    if isinstance(a, Part) or isinstance(b, Part):
+        # A component's value isn't modelled: the same constant's same
+        # component is the same object; against anything else, unknown.
+        return True if a == b else None
     if isinstance(a, (Obj, Arr, MapV, Builder)) or isinstance(b, (Obj, Arr, MapV, Builder)):
         return a is b
     if isinstance(a, (PlayerDir, LookDir)) or isinstance(b, (PlayerDir, LookDir)):
