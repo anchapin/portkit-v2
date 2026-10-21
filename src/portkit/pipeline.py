@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import advancements, biomecode, codeonly, datatags, ownership, worldgen
+from . import advancements, biomecode, codeonly, datatags, guidebooks, ownership, worldgen
 from .converters import features, lang, loot, recipes
 from .converters import blocks as block_converter
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
@@ -641,9 +641,13 @@ def convert(
             unhandled = datatags.refine(unhandled, staged.root, result.consumed, shipped,
                                         datatags.jar_namespaces(staged.root), getattr(meta, "loader", None),
                                         set(result.files))
+            # And the guide books no converter reads, from their file layout
+            # (#182, pending Alex, picks 1a-3a); later passes leave them alone.
+            unhandled, guide_files = guidebooks.refine(unhandled, staged.root, result.consumed,
+                                                       staged.classes, getattr(meta, "requires", None))
             # And its leftover worldgen, structure templates and other mods'
             # data the jar explains (#277; PR #316 picks 1a 2a 3a).
-            unhandled = worldgen.refine(unhandled, staged.root, result.consumed,
+            unhandled = worldgen.refine(unhandled, staged.root, result.consumed | guide_files,
                                         datatags.jar_namespaces(staged.root), staged.classes)
             # And its leftover advancements: recipe advancements go with their
             # residue recipes, the rest Bedrock has no place for (#340).
