@@ -304,11 +304,17 @@ def cube(element: dict, tag_faces: bool = False) -> tuple[dict | None, str]:
         if not isinstance(spec, dict):
             continue
         corners = spec.get("uv")
+        if corners is None and tag_faces and isinstance(spec.get("texture"), str) \
+                and face in _TURNABLE_FACES:
+            # Naming the face's material in the geometry needs a per-face uv.
+            # A face with none gets the one Java derives from the element's
+            # position (auto_uv; 1.21.1 BlockElement#uvsByFace, #350).
+            corners = auto_uv(face, element["from"], element["to"])
         if not (isinstance(corners, list) and len(corners) == 4):
             if tag_faces and isinstance(spec.get("texture"), str):
                 return None, (
-                    f"element's {face} face has no uv, and naming its material "
-                    "in the geometry needs one"
+                    f"element's {face} face has an unreadable uv, and naming its "
+                    "material in the geometry needs one"
                 )
             continue
         try:

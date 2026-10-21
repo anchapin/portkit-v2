@@ -244,6 +244,18 @@ def _block_names(mod: SourceMod) -> set[str]:
     return {p.stem for p in states.glob("*.json")}
 
 
+def _item_model_chain(mod: SourceMod, path: Path) -> list:
+    """The mod's own model files an item model inherits from (its parents)."""
+    try:
+        model = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(model, dict):
+        return []
+    _flat, seen, _why = _chain(mod, model)
+    return list(seen)
+
+
 def _block_item_templates(mod: SourceMod, src: Path, blocks: set[str],
                           emitted_blocks: set[str] | None) -> set[Path]:
     """The ``models/item/`` files an emitted block's item model inherits from.
@@ -783,6 +795,11 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
                 # The block converter owns this one; claiming it keeps it off the
                 # unowned list without producing a competing definition.
                 result.claim(mod, path)
+                # So does the chain it inherits outside models/item/ (a
+                # models/block/ file only this item model names as its parent,
+                # #350); Java reads it only through the child's ``parent``.
+                for parent_file in _item_model_chain(mod, path):
+                    result.claim(mod, parent_file)
                 continue
             # The block is residue, so Bedrock makes no item for it. The Java
             # item still exists (usually the one that places it); a flat icon
