@@ -2491,7 +2491,7 @@ class _RenderRun:
             run = self.shared()
             self.readings = ({} if run is None else
                              rendershape.read(getattr(self.mod, "classes", None), run[1],
-                                              getattr(self.mod, "minecraft", None)))
+                                              getattr(self.mod, "minecraft", None), run[0]))
         return self.readings
 
 

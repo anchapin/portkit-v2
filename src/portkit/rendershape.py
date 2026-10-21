@@ -161,10 +161,30 @@ def _method_shapes(cf, m, enum: str):
     return found, calls_super
 
 
-def read_shape(classes: ClassIndex, cls: str, vanilla: VanillaShapes | None):
-    """(shapes, source, why) for a block class, walking its superclasses."""
-    shapes: set[str] = set()
-    sources: list[str] = []
+def _run_shapes(machine, cf, m, obj, enum: str):
+    """The shapes ``m`` returns on the registered object ``obj`` (its fields
+    as its constructor left them; the state unknown), or None."""
+    from .blockcode import UNKNOWN, Const, Unreadable
+    if machine is None or obj is None:
+        return None
+    machine.steps = 0
+    machine.new_epoch()
+    try:
+        values = machine.run(cf, m, [obj, UNKNOWN])
+    except Unreadable:
+        return None
+    if not values or any(not isinstance(v, Const) or v.owner != enum or v.name not in SHAPES for v in values):
+        return None
+    return {v.name for v in values}
+
+
+def read_shape(classes: ClassIndex, cls: str, vanilla: VanillaShapes | None, machine=None, obj=None):
+    """(shapes, source, why) for a block class, walking its superclasses.
+
+    The first class that declares getRenderShape (by descriptor) decides:
+    run on the registered object when the machine can follow it, else read
+    from its constants when it returns exactly one and calls nothing. A
+    vanilla superclass's answer comes from ``vanilla``."""
     seen: set[str] = set()
     name = cls
     while name and name not in seen:
@@ -175,20 +195,24 @@ def read_shape(classes: ClassIndex, cls: str, vanilla: VanillaShapes | None):
                 return None, "", (f"inherits {_dotted(name)}'s render shape, and no table of vanilla render "
                                   "shapes is pinned for the mod's game version")
             shape = vanilla.not_model.get(name, "MODEL")
-            shapes.add(shape)
-            sources.append(f"{_dotted(name)}#getRenderShape = {shape} (vanilla, inherited; {vanilla.source})")
-            return frozenset(shapes), "; ".join(sources), ""
+            return (frozenset({shape}),
+                    f"{_dotted(name)}#getRenderShape = {shape} (vanilla, inherited; {vanilla.source})", "")
         own = next((m for m in cf.methods if m.desc in _SHAPE_DESCS and m.code is not None
                     and not m.access & 0x0008), None)
         if own is not None:
-            got, more = _method_shapes(cf, own, _SHAPE_DESCS[own.desc])
+            enum = _SHAPE_DESCS[own.desc]
+            ran = _run_shapes(machine, cf, own, obj, enum)
+            if ran is not None:
+                return (frozenset(ran), f"{_dotted(cf.name)}#{own.name} = {', '.join(sorted(ran))} "
+                        "(run on the registered block)", "")
+            got, more = _method_shapes(cf, own, enum)
             if got is None:
                 return None, "", more
-            shapes |= got
-            if got:
-                sources.append(f"{_dotted(cf.name)}#{own.name} = {', '.join(sorted(got))}")
-            if not more:
-                return frozenset(shapes), "; ".join(sources), ""
+            if len(got) == 1 and not more:
+                return frozenset(got), f"{_dotted(cf.name)}#{own.name} = {next(iter(got))}", ""
+            return None, "", (f"{_dotted(cf.name)}#{own.name} returns {', '.join(sorted(got)) or 'a value'} "
+                              f"{'or its superclass answer ' if more else ''}depending on what it reads, "
+                              "and the run on the registered block didn't decide it")
         name = cf.super_name
     return None, "", f"{_dotted(cls)}'s superclasses don't reach a vanilla class"
 
@@ -362,9 +386,13 @@ def block_entities(classes: ClassIndex, cls: str, renderers: _Renderers) -> list
     return list(dict.fromkeys(found))
 
 
-def read(classes: ClassIndex | None, registered: dict, minecraft: str | None) -> dict[str, RenderReading]:
+def read(classes: ClassIndex | None, registered: dict, minecraft: str | None,
+         machine=None) -> dict[str, RenderReading]:
     """A :class:`RenderReading` per name of ``registered`` (name -> (block
-    objects, why), as :func:`portkit.blockcode._registered` returns)."""
+    objects, why), as :func:`portkit.blockcode._registered` returns, run by
+    ``machine``). A block refused there only for SRG/intermediary member
+    names is read too (the method is found by its descriptor)."""
+    renamed = getattr(machine, "renamed", None) or {}
     out: dict[str, RenderReading] = {}
     if classes is None or not len(classes):
         return {n: RenderReading(n, why="the mod ships no class files") for n in registered}
@@ -374,6 +402,8 @@ def read(classes: ClassIndex | None, registered: dict, minecraft: str | None) ->
         r = RenderReading(name)
         out[name] = r
         if not objs:
+            objs = renamed.get(name) or []
+        if not objs:
             r.why = why
             continue
         clss = sorted({o.cls for o in objs})
@@ -381,7 +411,11 @@ def read(classes: ClassIndex | None, registered: dict, minecraft: str | None) ->
             r.why = "registered with different classes"
             continue
         r.cls = _dotted(clss[0])
-        r.shapes, r.source, r.why = read_shape(classes, clss[0], vanilla)
+        answers = {read_shape(classes, clss[0], vanilla, machine, o) for o in objs}
+        if len(answers) != 1:
+            r.why = "registered more than once with different render shapes"
+            continue
+        r.shapes, r.source, r.why = answers.pop()
         if r.shapes is not None and "MODEL" in r.shapes:
             if renderers is None:
                 renderers = _Renderers(classes)

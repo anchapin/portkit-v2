@@ -4327,6 +4327,7 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     machine = Machine(classes)
     machine.registrations = []
     machine._allocating = []
+    machine.renamed = {}
     wanted = _wanted_classes(classes, set(names))
     for cname in wanted:
         machine.steps = 0
@@ -4412,6 +4413,9 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
         elif _renamed(machine, objs[0].cls):
             why = (f"{objs[0].cls.replace('/', '.')} uses Forge SRG or Fabric intermediary member names, so its "
                    "methods can't be told apart from vanilla's by name")
+            # A reader that finds a method by its descriptor alone can still
+            # use the objects (portkit.rendershape, #352).
+            machine.renamed[name] = objs
             objs = []
         out[name] = (objs, why)
     return machine, {n: out[n] for n in names}
