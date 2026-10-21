@@ -311,8 +311,9 @@ def _other_mod_assets(root: Path, files: list[str], cite: _Citations) -> dict[st
             continue
         reason = (f"`{name}/` is not a folder of assets Minecraft's client reads (the client jars' "
                   f"assets/minecraft/ folders, sounds/, 1.12's data folders), no class of the jar names "
-                  f"`{name}` in a string, and each of its {len(members)} file(s) is a JSON object, so only "
-                  f"another mod's resource reloader reads it and it isn't converted with this jar")
+                  f"`{name}` in a string, and each of its {len(members)} file(s) is a JSON object: data for "
+                  f"another mod's (or a library's) resource reloader, if anything reads it, and it isn't "
+                  f"converted with this jar")
         for rel in members:
             out[rel] = reason
     return out
