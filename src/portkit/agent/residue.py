@@ -171,7 +171,14 @@ SKIP_KINDS = {
     "code_drawn_block": ("every model the blockstate names bakes no quads (only a particle texture), so the "
                          "block is drawn by the mod's Java code (a block-entity renderer, the fluid renderer or "
                          "a model swapped in at runtime); a Bedrock block definition has no renderer to hand "
-                         "that to, and a stand-in geometry would invent the look"),
+                         "that to, and a stand-in geometry would invent the look; or (#352, pending Alex) its "
+                         "Java render shape is ENTITYBLOCK_ANIMATED or INVISIBLE for every state, so the "
+                         "client never draws its blockstate model in the world"),
+    # #352 (pending Alex): a shipped block a block-entity renderer also draws (count 0).
+    "renderer_drawn_parts": ("the block shipped as its static blockstate model (Java's render shape is MODEL), "
+                             "but a block-entity renderer of the jar also draws its block entity (moving parts "
+                             "or contents); no source file is left out, the entry counts 0 files and names "
+                             "the renderer"),
     # #277 worldgen and other mods' data the jar explains (portkit.worldgen; PR #316 picks 1a 2a 3a).
     "code_worldgen": ("the worldgen file's type (a feature, placement modifier or pool element) is the mod's "
                       "own Java class, or only the mod's code (or such files) puts it into generation, so what "
