@@ -99,7 +99,10 @@ def test_recipe_reasons_fixed_and_computed(tmp_path, monkeypatch):
     assert found == {
         "g.json": ("machine_recipe", "a grinder recipe"),
         "p.json": ("machine_recipe", "examplemod presses for 40 ticks"),
-        "o.json": ("recipe", "unsupported recipe type 'examplemod:other'"),
+        "o.json": ("mod_recipe_type", (
+            "recipe type 'examplemod:other' is in the mod's own namespace and only code registers recipe "
+            "types (Java has no data-driven ones); no class of the jar was read registering it; "
+            f"{recipes.NO_BEDROCK_RECIPE_TYPE}, and its JSON has no vanilla recipe shape")),  # #358
     }
     assert adapters.recipe_reasons("machine_recipe") == {"examplemod:grind": "a grinder recipe"}
     assert adapters.recipe_reason(None, {}, mod) is None
