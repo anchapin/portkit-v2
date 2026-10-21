@@ -322,15 +322,16 @@ class _Renderers:
                 continue
             if not (self.supers(name) & _BER_BASES):
                 continue
+            # Only the class's own signature: a superclass's type parameter
+            # is bound by this one (``extends Base<FooBlockEntity>``). A bound
+            # or argument that is the vanilla block entity class itself says
+            # nothing about which block entity the renderer draws.
             concrete: list[str] = []
             bounded: list[list[str]] = []
-            for cname in [name, *[s for s in self.supers(name) if classes.get(s) is not None and s != name]]:
-                c = classes.get(cname)
-                if c is None or not c.signature:
-                    continue
-                params, rest = _signature_parts(c.signature)
-                concrete += [x for x in rest if self.is_be(x)]
-                bounded += [p for p in params if any(self.is_be(x) for x in p)]
+            if cf.signature and not cf.access & 0x0400:
+                params, rest = _signature_parts(cf.signature)
+                concrete = [x for x in rest if x not in _BE_BASES and self.is_be(x)]
+                bounded = [p for p in params if any(x not in _BE_BASES and self.is_be(x) for x in p)]
             if (concrete or bounded) and self._used(name):
                 self.found.append((name, concrete, bounded))
 

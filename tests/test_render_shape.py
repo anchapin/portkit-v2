@@ -95,6 +95,9 @@ def test_renderers_accept_by_type_argument_and_by_every_bound(classes):
     assert renderers.accepting(P + "BearingBlockEntity") == [P + "BearingRenderer"]
     # Kinetic but not a Bearing; and the only renderer naming it is unused.
     assert renderers.accepting(P + "ShaftBlockEntity") == []
+    # A renderer bound only by the vanilla BlockEntity accepts nothing by
+    # itself; a subclass that binds it to one block entity does.
+    assert renderers.accepting(P + "SpinnerBlockEntity") == [P + "SpinnerRenderer"]
     assert P + "UnusedRenderer" not in [name for name, _, _ in renderers.found]
 
 
