@@ -27,6 +27,22 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-21 (proposed, PR #PRNUM): texture variables resolve through the whole parent chain, a tagged face without a uv takes Java's derived uv, and the models an emitted block's item model reads go with the block
+
+- **Status:** proposed (#350, part of #277). A converter fix that follows Java's own model loading; no policy pick.
+- **What Java does** (read, not assumed): a texture variable is resolved against the whole flattened model, child entries over parents', and a `#name` value is looked up again from the top until it reaches a location (1.21.1 `BlockModel#findTextureEntry`/`getMaterial`; 1.21.4+ `TextureSlots.Resolver`); an unresolvable or cyclic one is the missing texture. A face with no `uv` gets one from the element's position (1.21.1 `BlockElement#uvsByFace`, already `models.auto_uv`). Storage Drawers 1.21.1-13.11.4: `<wood>_full_drawers_N` sets `top`/`front`/`side`/`trim`, its parent `full_drawers_orientable` maps `down`/`up` to `#top`, `north` to `#front`, the sides to `#side`, and the grandparent `full_drawers` has the boxes, whose `up`/`north`/... faces name no `uv`.
+- **Decision** (`src/portkit/converters/models.py`, `src/portkit/converters/items.py`, `src/portkit/ownership.py`; no mod names, #220):
+  1. **Variables.** `models.resolve` resolves `#var` values in the merged map recursively (`models.resolve_variables`), with cycle detection. An unfilled variable keeps the last `#` reference (still residue, the reason names it); a cycle keeps the values as written. A variable only a vanilla template fills is left for `expand_template`, as before.
+  2. **Derived uv on tagged faces.** When a block's elements disagree per face direction and every face names its material in the geometry, a face without a `uv` gets `auto_uv` instead of refusing the block. Untagged geometry is unchanged (a face without a `uv` still writes none).
+  3. **Bookkeeping.** An emitted block's item model is claimed with the block already; the models it reads outside `models/item/` (its parent chain and its `overrides` models with their parents) are now claimed with it too, instead of turning `unowned` once the block ships. And a model's `textures` map names textures only: `portkit.ownership` no longer counts a texture value as a user of a same-named model (Botania's `*_spreader_core` models, loaded by its block-entity renderer, share their path with a texture), so such a model is `java_only_asset`, not `unowned`.
+- **Why:** #277: Storage Drawers' biggest unexplained class (74 blocks, closing analysis 2026-10-20 item 11). The same two gaps refused blocks in other mods.
+- **Measured:** MEASURED
+- **Pack bytes:** PACKBYTES
+- **`c:obsidians` (checked, no change):** Storage Drawers' `void_upgrade` puts the 2-member tag in 8 grid slots, 2^8 = 256 combinations, over the #302 cap of 16, so it is the explained `recipe_over_cap` (#343), not a bug. The closing analysis's "1 slot" was wrong.
+- **Not checked in game:** blocks whose Java block returns `RenderShape.ENTITYBLOCK_ANIMATED` (Botania's mana spreaders and pools) now ship their blockstate model as a static block, as Botania's cocoon already does on develop; Java draws them through a block-entity renderer (a spreader turns toward its aim). Reading `getRenderShape` is the refinement the 2026-10-16 `code_drawn_block` entry left open.
+- **Rejected:** keeping the refusal for faces without a `uv` (Java fills it, so it was a converter gap, not a rule); resolving variables only one hop (Storage Drawers' chain is two); a substitute texture for an unfilled variable (#87).
+- **Links:** #350, #277, #87, #220, #302, #343.
+
 ## 2026-10-20 (approved (Alex, 2026-10-21): picks 1a–6a, PR #349): a texture sidecar with a Connected Textures Mod `"ctm"` section and no animation is the explained `connected_texture` (not converted); texture keys from pre-1.13 paths are lowercased and sanitised
 
 - **Status:** approved (Alex, 2026-10-21): picks 1a–6a (#348, part of #277, PR #349; picks comment https://github.com/anchapin/portkit-v2/pull/349#issuecomment-6307434303). The branch implements every "a" pick. docs/gauntlet.md is banked from gap-leaderboard 39538703718, approved with the picks.
