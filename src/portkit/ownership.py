@@ -94,6 +94,18 @@ def references(root: Path) -> dict[str, set[str]]:
         doc = _read(path)
         if doc is None:
             continue
+        # A model's "textures" map names textures, never models: Java reads
+        # its values only as texture locations (or #variables). Elsewhere in a
+        # model, which one a string is shows on disk (#350: a texture named
+        # like a Java-only model is not that model's user).
+        if lane == "models" and isinstance(doc, dict) and isinstance(doc.get("textures"), dict):
+            for value in doc["textures"].values():
+                if isinstance(value, dict):  # 1.21.5+: {"sprite": ..., ...}
+                    value = value.get("sprite")
+                loc = _location(value) if isinstance(value, str) else None
+                if loc is not None:
+                    add(f"assets/{loc[0]}/textures/{loc[1]}.png", rel)
+            doc = {k: v for k, v in doc.items() if k != "textures"}
         for key, value in _strings(doc):
             loc = _location(value)
             if loc is None:

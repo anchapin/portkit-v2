@@ -131,3 +131,18 @@ def test_an_emitted_block_items_model_parent_is_claimed(tmp_path):
     assert result.files == {}
     assert "assets/examplemod/models/item/oak_drawers.json" in result.consumed
     assert "assets/examplemod/models/block/oak_drawers_item.json" in result.consumed
+
+
+def test_an_emitted_block_items_override_models_are_claimed(tmp_path):
+    mod = _mod(tmp_path)
+    assets = mod.root / "assets" / "examplemod"
+    (assets / "models" / "item").mkdir(parents=True)
+    (assets / "models" / "item" / "oak_drawers.json").write_text(json.dumps({
+        "parent": "examplemod:block/oak_drawers",
+        "overrides": [{"model": "examplemod:block/oak_drawers_full", "predicate": {"examplemod:full": 1}}]}))
+    (assets / "models" / "block" / "oak_drawers_full.json").write_text(
+        json.dumps({"parent": "examplemod:block/drawers_full_shape"}))
+    (assets / "models" / "block" / "drawers_full_shape.json").write_text(json.dumps({"elements": []}))
+    result = items.convert(mod, emitted_blocks={"examplemod:oak_drawers"})
+    for rel in ("block/oak_drawers_full", "block/drawers_full_shape"):
+        assert f"assets/examplemod/models/{rel}.json" in result.consumed
