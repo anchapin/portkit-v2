@@ -163,9 +163,17 @@ def test_a_target_with_no_sounds_is_named_when_nothing_is_left(tmp_path):
 
 def test_without_the_java_vanilla_set_a_vanilla_reference_says_how_to_keep_it(tmp_path):
     event = {"category": "block", "sounds": [{"type": "event", "name": "minecraft:block.fire.ambient"}]}
-    result = sounds.convert(build(tmp_path, {"block.brazier.crackle": event}))
+    mod = build(tmp_path, {"block.brazier.crackle": event})
+    mod.minecraft = "1.20.1"
+    result = sounds.convert(mod)
     assert "sounds/sound_definitions.json" not in result.files
     assert "isn't cached; run `portkit reference fetch`" in result.unhandled[0].reason
+
+
+def test_a_jar_with_no_game_version_drops_vanilla_references_saying_why(tmp_path):
+    event = {"category": "block", "sounds": [{"type": "event", "name": "minecraft:block.fire.ambient"}]}
+    result = sounds.convert(build(tmp_path, {"block.brazier.crackle": event}))
+    assert "the jar declares no game version" in result.unhandled[0].reason
 
 
 def test_a_file_entrys_weight_is_carried(tmp_path):

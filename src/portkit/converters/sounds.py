@@ -159,6 +159,7 @@ class _Events:
     """Where an event reference finds its target's sounds list (#356)."""
 
     def __init__(self, namespace: str, own: dict, vanilla: dict | None, vanilla_label: str | None):
+        # vanilla_label is None when the jar declares no game version (no set chosen).
         self.namespace = namespace
         self.own = own
         self.vanilla = vanilla
@@ -176,6 +177,11 @@ class _Events:
                 )
             return list(body.get("sounds") or []), None
         if ns == "minecraft":
+            if self.vanilla is None and self.vanilla_label is None:
+                return None, _Drop(
+                    f"plays vanilla event {target!r} and the jar declares no game version, so "
+                    "which vanilla sounds.json it plays from is unknown"
+                )
             if self.vanilla is None:
                 return None, _Drop(
                     f"plays vanilla event {target!r} and vanilla's sounds.json for this game "
@@ -184,7 +190,8 @@ class _Events:
             found = self.vanilla.get(target)
             if not isinstance(found, list):
                 return None, _Drop(
-                    f"plays vanilla event {target!r}, which {self.vanilla_label} doesn't define "
+                    f"plays vanilla event {target!r}, which {self.vanilla_label or 'vanilla sounds.json'} "
+                    "doesn't define "
                     "(Java plays nothing for it)"
                 )
             return list(found), None
@@ -302,7 +309,7 @@ def convert(mod: SourceMod) -> ConversionResult:
         mod.namespace,
         events if isinstance(events, dict) else {},
         java_vanilla,
-        java_set.label if java_set is not None else "vanilla's sounds.json",
+        java_set.label if java_set is not None else None,
     )
     definitions: dict[str, dict] = {}
     inlined: list[str] = []
