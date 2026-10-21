@@ -329,6 +329,142 @@ def code_recipe_reason(java_type: object, recipe: dict, loader: str | None = Non
         "invent both"
     )
 
+# A recipe whose type the mod's own code registers (a RecipeSerializer of its
+# own, #358, part of #277; pending Alex, picks 1a-3a) is an explained residue
+# kind. Java has no data-driven recipe types, so a type in the mod's own
+# namespace, or one whose id the mod's code builds next to a recipe
+# serializer, is read only by that code; Bedrock's recipe types are a fixed
+# list an add-on can't extend. The reason names the type and what the
+# bytecode reads (registering class, serializer, recipe class;
+# portkit.recipetypes), and for a crafting-like variant (its JSON has the
+# vanilla shaped/shapeless/stonecutting shape, or wraps a vanilla recipe)
+# what Java does beyond that shape: extra keys, non-vanilla ingredient types,
+# and the recipe class's overrides of matches/assemble/getRemainingItems.
+# Pick 2a: such a variant converts as its vanilla type only when the recipe
+# class read from bytecode extends that vanilla class, overrides none of
+# those, and the JSON holds nothing beyond the vanilla shape; pick 3a: any
+# extra keeps it residue (never approximated).
+MOD_RECIPE_TYPE = "mod_recipe_type"
+
+NO_BEDROCK_RECIPE_TYPE = (
+    "Bedrock's recipe types are a fixed list (shaped, shapeless, furnace, brewing, smithing) "
+    "that an add-on can't extend"
+)
+
+_SHAPES = {
+    "minecraft:crafting_shaped": ("pattern", "key", "result"),
+    "minecraft:crafting_shapeless": ("ingredients", "result"),
+    "minecraft:stonecutting": ("ingredient", "result"),
+}
+_SHAPE_WORDS = {
+    "minecraft:crafting_shaped": "vanilla shaped crafting's pattern, key and result",
+    "minecraft:crafting_shapeless": "vanilla shapeless crafting's ingredients and result",
+    "minecraft:stonecutting": "vanilla stonecutting's ingredient and result",
+}
+
+
+def _json_shape(recipe: dict) -> str | None:
+    """The vanilla type whose shape the recipe's JSON has, or None."""
+    if all(k in recipe for k in _SHAPES["minecraft:crafting_shaped"]):
+        return "minecraft:crafting_shaped"
+    if "pattern" in recipe:
+        return None
+    for vt in ("minecraft:crafting_shapeless", "minecraft:stonecutting"):
+        if all(k in recipe for k in _SHAPES[vt]):
+            return vt
+    return None
+
+
+def _ingredient_types(spec, out: set) -> None:
+    """Every non-vanilla ingredient ``type`` in ``spec`` (an ingredient, a
+    list of them, or a shaped key's values)."""
+    if isinstance(spec, list):
+        for s in spec:
+            _ingredient_types(s, out)
+    elif isinstance(spec, dict):
+        t = spec.get("type")
+        if isinstance(t, str) and not t.startswith("minecraft:"):
+            out.add(t)
+
+
+def mod_recipe_type(java_type: object, recipe: dict, mod, cache: dict | None = None):
+    """``(reason, vanilla type to convert as or None)`` for a recipe whose
+    type the mod's own code registers (#358), or None when it isn't one:
+    a type outside ``minecraft:`` that the jar's code is read registering, or
+    one in the mod's own namespace (only code registers recipe types)."""
+    from .. import recipetypes
+
+    if not isinstance(java_type, str) or ":" not in java_type or java_type.startswith("minecraft:"):
+        return None
+    ns = java_type.split(":", 1)[0]
+    own = getattr(mod, "namespace", None)
+    cache = {} if cache is None else cache
+    if java_type not in cache:
+        cache[java_type] = recipetypes.read(getattr(mod, "classes", None), java_type, own)
+    reading = cache[java_type]
+    if reading is None and ns != own:
+        return None
+    if reading is not None:
+        parts = [f"{recipetypes.short(reading.registering)} registers it"]
+        if reading.serializer:
+            parts.append(f"serializer {recipetypes.short(reading.serializer)}")
+        if reading.recipe:
+            parts.append(f"recipe class {recipetypes.short(reading.recipe)}")
+        who = (f"recipe type {java_type!r} is registered by the mod's own code "
+               f"({_dotted(reading.registering)}: " + ", ".join(parts) + ")")
+    else:
+        who = (f"recipe type {java_type!r} is in the mod's own namespace and only code registers recipe "
+               "types (Java has no data-driven ones); no class of the jar was read registering it")
+    shape = _json_shape(recipe)
+    wrapped = None
+    if shape is None:
+        for key, value in recipe.items():
+            if isinstance(value, dict) and isinstance(value.get("type"), str):
+                inner = with_namespaced_type(value).get("type")
+                if inner in _SUPPORTED or inner in _SHAPES:
+                    wrapped = (key, inner)
+                    break
+    if shape is None and wrapped is None:
+        return f"{who}; {NO_BEDROCK_RECIPE_TYPE}, and its JSON has no vanilla recipe shape", None
+    extras: list[str] = []
+    if shape is not None:
+        known = set(_SHAPES[shape]) | _NO_DATA_KEYS | set(condition_keys(getattr(mod, "loader", None)))
+        extra_keys = sorted(set(recipe) - known)
+        if extra_keys:
+            extras.append("key(s) " + ", ".join(repr(k) for k in extra_keys))
+        types: set = set()
+        for k in ("key", "ingredients", "ingredient"):
+            spec = recipe.get(k)
+            _ingredient_types(list(spec.values()) if k == "key" and isinstance(spec, dict) else spec, types)
+        if types:
+            extras.append("ingredient type(s) " + ", ".join(repr(t) for t in sorted(types)))
+        like = f"crafting-like: its JSON has {_SHAPE_WORDS[shape]}"
+    else:
+        others = sorted(set(recipe) - {wrapped[0]} - _NO_DATA_KEYS)
+        extras.append("the wrapper itself" + (" and its key(s) " + ", ".join(repr(k) for k in others) if others else ""))
+        like = f"crafting-like: it wraps a vanilla {wrapped[1]!r} recipe under {wrapped[0]!r}"
+    if reading is not None and reading.overrides:
+        extras.append("code overriding " + ", ".join(reading.overrides))
+    unknown = None
+    if reading is None or not reading.recipe:
+        unknown = "its recipe class isn't read from bytecode, so whether Java does more than that shape can't be told"
+    elif shape is not None and reading.base != shape:
+        unknown = (f"its recipe class {recipetypes.short(reading.recipe)} isn't read extending vanilla "
+                   f"{shape.split(':')[1]}")
+    if not extras and unknown is None and shape is not None:
+        return None, shape  # pick 2a: vanilla crafting under the mod's type name
+    tail = []
+    if extras:
+        tail.append("Java also reads " + "; ".join(extras) + ", which a vanilla Bedrock recipe would drop (#87)")
+    if unknown:
+        tail.append(unknown)
+    return f"{who}; {like}, but " + "; ".join(tail) + f"; {NO_BEDROCK_RECIPE_TYPE}", None
+
+
+def _dotted(name: str | None) -> str:
+    return (name or "").replace("/", ".")
+
+
 # Convention tags that name exactly one vanilla item. Both loaders ship these
 # (Forge under forge:, Fabric and NeoForge under c:) and a mod using one means
 # the single vanilla item in practice. Anything not here stays residue: a tag
@@ -1422,6 +1558,7 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         result.recipe_sources[out_path] = rel
 
     advancements = advancement_index(mod.root)
+    type_readings: dict = {}  # recipe type -> recipetypes.read (#358)
     unlocks = {"derived": 0, "no_advancement": 0, "fallback": 0}
 
     unknown_ids: set[str] = set()  # vanilla ids neither Bedrock's list nor the table knows
@@ -1538,6 +1675,18 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             if code is not None:
                 result.unhandled.append(Unhandled(rel, CODE_RECIPE, code))
                 continue
+            own_type = mod_recipe_type(java_type, recipe, mod, type_readings)
+            if own_type is not None and own_type[1] is not None:
+                # Pick 2a (#358): vanilla crafting under the mod's type name.
+                result.notes.append(f"{rel}: {java_type} read as {own_type[1]} (its recipe class "
+                                    "extends it and overrides nothing; #358)")
+                java_type = own_type[1]
+                recipe = {**recipe, "type": java_type}
+                mapping = _SUPPORTED[java_type]
+            elif own_type is not None:
+                result.unhandled.append(Unhandled(rel, MOD_RECIPE_TYPE, own_type[0]))
+                continue
+        if mapping is None:
             why = _KNOWN_UNSUPPORTED.get(
                 java_type, f"unsupported recipe type {java_type!r}"
             )

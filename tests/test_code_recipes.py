@@ -52,11 +52,15 @@ def test_type_only_modded_recipe_is_a_special_recipe(tmp_path, body):
     assert "invent both" in reason
 
 
-def test_modded_recipe_with_data_keeps_the_unsupported_reason(tmp_path):
+def test_modded_recipe_with_data_is_a_mod_recipe_type(tmp_path):
+    # Not a special recipe: it carries data. Its type is in the mod's own
+    # namespace, so only the mod's code registers it (#358, pending Alex).
     body = {"type": "examplemod:grinding", "ingredient": {"item": "minecraft:stone"},
             "result": {"item": "minecraft:gravel"}}
     result = recipes.convert(build(tmp_path, {"r": body}))
-    assert residue(result) == {"r": ("recipe", "unsupported recipe type 'examplemod:grinding'")}
+    ((kind, reason),) = residue(result).values()
+    assert kind == "mod_recipe_type"
+    assert reason.startswith("recipe type 'examplemod:grinding' is in the mod's own namespace")
 
 
 def test_vanilla_special_type_is_not_claimed(tmp_path):
