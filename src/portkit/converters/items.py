@@ -809,9 +809,9 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
                 # The block converter owns this one; claiming it keeps it off the
                 # unowned list without producing a competing definition.
                 result.claim(mod, path)
-                # So do the models it reads outside models/item/ (a
-                # models/block/ parent or override model only this item model
-                # names, #350); Java reads them only through this model.
+                # So do the model files it reads (its parent chain, often in
+                # models/block/, and its overrides' models with their parents,
+                # #350); Java reads them through this model.
                 for parent_file in _item_model_chain(mod, path):
                     result.claim(mod, parent_file)
                 continue
