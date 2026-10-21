@@ -701,7 +701,7 @@ def _corpus_cases(args):
     from .data import tags as tag_data
 
     from .data import models as model_data
-    from .data import java_items, vanilla_items
+    from .data import java_items, java_sounds, vanilla_items
 
     if args.fetch:
         try:
@@ -711,6 +711,8 @@ def _corpus_cases(args):
             java_items.fetch()
             for tag_set in tag_data.SETS:
                 tag_data.fetch(tag_set)
+            for sound_set in java_sounds.SETS:
+                java_sounds.fetch(sound_set)
         except data.ReferenceDataError as exc:
             print(str(exc), file=sys.stderr)
             return 2
@@ -758,6 +760,15 @@ def _corpus_cases(args):
         print(f"warning: {message}", file=sys.stderr)
         if os.environ.get("GITHUB_ACTIONS") == "true":
             print(f"::warning title=vanilla sounds::{message}")
+    missing_java_sounds = [s.id for s in java_sounds.SETS if not java_sounds.cached(s)]
+    if missing_java_sounds and not os.environ.get("PORTKIT_JAVA_SOUND_REFERENCE"):
+        # Sound events that play a vanilla event inline its sounds (#356).
+        message = (f"vanilla Java sounds.json isn't cached ({', '.join(missing_java_sounds)}), so "
+                   f"sound events that play a vanilla event lose it and the numbers may differ "
+                   f"from the baseline; run `{data.FETCH_COMMAND}` or add --fetch")
+        print(f"warning: {message}", file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::warning title=java sounds::{message}")
     return manifest.parent, cases
 
 
@@ -1113,6 +1124,7 @@ def cmd_reference(args) -> int:
     vanilla sound list (#124), the loaders' and vanilla's item tags (#160),
     the vanilla block model templates stairs, slabs and walls are built from,
     vanilla's campfire recipes the Farmer's Delight stove cooks (#177),
+    vanilla's Java sounds.json per game version (event references, #356),
     Bedrock's vanilla texture atlases (short names and file paths only) and the
     SRG / intermediary -> Mojang name tables the bytecode readers use (#235)."""
     from . import data
@@ -1125,8 +1137,17 @@ def cmd_reference(args) -> int:
         print(f"{args.mod}: loader {meta.loader or '?'}, minecraft {meta.minecraft or '?'} -> tag data: {chosen}")
     from .data import models as model_data
     from .data import recipes as recipe_data
+    from .data import java_sounds
     from .data import java_items, vanilla_items
     from .data import vanilla_textures
+
+    # Vanilla Java sounds.json (#356): every pinned set, or the one the mod's
+    # declared game version needs.
+    if meta is None:
+        java_sound_sets = list(java_sounds.SETS)
+    else:
+        chosen_sounds = java_sounds.select(meta.minecraft or meta.loader_minecraft)
+        java_sound_sets = [chosen_sounds] if chosen_sounds else []
 
     from .data import mappings as mapping_data
 
@@ -1171,6 +1192,9 @@ def cmd_reference(args) -> int:
         for recipe_set in recipe_data.SETS:
             state = "cached" if recipe_data.cached(recipe_set, cache) else "missing"
             print(f"{recipe_set.id:28} {recipe_set.label} {state}")
+        for sound_set in java_sound_sets:
+            state = "cached" if java_sounds.cached(sound_set, cache) else "missing"
+            print(f"{sound_set.id:28} {sound_set.label} {state}")
         for tag_set in sets:
             state = "cached" if tags.cached(tag_set, cache) else "missing"
             print(f"{'tags-' + tag_set.id:28} {tag_set.label} {state}")
@@ -1214,6 +1238,14 @@ def cmd_reference(args) -> int:
             failed += 1
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} {recipe_set.id} -> {path}")
+    for sound_set in java_sound_sets:
+        try:
+            path, downloaded = java_sounds.fetch(sound_set, cache)
+        except data.ReferenceDataError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} {sound_set.id} -> {path}")
     for mapping in mapping_sets:
         try:
             path, downloaded = mapping_data.fetch(mapping, cache)
