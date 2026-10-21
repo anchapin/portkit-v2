@@ -61,7 +61,7 @@ class Residue:
                         kind=str(entry.get("kind", "unknown")),
                         source=str(entry.get("source", "?")),
                         reason=str(entry.get("reason", "no reason recorded")),
-                        count=int(entry.get("count", 1) or 1),
+                        count=int(1 if entry.get("count") is None else entry["count"]),
                     )
                 )
         return out

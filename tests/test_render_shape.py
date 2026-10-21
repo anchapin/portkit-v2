@@ -202,3 +202,18 @@ def test_a_block_withdrawn_for_its_texture_takes_its_geometry():
     # Still named by a block that stays.
     assert "models/blocks/shared.geo.json" in result.files and "blocks/b.json" in result.files
     assert any("models/blocks/a.geo.json: dropped with its block" in n for n in result.notes)
+
+
+def test_a_zero_count_entry_counts_no_file_in_reports():
+    from portkit.gaps import group_residue
+    from portkit.model import Unhandled
+    from portkit.report import Residue
+    grouped = group_residue([Unhandled("assets/x/blockstates/a.json", "renderer_drawn_parts", "r", count=0),
+                             {"source": "b", "kind": "block", "reason": "r"}])
+    assert sorted((v["kind"], v["entries"], v["files"]) for v in grouped.values()) == [
+        ("block", 1, 1), ("renderer_drawn_parts", 1, 0)]
+    import json as _json, tempfile, pathlib
+    tree = pathlib.Path(tempfile.mkdtemp())
+    (tree / "unhandled.json").write_text(_json.dumps([{"source": "a", "kind": "renderer_drawn_parts",
+                                                       "reason": "r", "count": 0}]))
+    assert [r.count for r in Residue.load(tree)] == [0]
