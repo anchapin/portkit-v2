@@ -23,6 +23,10 @@ PR #316, 2026-10-17, ``docs/decisions.md``):
   Minecraft or a mod loader reads, and every file in it is a JSON object whose
   top-level ``type`` or ``target_*`` names a namespace that is not the jar's own,
   vanilla's or a loader's. Only that other mod reads it.
+  ``assets/<ns>/<dir>/`` too (#346, pending Alex, pick 1a), where ``<dir>`` is
+  not a folder Minecraft's client reads, every file is a JSON object and no
+  class of the jar names ``<dir>`` in a string: another mod's resource
+  reloader reads it (Comforts' ``seamless_rules/``).
 
 * A structure template (``data/<ns>/structure[s]/<path>.nbt``) named only by
   data files that are residue of these two kinds goes with them: ``code_worldgen``
@@ -65,9 +69,25 @@ _VANILLA_DIRS = frozenset({
     "neoforge", "forge", "fabric", "quilt", "data_maps", "loot_modifiers",
 })
 
+# Folders of assets/<ns>/ that Minecraft's client reads: every folder of
+# assets/minecraft/ in the 1.21.1 client jar (atlases, blockstates, font, lang,
+# models, particles, shaders, texts, textures; piston-data sha1
+# 30c73b1c5da787909b2f73340419fdf13b9def88) and the 1.21.11 one (adds
+# equipment, items, post_effect, waypoint_style; sha1
+# ba2df812c2d12e0219c489c4cd9a5e1f0760f5bd), sounds/ (the asset index, beside
+# sounds.json), and the data folders 1.12 still read from assets/ (recipes with
+# Forge, advancements, loot_tables, structures, functions). #346, pending
+# Alex, pick 1a.
+_CLIENT_DIRS = frozenset({
+    "atlases", "blockstates", "equipment", "font", "items", "lang", "models", "particles",
+    "post_effect", "shaders", "sounds", "texts", "textures", "waypoint_style",
+    "recipes", "advancements", "loot_tables", "structures", "functions",
+})
+
 _WORLDGEN = re.compile(r"^data/([^/]+)/worldgen/(configured_feature|placed_feature|template_pool)/(.+)\.json$")
 _STRUCTURE = re.compile(r"^data/([^/]+)/(structure|structures)/(.+)\.nbt$")
 _DATA_DIR = re.compile(r"^data/([^/]+)/([^/]+)/")
+_ASSET_DIR = re.compile(r"^assets/([^/]+)/([^/]+)/")
 
 _MAX_CITED = 2
 
@@ -268,6 +288,36 @@ def _other_mod_dirs(root: Path, files: list[str], own: set[str], cite: _Citation
     return out
 
 
+def _other_mod_assets(root: Path, files: list[str], cite: _Citations) -> dict[str, str]:
+    """rel -> reason for every file of an assets/<ns>/<dir>/ folder Minecraft's
+    client doesn't read, whose files are all JSON objects and whose name no
+    class of the jar holds as (part of) a string: data only another mod's
+    reloader reads (#346, pending Alex, pick 1a). Without classes nothing is
+    re-filed, since the jar's own code can't be ruled out."""
+    if cite.classes is None:
+        return {}
+    by_dir: dict[str, list[str]] = {}
+    for rel in files:
+        m = _ASSET_DIR.match(rel)
+        if m and m.group(2) not in _CLIENT_DIRS:
+            by_dir.setdefault(f"assets/{m.group(1)}/{m.group(2)}/", []).append(rel)
+    pools = cite._load()
+    out: dict[str, str] = {}
+    for folder, members in sorted(by_dir.items()):
+        name = folder.split("/")[2]
+        if any(not rel.endswith(".json") or not isinstance(_read(root / rel), dict) for rel in members):
+            continue
+        if any(name in value for pool in pools.values() for value in pool):
+            continue
+        reason = (f"`{name}/` is not a folder of assets Minecraft's client reads (the client jars' "
+                  f"assets/minecraft/ folders, sounds/, 1.12's data folders), no class of the jar names "
+                  f"`{name}` in a string, and each of its {len(members)} file(s) is a JSON object, so only "
+                  f"another mod's resource reloader reads it and it isn't converted with this jar")
+        for rel in members:
+            out[rel] = reason
+    return out
+
+
 def _structure_owners(root: Path, structures: list[str], explained: dict[str, str]) -> dict[str, tuple[str, str]]:
     """rel -> (kind, reason) for each structure template every data file naming
     it is explained residue of these kinds."""
@@ -315,6 +365,8 @@ def _scanned(source: str) -> bool:
     """An unowned group this pass reads: worldgen, structure templates, or a
     data folder that is neither Minecraft's nor a loader's."""
     parts = source.strip("/").split("/")
+    if len(parts) >= 3 and parts[0] == "assets":
+        return parts[2] not in _CLIENT_DIRS
     return len(parts) >= 3 and parts[0] == "data" and (
         parts[2] in ("worldgen", "structure", "structures") or parts[2] not in _VANILLA_DIRS)
 
@@ -346,6 +398,8 @@ def refine(unhandled: list[Unhandled], root: Path, consumed: set[str], namespace
         if reason:
             found[rel] = (CODE_WORLDGEN, reason)
     for rel, reason in _other_mod_dirs(root, [r for r in leftover if r not in found], own, cite).items():
+        found[rel] = (OTHER_MOD_DATA, reason)
+    for rel, reason in _other_mod_assets(root, [r for r in leftover if r not in found], cite).items():
         found[rel] = (OTHER_MOD_DATA, reason)
     # Explained residue that names a structure: this pass's and any entry of
     # these kinds an adapter filed per file.

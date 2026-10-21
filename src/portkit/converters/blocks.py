@@ -28,6 +28,7 @@ a block whose light can't be read emits none, with a note saying so (see
 from __future__ import annotations
 
 import json
+import re
 from portkit import png as png_reader
 
 from .. import blockcode
@@ -2454,6 +2455,41 @@ def _coded_facing_variants(blockstate: dict) -> tuple[str | None, dict | None, b
 # renderer to hand that to, and drawing a stand-in would invent the look
 # (#87), so the block is `code_drawn_block` residue: an explained kind.
 CODE_DRAWN = "code_drawn_block"
+
+
+# A block refused only because a model borrows a vanilla texture from a Java
+# folder other than block/ and item/ (``minecraft:entity/lead_knot``,
+# ``minecraft:misc/...``; #346, pending Alex, pick 2a). The converter names a
+# vanilla texture only through Bedrock's terrain and item atlases
+# (portkit.data.vanilla_textures, bedrock-samples at the pinned commit), where
+# such a file has no short name, and the pack must not carry Mojang's art (#24),
+# so no face can wear it. A file of the same path elsewhere in Bedrock's
+# vanilla pack is an entity skin with no pixel-checked pairing to Java's (#296's
+# rule for a different-name pair): Comforts' rope_and_nail takes 10 of its 48
+# faces from pixels of Java's lead_knot that Bedrock's textures/entity/lead_knot
+# leaves transparent (decision #346). Explained: still not converted.
+OUTSIDE_ATLAS_KIND = "vanilla_texture_outside_atlas"
+_OUTSIDE_ATLAS = re.compile(r"model points at '([^']+)', " + re.escape(models.OUTSIDE_ATLAS) + r"$")
+_BLOCKSTATE = re.compile(r"^assets/[^/]+/blockstates/.+\.json$")
+
+
+def refine_outside_atlas(unhandled: list[Unhandled]) -> list[Unhandled]:
+    """Re-file a ``block`` entry refused for a vanilla texture outside block/
+    and item/ as the explained ``vanilla_texture_outside_atlas``, keeping the
+    converter's own reason. Other entries (items too) are returned unchanged."""
+    out: list[Unhandled] = []
+    for u in unhandled:
+        match = _OUTSIDE_ATLAS.search(u.reason) if u.kind == "block" and _BLOCKSTATE.match(u.source) else None
+        if match is None:
+            out.append(u)
+            continue
+        reference = match.group(1)
+        out.append(Unhandled(
+            source=u.source, kind=OUTSIDE_ATLAS_KIND, count=u.count,
+            reason=(f"{u.reason}: Bedrock's block and item atlases list no copy of `{reference}`, so no "
+                    f"face can name it, and the pack doesn't carry Mojang's art (#24); the block stays "
+                    f"unconverted rather than drawn with a stand-in texture (#87)")))
+    return out
 
 
 def _blockstate_models(blockstate: dict) -> list[str]:

@@ -534,6 +534,14 @@ _VANILLA_DIRS = {
 # piston_top shows textures/blocks/piston_inner).
 
 
+# The tail of the reason vanilla_texture gives for a vanilla texture in a Java
+# folder other than block/ and item/ (entity/, misc/, gui/, ...). The vanilla
+# index covers only Bedrock's terrain and item atlases, so such a reference has
+# no Bedrock name here; converters.blocks.refine_outside_atlas re-files a block
+# refused for it (#346).
+OUTSIDE_ATLAS = "a vanilla texture outside block/ and item/"
+
+
 def is_vanilla(reference: str, namespace: str) -> bool:
     """Is this texture reference into vanilla (minecraft:, or bare) from a mod?"""
     if not isinstance(reference, str) or reference.startswith("#"):
@@ -570,7 +578,7 @@ def vanilla_texture(
     _, _, path = reference.rpartition(":")
     lane, _, name = path.partition("/")
     if lane not in _VANILLA_DIRS or not name:
-        return None, None, f"model points at {reference!r}, a vanilla texture outside block/ and item/"
+        return None, None, f"model points at {reference!r}, {OUTSIDE_ATLAS}"
     index = vanilla_textures.index()
     if index is None:
         return None, None, (

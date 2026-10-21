@@ -178,22 +178,23 @@ SKIP_KINDS = {
                       "it generates and where is code; a Bedrock feature or feature rule would invent it, and "
                       "the reason names the type or the class"),
     "other_mod_data": ("data only another mod reads (its type or target is that mod's namespace, or a compat "
-                       "class of this jar registers it): neither Minecraft, the mod loader nor this mod reads "
-                       "it, and that mod isn't converted with this jar; the reason names the mod and what the "
-                       "jar shows"),
+                       "class of this jar registers it; for an assets/ folder, #346 pending Alex: no class of "
+                       "this jar names the folder): neither Minecraft, the mod loader nor this mod reads "
+                       "it, and that mod isn't converted with this jar; the reason names the mod (or the "
+                       "folder) and what the jar shows"),
     # #340 leftover advancements (portkit.advancements).
     "no_bedrock_advancement": ("Bedrock has no data-driven advancements (its achievements are a fixed list, "
                                "minecraft.wiki Achievement): a story or challenge advancement has nothing to "
                                "track or show it and its rewards are not given; a recipe advancement whose "
                                "recipe ships as a furnace recipe (no `unlock` field) or that names no recipe of "
                                "the jar has no converted recipe to carry it; the reason says which"),
-    # #342 (pending Alex, pick 2a): a recipe only the #302 expansion cap refuses (portkit.converters.recipes).
+    # #342 (Alex, 2026-10-20, pick 2a): a recipe only the #302 expansion cap refuses (portkit.converters.recipes).
     "recipe_over_cap": ("every ingredient is known and converted, but writing every mix Java accepts (one "
                         "recipe per tag member, or per combination of vanilla members across the grid slots, "
                         "#302) takes more recipes than the cap of 16, so it is left unconverted on purpose "
                         "rather than flooding the recipe book; the reason names each tag, its members, its "
                         "slots and the count"),
-    # #344 (pending Alex, pick 1a): an item whose look switches on an item property the
+    # #344 (Alex, 2026-10-20, pick 1a): an item whose look switches on an item property the
     # mod's code registers (portkit.converters.items, portkit.itemprops).
     "live_item_property": ("the item's model swaps its look on an item property the mod's own code "
                            "registers (a compass needle, a gauge, a fill level): Java computes the value "
@@ -201,6 +202,14 @@ SKIP_KINDS = {
                            "selection, so nothing in a pack can follow it and a frozen frame could "
                            "state a false reading (#169); the reason names each property and the class "
                            "that builds it"),
+    # #346 (pending Alex, pick 2a): a block whose model borrows a vanilla texture outside
+    # block/ and item/ (portkit.converters.blocks.refine_outside_atlas).
+    "vanilla_texture_outside_atlas": ("the block's model borrows a vanilla texture from outside Java's "
+                                      "block/ and item/ folders (an entity skin, misc/ art): Bedrock's block "
+                                      "and item atlases list no copy, the pack can't carry Mojang's art (#24) "
+                                      "and no same-named Bedrock file is pixel-checked to match, so any "
+                                      "texture the agent named would be a stand-in (#87); the reason names "
+                                      "the texture"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
