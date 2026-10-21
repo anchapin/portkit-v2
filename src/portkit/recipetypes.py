@@ -194,7 +194,13 @@ def read(classes: ClassIndex | None, java_type: str, own_namespace: str | None =
                     if hit:
                         break
                 if hit:
-                    serializer = _serializer_near(classes, cf, ins, k + 1, j)
+                    end = j
+                    if ins[j].arg.owner == _RL or ins[j].arg.desc.endswith(f"L{_RL};"):
+                        # The id is built first: the serializer sits between it and
+                        # the call that registers it (Registry.register(id, INSTANCE)).
+                        end = next((i for i in range(j + 1, min(j + 1 + _WINDOW, len(ins)))
+                                    if ins[i].op in _INVOKES), j)
+                    serializer = _serializer_near(classes, cf, ins, k + 1, end)
                     reading = TypeReading(java_type, cname, serializer, _recipe_of(classes, serializer))
                     reading.base, reading.overrides = vanilla_base(classes, reading.recipe)
                     return reading
