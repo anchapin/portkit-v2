@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from . import advancements, biomecode, codeonly, datatags, ownership, worldgen
 from .converters import features, lang, loot, recipes
+from .converters import blocks as block_converter
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
                          resolve_config)
 from .converters import convert_all
@@ -581,6 +582,9 @@ def convert(
             # references say whether residue owns them or only Java code
             # draws them (#277 unowned).
             shipped = {i for i in (_declared(b) for b in result.files.values()) if i}
+            # A block refused for a vanilla texture outside block/ and item/
+            # (an entity skin) Bedrock's atlases don't list (#346).
+            unhandled = block_converter.refine_outside_atlas(unhandled)
             unhandled = ownership.refine(unhandled, staged.root, result.consumed, shipped)
             # A refused block loot table whose block is residue goes with the
             # block (#299).
