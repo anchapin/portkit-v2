@@ -19,6 +19,7 @@ parses byte-for-byte as before.
 """
 from __future__ import annotations
 
+import re
 import struct
 import zipfile
 from dataclasses import dataclass, field
@@ -103,6 +104,9 @@ class ClassFile:
     # Each field's RuntimeVisibleAnnotations, read as ``annotations`` is
     # (fields with none are left out).
     field_annotations: dict = field(default_factory=dict)
+    # The class's generic Signature attribute (JVMS 4.7.9.1), class names in
+    # it read through the remapper as the pool's are; None when it has none.
+    signature: str | None = None
 
     def method(self, name: str, desc: str | None = None) -> Method | None:
         for m in self.methods:
@@ -319,14 +323,19 @@ def _parse(data: bytes, remapper=None) -> ClassFile:
                 p += 2 * nargs
                 bootstrap.append((ref, args))
     annotations: dict = {}
+    signature = None
     for aname, body in attrs:
+        if aname == "Signature" and len(body) == 2:
+            text = utf(struct.unpack_from(">H", body, 0)[0])
+            signature = (re.sub(r"L([^;<>:]+)", lambda m: "L" + remapper.cls(m.group(1)), text)
+                         if remapper is not None else text)
         if aname == "RuntimeVisibleAnnotations":
             try:
                 annotations = _annotations(body, pool)
             except (struct.error, IndexError, TypeError):
                 annotations = {}  # a malformed table names no annotation
     return ClassFile(cls(this), cls(sup), interfaces, fields, methods, pool, bootstrap, access, field_access,
-                     annotations, field_annotations)
+                     annotations, field_annotations, signature)
 
 
 def _annotations(body: bytes, pool: list) -> dict:

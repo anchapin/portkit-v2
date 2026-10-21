@@ -31,7 +31,7 @@ import json
 import re
 from portkit import png as png_reader
 
-from .. import blockcode
+from .. import blockcode, rendershape
 from ..model import ConversionResult, SourceMod, Unhandled
 from . import buttons, doors, models, plates, trapdoors
 
@@ -1515,6 +1515,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     readings = _read_facing_code(mod, src, stations or {}, loaded)
     bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded)
     shared = _SharedRun(mod, loaded)
+    render = _RenderRun(mod, shared)
     dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared)
     paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded, shared)
     paired_records: list[dict] = []
@@ -1543,6 +1544,13 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             for model_file in drawn_read:
                 result.claim(mod, model_file)
             result.unhandled.append(Unhandled(rel, CODE_DRAWN, drawn_by_code))
+            continue
+        shape = render().get(name) if name not in (stations or {}) and name in loaded else None
+        if shape is not None and shape.code_drawn:
+            # Java's section compiler never bakes this block's model (#352).
+            for model_file in _model_chain_files(mod, _blockstate_models(loaded[name])):
+                result.claim(mod, model_file)
+            result.unhandled.append(Unhandled(rel, CODE_DRAWN, _render_shape_reason(shape)))
             continue
         if name in water_why:
             result.unhandled.append(Unhandled(rel, "block", water_why[name]))
@@ -1683,6 +1691,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
         )
     models.RENDER_TYPES_SEEN.reset(outer)
     _one_render_method(result, render_types)
+    _flag_renderer_parts(mod, result, render)
     # Containers go last: the format move reads every component the block
     # has (liquid_detection included), and the records' behaviour notes drop
     # what a container carries.
@@ -2455,6 +2464,83 @@ def _coded_facing_variants(blockstate: dict) -> tuple[str | None, dict | None, b
 # renderer to hand that to, and drawing a stand-in would invent the look
 # (#87), so the block is `code_drawn_block` residue: an explained kind.
 CODE_DRAWN = "code_drawn_block"
+
+
+# A block whose Java render shape is ENTITYBLOCK_ANIMATED or INVISIBLE for every
+# state (#352, portkit.rendershape): the client's section compiler bakes a
+# block's blockstate model only for RenderShape.MODEL, so even a model with
+# elements is never drawn in the world; a block-entity renderer draws the block
+# (or nothing does). It is `code_drawn_block` residue like a model that bakes no
+# quads (#296), with the shape and the class that returns it as the reason.
+# A block whose shape is MODEL and whose block entity a renderer of the jar
+# accepts ships its static model, and is listed under the explained kind
+# `renderer_drawn_parts` with a count of 0: no source file is left out, but the
+# moving or contained parts the renderer draws are not in the pack.
+RENDERER_PARTS = "renderer_drawn_parts"
+
+
+class _RenderRun:
+    """portkit.rendershape readings for every blockstate, off the shared
+    registration run, made the first time they are asked for."""
+
+    def __init__(self, mod: SourceMod, shared: "_SharedRun"):
+        self.mod, self.shared, self.readings = mod, shared, None
+
+    def __call__(self) -> dict:
+        if self.readings is None:
+            run = self.shared()
+            self.readings = ({} if run is None else
+                             rendershape.read(getattr(self.mod, "classes", None), run[1],
+                                              getattr(self.mod, "minecraft", None), run[0]))
+        return self.readings
+
+
+def _model_chain_files(mod: SourceMod, refs: list[str]) -> list:
+    """The model files of ``refs`` and their parents inside the mod."""
+    out: list = []
+    for ref in dict.fromkeys(refs):
+        for _ in range(models._MAX_PARENT_DEPTH):
+            path = models.model_path(mod, ref)
+            if path is None or not path.is_file() or path in out:
+                break
+            out.append(path)
+            try:
+                parent = json.loads(path.read_text()).get("parent")
+            except (json.JSONDecodeError, AttributeError):
+                break
+            if not isinstance(parent, str) or models.normalize(parent).startswith("minecraft:"):
+                break
+            ref = parent
+    return out
+
+
+def _render_shape_reason(shape) -> str:
+    shapes = "/".join(sorted(shape.shapes))
+    return (f"Java's block returns RenderShape.{shapes} for every state ({shape.source}; class {shape.cls}), "
+            "so the client never bakes its blockstate model into the world (the section compiler draws a "
+            "model only for RenderShape.MODEL): the block is drawn by a block-entity renderer, or not at all, "
+            "which a Bedrock block definition can't carry, so its static model isn't shipped as the block")
+
+
+def _flag_renderer_parts(mod: SourceMod, result: ConversionResult, render: "_RenderRun") -> None:
+    """A count-0 `renderer_drawn_parts` entry per shipped block whose block
+    entity a renderer of the jar accepts (MODEL shape)."""
+    shipped = sorted(k[len("blocks/"):-len(".json")] for k in result.files
+                     if k.startswith("blocks/") and k.endswith(".json"))
+    if not shipped:
+        return
+    readings = render()
+    for name in shipped:
+        r = readings.get(name)
+        if r is None or not r.renderers or not r.shapes or "MODEL" not in r.shapes:
+            continue
+        shown = ", ".join(r.renderers[:2]) + (", ..." if len(r.renderers) > 2 else "")
+        result.unhandled.append(Unhandled(
+            str((mod.assets / "blockstates" / f"{name}.json").relative_to(mod.root)), RENDERER_PARTS,
+            (f"shipped as its static blockstate model; Java also draws it with a block-entity renderer "
+             f"({shown}, whose type accepts {', '.join(r.block_entities[:2])}, read from class signatures), "
+             f"so the parts or contents that renderer draws are not in the pack ({r.source})"),
+            count=0))
 
 
 # A block refused only because a model borrows a vanilla texture from a Java

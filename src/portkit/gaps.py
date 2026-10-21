@@ -108,7 +108,12 @@ def group_residue(entries) -> dict[str, dict]:
         kind = getattr(e, "kind", None) or (e.get("kind") if isinstance(e, dict) else None) or "unknown"
         reason = getattr(e, "reason", None) or (e.get("reason") if isinstance(e, dict) else "") or ""
         source = getattr(e, "source", None) or (e.get("source") if isinstance(e, dict) else "") or ""
-        count = getattr(e, "count", None) or (e.get("count") if isinstance(e, dict) else 1) or 1
+        # A count of 0 is real (an entry that leaves no source file out, #352
+        # renderer_drawn_parts); only a missing count means one file.
+        count = getattr(e, "count", None)
+        if count is None:
+            count = e.get("count", 1) if isinstance(e, dict) else 1
+        count = 1 if count is None else count
         key = reason_key(kind, reason, source)
         slot = out.setdefault(key, {"kind": kind, "reason": key.split(": ", 1)[1],
                                     "entries": 0, "files": 0, "examples": []})

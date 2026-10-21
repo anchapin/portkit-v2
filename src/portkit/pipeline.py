@@ -207,6 +207,30 @@ def _vanilla_short_names(lane: str) -> frozenset[str]:
     return index.short_names(lane) if index is not None else frozenset()
 
 
+def _block_geometries(body: dict) -> set[str]:
+    """The geometry identifiers a block definition names (its components and
+    every permutation's)."""
+    block = body.get("minecraft:block") or {}
+    out: set[str] = set()
+    parts = [block.get("components") or {}]
+    parts += [p.get("components") or {} for p in block.get("permutations") or () if isinstance(p, dict)]
+    for components in parts:
+        geometry = components.get("minecraft:geometry") if isinstance(components, dict) else None
+        if isinstance(geometry, dict):
+            geometry = geometry.get("identifier")
+        if isinstance(geometry, str):
+            out.add(geometry)
+    return out
+
+
+def _geo_identifiers(body) -> set[str]:
+    """The geometry identifiers a .geo.json file defines."""
+    if not isinstance(body, dict):
+        return set()
+    return {((g.get("description") or {}).get("identifier")) for g in body.get("minecraft:geometry") or ()
+            if isinstance(g, dict) and isinstance((g.get("description") or {}).get("identifier"), str)}
+
+
 def drop_untextured(result: ConversionResult, namespace: str) -> None:
     """Withdraw blocks and items whose textures never made it into the pack.
 
@@ -227,6 +251,7 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
     vanilla_terrain = _vanilla_short_names("terrain")
     vanilla_items = _vanilla_short_names("item")
     borrowed: dict[str, dict] = {}
+    withdrawn: set[str] = set()
 
     for path in sorted(result.files):
         body = result.files[path]
@@ -261,6 +286,8 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
         if not missing:
             continue
         del result.files[path]
+        if kind == "block":
+            withdrawn |= _block_geometries(body)
         result.unhandled.append(
             Unhandled(
                 source=source,
@@ -271,6 +298,20 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
                 ),
             )
         )
+
+    # A withdrawn block's geometry file goes with it once no block left in
+    # the pack names any geometry the file defines (#352): it would otherwise
+    # ship with nothing drawing it.
+    if withdrawn:
+        kept = set()
+        for path, body in result.files.items():
+            if path.startswith("blocks/") and isinstance(body, dict):
+                kept |= _block_geometries(body)
+        for path in sorted(p for p in result.files if p.startswith("models/blocks/") and p.endswith(".geo.json")):
+            defined = _geo_identifiers(result.files[path])
+            if defined and defined <= withdrawn and not defined & kept:
+                del result.files[path]
+                result.notes.append(f"{path}: dropped with its block, whose texture did not convert")
 
     # An item form written for a block (recipes._block_item) goes with it.
     blocks = {
