@@ -244,6 +244,32 @@ def _block_names(mod: SourceMod) -> set[str]:
     return {p.stem for p in states.glob("*.json")}
 
 
+def _item_model_chain(mod: SourceMod, path: Path) -> list:
+    """The mod's own model files an item model reads: its parents, and the
+    models its ``overrides`` swap in with their parents (#350)."""
+    try:
+        model = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(model, dict):
+        return []
+    _flat, seen, _why = _chain(mod, model)
+    found = list(seen)
+    for override in model.get("overrides") or []:
+        ref = override.get("model") if isinstance(override, dict) else None
+        other = models.model_path(mod, ref) if isinstance(ref, str) else None
+        if other is None or not other.is_file() or other in found or other == path:
+            continue
+        found.append(other)
+        try:
+            body = json.loads(other.read_text())
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(body, dict):
+            found += [p for p in _chain(mod, body)[1] if p not in found]
+    return found
+
+
 def _block_item_templates(mod: SourceMod, src: Path, blocks: set[str],
                           emitted_blocks: set[str] | None) -> set[Path]:
     """The ``models/item/`` files an emitted block's item model inherits from.
@@ -783,6 +809,11 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
                 # The block converter owns this one; claiming it keeps it off the
                 # unowned list without producing a competing definition.
                 result.claim(mod, path)
+                # So do the model files it reads (its parent chain, often in
+                # models/block/, and its overrides' models with their parents,
+                # #350); Java reads them through this model.
+                for parent_file in _item_model_chain(mod, path):
+                    result.claim(mod, parent_file)
                 continue
             # The block is residue, so Bedrock makes no item for it. The Java
             # item still exists (usually the one that places it); a flat icon

@@ -341,9 +341,30 @@ def test_a_key_named_like_a_built_in_face_is_renamed():
     assert names == {"java_up": "up", "side": "side"}
 
 
-def test_a_tagged_face_without_uv_is_refused():
+def test_a_tagged_face_without_uv_takes_javas_derived_uv():
+    # #350: Java fills a face's missing uv from the element's position
+    # (BlockElement#uvsByFace), so a tagged face gets that uv.
+    model = {"elements": [{"from": [2, 0, 3], "to": [14, 10, 16],
+                           "faces": {"up": {"texture": "#top"},
+                                     "north": {"texture": "#front"}}}]}
+    geo, why = models.geometry(model, "geometry.examplemod.x", tag_faces=True)
+    assert why == ""
+    uv = geo["minecraft:geometry"][0]["bones"][0]["cubes"][0]["uv"]
+    assert uv["up"] == {"uv": [2.0, 3.0], "uv_size": [12.0, 13.0], "material_instance": "top"}
+    assert uv["north"] == {"uv": [2.0, 6.0], "uv_size": [12.0, 10.0], "material_instance": "front"}
+
+
+def test_a_tagged_face_with_a_broken_uv_is_still_refused():
     model = {"elements": [{"from": [0, 0, 0], "to": [16, 16, 16],
-                           "faces": {"up": {"texture": "#top"}}}]}
+                           "faces": {"up": {"texture": "#top", "uv": [0, 0, 16]}}}]}
     geo, why = models.geometry(model, "geometry.examplemod.x", tag_faces=True)
     assert geo is None
-    assert "up face has no uv" in why
+    assert "up face has an unreadable uv" in why
+
+
+def test_an_untagged_face_without_uv_is_unchanged():
+    model = {"elements": [{"from": [0, 0, 0], "to": [16, 16, 16],
+                           "faces": {"up": {"texture": "#top"}}}]}
+    geo, why = models.geometry(model, "geometry.examplemod.x")
+    assert why == ""
+    assert "uv" not in geo["minecraft:geometry"][0]["bones"][0]["cubes"][0]

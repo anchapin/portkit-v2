@@ -144,13 +144,15 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
         extra = {"render_type": render_type} if render_type is not None else {}
         if not isinstance(parent, str):
             _note_render_type(render_type)
-            return _unfolded({**current, **extra, "textures": textures}, seen)
+            return _unfolded({**current, **extra, "textures": resolve_variables(textures)}, seen)
         parent = normalize(parent)
         if parent.startswith("minecraft:"):
             # Vanilla: either one of the shapes we have tabulated, or a refusal
-            # for faces() to explain. Either way the chain stops here.
+            # for faces() to explain. Either way the chain stops here. A
+            # variable only a vanilla template fills stays for expand_template.
             _note_render_type(render_type)
-            return _unfolded({**current, **extra, "parent": parent, "textures": textures}, seen)
+            return _unfolded({**current, **extra, "parent": parent,
+                              "textures": resolve_variables(textures)}, seen)
 
         path = model_path(mod, parent)
         if path is None:
@@ -163,6 +165,37 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
         except json.JSONDecodeError as exc:
             return {}, seen, f"parent model {parent!r} is invalid JSON: {exc}"
     return {}, seen, "model parent chain is deeper than we follow"
+
+
+def resolve_variables(textures: dict) -> dict:
+    """Follow ``#name`` texture variables through a merged texture map (#350).
+
+    Java resolves a texture variable against the whole flattened model: the
+    child's entries override its parents', and a value ``#name`` is looked up
+    again from the top, so a parent may map ``down`` to ``#top`` and leave
+    ``top`` for a child to set (1.21.1 ``BlockModel#findTextureEntry`` /
+    ``getMaterial``; 1.21.4+ ``TextureSlots.Resolver``). This does the same on
+    the map ``resolve`` merged. A variable that never reaches a concrete
+    texture keeps the last ``#`` reference on the way (``texture_shortname``
+    then names the variable left unfilled); a cycle keeps the value as the
+    model wrote it (Java draws the missing texture). Nothing is invented: an
+    unresolved value stays unresolved.
+    """
+    resolved: dict = {}
+    for key, value in textures.items():
+        seen = {key}
+        while isinstance(value, str) and value.startswith("#"):
+            name = value[1:]
+            if name in seen:
+                value = textures[key]  # a cycle: leave it as written
+                break
+            target = textures.get(name)
+            if not isinstance(target, str):
+                break
+            seen.add(name)
+            value = target
+        resolved[key] = value
+    return resolved
 
 
 # Java render types (#262). NeoForge/Forge models may name the block layer
@@ -271,11 +304,17 @@ def cube(element: dict, tag_faces: bool = False) -> tuple[dict | None, str]:
         if not isinstance(spec, dict):
             continue
         corners = spec.get("uv")
+        if corners is None and tag_faces and isinstance(spec.get("texture"), str) \
+                and face in _TURNABLE_FACES:
+            # Naming the face's material in the geometry needs a per-face uv.
+            # A face with none gets the one Java derives from the element's
+            # position (auto_uv; 1.21.1 BlockElement#uvsByFace, #350).
+            corners = auto_uv(face, element["from"], element["to"])
         if not (isinstance(corners, list) and len(corners) == 4):
             if tag_faces and isinstance(spec.get("texture"), str):
                 return None, (
-                    f"element's {face} face has no uv, and naming its material "
-                    "in the geometry needs one"
+                    f"element's {face} face has an unreadable uv, and naming its "
+                    "material in the geometry needs one"
                 )
             continue
         try:

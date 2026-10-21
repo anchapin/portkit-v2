@@ -165,3 +165,34 @@ def test_an_obj_model_and_its_materials_follow_the_json_that_loads_it(tmp_path):
         "assets/m/models/block/fan.mtl": "owned_by_residue",
         "assets/m/models/block/loose.obj": "java_only_asset",
     }
+
+
+def test_a_texture_named_like_a_model_does_not_make_the_model_used(tmp_path):
+    # #350: a shipped model's "textures" map names a texture whose path is also
+    # a Java-only model's (Botania's spreader core: models/block/x_core.json,
+    # loaded by its block-entity renderer, and textures/block/x_core.png). The
+    # textures map names textures only, so the model has no JSON user.
+    root = _jar(tmp_path, {
+        "assets/m/blockstates/spreader.json": {"variants": {"": {"model": "m:block/spreader"}}},
+        "assets/m/models/block/spreader.json": {"parent": "m:block/shape",
+                                                "textures": {"core": "m:block/spreader_core"}},
+        "assets/m/models/block/spreader_core.json": {"textures": {"core": "m:block/spreader_core"}},
+        "assets/m/textures/block/spreader_core.png": PNG,
+    })
+    users = ownership.references(root)
+    assert "assets/m/models/block/spreader_core.json" not in users
+    assert "assets/m/models/block/spreader.json" in users["assets/m/textures/block/spreader_core.png"]
+    found = ownership.classify(root, ["assets/m/models/block/spreader_core.json"],
+                               consumed={"assets/m/blockstates/spreader.json",
+                                         "assets/m/models/block/spreader.json"},
+                               residue_sources=set())
+    assert found == {"assets/m/models/block/spreader_core.json": ("java_only_asset", "")}
+
+
+def test_a_newer_texture_object_still_names_its_sprite(tmp_path):
+    root = _jar(tmp_path, {
+        "assets/m/models/block/lamp.json": {"textures": {"all": {"sprite": "m:block/lamp"}}},
+        "assets/m/textures/block/lamp.png": PNG,
+    })
+    assert ownership.references(root) == {
+        "assets/m/textures/block/lamp.png": {"assets/m/models/block/lamp.json"}}
