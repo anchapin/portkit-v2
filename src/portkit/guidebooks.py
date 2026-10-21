@@ -16,12 +16,14 @@ no file of it was read by a converter, every leftover file in it is a document
 show (``.png``, ``.nbt``, ``.snbt``), and its pages are prose in one of two
 layouts:
 
-* **per language**: documents under a folder named ``en_us`` (any depth below
-  ``<dir>``; 1.12's ``en_US`` too). Java's client reads per-language text only
-  from ``lang/`` (and ``texts/`` for the credits and splashes), and ``en_us``
-  is the language every translation falls back to, so per-language documents
-  anywhere else are text the mod's own screen shows (Patchouli's
-  ``<book>/en_us/entries/``, Mantle's ``<book>/en_us/``, IE's ``manual/en_us/``);
+* **per language**: documents under folders named like Java locale codes
+  (``xx_yy``, any depth below ``<dir>``; 1.12's ``en_US`` too), either one
+  named ``en_us`` (the language every translation falls back to) or two or
+  more different ones side by side (a set of translations). Java's client
+  reads per-language text only from ``lang/`` (and ``texts/`` for the credits
+  and splashes), so per-language documents anywhere else are text the mod's
+  own screen shows (Patchouli's ``<book>/en_us/entries/``, Mantle's
+  ``<book>/en_us/``, IE's ``manual/en_us/``);
 * **markdown**: ``.md`` pages. No part of Minecraft reads markdown (GuideME's
   ``ae2guide/``).
 
@@ -30,7 +32,7 @@ in ``assets/<ns>/``, is that guide's data half (Patchouli's ``book.json``).
 
 **Which system shows it, read from the jar, never from a table (#220).** The
 reason names the jar's classes that hold the folder's name as a path string
-(``<dir>/...``, ``<ns>:<dir>/...``), ranked by how many such strings they
+(``<dir>``, ``<dir>/...``, ``<ns>:<dir>/...``), ranked by how many such strings they
 hold, and each required dependency in the jar's metadata that those classes
 call into (a class path segment equal to its id) or whose id begins the
 folder's name. When neither is found the reason says so: then the jar shows
@@ -86,7 +88,7 @@ def _layout(members: list[str]) -> tuple[str, list[str], int] | None:
         if codes:
             locales.add(codes[-1].lower())
             per_language += 1
-    if _FALLBACK in locales:
+    if _FALLBACK in locales or len(locales) >= 2:
         return "per language", sorted(locales), per_language
     pages = sum(1 for m in members if _suffix(m) == ".md")
     if pages:
@@ -95,7 +97,7 @@ def _layout(members: list[str]) -> tuple[str, list[str], int] | None:
 
 
 def _path_strings(name: str):
-    return re.compile(rf"(?:^|[/:]){re.escape(name)}/")
+    return re.compile(rf"(?:^|[/:]){re.escape(name)}(?:/|$)")
 
 
 def _readers(name: str, cite: _Citations, requires: list[str]) -> str:
@@ -119,19 +121,19 @@ def _readers(name: str, cite: _Citations, requires: list[str]) -> str:
                 calls |= {d for d in deps if d in segments}
             shown = ", ".join(c for c, _ in hits[:_MAX_CITED])
             more = f" and {len(hits) - _MAX_CITED} more" if len(hits) > _MAX_CITED else ""
-            parts.append(f"the jar's classes naming `{name}/` as a path: {shown}{more}")
+            parts.append(f"the jar's classes naming `{name}` as a path: {shown}{more}")
             if calls - set(named):
                 parts.append("calling into the required dependenc" + ("ies " if len(calls - set(named)) > 1 else "y ")
                              + ", ".join(f"`{d}`" for d in sorted(calls - set(named))))
         else:
-            parts.append(f"no class of the jar names `{name}/` as a path")
+            parts.append(f"no class of the jar names `{name}` as a path")
     else:
         parts.append("the source has no classes to name its reader")
     if named:
         parts.append("the folder is named after the required dependenc" + ("ies " if len(named) > 1 else "y ")
                      + ", ".join(f"`{d}`" for d in named) + ", which reads it")
     if not named and (cite.classes is None or parts[0].startswith("no class")):
-        parts.append("so the jar shows no reader and Java may not open these pages at all")
+        parts.append("so the jar shows no reader, and Java may never open these pages")
     return "; ".join(parts)
 
 
@@ -146,8 +148,8 @@ def _reason(name: str, members: list[str], layout: tuple[str, list[str], int], r
     else:
         what = f"{pages} markdown page(s), a format no part of Minecraft reads"
     extra = f", and {others} other file(s) its pages use" if others else ""
-    return (f"`{name}/` is a guide book: {what}{extra} ({', '.join(suffixes)}); its book screen is Java "
-            f"({readers}). A Bedrock add-on has no guide-book screen and portkit's form viewer reads only "
+    return (f"`{name}/` is a guide book: {what}{extra} ({', '.join(suffixes)}); a guide's book screen is "
+            f"Java ({readers}). A Bedrock add-on has no guide-book screen and portkit's form viewer reads only "
             f"Citadel books, so its text, pictures and recipe or structure renders are not converted, "
             f"and nothing is summarised or rewritten (#87)")
 
