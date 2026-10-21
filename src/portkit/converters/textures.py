@@ -21,6 +21,7 @@ has to become residue: emitting the png alone is a wrong answer, not a partial o
 from __future__ import annotations
 
 import json
+import re
 
 from ..model import ConversionResult, SourceMod, Unhandled
 from ..png import decode_rgba, encode_png
@@ -64,14 +65,39 @@ def _flipbook(animation: dict, texture_path: str, atlas_tile: str) -> tuple[dict
     return entry, None
 
 
+# Anything a texture key can't hold after "/" and "-" are flattened
+# (validate.rules._TEXTURE_KEY takes [a-z0-9_/.] after the namespace).
+_KEY_ILLEGAL = re.compile(r"[^a-z0-9_.]")
+
+
 def shortname(subpath: str, namespace: str) -> str:
     """Index key for a texture at <lane>/<subpath> (no extension).
 
-    A Java path is [a-z0-9/._-]; a texture key takes [a-z0-9_/.]
+    A Java path since 1.11 is [a-z0-9/._-]; a texture key takes [a-z0-9_/.]
     (validate.rules._TEXTURE_KEY). "/" and "-" both become "_", so every legal
-    Java path gives a valid key.
+    Java path gives the key it always did. Older jars (1.12 and before) may
+    use any case and other characters (Chisel's ``hexPlating/``,
+    ``bricks+dirt2-ctmv``): the key is lowercased and every other character
+    outside [a-z0-9_.] becomes "_" too (#348). Only the key changes; the file
+    keeps its path, which the index entry names. Two textures that end up on
+    one key are both residue (:func:`convert`), never a guess.
     """
-    return f"{namespace}:{subpath.replace('/', '_').replace('-', '_')}"
+    return f"{namespace}:{_KEY_ILLEGAL.sub('_', subpath.lower())}"
+
+
+# The texture metadata section the Connected Textures Mod reads
+# (team.chisel.ctm.client.texture.IMetadataSectionCTM.SECTION_NAME, CTM
+# 1.12/dev and 1.21/dev), not Minecraft (#348).
+CTM_SECTION = "ctm"
+CONNECTED_TEXTURE = "connected_texture"
+
+
+def _ctm_reason(section) -> str:
+    kind = section.get("type") if isinstance(section, dict) else None
+    kind = kind.lower() if isinstance(kind, str) else "normal (no type)"
+    return (f"sidecar carries a {CTM_SECTION!r} section (CTM type {kind}) and no animation: the Connected "
+            "Textures Mod draws this texture per block from its neighbours or position (or only sets its "
+            "render layer); Bedrock block textures are fixed per face, so it is not converted")
 
 
 def tint(data: bytes, rgb: int) -> bytes | None:
@@ -166,7 +192,13 @@ def convert(mod: SourceMod, derived=()) -> ConversionResult:
                         Unhandled(sidecar_rel, "texture_animation", f"invalid JSON: {exc}")
                     )
                     continue
-                animation = meta.get("animation")
+                animation = meta.get("animation") if isinstance(meta, dict) else None
+                if animation is None and isinstance(meta, dict) and CTM_SECTION in meta:
+                    # A Connected Textures Mod sidecar (#348): explained, the
+                    # texture goes with it as for any unmapped sidecar.
+                    result.unhandled.append(
+                        Unhandled(sidecar_rel, CONNECTED_TEXTURE, _ctm_reason(meta[CTM_SECTION])))
+                    continue
                 if animation is None:
                     result.unhandled.append(
                         Unhandled(

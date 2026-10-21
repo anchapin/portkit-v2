@@ -210,6 +210,14 @@ SKIP_KINDS = {
                                       "and no same-named Bedrock file is pixel-checked to match, so any "
                                       "texture the agent named would be a stand-in (#87); the reason names "
                                       "the texture"),
+    # #348 (pending Alex, pick 1a): a texture sidecar with a Connected Textures Mod "ctm"
+    # section and no animation (portkit.converters.textures).
+    "connected_texture": ("the texture's .mcmeta carries a \"ctm\" section, which the Connected Textures "
+                          "Mod reads, not Minecraft: it picks the texture's look per block from the "
+                          "neighbours (ctm, ctmh, ctmv, pillar, sctm, edges), the block's position "
+                          "(pattern, random) or only sets its render layer; a Bedrock block texture is "
+                          "fixed per face with no neighbour lookup, so a stand-in png would draw a "
+                          "pattern sheet or connection layout wrong; the reason names the CTM type"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
