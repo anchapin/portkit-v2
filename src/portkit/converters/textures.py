@@ -73,7 +73,7 @@ _KEY_ILLEGAL = re.compile(r"[^a-z0-9_.]")
 def shortname(subpath: str, namespace: str) -> str:
     """Index key for a texture at <lane>/<subpath> (no extension).
 
-    A Java path since 1.11 is [a-z0-9/._-]; a texture key takes [a-z0-9_/.]
+    A Java path since 1.13 is [a-z0-9/._-]; a texture key takes [a-z0-9_/.]
     (validate.rules._TEXTURE_KEY). "/" and "-" both become "_", so every legal
     Java path gives the key it always did. Older jars (1.12 and before) may
     use any case and other characters (Chisel's ``hexPlating/``,
