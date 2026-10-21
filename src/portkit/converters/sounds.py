@@ -234,6 +234,10 @@ def _flatten(
                     dropped.append(reason)
             if refused:
                 return [], dropped, f"via {target}: {refused}"
+            if not inner and not inner_dropped:
+                reason = _Drop(f"plays event {target!r}, which lists no sounds (Java plays nothing for it)")
+                if reason not in dropped:
+                    dropped.append(reason)
             volume = sound.get("volume")
             pitch = sound.get("pitch")
             scale_v = float(volume) if isinstance(volume, (int, float)) else 1.0

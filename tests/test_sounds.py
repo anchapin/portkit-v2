@@ -154,6 +154,13 @@ def test_an_undefined_target_plays_nothing_so_only_that_entry_drops(tmp_path, mo
     assert "doesn't define" in note
 
 
+def test_a_target_with_no_sounds_is_named_when_nothing_is_left(tmp_path):
+    index = {"a": {"sounds": [{"type": "event", "name": "examplemod:b"}]}, "b": {"sounds": []}}
+    result = sounds.convert(build(tmp_path, index))
+    assert any("event 'a' has no sound" in u.reason and "lists no sounds" in u.reason
+               for u in result.unhandled)
+
+
 def test_without_the_java_vanilla_set_a_vanilla_reference_says_how_to_keep_it(tmp_path):
     event = {"category": "block", "sounds": [{"type": "event", "name": "minecraft:block.fire.ambient"}]}
     result = sounds.convert(build(tmp_path, {"block.brazier.crackle": event}))
