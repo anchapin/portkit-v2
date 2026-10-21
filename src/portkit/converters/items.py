@@ -177,6 +177,20 @@ _READOUT_PREDICATES = {
     "speed": "a speed gauge", "in_chunk": "a locator that lights up near its target",
 }
 
+# #344 (part of #277, pending Alex): an item whose overrides switch on item
+# properties the mod's own code registers, where those are the only reason it
+# stays residue (a readout, or a property with no known resting look), is
+# explained residue of this kind: Java's property function computes the value
+# every frame and picks the look, and a Bedrock item's ``minecraft:icon`` is a
+# static texture with no state selection (learn.microsoft.com, "minecraft:icon"),
+# so nothing in a pack can follow it, and a frozen frame would state a false
+# reading (#169). Nothing is converted; the residue agent skips the kind.
+# Which properties the code registers is read from the bytecode
+# (portkit.itemprops), never a list (#220). A ``minecraft:`` key (bare or
+# namespaced) is never counted (pick 2a): a mod's code may build vanilla's name
+# to read vanilla's own property, so the name alone isn't the mod's.
+LIVE_ITEM_PROPERTY = "live_item_property"
+
 # Forge's and NeoForge's ``separate_transforms`` loader: one item model whose
 # look is picked per render context. Java bakes ``base`` for every context and
 # ``perspectives[<context>]`` where one is given, keyed by
@@ -485,6 +499,47 @@ def _override_looks(overrides) -> tuple[list | None, str]:
     return looks, ""
 
 
+def _live_property_reason(mod: SourceMod, overrides, memo: dict) -> str | None:
+    """Why an item whose overrides :func:`_override_looks` refused is
+    ``live_item_property`` residue (#344), or None when it isn't: every
+    predicate key with no known resting look (a readout or an unknown name) is
+    a mod-namespaced property the mod's own code registers (``memo`` caches
+    :func:`portkit.itemprops.code_registered` per key across the mod)."""
+    from ..itemprops import code_registered, full_name
+
+    if not isinstance(overrides, list):
+        return None
+    keys: list[str] = []
+    for entry in overrides:
+        predicate = entry.get("predicate") if isinstance(entry, dict) else None
+        if not isinstance(predicate, dict) or not predicate:
+            return None
+        for key in predicate:
+            if not isinstance(key, str):
+                return None
+            if key.rpartition(":")[2] in _OVERRIDE_KIND:
+                continue  # a known resting look: not why it's refused
+            if key not in keys:
+                keys.append(key)
+    if not keys or any(full_name(k).startswith("minecraft:") for k in keys):
+        return None
+    missing = [k for k in keys if k not in memo]
+    if missing:
+        found = code_registered(mod.classes, missing)
+        for k in missing:
+            memo[k] = found.get(k)
+    if any(memo[k] is None for k in keys):
+        return None
+    parts = "; ".join(f"{k!r} (built in {memo[k].replace('/', '.')})" for k in keys)
+    return (
+        f"model swaps texture on item propert{'ies' if len(keys) > 1 else 'y'} {parts}, which the mod's "
+        "own code registers as an item property function: Java computes the value every frame and "
+        "picks the look, and a Bedrock item icon is a static texture with no state selection, so "
+        "nothing in the pack can follow it and one frozen frame could state a false reading (#169); "
+        "the item stays unconverted on purpose (#344)"
+    )
+
+
 def _override_note(namespace: str, converted: list[tuple[str, list]]) -> str:
     """One note per mod for the items whose override looks were dropped."""
     parts = []
@@ -704,6 +759,7 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
     variants: list[tuple[str, str]] = []  # (model name, texture) of skipped variants
     held_names: list[str] = []  # emitted items held like a tool
     override_items: list[tuple[str, list]] = []  # emitted base icons whose override looks were dropped
+    live_memo: dict = {}  # override key -> class whose code registers it, or None (#344)
     items_known: set[str] | None = None  # ids evidenced as items, read on first need
     lang_keys: set[str] | None = None  # en_us keys, read on first need
     placers: list[str] = []  # emitted plain items whose same-id block did not convert
@@ -832,7 +888,11 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
         if flat["overrides"]:
             looks, why = _override_looks(flat["overrides"])
             if looks is None:
-                result.unhandled.append(Unhandled(rel, "item", why))
+                live = _live_property_reason(mod, flat["overrides"], live_memo)
+                if live is not None:
+                    result.unhandled.append(Unhandled(rel, LIVE_ITEM_PROPERTY, live))
+                else:
+                    result.unhandled.append(Unhandled(rel, "item", why))
                 continue
         if flat["elements"]:
             result.unhandled.append(

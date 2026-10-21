@@ -193,6 +193,14 @@ SKIP_KINDS = {
                         "#302) takes more recipes than the cap of 16, so it is left unconverted on purpose "
                         "rather than flooding the recipe book; the reason names each tag, its members, its "
                         "slots and the count"),
+    # #344 (pending Alex, pick 1a): an item whose look switches on an item property the
+    # mod's code registers (portkit.converters.items, portkit.itemprops).
+    "live_item_property": ("the item's model swaps its look on an item property the mod's own code "
+                           "registers (a compass needle, a gauge, a fill level): Java computes the value "
+                           "every frame, and a Bedrock item icon is a static texture with no state "
+                           "selection, so nothing in a pack can follow it and a frozen frame could "
+                           "state a false reading (#169); the reason names each property and the class "
+                           "that builds it"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
