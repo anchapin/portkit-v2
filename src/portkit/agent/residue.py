@@ -225,6 +225,14 @@ SKIP_KINDS = {
                           "(pattern, random) or only sets its render layer; a Bedrock block texture is "
                           "fixed per face with no neighbour lookup, so a stand-in png would draw a "
                           "pattern sheet or connection layout wrong; the reason names the CTM type"),
+    # #358 (pending Alex, picks 1a-3a): a recipe whose type the mod's own code registers
+    # (portkit.converters.recipes.mod_recipe_type, portkit.recipetypes).
+    "mod_recipe_type": ("the recipe's type is a recipe serializer the mod's own code registers (Java has no "
+                        "data-driven recipe types) and Bedrock's recipe types are a fixed list an add-on "
+                        "can't extend; the reason names the type, the registering class, serializer and "
+                        "recipe class read from bytecode, and for a crafting-like variant what Java does "
+                        "beyond the vanilla shape (extra keys, fluid or other non-vanilla ingredients, code "
+                        "overriding matches/assemble/getRemainingItems), which a vanilla recipe would drop"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
