@@ -179,6 +179,8 @@ def _attach_jarjar_dir(index: ClassIndex, root: Path) -> dict[str, int]:
             continue
         try:
             with zipfile.ZipFile(jar) as zf:
+                if len(zf.infolist()) > nested_jars.MAX_MEMBERS:
+                    continue
                 contents = nested_jars.read(zf, rel)
         except (zipfile.BadZipFile, OSError):
             continue

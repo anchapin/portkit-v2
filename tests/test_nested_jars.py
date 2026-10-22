@@ -207,3 +207,9 @@ def test_a_library_jars_jarjar_jars_and_services_are_read(tmp_path, lib):
     libraries.attach(index, [tmp_path / "lib.jar"])
     assert index.library_count() == 4 and index.get("z/Z") is None
     assert index.services["a.Service"] == ["a/Own", "com/example/lib/LibBlock", "com/example/lib/LibPlateBlock"]
+
+
+def test_a_nested_jar_over_the_member_bound_is_skipped(tmp_path, monkeypatch, own, lib):
+    jar = _mod_jar(tmp_path / "m.jar", own, {"META-INF/jarjar/l.jar": _inner_jar(lib)}, ["META-INF/jarjar/l.jar"])
+    monkeypatch.setattr(nested_jars, "MAX_MEMBERS", 2)
+    assert from_jar(jar, tmp_path / "s").classes.library_count() == 0

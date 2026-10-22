@@ -31,6 +31,9 @@ JARJAR_METADATA = "META-INF/jarjar/metadata.json"
 # read (PR #321 review).
 MAX_NESTED_JAR_BYTES = 64 * 1024 * 1024
 MAX_CLASS_BYTES = 4 * 1024 * 1024
+# The member bound ingest uses for the mod's own jar; a nested jar with more
+# is skipped (its contents are never staged, but a zip bomb isn't read).
+MAX_MEMBERS = 50_000
 LOADER_METADATA = ("META-INF/neoforge.mods.toml", "META-INF/mods.toml", "fabric.mod.json", "quilt.mod.json")
 
 
@@ -112,6 +115,8 @@ def _open_each(zf: zipfile.ZipFile, paths: list[str], cap: int) -> list[JarConte
             continue
         try:
             with zipfile.ZipFile(io.BytesIO(zf.read(info))) as inner:
+                if len(inner.infolist()) > MAX_MEMBERS:
+                    continue
                 out.append(read(inner, path))
         except (zipfile.BadZipFile, OSError, ValueError):
             continue
