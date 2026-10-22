@@ -27,6 +27,12 @@
 //              with it and leaves exactly one drop. Reported, not asserted:
 //              what placing the lower part alone and the setblock command
 //              leave above it.
+//   gate       a block carrying the portkit fence gate component (#367): placed
+//              (closed, not in a wall), used by the runtime's scriptevent as a
+//              player facing it (turned away and open) and again (closed),
+//              powered by a redstone block beside it (open, powered) and
+//              unpowered (closed), broken (its drop counted), then placed
+//              again beside a wall across it (in_wall).
 //   trapdoor   a block carrying the portkit trapdoor component (#296): placed
 //              by script, powered by a redstone block beside it (it opens),
 //              unpowered (it closes), broken with `setblock ... air destroy`
@@ -44,9 +50,12 @@
 //              player's use takes): powered, lamp lit; read again a few ticks
 //              before its press time is up (still powered) and after it
 //              (unpowered, lamp unlit); then broken with `setblock ... air
-//              destroy` and its drop counted. Reported, not asserted: an
-//              arrow spawned flying at it (pressed where its set type lets
-//              arrows press it).
+//              destroy` and its drop counted. The lamp may take one more
+//              redstone tick (two game ticks) to follow (#367: which side of
+//              the circuit tick the press lands on moves with the number of
+//              ticks the earlier checks took; the lag is reported). Reported,
+//              not asserted: an arrow spawned flying at it (pressed where its
+//              set type lets arrows press it).
 //   ore        an ore feature the converter wrote (#281). Asserted
 //              (ore_generate): outside the flat Overworld, fresh chunks of the
 //              rule's dimension are loaded and the ore blocks the world
@@ -68,11 +77,14 @@ import {
   AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, PAIRED_PART, Tally, connectionVerdict,
   connectionSlot, containerVerdict, describe, doorVerdict, dropSlot, dropVerdict, line,
   pairedSlot, pairedVerdict, plateSlot, plateVerdict, slot, trapdoorSlot, trapdoorVerdict, buttonSlot,
+  gateSlot, gateVerdict, OPPOSITE,
   GEN_ORIGIN, GEN_SIZE, ORE_CUBE, generateVerdict, oreSlot, oreVerdict, scanRange,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
 
 const BATCH = 16;
+// A redstone tick in game ticks (Bedrock's circuit system updates every second game tick).
+const REDSTONE_TICK = 2;
 const say = (kind, payload) => console.warn(line(kind, payload));
 
 world.afterEvents.worldLoad.subscribe(() => {
@@ -103,7 +115,7 @@ async function run() {
     blocks: CHECKS.blocks.length, items: CHECKS.items.length, drops: (CHECKS.drops ?? []).length,
     tool_drops: (CHECKS.tool_drops ?? []).length, paired: (CHECKS.paired ?? []).length,
     trapdoors: (CHECKS.trapdoors ?? []).length, plates: (CHECKS.plates ?? []).length,
-    buttons: (CHECKS.buttons ?? []).length, ores: (CHECKS.ores ?? []).length,
+    buttons: (CHECKS.buttons ?? []).length, gates: (CHECKS.gates ?? []).length, ores: (CHECKS.ores ?? []).length,
     geodes: (CHECKS.geodes ?? []).length,
   });
   if (!(await loaded(dim))) {
@@ -477,6 +489,19 @@ async function run() {
       powered: dim.getBlock(at)?.permutation.getState(powered),
       lamp: dim.getBlock(beside)?.typeId === "minecraft:lit_redstone_lamp",
     });
+    // Bedrock's circuit system moves once a redstone tick (two game ticks), so
+    // where the press lands against it shifts the lamp by a game tick: the lamp
+    // gets up to one more redstone tick to read `want` (#367).
+    const settle = async (state, want) => {
+      let lag = 0;
+      while (lag < REDSTONE_TICK && state.lamp !== want) {
+        await system.waitTicks(1);
+        lag += 1;
+        state.lamp = dim.getBlock(beside)?.typeId === "minecraft:lit_redstone_lamp";
+      }
+      if (lag) state.lamp_lag = lag;
+      return lag;
+    };
     const judge = (check, want, state, lamp) => {
       const verdict = plateVerdict(want, { powered: state.powered });
       if (verdict.ok) tally.record(check, id, true);
@@ -511,9 +536,10 @@ async function run() {
       dim.runCommand(`scriptevent ${event} ${at.x} ${at.y} ${at.z}`);
       await system.waitTicks(2);
       seen.pressed = read();
+      const lag = seen.pressed.powered === true ? await settle(seen.pressed, true) : 0;
       judge("button_press", true, seen.pressed, true);
       if (ticks > 6) {
-        await system.waitTicks(ticks - 6);
+        await system.waitTicks(Math.max(1, ticks - 6 - lag));
         seen.held = read();
         judge("button_hold", true, seen.held, false);
         await system.waitTicks(10);
@@ -521,6 +547,7 @@ async function run() {
         await system.waitTicks(ticks + 4);
       }
       seen.released = read();
+      if (seen.released.powered === false) await settle(seen.released, false);
       judge("button_release", false, seen.released, true);
       // Reported only: an arrow flying down onto it.
       try {
@@ -554,6 +581,88 @@ async function run() {
       fail("button", id, describe(err));
     }
     say("BUTTON", seen);
+  }
+
+  // gate: one fence gate at a time (#367)
+  const GATES = CHECKS.gates ?? [];
+  for (let i = 0; i < GATES.length; i++) {
+    const { id, states, event, wall, expect } = GATES[i];
+    const at = gateSlot(i);
+    const beside = { x: at.x + 1, y: at.y, z: at.z };
+    const seen = { id };
+    const read = () => {
+      const perm = dim.getBlock(at).permutation;
+      return {
+        facing: perm.getState("minecraft:cardinal_direction"), open: perm.getState(states.open),
+        powered: perm.getState(states.powered), in_wall: perm.getState(states.in_wall),
+      };
+    };
+    const judge = (check, want, state) => {
+      const verdict = gateVerdict(want, state);
+      if (verdict.ok) tally.record(check, id, true);
+      else fail(check, id, verdict.problems.join("; "));
+    };
+    try {
+      for (const e of itemsNear(at)) e.remove();
+      dim.getBlock(at).setPermutation(BlockPermutation.resolve(id));
+      await system.waitTicks(2);
+      seen.placed = dim.getBlock(at)?.typeId;
+      if (seen.placed !== id) {
+        fail("gate_place", id, `reads back as ${seen.placed}`);
+        say("GATE", seen);
+        continue;
+      }
+      tally.record("gate_place", id, true);
+      seen.before = read();
+      judge("gate_idle", { open: false, powered: false, in_wall: false }, seen.before);
+      // A player facing the gate (looking opposite to its facing) opens it: it turns away.
+      const facing = seen.before.facing;
+      dim.runCommand(`scriptevent ${event} ${at.x} ${at.y} ${at.z} ${OPPOSITE[facing]}`);
+      await system.waitTicks(2);
+      seen.used = read();
+      judge("gate_use_open", { open: true, facing: OPPOSITE[facing] }, seen.used);
+      dim.runCommand(`scriptevent ${event} ${at.x} ${at.y} ${at.z} ${facing}`);
+      await system.waitTicks(2);
+      seen.closed = read();
+      judge("gate_use_close", { open: false, facing: OPPOSITE[facing] }, seen.closed);
+      dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:redstone_block"));
+      await system.waitTicks(4);
+      seen.powered = read();
+      judge("gate_power", { open: true, powered: true }, seen.powered);
+      dim.getBlock(beside).setPermutation(BlockPermutation.resolve("minecraft:air"));
+      await system.waitTicks(4);
+      seen.unpowered = read();
+      judge("gate_unpower", { open: false, powered: false }, seen.unpowered);
+      for (const e of itemsNear(at)) e.remove();
+      dim.runCommand(`setblock ${at.x} ${at.y} ${at.z} air destroy`);
+      await system.waitTicks(10);
+      seen.after_break = dim.getBlock(at)?.typeId;
+      const got = [];
+      for (const e of itemsNear(at)) {
+        const stack = e.getComponent("minecraft:item")?.itemStack;
+        if (stack) got.push({ item: stack.typeId, count: stack.amount });
+        e.remove();
+      }
+      seen.drop = got;
+      if (expect) {
+        const verdict = dropVerdict(expect, got);
+        if (verdict.ok) tally.record("gate_drop", id, true);
+        else fail("gate_drop", id, verdict.problems.join("; "));
+      }
+      // Placed beside a wall across it (the default facing's side): lowered.
+      const across = facing === "north" || facing === "south"
+        ? { x: at.x - 1, y: at.y, z: at.z } : { x: at.x, y: at.y, z: at.z - 1 };
+      dim.getBlock(across).setPermutation(BlockPermutation.resolve(wall));
+      dim.getBlock(at).setPermutation(BlockPermutation.resolve(id));
+      await system.waitTicks(2);
+      seen.walled = read();
+      judge("gate_in_wall", { in_wall: true }, seen.walled);
+      dim.getBlock(at).setPermutation(BlockPermutation.resolve("minecraft:air"));
+      dim.getBlock(across).setPermutation(BlockPermutation.resolve("minecraft:air"));
+    } catch (err) {
+      fail("gate", id, describe(err));
+    }
+    say("GATE", seen);
   }
 
   // ore: each ore feature placed into a cube of what it replaces (#281)

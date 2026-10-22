@@ -163,6 +163,27 @@ export function trapdoorVerdict(want, state) {
   return { ok: problems.length === 0, problems };
 }
 
+// The fence gate check's layer (#367): one gate each, laid out like the paired
+// check (a redstone block or a wall beside it), a new layer four up every 64;
+// above the drop layer, below the connection layer.
+export const GATE_Y = 90;
+export const OPPOSITE = { north: "south", south: "north", east: "west", west: "east" };
+
+/** Where the i-th fence gate goes. */
+export function gateSlot(i) {
+  const at = pairedSlot(i);
+  return { ...at, y: at.y - PAIRED_Y + GATE_Y };
+}
+
+/** A gate read back against `want`: only the states `want` names are compared. */
+export function gateVerdict(want, state) {
+  const problems = [];
+  for (const [k, v] of Object.entries(want)) {
+    if (state[k] !== v) problems.push(`${k}=${state[k]}, expected ${v}`);
+  }
+  return { ok: problems.length === 0, problems };
+}
+
 // The pressure plate check's layer (#296): one plate each on a stone block,
 // laid out like the paired check (a redstone lamp beside it), a new layer
 // four up every 64; between the trapdoor and drop layers for 128 plates.

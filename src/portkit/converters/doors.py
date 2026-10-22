@@ -199,8 +199,11 @@ class Reading:
         self.cls: str | None = None
         self.verdict = "unread"   # "vanilla" | "unread" | "refused"
         self.why = ""
-        self.door: tuple[bool, str] | None = None   # (opens by hand, sound family) when read
+        # (opens by hand, sound family) when read; a plate's (sensitivity, family); a fence
+        # gate's sound family or Bedrock (open, close) sound pair (#367).
+        self.door: tuple | str | None = None
         self.door_from = ""
+        self.wood_why = ""
 
 
 def _overrides(machine, cls: str, behaviour: frozenset) -> list[str]:
@@ -222,9 +225,14 @@ _KINDS = {
 }
 
 
+def _gate_kind():
+    from . import fence_gates
+    return ({"net/minecraft/world/level/block/FenceGateBlock"}, fence_gates.GATE_BEHAVIOUR)
+
+
 def read_code(classes, names: list[str], kind: str, run_names: list[str] | None = None,
               run=None) -> dict[str, Reading]:
-    """A :class:`Reading` per name; ``kind`` "door", "trapdoor", "plate" or "two_tall".
+    """A :class:`Reading` per name; ``kind`` "door", "trapdoor", "plate", "two_tall" or "gate".
 
     For a door or trapdoor read as vanilla, ``Reading.door`` is (opens by
     hand, sound family) from the ``BlockSetType`` its vanilla constructor was
@@ -245,7 +253,7 @@ def read_code(classes, names: list[str], kind: str, run_names: list[str] | None 
     if run is None:
         run = blockcode._registered(classes, sorted(set(run_names or ()) | set(names)))
     machine, registered = run
-    wanted, behaviour = _KINDS[kind]
+    wanted, behaviour = _KINDS[kind] if kind != "gate" else _gate_kind()
     for name, r in readings.items():
         objs, why = registered[name]
         if not objs:
@@ -275,6 +283,13 @@ def read_code(classes, names: list[str], kind: str, run_names: list[str] | None 
                     r.door, r.door_from = (hand, family), where
         elif kind == "plate":
             r.door, r.door_from = _plate_type(obj)
+        elif kind == "gate":
+            # (#367) the gate's sound family from its WoodType; None when unread.
+            from . import fence_gates
+            family, where = fence_gates.read_wood(obj)
+            r.door, r.door_from = family, (where if family is not None else "")
+            if family is None:
+                r.wood_why = where
     return readings
 
 
