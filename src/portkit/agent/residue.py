@@ -233,6 +233,12 @@ SKIP_KINDS = {
                         "recipe class read from bytecode, and for a crafting-like variant what Java does "
                         "beyond the vanilla shape (extra keys, fluid or other non-vanilla ingredients, code "
                         "overriding matches/assemble/getRemainingItems), which a vanilla recipe would drop"),
+    # #182 (pending Alex, picks 1a-3a): a guide book's leftover pages (portkit.guidebooks).
+    "guidebook": ("the files are a guide book's pages and the pictures or structures they show (per-language "
+                  "documents outside lang/ and texts/, or markdown pages), drawn by a Java book screen (the mod's "
+                  "own or a library's, named in the reason when the jar shows it); a Bedrock add-on has no "
+                  "guide-book screen and portkit's form viewer reads only Citadel books, so nothing is converted "
+                  "and no page is summarised or rewritten (#87)"),
     "book": ("a guide book's pages ship through the book viewer's data table and .lang text (#182), which "
              "the agent's tools don't write; the reason says what the viewer can't carry"),
 }
