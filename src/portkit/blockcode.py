@@ -3604,7 +3604,7 @@ class Machine:
         elements (Java SE 21): ``filter``, ``map``, ``count``, ``toList``,
         ``collect`` with ``Collectors.toList`` / ``toUnmodifiableList`` /
         ``toCollection``, ``anyMatch`` / ``allMatch`` / ``noneMatch``,
-        ``findFirst`` and ``forEach``, each in encounter order. Anything
+        ``findFirst``, ``forEach`` and ``toArray``, each in encounter order. Anything
         else, or a function whose value isn't known, is unknown."""
         items = list(strm.items)
         if name == "filter" and len(rest) == 1:
@@ -3614,13 +3614,18 @@ class Machine:
             return [Strm(tuple(i for i, v in zip(items, verdicts) if v))]
         if name == "map" and len(rest) == 1:
             out = [self._apply(rest[0], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [i]) for i in items]
-            if any(o is UNKNOWN or isinstance(o, _Many) for o in out):
-                return [UNKNOWN]
-            return [Strm(tuple(out))]
+            # One element out per element in (Stream#map, Java SE 21): an
+            # element whose value isn't known is unknown, the count is not.
+            return [Strm(tuple(UNKNOWN if isinstance(o, _Many) else o for o in out))]
         if name == "count" and not rest:
             return [len(items)]
         if name == "toList" and not rest:
             return [Coll(tuple(items))]
+        if name == "toArray" and len(rest) <= 1:
+            # Stream#toArray() / toArray(IntFunction generator): a new array
+            # of the elements in encounter order (Java SE 21); the generator
+            # only allocates it.
+            return [Arr(items)]
         if name in ("anyMatch", "allMatch", "noneMatch") and len(rest) == 1:
             verdicts = [self._test(rest[0], i) for i in items]
             if None in verdicts:

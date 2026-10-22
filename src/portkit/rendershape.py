@@ -47,7 +47,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .bytecode import ClassIndex, instructions
+from .bytecode import ClassIndex, Handle, Indy, instructions
 
 # getRenderShape descriptors -> the render-shape enum class (any method name).
 _SHAPE_DESCS = {
@@ -393,11 +393,21 @@ def _bind_sites(classes: ClassIndex) -> list:
         if cf is None or not _calls_bind(cf):
             continue
         for m in cf.methods:
-            if m.code is not None and any(
-                    i.op in _INVOKES and (getattr(i.arg, "owner", None), getattr(i.arg, "name", None)) in BIND_CALLS
-                    for i in instructions(cf, m.code)):
+            if m.code is not None and any(_is_bind(i) for i in instructions(cf, m.code)):
                 sites.append((cf, m))
     return sites
+
+
+def _is_bind(insn) -> bool:
+    """Whether ``insn`` calls one of BIND_CALLS, directly or by making a
+    method reference to it (``event::registerBlockEntityRenderer`` handed to a
+    helper that calls it as its own functional interface)."""
+    arg = insn.arg
+    if insn.op in _INVOKES:
+        return (getattr(arg, "owner", None), getattr(arg, "name", None)) in BIND_CALLS
+    if insn.op == 0xBA and isinstance(arg, Indy):
+        return any(isinstance(a, Handle) and (a.ref.owner, a.ref.name) in BIND_CALLS for a in arg.args)
+    return False
 
 
 def _one_class(values, test) -> tuple[str | None, str]:
