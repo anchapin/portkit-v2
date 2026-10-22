@@ -86,6 +86,18 @@ _GET_SHAPE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/mine
                    "Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/phys/shapes/CollisionContext;)"
                    "Lnet/minecraft/world/phys/shapes/VoxelShape;")
 _BE_BUILDER = "net/minecraft/world/level/block/entity/BlockEntityType$Builder"
+# Static builders that take a block entity type's factory first and whose
+# ``build`` makes the type (see Machine._holder_call): vanilla 1.17+
+# ``BlockEntityType$Builder.of(factory, blocks...)``; 1.14-1.16 under MCP
+# class names, ``TileEntityType$Builder.create(supplier, blocks...)`` (the
+# Mojang member name ``of`` once a jar is read through mappings); Fabric
+# API's ``FabricBlockEntityTypeBuilder.create(factory, blocks...)`` (#355).
+_BE_TYPE_FACTORIES = frozenset({
+    (_BE_BUILDER, "of"),
+    ("net/minecraft/tileentity/TileEntityType$Builder", "of"),
+    ("net/minecraft/tileentity/TileEntityType$Builder", "create"),
+    ("net/fabricmc/fabric/api/object/builder/v1/block/entity/FabricBlockEntityTypeBuilder", "create"),
+})
 _PLACEMENT_DESC = ("(Lnet/minecraft/world/item/context/BlockPlaceContext;)"
                    "Lnet/minecraft/world/level/block/state/BlockState;")
 
@@ -802,6 +814,13 @@ class Machine:
         # BlockEntityType builders and BlockEntityType#create are followed
         # (see _holder_call) instead of being unknown calls.
         self.holders = False
+        # While reading the client's renderer registrations
+        # (portkit.rendershape.bindings, #355): a call whose (owner, name) is
+        # in bind_calls is recorded as (its arguments, the method it was
+        # made in) in binds and returns nothing, instead of being an unknown
+        # call.
+        self.bind_calls: frozenset = frozenset()
+        self.binds: list | None = None
         # (class, static field) -> whether it reads as null until written
         # (see _lazy_null).
         self._lazy: dict = {}
@@ -1365,6 +1384,9 @@ class Machine:
         """Possible results of calling ``owner.name(desc)`` with ``args``
         (receiver first unless static)."""
         recv = None if static or not args else args[0]
+        if self.binds is not None and (owner, name) in self.bind_calls:
+            self.binds.append((list(args if static else args[1:]), self._running[-1] if self._running else ""))
+            return [None]
         if isinstance(recv, Lam) and name not in ("equals", "hashCode", "toString"):
             return self.call_lambda(recv, args[1:])
         if self.assume_support and name == "canSurvive" and desc == _CAN_SURVIVE_DESC:
@@ -2240,7 +2262,9 @@ class Machine:
           ``build(type)`` keep the factory (BlockEntityType$Builder#of and
           #build, MC 1.21.1: the type stores the factory), and
           ``BlockEntityType#create(pos, state)`` calls it
-          (``this.factory.create(pos, state)``, MC 1.21.1).
+          (``this.factory.create(pos, state)``, MC 1.21.1); the 1.14-1.16
+          and Fabric API builders too (_BE_TYPE_FACTORIES);
+        * ``Registry.register(registry, id, value)`` returns the value.
 
         Anything else is not handled here."""
         if name == "register" and not static and not desc.endswith(")V"):
@@ -2248,9 +2272,15 @@ class Machine:
             lams = [a for a in rest if isinstance(a, Lam)]
             if len(ids) == 1 and len(lams) == 1 and len(rest) == 2:
                 return [Obj("__holder", {"supplier": lams[0]})]
+        if static and name == "register" and owner == "net/minecraft/core/Registry" and len(rest) == 3 \
+                and isinstance(rest[2], Obj):
+            # Registry.register(registry, id, value) returns the value
+            # (1.21.1 Registry#register); Fabric registers a block entity
+            # type this way (#355).
+            return [rest[2]]
         if isinstance(recv, Obj) and recv.cls == "__holder" and name in ("get", "value") and not rest:
             return self.call_lambda(recv.fields["supplier"], [])
-        if owner == _BE_BUILDER and static and name == "of" and rest and isinstance(rest[0], Lam):
+        if (owner, name) in _BE_TYPE_FACTORIES and static and rest and isinstance(rest[0], Lam):
             return [Obj("__betype_builder", {"factory": rest[0]})]
         if isinstance(recv, Obj) and recv.cls == "__betype_builder" and name == "build":
             return [Obj("__betype", {"factory": recv.fields["factory"]})]
