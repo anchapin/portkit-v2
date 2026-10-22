@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-22 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #PRNUM): the jar-in-jar libraries a Forge/NeoForge mod lists in META-INF/jarjar/metadata.json are read as library classes, with their META-INF/services files
+## 2026-10-22 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #371): the jar-in-jar libraries a Forge/NeoForge mod lists in META-INF/jarjar/metadata.json are read as library classes, with their META-INF/services files
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order) (#368, part of #277; follow-up of #362 / PR #363).
 - **Decision:** when a mod jar (or an unpacked mod directory) is ingested, each jar its `META-INF/jarjar/metadata.json` lists (MinecraftForge JarJar `Metadata.jars[].path`, `ContainedJarMetadata`; NeoForge keeps the format) is opened one level deep, at most 64 MiB, and its classes are added to the mod's `ClassIndex` as *library* classes (`add_libraries`: found by name, never listed, counted, scanned or converted as the mod's own; the mod's own class wins a name clash), its `META-INF/services/` files after the mod's own (`add_services`), and its loader metadata after the mod's in `entry_meta` (`portkit/nested_jars.py`, `ingest.py`). The run notes which bundled jars were read. A pinned or `--library` jar is read the same way: the jars its `metadata.json` lists join its `META-INF/jars/` ones, and its service files (and its nested jars') are now read too (`libraries.py`).
