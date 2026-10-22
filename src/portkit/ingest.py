@@ -5,7 +5,10 @@ resource tree the converters actually care about (assets/ and data/). This
 module stages that tree onto disk and is honest about everything it drops.
 
 Nothing here guesses. Compiled code and jar-in-jar dependencies are reported as
-residue rather than silently ignored.
+residue rather than silently ignored. The classes and service files of the
+jar-in-jar libraries a Forge/NeoForge mod lists in META-INF/jarjar/metadata.json
+are attached to the class index as library classes (#368, portkit.nested_jars),
+read-only like a --library jar; their resources are not staged.
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import nested_jars
 from .bytecode import ClassIndex
 from .icon import declared_paths
 from .model import Unhandled
@@ -62,6 +66,18 @@ class Ingested:
     # block's code says when nothing else does (portkit.blockcode). They are
     # still reported as residue: reading a pattern is not converting code.
     classes: ClassIndex = field(default_factory=lambda: ClassIndex({}))
+    # The Forge/NeoForge jar-in-jar libraries (META-INF/jarjar/metadata.json)
+    # whose classes and service files were attached to ``classes`` as library
+    # classes (#368), path -> classes added. They stay nested_jar residue.
+    bundled: dict[str, int] = field(default_factory=dict)
+
+    def bundled_note(self) -> str | None:
+        """The conversion note naming the jar-in-jar libraries read, or None."""
+        if not self.bundled:
+            return None
+        jars = ", ".join(f"{p.rsplit('/', 1)[-1]} ({n} classes)" for p, n in self.bundled.items())
+        return (f"Read with the jar-in-jar libraries the mod bundles (META-INF/jarjar/metadata.json): {jars}; "
+                "read-only for registrations, base classes and services, nothing of them is shipped (#368).")
 
     @property
     def namespace(self) -> str:
@@ -137,14 +153,37 @@ def from_directory(root: Path) -> Ingested:
             and candidate.stat().st_size <= _MAX_ICON_BYTES
         ):
             icons[rel] = candidate.read_bytes()
+    index = _with_meta(ClassIndex.from_source(root), metadata)
+    bundled = _attach_jarjar_dir(index, root)
     return Ingested(
         root=root,
         namespaces=_namespaces(root),
         metadata=metadata,
         class_count=sum(1 for _ in root.rglob("*.class")),
         icons=icons,
-        classes=_with_meta(ClassIndex.from_source(root), metadata),
+        classes=index,
+        bundled=bundled,
     )
+
+
+def _attach_jarjar_dir(index: ClassIndex, root: Path) -> dict[str, int]:
+    """An unpacked mod's META-INF/jarjar/metadata.json jars, attached to
+    ``index`` as libraries (#368)."""
+    listing = root / nested_jars.JARJAR_METADATA
+    if not listing.is_file():
+        return {}
+    out = {}
+    for rel in nested_jars.jarjar_paths(listing.read_bytes()):
+        jar = root / rel
+        if not jar.is_file() or jar.stat().st_size > nested_jars.MAX_NESTED_JAR_BYTES:
+            continue
+        try:
+            with zipfile.ZipFile(jar) as zf:
+                contents = nested_jars.read(zf, rel)
+        except (zipfile.BadZipFile, OSError):
+            continue
+        out[rel] = nested_jars.attach(index, [contents])
+    return out
 
 
 def from_jar(jar_path: Path, workdir: Path) -> Ingested:
@@ -203,6 +242,9 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
             if info is not None and _safe_member(rel) and info.file_size <= _MAX_ICON_BYTES:
                 icons[rel] = zf.read(info)
 
+        # Forge/NeoForge jar-in-jar libraries, read as library classes (#368).
+        bundled_jars = nested_jars.jarjar(zf)
+
     found = _namespaces(workdir)
     if not found and not set(metadata) & set(LOADER_METADATA):
         # A code-only mod (no assets/ or data/ tree) still ingests: it is a
@@ -213,6 +255,8 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
             "metadata (fabric.mod.json, quilt.mod.json, mods.toml, neoforge.mods.toml, mcmod.info); "
             "it is not a mod, nothing to convert"
         )
+    index = _with_services(_with_meta(ClassIndex(classes), metadata), services)
+    bundled = {jar.name: nested_jars.attach(index, [jar]) for jar in bundled_jars}
     return Ingested(
         root=workdir,
         namespaces=found,
@@ -220,7 +264,8 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
         class_count=class_count,
         nested_jars=nested,
         icons=icons,
-        classes=_with_services(_with_meta(ClassIndex(classes), metadata), services),
+        classes=index,
+        bundled=bundled,
     )
 
 

@@ -13,7 +13,9 @@ read for its classes only: they are added to the mod's
 by name and never listed, counted, scanned or converted as the mod's own. A
 library's assets, data, lang and models are not read and nothing of it is
 shipped: only the target mod's content is in the pack. Jars a library bundles
-in ``META-INF/jars/`` (Fabric jar-in-jar) are read as part of it. A class the mod itself has wins over a library's, and
+in ``META-INF/jars/`` (Fabric jar-in-jar) or lists in
+``META-INF/jarjar/metadata.json`` (Forge/NeoForge, #368) are read as part of
+it, and so are the ``META-INF/services/`` files of each (#368). A class the mod itself has wins over a library's, and
 an earlier library's over a later one's.
 
 Library jars are fetched like the corpus jars (pinned url and sha512, cached,
@@ -21,22 +23,22 @@ never committed or vendored).
 """
 from __future__ import annotations
 
-import io
 import tomllib
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import nested_jars
 from .corpus import ROOT as REPO_ROOT
 from .corpus import CorpusError, Mod
 
 MANIFEST = REPO_ROOT / "fixtures" / "real" / "libraries.toml"
 # The same bounds ingest uses for the mod's own jar.
-_MAX_CLASS_BYTES = 4 * 1024 * 1024
+_MAX_CLASS_BYTES = nested_jars.MAX_CLASS_BYTES
 _MAX_CLASSES = 200_000
-# A nested jar (META-INF/jars/) is read into memory whole; larger ones are
-# skipped rather than read (PR #321 review).
-_MAX_NESTED_JAR_BYTES = 64 * 1024 * 1024
+# A nested jar is read into memory whole; larger ones are skipped rather than
+# read (PR #321 review).
+_MAX_NESTED_JAR_BYTES = nested_jars.MAX_NESTED_JAR_BYTES
 _REQUIRED = ("name", "project", "version_id", "version", "url", "sha512", "license", "for")
 
 
@@ -44,72 +46,57 @@ class LibraryError(Exception):
     """A library jar that can't be read."""
 
 
-def classes(jar: Path) -> dict[str, bytes]:
-    """Every class file of ``jar`` and of the jars it nests under
-    ``META-INF/jars/`` (one level, each at most _MAX_NESTED_JAR_BYTES), by
-    internal name."""
+def _contents(jar: Path) -> list[nested_jars.JarContents]:
+    """``jar`` and the jars it nests (one level): ``META-INF/jars/`` (Fabric
+    jar-in-jar, each at most _MAX_NESTED_JAR_BYTES) and the jars its
+    ``META-INF/jarjar/metadata.json`` lists (Forge/NeoForge, #368), in that
+    order after the jar itself."""
     jar = Path(jar)
     if not jar.is_file() or not zipfile.is_zipfile(jar):
         raise LibraryError(f"{jar} is not a jar (zip) archive")
-    out: dict[str, bytes] = {}
     with zipfile.ZipFile(jar) as zf:
-        _read(zf, out)
-        for info in zf.infolist():
-            if info.filename.startswith("META-INF/jars/") and info.filename.endswith(".jar") \
-                    and info.file_size <= _MAX_NESTED_JAR_BYTES:
-                try:
-                    with zipfile.ZipFile(io.BytesIO(zf.read(info))) as inner:
-                        _read(inner, out)
-                except zipfile.BadZipFile:
-                    continue
+        return [nested_jars.read(zf, jar.name), *nested_jars.fabric_jars(zf), *nested_jars.jarjar(zf)]
+
+
+def classes(jar: Path) -> dict[str, bytes]:
+    """Every class file of ``jar`` and of the jars it nests (see
+    :func:`_contents`), by internal name; the first copy of a name wins."""
+    out: dict[str, bytes] = {}
+    for part in _contents(jar):
+        for name, raw in part.classes.items():
+            if name not in out:
+                if len(out) >= _MAX_CLASSES:
+                    raise LibraryError(f"more than {_MAX_CLASSES} library classes; refusing")
+                out[name] = raw
     return out
 
 
-def _read(zf: zipfile.ZipFile, out: dict[str, bytes]) -> None:
-    for info in zf.infolist():
-        name = info.filename
-        if name.endswith(".class") and not name.startswith("META-INF/") \
-                and info.file_size <= _MAX_CLASS_BYTES and name[:-6] not in out:
-            if len(out) >= _MAX_CLASSES:
-                raise LibraryError(f"more than {_MAX_CLASSES} library classes; refusing")
-            out[name[:-6]] = zf.read(info)
-
-
-_METADATA = ("META-INF/neoforge.mods.toml", "META-INF/mods.toml", "fabric.mod.json", "quilt.mod.json")
+def services(jar: Path) -> list[dict[str, bytes]]:
+    """The ``META-INF/services/<service>`` files of ``jar`` and of each jar it
+    nests, one ``{path: bytes}`` per jar that has any (#368)."""
+    return [part.services for part in _contents(jar) if part.services]
 
 
 def metadata(jar: Path) -> list[dict[str, bytes]]:
-    """The loader metadata files of ``jar`` and of each jar it nests under
-    ``META-INF/jars/`` (one level, as :func:`classes`), one ``{path: bytes}``
-    per jar that has any: which classes each loader constructs itself
-    (:mod:`portkit.entrypoints`)."""
-    out = []
-    with zipfile.ZipFile(Path(jar)) as zf:
-        own = {n: zf.read(n) for n in _METADATA if n in zf.namelist()}
-        if own:
-            out.append(own)
-        for info in zf.infolist():
-            if info.filename.startswith("META-INF/jars/") and info.filename.endswith(".jar") \
-                    and info.file_size <= _MAX_NESTED_JAR_BYTES:
-                try:
-                    with zipfile.ZipFile(io.BytesIO(zf.read(info))) as inner:
-                        found = {n: inner.read(n) for n in _METADATA if n in inner.namelist()}
-                except zipfile.BadZipFile:
-                    continue
-                if found:
-                    out.append(found)
-    return out
+    """The loader metadata files of ``jar`` and of each jar it nests (as
+    :func:`classes`), one ``{path: bytes}`` per jar that has any: which
+    classes each loader constructs itself (:mod:`portkit.entrypoints`)."""
+    return [dict(part.metadata) for part in _contents(jar) if part.metadata]
 
 
 def attach(index, jars) -> list[str]:
-    """Add each library jar's classes to ``index`` (a ClassIndex) in order;
-    returns one conversion note per jar."""
+    """Add each library jar's classes to ``index`` (a ClassIndex) in order,
+    its loader metadata, and its service files after the ones already read
+    (#368); returns one conversion note per jar."""
     notes = []
     for jar in jars or ():
         found = classes(Path(jar))
         added = index.add_libraries(found)
         if hasattr(index, "entry_meta"):
             index.entry_meta.extend(metadata(Path(jar)))
+        if hasattr(index, "add_services"):
+            for files in services(Path(jar)):
+                index.add_services(files)
         notes.append(f"Read with library jar {Path(jar).name} ({added} classes, read-only for "
                      "registrations and base classes; nothing of it is shipped) (#280).")
     return notes
