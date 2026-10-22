@@ -1,4 +1,5 @@
 package com.example.render;
+import java.util.Set;
 import net.minecraft.core.Registry;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 // Block entity types, built the vanilla way and registered.
@@ -8,4 +9,6 @@ public class Types {
       Registry.register(null, "bearing", BlockEntityType.Builder.of(BearingBlockEntity::new).build(null));
   public static final BlockEntityType<ShaftBlockEntity> SHAFT = BlockEntityType.Builder.of(ShaftBlockEntity::new).build(null);
   public static final BlockEntityType<SpinnerBlockEntity> SPINNER = BlockEntityType.Builder.of(SpinnerBlockEntity::new).build(null);
+  // Built with the type's own constructor (factory, valid blocks, data type).
+  public static final BlockEntityType<TankBlockEntity> TANK = new BlockEntityType<>(TankBlockEntity::new, Set.of(), null);
 }

@@ -359,6 +359,8 @@ BIND_CALLS = frozenset({
     ("net/fabricmc/fabric/api/client/rendereregistry/v1/BlockEntityRendererRegistry", "register"),
 })
 _INVOKES = (0xB6, 0xB7, 0xB8, 0xB9)
+_BE_TYPES = frozenset({"net/minecraft/world/level/block/entity/BlockEntityType",
+                       "net/minecraft/tileentity/TileEntityType"})
 
 
 @dataclass(frozen=True)
@@ -428,15 +430,25 @@ def _renderer_of(machine, types: _Types, prov) -> tuple[str | None, str]:
 
 
 def _entity_of(machine, types: _Types, typ) -> tuple[str | None, str]:
-    from .blockcode import ClassLit, Obj, UNKNOWN, Unreadable
+    from .blockcode import ClassLit, Lam, Obj, UNKNOWN, Unreadable
     if isinstance(typ, ClassLit):  # 1.12: the block entity class
         return (typ.name, "") if types.is_be(typ.name) else (None, f"is the class {_dotted(typ.name)}")
-    if not (isinstance(typ, Obj) and typ.cls == "__betype"):
+    factory = None
+    if isinstance(typ, Obj) and typ.cls == "__betype":  # a builder's build()
+        factory = typ.fields["factory"]
+    elif isinstance(typ, Obj) and typ.cls in _BE_TYPES:
+        # ``new BlockEntityType(factory, validBlocks, dataType)`` (1.20.1;
+        # 1.16 ``TileEntityType(supplier, validBlocks, dataType)``): the
+        # factory is the first constructor argument.
+        ctor = typ.fields.get("__vanilla_ctor")
+        if ctor and ctor[0] == typ.cls and ctor[2] and isinstance(ctor[2][0], Lam):
+            factory = ctor[2][0]
+    if factory is None:
         return None, "isn't a block entity type the run builds"
     machine.steps = 0
     machine.new_epoch()
     try:
-        built = machine.call_lambda(typ.fields["factory"], [UNKNOWN, UNKNOWN])
+        built = machine.call_lambda(factory, [UNKNOWN, UNKNOWN])
     except Unreadable as exc:
         return None, f"its factory can't be followed ({exc})"
     return _one_class(built, types.is_be)

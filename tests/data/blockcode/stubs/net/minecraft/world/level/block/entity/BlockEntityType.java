@@ -2,6 +2,8 @@ package net.minecraft.world.level.block.entity;
 import net.minecraft.core.BlockPos; import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 public class BlockEntityType<T extends BlockEntity> {
+  public BlockEntityType() { }
+  public BlockEntityType(BlockEntitySupplier<? extends T> f, java.util.Set<Block> blocks, Object dataType) { }
   public T create(BlockPos p, BlockState s) { return null; }
   public interface BlockEntitySupplier<T extends BlockEntity> { T create(BlockPos p, BlockState s); }
   public static class Builder<T extends BlockEntity> {

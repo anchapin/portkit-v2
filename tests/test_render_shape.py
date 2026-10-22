@@ -100,6 +100,7 @@ def test_registration_calls_pair_renderer_and_block_entity(classes):
         (D + "SpinnerRenderer", D + "SpinnerBlockEntity"),    # a lambda building the renderer
         (D + "KineticRenderer", D + "BearingBlockEntity"),    # vanilla BlockEntityRenderers, Registry.register
         (D + "OldChestRenderer", D + "OldChestTile"),         # 1.12 class literal and renderer object
+        (D + "TankRenderer", D + "TankBlockEntity"),          # new BlockEntityType(factory, blocks, null)
     }
 
 

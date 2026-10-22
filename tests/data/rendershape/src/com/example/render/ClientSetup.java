@@ -8,6 +8,7 @@ public class ClientSetup {
     event.registerBlockEntityRenderer(Types.POOL, PoolRenderer::new);
     event.registerBlockEntityRenderer(Types.SPINNER, c -> new SpinnerRenderer());
     BlockEntityRenderers.register(Types.BEARING, KineticRenderer::new);
+    event.registerBlockEntityRenderer(Types.TANK, TankRenderer::new);
   }
   // The type comes from the caller: the call can't be read on its own.
   public static void later(EntityRenderersEvent.RegisterRenderers event, BlockEntityType<ShaftBlockEntity> type) {
