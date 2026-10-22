@@ -33,7 +33,7 @@ from portkit import png as png_reader
 
 from .. import blockcode, rendershape
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import buttons, doors, models, plates, trapdoors
+from . import buttons, doors, fence_gates, models, plates, trapdoors
 
 _MENU_CATEGORY = "construction"
 
@@ -1701,6 +1701,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     doors.door_table(mod, result, [r for r in paired_records if r["kind"] in ("door", "two_tall")])
     trapdoors.table(mod, result, [r for r in paired_records if r["kind"] == "trapdoor"])
     plates.table(mod, result, [r for r in paired_records if r["kind"] == "plate"])
+    fence_gates.table(mod, result, [r for r in paired_records if r["kind"] == "gate"])
     buttons.table(mod.namespace, result, [r for r in directional_bool if r.get("button")])
     _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
     _add_water(mod, result, sorted(water_dropped))
@@ -1718,6 +1719,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(doors.notes([r for r in paired_records if r["kind"] in ("door", "two_tall")]))
     result.notes.extend(trapdoors.notes([r for r in paired_records if r["kind"] == "trapdoor"]))
     result.notes.extend(plates.notes([r for r in paired_records if r["kind"] == "plate"]))
+    result.notes.extend(fence_gates.notes([r for r in paired_records if r["kind"] == "gate"]))
     result.notes.extend(buttons.notes([r for r in directional_bool if r.get("button")]))
     result.notes.extend(later)
     result.notes.extend(containers.pop("", []))
@@ -3655,6 +3657,13 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
         if reason:
             why[stem] = reason
             continue
+        gate, reason = fence_gates.gate_variants(blockstate)
+        if gate is not None:
+            specs[stem] = ("gate", gate)
+            continue
+        if reason:
+            why[stem] = reason
+            continue
         pressed, reason = plates.plate_variants(blockstate)
         if pressed is not None and plates.is_plate_shaped(mod, pressed):
             specs[stem] = ("plate", pressed)
@@ -3668,18 +3677,27 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
     # readers run it (#280: a run on one kind's names alone misses names a
     # library's material set builds by concatenation).
     run = (shared or _SharedRun(mod, loaded))()
-    for kind in ("door", "trapdoor", "two_tall", "plate"):
+    for kind in ("door", "trapdoor", "two_tall", "plate", "gate"):
         names = sorted(n for n, s in specs.items() if s[0] == kind)
         if names:
             readings.update(doors.read_code(classes, names, kind, run=run))
-    tags = {"door": "wooden_doors", "trapdoor": "wooden_trapdoors", "plate": "wooden_pressure_plates"}
+    tags = {"door": "wooden_doors", "trapdoor": "wooden_trapdoors", "plate": "wooden_pressure_plates",
+            "gate": "fence_gates"}
     wooden = {kind: doors.wooden_doors(mod, tag) for kind, tag in tags.items()}
     for stem in list(specs):
         r = readings[stem]
         kind = specs[stem][0]
         if r.verdict == "refused":
-            what = {"door": "door", "trapdoor": "trapdoor", "plate": "pressure plate"}.get(kind, "two-tall block")
-            why[stem] = f"{what}: {r.why} (#296)"
+            what = {"door": "door", "trapdoor": "trapdoor", "plate": "pressure plate",
+                    "gate": "fence gate"}.get(kind, "two-tall block")
+            why[stem] = f"{what}: {r.why} ({'#367' if kind == 'gate' else '#296'})"
+            del specs[stem]
+        elif r.verdict == "vanilla" and r.door is None and kind == "gate" \
+                and f"{mod.namespace}:{stem}" not in wooden[kind]:
+            # (#367) read as vanilla FenceGateBlock, but its WoodType isn't read: the DEFAULT
+            # sounds need the jar's minecraft:fence_gates tag, as for an unread gate.
+            why[stem] = (f"fence gate read as vanilla {r.cls}, but {r.wood_why}, and the jar's "
+                         "minecraft:fence_gates tag doesn't list it, so its sounds aren't known (#367)")
             del specs[stem]
         elif r.verdict == "vanilla" and r.door is None and kind in wooden \
                 and f"{mod.namespace}:{stem}" not in wooden[kind]:
@@ -3694,7 +3712,11 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
             del specs[stem]
         elif r.verdict == "unread" and kind in wooden \
                 and f"{mod.namespace}:{stem}" not in wooden[kind]:
-            if kind == "plate":
+            if kind == "gate":
+                why[stem] = (f"fence gate whose code isn't read ({r.why}) and which the jar's "
+                             "minecraft:fence_gates tag doesn't list, so whether it is vanilla FenceGateBlock "
+                             "(and its sounds) isn't known (#367)")
+            elif kind == "plate":
                 why[stem] = (f"pressure plate whose code isn't read ({r.why}) and which the jar's "
                              "minecraft:wooden_pressure_plates tag doesn't list, so what presses it (everything or "
                              "mobs only, or the mod's own rule) isn't known (#296)")
@@ -3708,6 +3730,19 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
 def _convert_paired(mod: SourceMod, result: ConversionResult, rel: str, name: str,
                     spec: tuple, reading) -> dict | None:
     kind, data = spec
+    if kind == "gate":
+        family = reading.door if reading.door is not None else fence_gates.DEFAULT_FAMILY
+        if not fence_gates.convert(mod, result, rel, name, data):
+            return None
+        if reading.verdict == "vanilla":
+            why = ("" if reading.door is not None else
+                   f"{reading.wood_why}; the jar tags it minecraft:fence_gates: the two-argument WoodType's sounds")
+        else:
+            why = (f"its code isn't read: {reading.why}; the jar tags it minecraft:fence_gates: vanilla "
+                   "FenceGateBlock with the two-argument WoodType's sounds")
+        return {"kind": "gate", "name": name, "family": family,
+                "read": reading.verdict == "vanilla" and reading.door is not None,
+                "from": f"{reading.cls} {reading.door_from}".strip(), "why": why}
     if kind == "plate":
         plate = reading.door if reading.door is not None else plates.DEFAULT_PLATE
         if not plates.convert(mod, result, rel, name, data):

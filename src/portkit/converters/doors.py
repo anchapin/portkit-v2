@@ -201,6 +201,7 @@ class Reading:
         self.why = ""
         self.door: tuple[bool, str] | None = None   # (opens by hand, sound family) when read
         self.door_from = ""
+        self.wood_why = ""
 
 
 def _overrides(machine, cls: str, behaviour: frozenset) -> list[str]:
@@ -220,6 +221,11 @@ _KINDS = {
     "two_tall": (_TWO_TALL_CLASSES, TWO_TALL_BEHAVIOUR),
     "plate": ({_PLATE_CLASS}, PLATE_BEHAVIOUR),
 }
+
+
+def _gate_kind():
+    from . import fence_gates
+    return ({"net/minecraft/world/level/block/FenceGateBlock"}, fence_gates.GATE_BEHAVIOUR)
 
 
 def read_code(classes, names: list[str], kind: str, run_names: list[str] | None = None,
@@ -245,7 +251,7 @@ def read_code(classes, names: list[str], kind: str, run_names: list[str] | None 
     if run is None:
         run = blockcode._registered(classes, sorted(set(run_names or ()) | set(names)))
     machine, registered = run
-    wanted, behaviour = _KINDS[kind]
+    wanted, behaviour = _KINDS[kind] if kind != "gate" else _gate_kind()
     for name, r in readings.items():
         objs, why = registered[name]
         if not objs:
@@ -275,6 +281,13 @@ def read_code(classes, names: list[str], kind: str, run_names: list[str] | None 
                     r.door, r.door_from = (hand, family), where
         elif kind == "plate":
             r.door, r.door_from = _plate_type(obj)
+        elif kind == "gate":
+            # (#367) the gate's sound family from its WoodType; None when unread.
+            from . import fence_gates
+            family, where = fence_gates.read_wood(obj)
+            r.door, r.door_from = family, (where if family is not None else "")
+            if family is None:
+                r.wood_why = where
     return readings
 
 
