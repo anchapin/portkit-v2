@@ -47,6 +47,22 @@ entry `scripts/portkit/main.js` that wires the two.
   (`scripts/portkit/data/<namespace>_trapdoors.js`) only for trapdoors read as
   vanilla `TrapDoorBlock`, or the labelled DEFAULT wooden trapdoor
   (`converters/trapdoors.py`).
+- `fence_gate_core.js`: not a station: the pure rules of a fence gate (#367),
+  no imports (tested with node, `tests/js/fence_gate.test.mjs`), ported from
+  vanilla `FenceGateBlock`: placement (open = powered = signal, `in_wall` from a
+  wall on either side across the gate), a use (an open gate closes; a closed
+  one turns away from the player if it faced them, then opens) and a change of
+  redstone power (`neighborChanged`: open = powered, the sound when open
+  changes).
+- `fence_gate.js`: its Bedrock binding (`@minecraft/server` 2.5.0, for
+  `onRedstoneUpdate`): one custom component per namespace (`onPlace`,
+  `onPlayerInteract`, `onRedstoneUpdate`), `in_wall` kept up after placement
+  from `world.afterEvents.playerPlaceBlock` / `playerBreakBlock` /
+  `blockExplode` beside a gate (`onNeighborChanged` is still pre-release), and
+  `/scriptevent portkit:fence_gate_use <x> <y> <z> <direction>`. The converter
+  writes the table (`scripts/portkit/data/<namespace>_fence_gates.js`: sounds
+  per gate from its `WoodType`, the walls list) only for gates read as vanilla
+  `FenceGateBlock`, or the labelled DEFAULT (`converters/fence_gates.py`).
 - `pressure_plate_core.js`: the pure rules of a pressure plate (#296), from
   vanilla `BasePressurePlateBlock` / `PressurePlateBlock` (1.21.1): the touch
   box, what presses it (everything, or mobs and players only; never a
