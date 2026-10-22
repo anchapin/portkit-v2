@@ -2297,6 +2297,55 @@ class Machine:
             return self.call_lambda(recv.fields["factory"], list(rest))
         return _NOT_HANDLED
 
+    def _service_call(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
+        """``java.util.ServiceLoader`` (Java SE 21), followed while reading
+        registry plumbing (Machine.holders, #362): ``load(service[,
+        loader])`` of a service interface or class of the mod's own finds
+        the providers its ``META-INF/services/<service>`` file lists
+        (:attr:`portkit.bytecode.ClassIndex.services`), in file order;
+        ``stream()`` gives one ``ServiceLoader.Provider`` each, whose
+        ``type()`` is the provider class and ``get()`` a new instance (its
+        public no-argument constructor run), and ``iterator()`` /
+        ``findFirst()`` the instances. A service the mod doesn't declare
+        (another jar on the game's class path may provide it) is unknown."""
+        if owner == "java/util/ServiceLoader" and static and name == "load" and rest \
+                and isinstance(rest[0], ClassLit):
+            service = rest[0].name
+            listed = getattr(self.classes, "services", {}).get(service.replace("/", "."))
+            if not listed or self.classes.is_library(service) or self.classes.raw(service) is None:
+                return [UNKNOWN]
+            return [Obj("__services", {"providers": tuple(listed)})]
+        if isinstance(recv, Obj) and recv.cls == "__services" and not rest:
+            providers = recv.fields["providers"]
+            if name == "stream":
+                return [Strm(tuple(Obj("__service_provider", {"type": p}) for p in providers))]
+            if name == "iterator":
+                return [IterV(Coll(tuple(self._service_instance(p) for p in providers)))]
+            if name == "findFirst":
+                return [Opt(self._service_instance(providers[0]) if providers else None)]
+            return [UNKNOWN] if _arg_count(desc)[1] else [None]
+        if isinstance(recv, Obj) and recv.cls == "__service_provider" and not rest:
+            if name == "type":
+                return [ClassLit(recv.fields["type"])]
+            if name == "get":
+                return [self._service_instance(recv.fields["type"])]
+        return _NOT_HANDLED
+
+    def _service_instance(self, cls: str):
+        """A new instance of a service provider class (ServiceLoader: its
+        public no-argument constructor), or UNKNOWN."""
+        found = self.find_method(cls, "<init>", "()V") if self.is_mod(cls) else None
+        if found is None:
+            return UNKNOWN
+        self.init_class(cls)
+        obj = self._new(cls)
+        try:
+            self.run(*found, [obj])
+        except Unreadable as exc:
+            obj.fields.setdefault("__partial", str(exc))
+        obj._uninit = False
+        return obj
+
     def _new(self, cls: str):
         if cls in ("java/util/EnumMap", "java/util/HashMap", "java/util/LinkedHashMap",
                    "java/util/TreeMap"):
@@ -2601,6 +2650,9 @@ class Machine:
             held = self._holder_call(owner, name, desc, recv, rest, static)
             if held is not _NOT_HANDLED:
                 return held
+            served = self._service_call(owner, name, desc, recv, rest, static)
+            if served is not _NOT_HANDLED:
+                return served
         if owner in ("net/minecraft/world/level/block/Block",) or (
                 owner.startswith(_VANILLA_BLOCK_PACKAGE) and name == "box" and static):
             if name == "box" and static and len(rest) == 6:
