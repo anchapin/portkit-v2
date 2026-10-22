@@ -101,6 +101,7 @@ def test_registration_calls_pair_renderer_and_block_entity(classes):
         (D + "KineticRenderer", D + "BearingBlockEntity"),    # vanilla BlockEntityRenderers, Registry.register
         (D + "OldChestRenderer", D + "OldChestTile"),         # 1.12 class literal and renderer object
         (D + "TankRenderer", D + "TankBlockEntity"),          # new BlockEntityType(factory, blocks, null)
+        (D + "LampRenderer", D + "LampBlockEntity"),          # a helper, read through its caller
     }
 
 
@@ -108,6 +109,11 @@ def test_a_call_whose_type_comes_from_the_caller_pairs_nothing(classes):
     later = [b for b in rendershape.bindings(classes) if b.where == D + "ClientSetup#later"]
     assert len(later) == 1 and later[0].entity is None and later[0].renderer == D + "KineticRenderer"
     assert "isn't a block entity type the run builds" in later[0].why
+
+
+def test_a_helper_making_the_call_is_read_through_its_caller(classes):
+    lamp = [b for b in rendershape.bindings(classes) if b.entity == D + "LampBlockEntity"]
+    assert [b.where for b in lamp] == [D + "ClientHelpers#onRegister"]
 
 
 def test_a_renderer_on_the_mods_base_class_draws_only_what_it_is_bound_to(classes):

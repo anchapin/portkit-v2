@@ -11,4 +11,5 @@ public class Types {
   public static final BlockEntityType<SpinnerBlockEntity> SPINNER = BlockEntityType.Builder.of(SpinnerBlockEntity::new).build(null);
   // Built with the type's own constructor (factory, valid blocks, data type).
   public static final BlockEntityType<TankBlockEntity> TANK = new BlockEntityType<>(TankBlockEntity::new, Set.of(), null);
+  public static final BlockEntityType<LampBlockEntity> LAMP = BlockEntityType.Builder.of(LampBlockEntity::new).build(null);
 }

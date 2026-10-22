@@ -454,11 +454,76 @@ def _entity_of(machine, types: _Types, typ) -> tuple[str | None, str]:
     return _one_class(built, types.is_be)
 
 
+def _callers(classes: ClassIndex, target) -> list:
+    """(class, method) of every method of the mod that invokes ``target``."""
+    cf_t, m_t = target
+    out = []
+    owner, mname = cf_t.name.encode(), m_t.name.encode()
+    for name in classes.names():
+        raw = classes.raw(name)
+        if raw is None or owner not in raw or mname not in raw:
+            continue
+        cf = classes.get(name)
+        if cf is None:
+            continue
+        for m in cf.methods:
+            if m.code is not None and (cf.name, m.name, m.desc) != (cf_t.name, m_t.name, m_t.desc) and any(
+                    i.op in _INVOKES and getattr(i.arg, "owner", None) == cf_t.name
+                    and getattr(i.arg, "name", None) == m_t.name and getattr(i.arg, "desc", None) == m_t.desc
+                    for i in instructions(cf, m.code)):
+                out.append((cf, m))
+    return out
+
+
+def _run_site(machine, types: _Types, cf, m) -> list[Binding]:
+    from .blockcode import UNKNOWN, Unreadable, _arg_count
+    where = f"{_dotted(cf.name)}#{m.name}"
+    machine.binds = []
+    stopped = ""
+    n, _ = _arg_count(m.desc)
+    try:
+        machine.steps = 0
+        machine.init_class(cf.name)
+        machine.steps = 0
+        machine.new_epoch()
+        machine.run(cf, m, ([] if m.access & 0x0008 else [UNKNOWN]) + [UNKNOWN] * n)
+    except Unreadable as exc:
+        stopped = str(exc)
+    calls, machine.binds = machine.binds, None
+    out: list[Binding] = []
+    if stopped:
+        out.append(Binding(where, why=f"{where} can't be followed to the end ({stopped})"))
+    seen = set()
+    for args, _cls in calls:
+        if len(args) < 2:
+            continue
+        renderer, rwhy = _renderer_of(machine, types, args[-1])
+        entity, ewhy = _entity_of(machine, types, args[-2])
+        key = (renderer, entity, rwhy, ewhy)
+        if key in seen:
+            continue
+        seen.add(key)
+        why = "; ".join(x for x in (rwhy and f"the renderer {rwhy}", ewhy and f"the type {ewhy}") if x)
+        out.append(Binding(where, renderer and _dotted(renderer), entity and _dotted(entity),
+                           f"a call in {where}: {why}" if why else ""))
+    return out
+
+
+# How many callers up a registration call made in a helper (its type and
+# renderer handed in as arguments) is followed: the helper is run from each
+# method that calls it, with the values that method hands it.
+_CALLER_DEPTH = 2
+
+
 def bindings(classes: ClassIndex | None) -> list[Binding]:
     """Every renderer registration call of the jar, read (see the module
     docstring). Each calling method is run once on unknown arguments, its
-    class initialized first, on a machine of its own."""
-    from .blockcode import Machine, UNKNOWN, Unreadable, _arg_count
+    class initialized first, on a machine of its own; when a call there
+    isn't read (or the run makes none), the methods that call it are run
+    the same way, up to _CALLER_DEPTH callers up, so a helper that makes
+    the call with the values its caller hands it is read through its
+    callers (a client-setup handler calling ``bind(event, TYPE, R::new)``)."""
+    from .blockcode import Machine
     if classes is None or not len(classes):
         return []
     sites = _bind_sites(classes)
@@ -469,35 +534,18 @@ def bindings(classes: ClassIndex | None) -> list[Binding]:
     machine.holders = True
     machine.bind_calls = BIND_CALLS
     out: list[Binding] = []
-    for cf, m in sites:
-        where = f"{_dotted(cf.name)}#{m.name}"
-        machine.binds = []
-        stopped = ""
-        n, _ = _arg_count(m.desc)
-        try:
-            machine.steps = 0
-            machine.init_class(cf.name)
-            machine.steps = 0
-            machine.new_epoch()
-            machine.run(cf, m, ([] if m.access & 0x0008 else [UNKNOWN]) + [UNKNOWN] * n)
-        except Unreadable as exc:
-            stopped = str(exc)
-        calls, machine.binds = machine.binds, None
-        if stopped:
-            out.append(Binding(where, why=f"{where} can't be followed to the end ({stopped})"))
-        seen = set()
-        for args, _cls in calls:
-            if len(args) < 2:
-                continue
-            renderer, rwhy = _renderer_of(machine, types, args[-1])
-            entity, ewhy = _entity_of(machine, types, args[-2])
-            key = (renderer, entity, rwhy, ewhy)
-            if key in seen:
-                continue
-            seen.add(key)
-            why = "; ".join(x for x in (rwhy and f"the renderer {rwhy}", ewhy and f"the type {ewhy}") if x)
-            out.append(Binding(where, renderer and _dotted(renderer), entity and _dotted(entity),
-                               f"a call in {where}: {why}" if why else ""))
+    done: set = set()
+    todo = [(cf, m, 0) for cf, m in sites]
+    while todo:
+        cf, m, depth = todo.pop(0)
+        key = (cf.name, m.name, m.desc)
+        if key in done:
+            continue
+        done.add(key)
+        found = _run_site(machine, types, cf, m)
+        out += found
+        if depth < _CALLER_DEPTH and (not found or any(not (b.renderer and b.entity) for b in found)):
+            todo += [(c, cm, depth + 1) for c, cm in _callers(classes, (cf, m))]
     return out
 
 
