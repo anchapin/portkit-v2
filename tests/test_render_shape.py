@@ -84,21 +84,51 @@ def test_vanilla_tables_hold_only_non_model_shapes():
 # --- block-entity renderers -------------------------------------------------
 
 def test_block_entities_from_construction_and_signature(classes):
-    renderers = rendershape._Renderers(classes)
-    assert rendershape.block_entities(classes, P + "SpinnerBlock", renderers) == [P + "SpinnerBlockEntity"]
-    assert rendershape.block_entities(classes, P + "BearingBlock", renderers) == [P + "BearingBlockEntity"]
+    types = rendershape._Types(classes)
+    assert rendershape.block_entities(classes, P + "SpinnerBlock", types) == [P + "SpinnerBlockEntity"]
+    assert rendershape.block_entities(classes, P + "BearingBlock", types) == [P + "BearingBlockEntity"]
 
 
-def test_renderers_accept_by_type_argument_and_by_every_bound(classes):
-    renderers = rendershape._Renderers(classes)
-    assert renderers.accepting(P + "PoolBlockEntity") == [P + "PoolRenderer"]
-    assert renderers.accepting(P + "BearingBlockEntity") == [P + "BearingRenderer"]
-    # Kinetic but not a Bearing; and the only renderer naming it is unused.
-    assert renderers.accepting(P + "ShaftBlockEntity") == []
-    # A renderer bound only by the vanilla BlockEntity accepts nothing by
-    # itself; a subclass that binds it to one block entity does.
-    assert renderers.accepting(P + "SpinnerBlockEntity") == [P + "SpinnerRenderer"]
-    assert P + "UnusedRenderer" not in [name for name, _, _ in renderers.found]
+D = "com.example.render."
+
+
+def test_registration_calls_pair_renderer_and_block_entity(classes):
+    """#355 pick 4c: the call itself is read (ClientSetup, OldClientProxy)."""
+    found = {(b.renderer, b.entity) for b in rendershape.bindings(classes) if b.renderer and b.entity}
+    assert found == {
+        (D + "PoolRenderer", D + "PoolBlockEntity"),          # Forge event, constructor reference
+        (D + "SpinnerRenderer", D + "SpinnerBlockEntity"),    # a lambda building the renderer
+        (D + "KineticRenderer", D + "BearingBlockEntity"),    # vanilla BlockEntityRenderers, Registry.register
+        (D + "OldChestRenderer", D + "OldChestTile"),         # 1.12 class literal and renderer object
+        (D + "TankRenderer", D + "TankBlockEntity"),          # new BlockEntityType(factory, blocks, null)
+        (D + "LampRenderer", D + "LampBlockEntity"),          # a helper, read through its caller
+    }
+
+
+def test_a_call_whose_type_comes_from_the_caller_pairs_nothing(classes):
+    later = [b for b in rendershape.bindings(classes) if b.where == D + "ClientSetup#later"]
+    assert len(later) == 1 and later[0].entity is None and later[0].renderer == D + "KineticRenderer"
+    assert "isn't a block entity type the run builds" in later[0].why
+
+
+def test_a_helper_making_the_call_is_read_through_its_caller(classes):
+    lamp = [b for b in rendershape.bindings(classes) if b.entity == D + "LampBlockEntity"]
+    assert [b.where for b in lamp] == [D + "ClientHelpers#onRegister"]
+
+
+def test_a_renderer_on_the_mods_base_class_draws_only_what_it_is_bound_to(classes):
+    """KineticRenderer<T extends KineticBlockEntity> would accept the shaft by
+    its signature (#354's over-match); the client binds it to the bearing only."""
+    machine = blockcode.Machine(classes)
+    out = rendershape.read(classes, {"bearing": ([blockcode.Obj(P + "BearingBlock", {})], ""),
+                                     "shaft": ([blockcode.Obj(P + "ShaftBlock", {})], "")}, "1.21.1", machine)
+    assert out["bearing"].renderers == (D + "KineticRenderer",)
+    assert out["bearing"].bound_by == (D + "ClientSetup#registerRenderers",)
+    assert out["shaft"].block_entities == (D + "ShaftBlockEntity",) and out["shaft"].renderers == ()
+
+
+def test_a_jar_without_registration_calls_binds_nothing():
+    assert rendershape.bindings(ClassIndex({})) == []
 
 
 def test_read_combines_both(classes):
@@ -166,12 +196,15 @@ def test_a_mixed_or_unread_shape_changes_nothing(tmp_path, monkeypatch):
 def test_model_with_a_renderer_ships_and_is_flagged_at_zero_files(tmp_path, monkeypatch):
     with_reading(monkeypatch, rendershape.RenderReading(
         "thing", "com.example.render.PoolBlock", frozenset({"MODEL"}), "PoolBlock#getRenderShape = MODEL",
-        block_entities=("com.example.render.PoolBlockEntity",), renderers=("com.example.render.PoolRenderer",)))
+        block_entities=("com.example.render.PoolBlockEntity",), renderers=("com.example.render.PoolRenderer",),
+        bound_by=("com.example.render.ClientSetup#registerRenderers",),
+        bound_to=("com.example.render.PoolBlockEntity",)))
     result = blocks.convert(build(tmp_path))
     assert "blocks/thing.json" in result.files
     (entry,) = result.unhandled
     assert (entry.kind, entry.count) == ("renderer_drawn_parts", 0)
     assert "com.example.render.PoolRenderer" in entry.reason
+    assert "registration call in com.example.render.ClientSetup#registerRenderers" in entry.reason
 
 
 def test_both_kinds_are_explained():

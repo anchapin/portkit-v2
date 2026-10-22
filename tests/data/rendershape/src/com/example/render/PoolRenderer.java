@@ -1,3 +1,6 @@
 package com.example.render;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
-public class PoolRenderer implements BlockEntityRenderer<PoolBlockEntity> { }
+import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
+public class PoolRenderer implements BlockEntityRenderer<PoolBlockEntity> {
+  public PoolRenderer() { }
+  public PoolRenderer(BlockEntityRendererProvider.Context c) { } }

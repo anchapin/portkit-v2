@@ -17,18 +17,29 @@ Two facts per registered block class:
   method that calls another method for its answer, or a value that is not one
   of the enum's constants is *unread*: nothing changes for that block.
 
-* **Block-entity renderer.** A renderer class of the jar (it implements
-  ``BlockEntityRenderer``, 1.12/1.16 extends ``TileEntitySpecialRenderer`` /
-  ``TileEntityRenderer``) whose generic signature accepts the block's block
-  entity class, and that some other class of the jar names (so it is used).
-  The block's block entity classes are the ones its ``BlockEntity``-returning
-  methods construct (``newBlockEntity``, 1.12 ``createNewTileEntity``) and the
-  block entity classes its own generic signature names (``implements
-  IBE<FooBlockEntity>``-style interfaces). A renderer accepts a class when the
-  class is a subtype of a concrete block-entity type argument in the
-  renderer's signature, or of every bound of one of its type parameters.
-  This is read from class signatures, not from the renderer registration
-  call, so it says a renderer *can* draw the block entity (labelled so).
+* **Block-entity renderer** (#355, pick 4c). The renderer the client binds
+  to the block's block entity type, read from the registration call itself:
+  vanilla ``BlockEntityRenderers.register(type, provider)`` (1.17+; Fabric
+  jars read through mappings call it as ``BlockEntityRendererFactories``),
+  Forge/NeoForge ``EntityRenderersEvent$RegisterRenderers
+  #registerBlockEntityRenderer(type, provider)``, Forge 1.14-1.16
+  ``ClientRegistry.bindTileEntityRenderer(type, factory)``, 1.12
+  ``ClientRegistry.bindTileEntitySpecialRenderer(class, renderer)`` and
+  Fabric API's ``BlockEntityRendererRegistry.register(type, factory)``.
+  Each method of the jar that makes such a call is run once, as the loader
+  runs a client-setup handler (on an unknown event), on a fresh machine
+  that follows registry holders and block entity type builders
+  (``blockcode.Machine.holders``). A call pairs a renderer class (the
+  provider's constructor reference, the class a provider lambda builds, or
+  the 1.12 renderer object) with a block entity class (the type's factory,
+  run, or the 1.12 class literal). A block's block entity classes are the
+  ones its ``BlockEntity``-returning methods construct (``newBlockEntity``,
+  1.12 ``createNewTileEntity``) and the ones its own generic signature names;
+  a renderer is the block's only when a read call binds it to exactly one of
+  those classes. A call that can't be read pairs nothing: the block ships as
+  before, with no entry (the rule for an unread shape), never a guess from
+  the renderer's class signature (which over-matches every block entity
+  under a mod's own base class, #354 pick 4's known limit).
 
 No mod is named here (#220).
 """
@@ -125,10 +136,14 @@ class RenderReading:
     shapes: frozenset | None = None
     source: str = ""
     why: str = ""
-    # Block entity classes the block makes, and renderer classes whose
-    # signature accepts one of them (used somewhere in the jar).
+    # Block entity classes the block makes, and the renderer classes a read
+    # registration call binds to one of them.
     block_entities: tuple = ()
     renderers: tuple = ()
+    # The methods whose renderer registration call binds them, and the
+    # block entity classes those calls name (#355).
+    bound_by: tuple = ()
+    bound_to: tuple = ()
 
     @property
     def code_drawn(self) -> bool:
@@ -308,32 +323,12 @@ def _signature_parts(sig: str) -> tuple[list[list[str]], list[str]]:
     return params, _class_names(sig[i:])
 
 
-class _Renderers:
-    """The jar's used block-entity renderer classes and what each accepts."""
+class _Types:
+    """Supertype lookups over the jar's classes (and its libraries')."""
 
     def __init__(self, classes: ClassIndex):
         self.classes = classes
         self.memo: dict = {}
-        self.found: list[tuple[str, list[str], list[list[str]]]] = []
-        names = classes.names()
-        for name in names:
-            cf = classes.get(name)
-            if cf is None or cf.access & 0x0200:
-                continue
-            if not (self.supers(name) & _BER_BASES):
-                continue
-            # Only the class's own signature: a superclass's type parameter
-            # is bound by this one (``extends Base<FooBlockEntity>``). A bound
-            # or argument that is the vanilla block entity class itself says
-            # nothing about which block entity the renderer draws.
-            concrete: list[str] = []
-            bounded: list[list[str]] = []
-            if cf.signature and not cf.access & 0x0400:
-                params, rest = _signature_parts(cf.signature)
-                concrete = [x for x in rest if x not in _BE_BASES and self.is_be(x)]
-                bounded = [p for p in params if any(x not in _BE_BASES and self.is_be(x) for x in p)]
-            if (concrete or bounded) and self._used(name):
-                self.found.append((name, concrete, bounded))
 
     def supers(self, name: str) -> frozenset:
         return _supertypes(self.classes, name, self.memo)
@@ -341,27 +336,220 @@ class _Renderers:
     def is_be(self, name: str) -> bool:
         return bool(self.supers(name) & _BE_BASES)
 
-    def _used(self, name: str) -> bool:
-        needle = name.encode()
-        top = name.split("$", 1)[0]
-        for other in self.classes.names():
-            if other == name or other.split("$", 1)[0] == top and other.startswith(name):
-                continue
-            raw = self.classes.raw(other)
-            if raw is not None and needle in raw:
-                return True
-        return False
-
-    def accepting(self, be: str) -> list[str]:
-        sup = self.supers(be)
-        out = []
-        for name, concrete, bounded in self.found:
-            if any(c in sup for c in concrete) or any(all(b in sup for b in p) for p in bounded):
-                out.append(name)
-        return out
+    def is_renderer(self, name: str) -> bool:
+        return bool(self.supers(name) & _BER_BASES)
 
 
-def block_entities(classes: ClassIndex, cls: str, renderers: _Renderers) -> list[str]:
+# The client's block-entity renderer registration calls (#355, pick 4c),
+# (owner, method) in Mojang names (a Forge SRG or Fabric intermediary jar is
+# read through mappings, #235). The block entity type (1.12: its class) is
+# the second-to-last argument, the renderer provider (1.12: the renderer)
+# the last.
+BIND_CALLS = frozenset({
+    # Vanilla 1.17+ (Fabric's BlockEntityRendererFactories, yarn name).
+    ("net/minecraft/client/renderer/blockentity/BlockEntityRenderers", "register"),
+    # Forge 1.17+ and NeoForge, the mod-bus event.
+    ("net/minecraftforge/client/event/EntityRenderersEvent$RegisterRenderers", "registerBlockEntityRenderer"),
+    ("net/neoforged/neoforge/client/event/EntityRenderersEvent$RegisterRenderers", "registerBlockEntityRenderer"),
+    # Forge 1.14-1.16 and 1.12.
+    ("net/minecraftforge/fml/client/registry/ClientRegistry", "bindTileEntityRenderer"),
+    ("net/minecraftforge/fml/client/registry/ClientRegistry", "bindTileEntitySpecialRenderer"),
+    # Fabric API (v1, and the older rendereregistry package).
+    ("net/fabricmc/fabric/api/client/rendering/v1/BlockEntityRendererRegistry", "register"),
+    ("net/fabricmc/fabric/api/client/rendereregistry/v1/BlockEntityRendererRegistry", "register"),
+})
+_INVOKES = (0xB6, 0xB7, 0xB8, 0xB9)
+_BE_TYPES = frozenset({"net/minecraft/world/level/block/entity/BlockEntityType",
+                       "net/minecraft/tileentity/TileEntityType"})
+
+
+@dataclass(frozen=True)
+class Binding:
+    """One renderer registration call read: the renderer class and the block
+    entity class it is bound to (dotted), or None with why."""
+    where: str
+    renderer: str | None = None
+    entity: str | None = None
+    why: str = ""
+
+
+def _calls_bind(cf) -> bool:
+    for i in range(1, len(cf.pool)):
+        try:
+            c = cf.constant(i)
+        except Exception:  # noqa: BLE001 - a pool slot that isn't loadable
+            continue
+        if getattr(c, "owner", None) is not None and (c.owner, c.name) in BIND_CALLS:
+            return True
+    return False
+
+
+def _bind_sites(classes: ClassIndex) -> list:
+    """(class, method) of every method of the mod (not its libraries) that
+    calls one of BIND_CALLS."""
+    sites = []
+    for name in classes.names():
+        cf = classes.get(name)
+        if cf is None or not _calls_bind(cf):
+            continue
+        for m in cf.methods:
+            if m.code is not None and any(
+                    i.op in _INVOKES and (getattr(i.arg, "owner", None), getattr(i.arg, "name", None)) in BIND_CALLS
+                    for i in instructions(cf, m.code)):
+                sites.append((cf, m))
+    return sites
+
+
+def _one_class(values, test) -> tuple[str | None, str]:
+    from .blockcode import Obj
+    clss = {v.cls for v in values if isinstance(v, Obj)}
+    if not values or len(clss) != 1 or not all(isinstance(v, Obj) for v in values):
+        return None, "doesn't build one object of one class"
+    cls = clss.pop()
+    if not test(cls):
+        return None, f"builds {_dotted(cls)}"
+    return cls, ""
+
+
+def _renderer_of(machine, types: _Types, prov) -> tuple[str | None, str]:
+    from .blockcode import Lam, Obj, UNKNOWN, Unreadable
+    if isinstance(prov, Obj):  # 1.12: the renderer object itself
+        return (prov.cls, "") if types.is_renderer(prov.cls) else (None, f"is a {_dotted(prov.cls)}")
+    if not isinstance(prov, Lam):
+        return None, "isn't a value the run reads"
+    if prov.handle.kind == 8:  # Renderer::new
+        cls = prov.handle.ref.owner
+        return (cls, "") if types.is_renderer(cls) else (None, f"constructs {_dotted(cls)}")
+    machine.steps = 0
+    machine.new_epoch()
+    try:
+        built = machine.call_lambda(prov, [UNKNOWN])
+    except Unreadable as exc:
+        return None, f"can't be followed ({exc})"
+    return _one_class(built, types.is_renderer)
+
+
+def _entity_of(machine, types: _Types, typ) -> tuple[str | None, str]:
+    from .blockcode import ClassLit, Lam, Obj, UNKNOWN, Unreadable
+    if isinstance(typ, ClassLit):  # 1.12: the block entity class
+        return (typ.name, "") if types.is_be(typ.name) else (None, f"is the class {_dotted(typ.name)}")
+    factory = None
+    if isinstance(typ, Obj) and typ.cls == "__betype":  # a builder's build()
+        factory = typ.fields["factory"]
+    elif isinstance(typ, Obj) and typ.cls in _BE_TYPES:
+        # ``new BlockEntityType(factory, validBlocks, dataType)`` (1.20.1;
+        # 1.16 ``TileEntityType(supplier, validBlocks, dataType)``): the
+        # factory is the first constructor argument.
+        ctor = typ.fields.get("__vanilla_ctor")
+        if ctor and ctor[0] == typ.cls and ctor[2] and isinstance(ctor[2][0], Lam):
+            factory = ctor[2][0]
+    if factory is None:
+        return None, "isn't a block entity type the run builds"
+    machine.steps = 0
+    machine.new_epoch()
+    try:
+        built = machine.call_lambda(factory, [UNKNOWN, UNKNOWN])
+    except Unreadable as exc:
+        return None, f"its factory can't be followed ({exc})"
+    return _one_class(built, types.is_be)
+
+
+def _callers(classes: ClassIndex, target) -> list:
+    """(class, method) of every method of the mod that invokes ``target``."""
+    cf_t, m_t = target
+    out = []
+    owner, mname = cf_t.name.encode(), m_t.name.encode()
+    for name in classes.names():
+        raw = classes.raw(name)
+        if raw is None or owner not in raw or mname not in raw:
+            continue
+        cf = classes.get(name)
+        if cf is None:
+            continue
+        for m in cf.methods:
+            if m.code is not None and (cf.name, m.name, m.desc) != (cf_t.name, m_t.name, m_t.desc) and any(
+                    i.op in _INVOKES and getattr(i.arg, "owner", None) == cf_t.name
+                    and getattr(i.arg, "name", None) == m_t.name and getattr(i.arg, "desc", None) == m_t.desc
+                    for i in instructions(cf, m.code)):
+                out.append((cf, m))
+    return out
+
+
+def _run_site(machine, types: _Types, cf, m) -> list[Binding]:
+    from .blockcode import UNKNOWN, Unreadable, _arg_count
+    where = f"{_dotted(cf.name)}#{m.name}"
+    machine.binds = []
+    stopped = ""
+    n, _ = _arg_count(m.desc)
+    try:
+        machine.steps = 0
+        machine.init_class(cf.name)
+        machine.steps = 0
+        machine.new_epoch()
+        machine.run(cf, m, ([] if m.access & 0x0008 else [UNKNOWN]) + [UNKNOWN] * n)
+    except Unreadable as exc:
+        stopped = str(exc)
+    calls, machine.binds = machine.binds, None
+    out: list[Binding] = []
+    if stopped:
+        out.append(Binding(where, why=f"{where} can't be followed to the end ({stopped})"))
+    seen = set()
+    for args, _cls in calls:
+        if len(args) < 2:
+            continue
+        renderer, rwhy = _renderer_of(machine, types, args[-1])
+        entity, ewhy = _entity_of(machine, types, args[-2])
+        key = (renderer, entity, rwhy, ewhy)
+        if key in seen:
+            continue
+        seen.add(key)
+        why = "; ".join(x for x in (rwhy and f"the renderer {rwhy}", ewhy and f"the type {ewhy}") if x)
+        out.append(Binding(where, renderer and _dotted(renderer), entity and _dotted(entity),
+                           f"a call in {where}: {why}" if why else ""))
+    return out
+
+
+# How many callers up a registration call made in a helper (its type and
+# renderer handed in as arguments) is followed: the helper is run from each
+# method that calls it, with the values that method hands it.
+_CALLER_DEPTH = 2
+
+
+def bindings(classes: ClassIndex | None) -> list[Binding]:
+    """Every renderer registration call of the jar, read (see the module
+    docstring). Each calling method is run once on unknown arguments, its
+    class initialized first, on a machine of its own; when a call there
+    isn't read (or the run makes none), the methods that call it are run
+    the same way, up to _CALLER_DEPTH callers up, so a helper that makes
+    the call with the values its caller hands it is read through its
+    callers (a client-setup handler calling ``bind(event, TYPE, R::new)``)."""
+    from .blockcode import Machine
+    if classes is None or not len(classes):
+        return []
+    sites = _bind_sites(classes)
+    if not sites:
+        return []
+    types = _Types(classes)
+    machine = Machine(classes)
+    machine.holders = True
+    machine.bind_calls = BIND_CALLS
+    out: list[Binding] = []
+    done: set = set()
+    todo = [(cf, m, 0) for cf, m in sites]
+    while todo:
+        cf, m, depth = todo.pop(0)
+        key = (cf.name, m.name, m.desc)
+        if key in done:
+            continue
+        done.add(key)
+        found = _run_site(machine, types, cf, m)
+        out += found
+        if depth < _CALLER_DEPTH and (not found or any(not (b.renderer and b.entity) for b in found)):
+            todo += [(c, cm, depth + 1) for c, cm in _callers(classes, (cf, m))]
+    return out
+
+
+def block_entities(classes: ClassIndex, cls: str, renderers: _Types) -> list[str]:
     """Block entity classes a block class constructs or names in its generic signature."""
     found: list[str] = []
     seen: set[str] = set()
@@ -398,7 +586,8 @@ def read(classes: ClassIndex | None, registered: dict, minecraft: str | None,
     if classes is None or not len(classes):
         return {n: RenderReading(n, why="the mod ships no class files") for n in registered}
     vanilla = vanilla_for(minecraft)
-    renderers: _Renderers | None = None
+    types: _Types | None = None
+    bound: dict | None = None
     for name, (objs, why) in registered.items():
         r = RenderReading(name)
         out[name] = r
@@ -418,9 +607,16 @@ def read(classes: ClassIndex | None, registered: dict, minecraft: str | None,
             continue
         r.shapes, r.source, r.why = answers.pop()
         if r.shapes is not None and "MODEL" in r.shapes:
-            if renderers is None:
-                renderers = _Renderers(classes)
-            bes = block_entities(classes, clss[0], renderers)
+            if types is None:
+                types = _Types(classes)
+                bound = {}
+                for b in bindings(classes):
+                    if b.renderer and b.entity:
+                        bound.setdefault(b.entity, set()).add((b.renderer, b.where))
+            bes = block_entities(classes, clss[0], types)
             r.block_entities = tuple(_dotted(b) for b in bes)
-            r.renderers = tuple(sorted({_dotted(x) for b in bes for x in renderers.accepting(b)}))
+            pairs = {p for b in r.block_entities for p in bound.get(b, ())}
+            r.renderers = tuple(sorted({p[0] for p in pairs}))
+            r.bound_by = tuple(sorted({p[1] for p in pairs}))
+            r.bound_to = tuple(b for b in r.block_entities if b in bound)
     return out

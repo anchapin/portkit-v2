@@ -2472,8 +2472,8 @@ CODE_DRAWN = "code_drawn_block"
 # elements is never drawn in the world; a block-entity renderer draws the block
 # (or nothing does). It is `code_drawn_block` residue like a model that bakes no
 # quads (#296), with the shape and the class that returns it as the reason.
-# A block whose shape is MODEL and whose block entity a renderer of the jar
-# accepts ships its static model, and is listed under the explained kind
+# A block whose shape is MODEL and whose block entity the client binds a
+# renderer to (the registration call read, #355 pick 4c) ships its static model, and is listed under the explained kind
 # `renderer_drawn_parts` with a count of 0: no source file is left out, but the
 # moving or contained parts the renderer draws are not in the pack.
 RENDERER_PARTS = "renderer_drawn_parts"
@@ -2524,7 +2524,8 @@ def _render_shape_reason(shape) -> str:
 
 def _flag_renderer_parts(mod: SourceMod, result: ConversionResult, render: "_RenderRun") -> None:
     """A count-0 `renderer_drawn_parts` entry per shipped block whose block
-    entity a renderer of the jar accepts (MODEL shape)."""
+    entity the client binds a renderer to (MODEL shape; the registration
+    call read, #355 pick 4c)."""
     shipped = sorted(k[len("blocks/"):-len(".json")] for k in result.files
                      if k.startswith("blocks/") and k.endswith(".json"))
     if not shipped:
@@ -2538,8 +2539,9 @@ def _flag_renderer_parts(mod: SourceMod, result: ConversionResult, render: "_Ren
         result.unhandled.append(Unhandled(
             str((mod.assets / "blockstates" / f"{name}.json").relative_to(mod.root)), RENDERER_PARTS,
             (f"shipped as its static blockstate model; Java also draws it with a block-entity renderer "
-             f"({shown}, whose type accepts {', '.join(r.block_entities[:2])}, read from class signatures), "
-             f"so the parts or contents that renderer draws are not in the pack ({r.source})"),
+             f"({shown}, bound to {', '.join(r.bound_to[:2])} by the renderer registration call in "
+             f"{', '.join(r.bound_by[:2])}), so the parts or contents that renderer draws are not in "
+             f"the pack ({r.source})"),
             count=0))
 
 
