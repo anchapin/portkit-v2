@@ -213,3 +213,23 @@ def test_a_nested_jar_over_the_member_bound_is_skipped(tmp_path, monkeypatch, ow
     jar = _mod_jar(tmp_path / "m.jar", own, {"META-INF/jarjar/l.jar": _inner_jar(lib)}, ["META-INF/jarjar/l.jar"])
     monkeypatch.setattr(nested_jars, "MAX_MEMBERS", 2)
     assert from_jar(jar, tmp_path / "s").classes.library_count() == 0
+
+
+# --- a call to the mod's own class that resolves to a bundled library's method ---
+
+JJ = Path(__file__).parent / "data" / "jarjarcode"
+
+
+def test_an_inherited_library_method_is_a_registration_boundary():
+    # ModBlocks: R.block("jj_lamp", JJLampBlock::new).register(), compiled
+    # against the mod's ModRegistry, whose block(...) is the bundled
+    # BuilderRegistry's. Inside the library the factory is wrapped twice, so
+    # only the mod's call says which block the name builds (#368).
+    own, lib = _entries(JJ / "classes"), _entries(JJ / "library")
+    _, reg = blockcode._registered(ClassIndex(own, lib), ["jj_lamp"])
+    assert [o.cls for o in reg["jj_lamp"][0]] == ["com/example/jjmod/JJLampBlock"]
+    # The same registration reaches the reader through a jarjar-attached copy.
+    index = ClassIndex(own)
+    nested_jars.attach(index, [nested_jars.JarContents("META-INF/jarjar/jjlib.jar", classes=lib)])
+    _, reg = blockcode._registered(index, ["jj_lamp"])
+    assert [o.cls for o in reg["jj_lamp"][0]] == ["com/example/jjmod/JJLampBlock"]
