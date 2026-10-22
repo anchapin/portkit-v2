@@ -818,7 +818,10 @@ def test_runtime_under_node_with_waystone_runes(stoned):
     _, tree = stoned
     js = ROOT / "tests" / "js"
     proc = subprocess.run(
-        ["node", "--import", str(js / "register.mjs"), "--test", str(js / "adapters" / "waystones" / "waystone.test.mjs")],
+        # The TAP reporter explicitly: newer Node prints its spec reporter ("ℹ skipped 0")
+        # even when stdout isn't a terminal (seen on the ubuntu-26.04 runner image).
+        ["node", "--import", str(js / "register.mjs"), "--test", "--test-reporter=tap",
+         str(js / "adapters" / "waystones" / "waystone.test.mjs")],
         capture_output=True, text=True, timeout=120,
         env={"PATH": os.environ["PATH"], "PORTKIT_WAYSTONE_TABLE": str(tree / DATA)},
     )
