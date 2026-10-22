@@ -55,7 +55,8 @@ def _contents(jar: Path) -> list[nested_jars.JarContents]:
     if not jar.is_file() or not zipfile.is_zipfile(jar):
         raise LibraryError(f"{jar} is not a jar (zip) archive")
     with zipfile.ZipFile(jar) as zf:
-        return [nested_jars.read(zf, jar.name), *nested_jars.fabric_jars(zf), *nested_jars.jarjar(zf)]
+        return [nested_jars.read(zf, jar.name), *nested_jars.fabric_jars(zf, _MAX_NESTED_JAR_BYTES),
+                *nested_jars.jarjar(zf, _MAX_NESTED_JAR_BYTES)]
 
 
 def classes(jar: Path) -> dict[str, bytes]:

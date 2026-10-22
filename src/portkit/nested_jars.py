@@ -84,31 +84,31 @@ def read(zf: zipfile.ZipFile, name: str) -> JarContents:
     return out
 
 
-def jarjar(zf: zipfile.ZipFile) -> list[JarContents]:
+def jarjar(zf: zipfile.ZipFile, cap: int = MAX_NESTED_JAR_BYTES) -> list[JarContents]:
     """Each jar ``zf``'s ``META-INF/jarjar/metadata.json`` lists, read (one
     level; a missing, oversized or unreadable one is skipped)."""
     try:
         listed = jarjar_paths(zf.read(JARJAR_METADATA))
     except KeyError:
         return []
-    return _open_each(zf, listed)
+    return _open_each(zf, listed, cap)
 
 
-def fabric_jars(zf: zipfile.ZipFile) -> list[JarContents]:
+def fabric_jars(zf: zipfile.ZipFile, cap: int = MAX_NESTED_JAR_BYTES) -> list[JarContents]:
     """Each ``META-INF/jars/*.jar`` of ``zf``, read (one level)."""
     listed = [i.filename for i in zf.infolist()
               if i.filename.startswith("META-INF/jars/") and i.filename.endswith(".jar")]
-    return _open_each(zf, listed)
+    return _open_each(zf, listed, cap)
 
 
-def _open_each(zf: zipfile.ZipFile, paths: list[str]) -> list[JarContents]:
+def _open_each(zf: zipfile.ZipFile, paths: list[str], cap: int) -> list[JarContents]:
     out = []
     for path in paths:
         try:
             info = zf.getinfo(path)
         except KeyError:
             continue
-        if info.file_size > MAX_NESTED_JAR_BYTES:
+        if info.file_size > cap:
             continue
         try:
             with zipfile.ZipFile(io.BytesIO(zf.read(info))) as inner:
