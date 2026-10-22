@@ -11,7 +11,9 @@ Its behaviour is vanilla ``FenceGateBlock`` code, so it converts by the doors' r
 - **read**: the registration was followed (``portkit.blockcode``) to vanilla
   ``FenceGateBlock`` or a subclass overriding none of :data:`GATE_BEHAVIOUR`; its sounds
   come from the ``WoodType`` its vanilla constructor was given, a vanilla constant or one
-  built in code (:func:`read_wood`, :mod:`portkit.data.wood_types`);
+  built in code (:func:`read_wood`, :mod:`portkit.data.wood_types`), or from the vanilla
+  ``SoundEvents`` the loaders' ``FenceGateBlock(Properties, SoundEvent, SoundEvent)`` is
+  given (picks 8a/9a, :mod:`portkit.data.sound_events`);
 - read as vanilla but the ``WoodType`` not read, or the registration not read (#280): the
   labelled DEFAULT (the two-argument ``WoodType`` constructor's sounds, ``WOOD``) only when
   the jar's own ``minecraft:fence_gates`` tag lists it; otherwise residue;
@@ -146,12 +148,14 @@ def _is_wood_type(a) -> bool:
         or (isinstance(a, blockcode.Obj) and a.cls == wood_types.CLASS)
 
 
-def read_wood(obj) -> tuple[str | None, str]:
+def read_wood(obj) -> tuple[str | tuple[str, str] | None, str]:
     """(Java sound family, where it was read) for a gate built as
     ``new FenceGateBlock(WoodType.X, props)`` (1.21) / ``(props, WoodType.X)`` (1.20), the
     type a vanilla constant or one built in code with ``new WoodType(name, setType)`` (the
     two-argument constructor's sounds) or the canonical constructor with
-    ``SoundEvents.<family>FENCE_GATE_*`` arguments. (None, why) when it can't be read here."""
+    ``SoundEvents.<family>FENCE_GATE_*`` arguments; for the loaders' sound constructor the
+    family, or the Bedrock (open, close) pair pick 9a read (:func:`_read_loader_sounds`).
+    (None, why) when it can't be read here."""
     ctor = obj.fields.get("__vanilla_ctor") if isinstance(obj, blockcode.Obj) else None
     if not ctor or ctor[0] != wood_types.FENCE_GATE_CLASS:
         return None, "its vanilla FenceGateBlock constructor call isn't read"
