@@ -175,6 +175,68 @@ def test_read_wood_constant_and_built_in_code():
     assert fence_gates.read_wood(loader)[0] is None
 
 
+def test_loader_constructor_maps_any_vanilla_sound_event():
+    """Pick 9a: the loader constructor's vanilla SoundEvents map to the Bedrock sound vanilla
+    Bedrock plays for the same event, each on its own; one with no equivalent read gets the
+    labelled DEFAULT wood fence gate sound of its slot."""
+    from portkit.data import sound_events
+
+    props = object()
+    gate = blockcode.Obj(GATE)
+    gate.fields["__vanilla_ctor"] = (GATE, wood_types.LOADER_SOUND_CTOR,
+                                     (props, _se("COPPER_DOOR_OPEN"), _se("COPPER_DOOR_CLOSE")))
+    family, where = fence_gates.read_wood(gate)
+    assert family == ("open_door.copper", "close_door.copper")
+    assert "COPPER_DOOR_OPEN -> Bedrock open_door.copper" in where and "bedrock-samples" in where
+    assert "DEFAULT" not in where
+    assert fence_gates.gate_sounds(family) == ("open_door.copper", "close_door.copper")
+    assert "open_door.copper (open)" in fence_gates.sound_words(family)
+    # Open and close of two fence gate families: each sound read on its own.
+    gate.fields["__vanilla_ctor"] = (GATE, wood_types.LOADER_SOUND_CTOR,
+                                     (props, _se("BAMBOO_WOOD_FENCE_GATE_OPEN"), _se("FENCE_GATE_CLOSE")))
+    assert fence_gates.read_wood(gate)[0] == ("open.bamboo_wood_fence_gate", "close.fence_gate")
+    # A vanilla event with no Bedrock equivalent read: the labelled DEFAULT of its slot only.
+    gate.fields["__vanilla_ctor"] = (GATE, wood_types.LOADER_SOUND_CTOR,
+                                     (props, _se("IRON_DOOR_OPEN"), _se("CHAIN_PLACE")))
+    family, where = fence_gates.read_wood(gate)
+    assert family == ("open.iron_door", "close.fence_gate")
+    assert "CHAIN_PLACE has no Bedrock equivalent read: DEFAULT close.fence_gate" in where
+    # Same-family fence gate events still read as the family (8a, unchanged bytes).
+    gate.fields["__vanilla_ctor"] = (GATE, wood_types.LOADER_SOUND_CTOR,
+                                     (props, _se("FENCE_GATE_OPEN"), _se("FENCE_GATE_CLOSE")))
+    assert fence_gates.read_wood(gate)[0] == "WOOD"
+    # Every derived row names a Bedrock definition of a sourced table, and no approximations.
+    assert sound_events.bedrock_sound("COPPER_TRAPDOOR_CLOSE")[0] == "open_trapdoor.copper"
+    assert sound_events.bedrock_sound("METAL_PRESSURE_PLATE_CLICK_ON") is None
+    assert sound_events.bedrock_sound("WOODEN_BUTTON_CLICK_ON") is None
+    assert sound_events.bedrock_sound("NETHER_WOOD_FENCE_GATE_OPEN")[0] == "open.nether_wood_fence_gate"
+
+
+def test_loader_sound_gate_converts_with_mapped_sounds(tmp_path, templates, monkeypatch):
+    """Pick 9a end to end: a gate whose loader constructor names copper door sounds gets
+    the Bedrock copper door sounds in its table, labelled as read in its note."""
+    root = _gate_mod(tmp_path, tagged=())
+    real = doors.read_code
+    where = ("FenceGateBlock(Properties, SoundEvents.COPPER_DOOR_OPEN, SoundEvents.COPPER_DOOR_CLOSE), the "
+             "loader's constructor; open COPPER_DOOR_OPEN -> Bedrock open_door.copper (bedrock-samples)")
+
+    def fake(classes, names, kind, **kw):
+        out = real(None, names, kind)
+        if kind == "gate":
+            r = out["oak_fence_gate"]
+            r.verdict, r.cls, r.door, r.door_from = "vanilla", "net.minecraft.world.level.block.FenceGateBlock", \
+                ("open_door.copper", "close_door.copper"), where
+        return out
+
+    monkeypatch.setattr(doors, "read_code", fake)
+    result = convert_all(_mod(root))
+    table = result.files[fence_gates.table_path(NS)]
+    assert '"open_sound": "open_door.copper"' in table and '"close_sound": "close_door.copper"' in table
+    note = next(n for n in result.notes if n.startswith("oak_fence_gate:"))
+    assert "read from its code" in note and "COPPER_DOOR_OPEN" in note
+    assert "sounds open_door.copper (open) and close_door.copper (close)" in note
+
+
 def test_gate_types_cover_the_sound_table():
     assert set(wood_types.GATE_TYPES.values()) == set(wood_types.SOUNDS)
     assert wood_types.SOUNDS["WOOD"] == ("open.fence_gate", "close.fence_gate")

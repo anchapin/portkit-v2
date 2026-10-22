@@ -56,7 +56,7 @@ from __future__ import annotations
 import json
 
 from .. import blockcode
-from ..data import wood_types
+from ..data import sound_events, wood_types
 from ..model import ConversionResult, SourceMod, Unhandled
 from . import models
 
@@ -157,19 +157,7 @@ def read_wood(obj) -> tuple[str | None, str]:
         return None, "its vanilla FenceGateBlock constructor call isn't read"
     found = [a for a in ctor[2] if _is_wood_type(a)]
     if not found and ctor[1] == wood_types.LOADER_SOUND_CTOR and len(ctor[2]) == 3:
-        # (pick 8a) Forge/NeoForge's patched FenceGateBlock(Properties, openSound, closeSound).
-        opened, close = ctor[2][1], ctor[2][2]
-        fams = []
-        for a, table in ((close, wood_types.CLOSE_EVENTS), (opened, wood_types.OPEN_EVENTS)):
-            if isinstance(a, blockcode.Const) and a.owner == wood_types.SOUND_EVENTS and a.name in table:
-                fams.append((table[a.name], a.name))
-            else:
-                return None, ("its loader's FenceGateBlock(Properties, SoundEvent, SoundEvent) is given sounds "
-                              "that aren't vanilla fence gate SoundEvents read here")
-        if fams[0][0] != fams[1][0]:
-            return None, f"its open and close sounds are of two families ({fams[1][1]}, {fams[0][1]})"
-        return fams[0][0], (f"FenceGateBlock(Properties, SoundEvents.{fams[1][1]}, SoundEvents.{fams[0][1]}), "
-                            "the loader's constructor")
+        return _read_loader_sounds(ctor[2][1], ctor[2][2])
     if len(found) != 1:
         return None, f"its FenceGateBlock constructor ({ctor[1]}) isn't given one WoodType read here"
     v = found[0]
@@ -195,6 +183,52 @@ def read_wood(obj) -> tuple[str | None, str]:
             return None, f"its WoodType's close and open sounds are of two families ({fams[0][1]}, {fams[1][1]})"
         return fams[0][0], f"new WoodType(..., SoundEvents.{fams[0][1]}, SoundEvents.{fams[1][1]})"
     return None, f"its WoodType is built with a constructor not read here ({desc})"
+
+
+def _read_loader_sounds(opened, close) -> tuple[str | tuple[str, str] | None, str]:
+    """Forge/NeoForge's patched ``FenceGateBlock(Properties, openSound, closeSound)``.
+
+    Pick 8a: two vanilla fence gate ``SoundEvents`` of one family -> that family (as a
+    ``WoodType``'s). Pick 9a: any other vanilla ``SoundEvents`` field maps to the Bedrock
+    sound vanilla Bedrock plays for the same event (:mod:`portkit.data.sound_events`), each
+    sound on its own; a field with no Bedrock equivalent there gets the labelled DEFAULT
+    wood fence gate sound of its slot. The result is then the Bedrock (open, close) pair.
+    A sound that isn't a vanilla ``SoundEvents`` constant isn't read: (None, why)."""
+    args = (("open", opened, wood_types.OPEN_EVENTS, 0), ("close", close, wood_types.CLOSE_EVENTS, 1))
+    for _, a, _, _ in args:
+        if not (isinstance(a, blockcode.Const) and a.owner == wood_types.SOUND_EVENTS):
+            return None, ("its loader's FenceGateBlock(Properties, SoundEvent, SoundEvent) is given sounds "
+                          "that aren't vanilla SoundEvents read here")
+    call = f"FenceGateBlock(Properties, SoundEvents.{opened.name}, SoundEvents.{close.name}), the loader's constructor"
+    fams = [table.get(a.name) for _, a, table, _ in args]
+    if fams[0] is not None and fams[0] == fams[1]:
+        return fams[0], call
+    pair, said = [], []
+    for (verb, a, _, at), fam in zip(args, fams):
+        got = sound_events.bedrock_sound(a.name)
+        if got is not None:
+            pair.append(got[0])
+            said.append(f"{verb} {a.name} -> Bedrock {got[0]} ({got[1]})")
+        else:
+            default = wood_types.SOUNDS[DEFAULT_FAMILY][at]
+            pair.append(default)
+            said.append(f"{verb} {a.name} has no Bedrock equivalent read: DEFAULT {default} (wood fence gate)")
+    return (pair[0], pair[1]), f"{call}; " + "; ".join(said)
+
+
+def gate_sounds(family) -> tuple[str, str]:
+    """Bedrock (open, close) sound definitions for a record's ``family``: a Java fence gate
+    sound family, or the (open, close) pair pick 9a read."""
+    if isinstance(family, (tuple, list)):
+        return family[0], family[1]
+    return wood_types.SOUNDS[family]
+
+
+def sound_words(family) -> str:
+    """How a gate's notes name its sounds."""
+    if isinstance(family, (tuple, list)):
+        return f"sounds {family[0]} (open) and {family[1]} (close)"
+    return f"{family.lower().replace('_', ' ')} fence gate sounds"
 
 
 # -- writing ---------------------------------------------------------------
@@ -332,7 +366,7 @@ def table(mod: SourceMod, result: ConversionResult, records: list[dict]) -> None
     ns = mod.namespace
     gates = {}
     for r in records:
-        opened, closed = wood_types.SOUNDS[r["family"]]
+        opened, closed = gate_sounds(r["family"])
         gates[f"{ns}:{r['name']}"] = {"open_sound": opened, "close_sound": closed}
     if not gates:
         return
@@ -359,7 +393,7 @@ def notes(records: list[dict]) -> list[str]:
             f"{r['name']}: fence gate (vanilla FenceGateBlock's rules): placed facing the way the player looks, "
             "open and powered when placed powered, lowered (in_wall) between walls; a use opens it away from "
             "the player or closes it; redstone opens and closes it on a change of power; no collision when "
-            f"open, 1.5 blocks tall when closed; {r['family'].lower().replace('_', ' ')} fence gate sounds, "
+            f"open, 1.5 blocks tall when closed; {sound_words(r['family'])}, "
             f"{how}. in_wall follows players placing and breaking blocks beside it and explosions, not "
             "commands or pistons. Not carried: a wind charge opening it, mobs pathing through it, fences "
             "and walls connecting to it.")
