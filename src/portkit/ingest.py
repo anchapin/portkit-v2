@@ -160,6 +160,7 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
     metadata: dict[str, bytes] = {}
     class_count = 0
     classes: dict[str, bytes] = {}
+    services: dict[str, bytes] = {}
     nested: list[str] = []
     total = 0
 
@@ -184,6 +185,9 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
                 continue
             if name in METADATA_NAMES:
                 metadata[name] = zf.read(info)
+                continue
+            if name.startswith("META-INF/services/") and info.file_size <= _MAX_CLASS_BYTES:
+                services[name] = zf.read(info)
                 continue
             if not name.startswith(RESOURCE_LANES):
                 continue
@@ -216,8 +220,13 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
         class_count=class_count,
         nested_jars=nested,
         icons=icons,
-        classes=_with_meta(ClassIndex(classes), metadata),
+        classes=_with_services(_with_meta(ClassIndex(classes), metadata), services),
     )
+
+
+def _with_services(index: ClassIndex, files: dict[str, bytes]) -> ClassIndex:
+    index.add_services(files)
+    return index
 
 
 def _with_meta(index: ClassIndex, metadata: dict[str, bytes]) -> ClassIndex:

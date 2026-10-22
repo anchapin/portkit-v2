@@ -821,6 +821,11 @@ class Machine:
         # call.
         self.bind_calls: frozenset = frozenset()
         self.binds: list | None = None
+        # A library adapter's reader of a library's builder API
+        # (portkit.adapters, ``renderer_bindings``, #362): called first with
+        # (owner, name, desc, args, static) for every call; a list is the
+        # call's results, None lets the call run as usual.
+        self.call_hook = None
         # (class, static field) -> whether it reads as null until written
         # (see _lazy_null).
         self._lazy: dict = {}
@@ -1384,6 +1389,10 @@ class Machine:
         """Possible results of calling ``owner.name(desc)`` with ``args``
         (receiver first unless static)."""
         recv = None if static or not args else args[0]
+        if self.call_hook is not None:
+            hooked = self.call_hook(owner, name, desc, args, static)
+            if hooked is not None:
+                return hooked
         if self.binds is not None and (owner, name) in self.bind_calls:
             self.binds.append((list(args if static else args[1:]), self._running[-1] if self._running else ""))
             return [None]
@@ -2288,6 +2297,55 @@ class Machine:
             return self.call_lambda(recv.fields["factory"], list(rest))
         return _NOT_HANDLED
 
+    def _service_call(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
+        """``java.util.ServiceLoader`` (Java SE 21), followed while reading
+        registry plumbing (Machine.holders, #362): ``load(service[,
+        loader])`` of a service interface or class of the mod's own finds
+        the providers its ``META-INF/services/<service>`` file lists
+        (:attr:`portkit.bytecode.ClassIndex.services`), in file order;
+        ``stream()`` gives one ``ServiceLoader.Provider`` each, whose
+        ``type()`` is the provider class and ``get()`` a new instance (its
+        public no-argument constructor run), and ``iterator()`` /
+        ``findFirst()`` the instances. A service the mod doesn't declare
+        (another jar on the game's class path may provide it) is unknown."""
+        if owner == "java/util/ServiceLoader" and static and name == "load" and rest \
+                and isinstance(rest[0], ClassLit):
+            service = rest[0].name
+            listed = getattr(self.classes, "services", {}).get(service.replace("/", "."))
+            if not listed or self.classes.is_library(service) or self.classes.raw(service) is None:
+                return [UNKNOWN]
+            return [Obj("__services", {"providers": tuple(listed)})]
+        if isinstance(recv, Obj) and recv.cls == "__services" and not rest:
+            providers = recv.fields["providers"]
+            if name == "stream":
+                return [Strm(tuple(Obj("__service_provider", {"type": p}) for p in providers))]
+            if name == "iterator":
+                return [IterV(Coll(tuple(self._service_instance(p) for p in providers)))]
+            if name == "findFirst":
+                return [Opt(self._service_instance(providers[0]) if providers else None)]
+            return [UNKNOWN] if _arg_count(desc)[1] else [None]
+        if isinstance(recv, Obj) and recv.cls == "__service_provider" and not rest:
+            if name == "type":
+                return [ClassLit(recv.fields["type"])]
+            if name == "get":
+                return [self._service_instance(recv.fields["type"])]
+        return _NOT_HANDLED
+
+    def _service_instance(self, cls: str):
+        """A new instance of a service provider class (ServiceLoader: its
+        public no-argument constructor), or UNKNOWN."""
+        found = self.find_method(cls, "<init>", "()V") if self.is_mod(cls) else None
+        if found is None:
+            return UNKNOWN
+        self.init_class(cls)
+        obj = self._new(cls)
+        try:
+            self.run(*found, [obj])
+        except Unreadable as exc:
+            obj.fields.setdefault("__partial", str(exc))
+        obj._uninit = False
+        return obj
+
     def _new(self, cls: str):
         if cls in ("java/util/EnumMap", "java/util/HashMap", "java/util/LinkedHashMap",
                    "java/util/TreeMap"):
@@ -2592,6 +2650,9 @@ class Machine:
             held = self._holder_call(owner, name, desc, recv, rest, static)
             if held is not _NOT_HANDLED:
                 return held
+            served = self._service_call(owner, name, desc, recv, rest, static)
+            if served is not _NOT_HANDLED:
+                return served
         if owner in ("net/minecraft/world/level/block/Block",) or (
                 owner.startswith(_VANILLA_BLOCK_PACKAGE) and name == "box" and static):
             if name == "box" and static and len(rest) == 6:
@@ -3604,7 +3665,7 @@ class Machine:
         elements (Java SE 21): ``filter``, ``map``, ``count``, ``toList``,
         ``collect`` with ``Collectors.toList`` / ``toUnmodifiableList`` /
         ``toCollection``, ``anyMatch`` / ``allMatch`` / ``noneMatch``,
-        ``findFirst`` and ``forEach``, each in encounter order. Anything
+        ``findFirst``, ``forEach`` and ``toArray``, each in encounter order. Anything
         else, or a function whose value isn't known, is unknown."""
         items = list(strm.items)
         if name == "filter" and len(rest) == 1:
@@ -3614,13 +3675,18 @@ class Machine:
             return [Strm(tuple(i for i, v in zip(items, verdicts) if v))]
         if name == "map" and len(rest) == 1:
             out = [self._apply(rest[0], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [i]) for i in items]
-            if any(o is UNKNOWN or isinstance(o, _Many) for o in out):
-                return [UNKNOWN]
-            return [Strm(tuple(out))]
+            # One element out per element in (Stream#map, Java SE 21): an
+            # element whose value isn't known is unknown, the count is not.
+            return [Strm(tuple(UNKNOWN if isinstance(o, _Many) else o for o in out))]
         if name == "count" and not rest:
             return [len(items)]
         if name == "toList" and not rest:
             return [Coll(tuple(items))]
+        if name == "toArray" and len(rest) <= 1:
+            # Stream#toArray() / toArray(IntFunction generator): a new array
+            # of the elements in encounter order (Java SE 21); the generator
+            # only allocates it.
+            return [Arr(items)]
         if name in ("anyMatch", "allMatch", "noneMatch") and len(rest) == 1:
             verdicts = [self._test(rest[0], i) for i in items]
             if None in verdicts:

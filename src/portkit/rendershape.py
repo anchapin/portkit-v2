@@ -47,7 +47,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .bytecode import ClassIndex, instructions
+from .bytecode import ClassIndex, Handle, Indy, instructions
 
 # getRenderShape descriptors -> the render-shape enum class (any method name).
 _SHAPE_DESCS = {
@@ -359,6 +359,9 @@ BIND_CALLS = frozenset({
     ("net/fabricmc/fabric/api/client/rendereregistry/v1/BlockEntityRendererRegistry", "register"),
 })
 _INVOKES = (0xB6, 0xB7, 0xB8, 0xB9)
+_PROVIDER = "net/minecraft/client/renderer/blockentity/BlockEntityRendererProvider"
+_PROVIDER_CREATE = (f"(L{_PROVIDER}$Context;)"
+                    "Lnet/minecraft/client/renderer/blockentity/BlockEntityRenderer;")
 _BE_TYPES = frozenset({"net/minecraft/world/level/block/entity/BlockEntityType",
                        "net/minecraft/tileentity/TileEntityType"})
 
@@ -393,11 +396,21 @@ def _bind_sites(classes: ClassIndex) -> list:
         if cf is None or not _calls_bind(cf):
             continue
         for m in cf.methods:
-            if m.code is not None and any(
-                    i.op in _INVOKES and (getattr(i.arg, "owner", None), getattr(i.arg, "name", None)) in BIND_CALLS
-                    for i in instructions(cf, m.code)):
+            if m.code is not None and any(_is_bind(i) for i in instructions(cf, m.code)):
                 sites.append((cf, m))
     return sites
+
+
+def _is_bind(insn) -> bool:
+    """Whether ``insn`` calls one of BIND_CALLS, directly or by making a
+    method reference to it (``event::registerBlockEntityRenderer`` handed to a
+    helper that calls it as its own functional interface)."""
+    arg = insn.arg
+    if insn.op in _INVOKES:
+        return (getattr(arg, "owner", None), getattr(arg, "name", None)) in BIND_CALLS
+    if insn.op == 0xBA and isinstance(arg, Indy):
+        return any(isinstance(a, Handle) and (a.ref.owner, a.ref.name) in BIND_CALLS for a in arg.args)
+    return False
 
 
 def _one_class(values, test) -> tuple[str | None, str]:
@@ -413,8 +426,22 @@ def _one_class(values, test) -> tuple[str | None, str]:
 
 def _renderer_of(machine, types: _Types, prov) -> tuple[str | None, str]:
     from .blockcode import Lam, Obj, UNKNOWN, Unreadable
-    if isinstance(prov, Obj):  # 1.12: the renderer object itself
-        return (prov.cls, "") if types.is_renderer(prov.cls) else (None, f"is a {_dotted(prov.cls)}")
+    if isinstance(prov, Obj) and types.is_renderer(prov.cls):  # 1.12: the renderer object itself
+        return prov.cls, ""
+    if isinstance(prov, Obj) and _PROVIDER in types.supers(prov.cls):
+        # A provider object of the mod's own class (a wrapper that caches
+        # the renderer another provider builds): its ``create`` is run, as
+        # the client calls it (BlockEntityRenderers#createEntityRenderers,
+        # MC 1.21.1).
+        machine.steps = 0
+        machine.new_epoch()
+        try:
+            built = machine.call(prov.cls, "create", _PROVIDER_CREATE, [prov, UNKNOWN])
+        except Unreadable as exc:
+            return None, f"is a {_dotted(prov.cls)} whose create can't be followed ({exc})"
+        return _one_class(built, types.is_renderer)
+    if isinstance(prov, Obj):
+        return None, f"is a {_dotted(prov.cls)}"
     if not isinstance(prov, Lam):
         return None, "isn't a value the run reads"
     if prov.handle.kind == 8:  # Renderer::new
@@ -526,9 +553,11 @@ def bindings(classes: ClassIndex | None) -> list[Binding]:
     from .blockcode import Machine
     if classes is None or not len(classes):
         return []
+    from . import adapters
+    extra = adapters.renderer_bindings(classes)
     sites = _bind_sites(classes)
     if not sites:
-        return []
+        return extra
     types = _Types(classes)
     machine = Machine(classes)
     machine.holders = True
@@ -546,7 +575,7 @@ def bindings(classes: ClassIndex | None) -> list[Binding]:
         out += found
         if depth < _CALLER_DEPTH and (not found or any(not (b.renderer and b.entity) for b in found)):
             todo += [(c, cm, depth + 1) for c, cm in _callers(classes, (cf, m))]
-    return out
+    return out + extra
 
 
 def block_entities(classes: ClassIndex, cls: str, renderers: _Types) -> list[str]:

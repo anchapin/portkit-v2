@@ -537,6 +537,27 @@ class ClassIndex:
         # (one {path: bytes} per jar, the mod's first): which classes the
         # loader constructs itself (:mod:`portkit.entrypoints`, #280).
         self.entry_meta: list[dict[str, bytes]] = []
+        # Service provider configuration files (META-INF/services/<service>,
+        # java.util.ServiceLoader): service binary name -> provider classes
+        # (internal names) in file order, the mod's first, then each
+        # library's (#362).
+        self.services: dict[str, list[str]] = {}
+
+    def add_services(self, files: dict[str, bytes]) -> None:
+        """Read ``META-INF/services/<service>`` files ({path: bytes}) as
+        java.util.ServiceLoader does: UTF-8, one provider binary name per
+        line, ``#`` starts a comment, blanks ignored, duplicates once."""
+        for path, raw in sorted(files.items()):
+            service = path.rsplit("/", 1)[-1]
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            found = self.services.setdefault(service, [])
+            for line in text.splitlines():
+                name = line.split("#", 1)[0].strip()
+                if name and name.replace(".", "/") not in found:
+                    found.append(name.replace(".", "/"))
 
     def add_libraries(self, entries: dict[str, bytes]) -> int:
         """Make ``entries`` (a dependency jar's classes) visible to lookups;
@@ -584,6 +605,7 @@ class ClassIndex:
         if source is None:
             return cls(entries)
         source = Path(source)
+        services: dict[str, bytes] = {}
         if source.is_file() and zipfile.is_zipfile(source):
             with zipfile.ZipFile(source) as zf:
                 for info in zf.infolist():
@@ -591,12 +613,20 @@ class ClassIndex:
                     if name.endswith(".class") and not name.startswith("META-INF/") \
                             and info.file_size <= _MAX_CLASS_BYTES:
                         entries[name[:-6]] = zf.read(info)
+                    elif name.startswith("META-INF/services/") and not info.is_dir() \
+                            and info.file_size <= _MAX_CLASS_BYTES:
+                        services[name] = zf.read(info)
         elif source.is_dir():
             for path in source.rglob("*.class"):
                 rel = path.relative_to(source).as_posix()
                 if not rel.startswith("META-INF/") and path.stat().st_size <= _MAX_CLASS_BYTES:
                     entries[rel[:-6]] = path.read_bytes()
-        return cls(entries)
+            svc = source / "META-INF" / "services"
+            if svc.is_dir():
+                services = {f"META-INF/services/{p.name}": p.read_bytes() for p in svc.iterdir() if p.is_file()}
+        index = cls(entries)
+        index.add_services(services)
+        return index
 
     def __len__(self) -> int:
         return len(self._raw)
