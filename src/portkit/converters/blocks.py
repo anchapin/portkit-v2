@@ -3257,6 +3257,11 @@ def _read_bool_code(mod: SourceMod, src, stations: dict, loaded: dict | None = N
     for stem, blockstate in (loaded if loaded is not None else _load_blockstates(src)).items():
         if stem in stations:
             continue
+        gate, gate_why = fence_gates.gate_variants(blockstate)
+        if gate is not None or gate_why:
+            # A fence gate is the paired reader's (#367): its booleans are vanilla
+            # FenceGateBlock's, ported by the gate runtime.
+            continue
         spec, reason = _coded_bool_variants(blockstate)
         if spec is not None:
             specs[stem] = spec

@@ -57,6 +57,14 @@ converter wrote, so the checks test the pack as shipped.
   again a few ticks before its press time is up (still pressed) and after
   (released, lamp unlit), then breaks it and counts the drop. Reported, not
   asserted: what an arrow fired at it does.
+- ``gates``: blocks carrying the portkit fence gate component (#367). Each is
+  ``{"id", "states", "event", "wall", "expect"}`` (``states`` names its ``open``,
+  ``in_wall`` and ``powered`` states; ``event`` the use scriptevent and ``wall`` a
+  wall id from the pack's gate table); the check places it (closed, not in a wall),
+  uses it with the scriptevent as a player facing the gate (it turns to face away
+  and opens) and again (closed), sets a redstone block beside it and removes it
+  (open and powered, then closed), breaks it and counts the drop, then places it
+  again between a wall and air (in_wall).
 - ``ores``: feature rules whose feature is a ``minecraft:ore_feature`` of the
   pack (#281). Each is ``{"rule", "feature", "blocks", "replaces",
   "dimension", "y"}``. Outside the Overworld (the check world is flat) the
@@ -101,6 +109,7 @@ class Checks:
     trapdoors: list[dict] = field(default_factory=list)
     plates: list[dict] = field(default_factory=list)
     buttons: list[dict] = field(default_factory=list)
+    gates: list[dict] = field(default_factory=list)
     ores: list[dict] = field(default_factory=list)
     geodes: list[dict] = field(default_factory=list)
     # "flat" (the default check world) or "default": a generated Overworld,
@@ -120,6 +129,7 @@ class Checks:
             "trapdoors": self.trapdoors,
             "plates": self.plates,
             "buttons": self.buttons,
+            "gates": self.gates,
             "ores": self.ores,
             "geodes": self.geodes,
         }
@@ -401,6 +411,41 @@ def _button_check(behavior_pack: Path, ident: str, block: dict, tables: dict) ->
             "event": row["event"], "expect": _block_expect(behavior_pack, ident, block)}
 
 
+GATE_COMPONENT = ":portkit_fence_gate"
+
+
+def _gate_tables(behavior_pack: Path) -> dict[str, dict]:
+    """Every gate of the pack's fence gate tables, by block id, each with its table's use
+    scriptevent and the wall the check uses (cobblestone wall when the table lists it)."""
+    out: dict[str, dict] = {}
+    for path in sorted((behavior_pack / "scripts" / "portkit" / "data").glob("*_fence_gates.js")):
+        _, sep, body = path.read_text(encoding="utf-8").partition("export default ")
+        if not sep:
+            continue
+        try:
+            table = json.loads(body.strip().rstrip(";"))
+        except ValueError:
+            continue
+        walls = [w for w in table.get("walls") or [] if isinstance(w, str)]
+        wall = "minecraft:cobblestone_wall" if "minecraft:cobblestone_wall" in walls else (walls[0] if walls else None)
+        for ident in table.get("gates") or {}:
+            out[ident] = {"event": table.get("event"), "wall": wall}
+    return out
+
+
+def _gate_check(behavior_pack: Path, ident: str, block: dict, tables: dict) -> dict | None:
+    components = block.get("components") or {}
+    if not any(isinstance(k, str) and k.endswith(GATE_COMPONENT) for k in components):
+        return None
+    states = [s for s in ((block.get("description") or {}).get("states") or {}) if isinstance(s, str)]
+    named = {k: [s for s in states if s.endswith(f":{k}")] for k in ("open", "in_wall", "powered")}
+    row = tables.get(ident)
+    if any(len(v) != 1 for v in named.values()) or row is None or not row.get("event") or not row.get("wall"):
+        return None
+    return {"id": ident, "states": {k: v[0] for k, v in named.items()}, "event": row["event"],
+            "wall": row["wall"], "expect": _block_expect(behavior_pack, ident, block)}
+
+
 def _tags(value) -> set[str]:
     if isinstance(value, dict):
         out = {value["value"]} if value.get("test") == "has_biome_tag" and isinstance(value.get("value"), str) else set()
@@ -512,6 +557,7 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks = Checks()
     plate_tables = _plate_tables(behavior_pack)
     button_tables = _button_tables(behavior_pack)
+    gate_tables = _gate_tables(behavior_pack)
     for path in sorted((behavior_pack / "blocks").rglob("*.json")):
         doc = _read_json(path)
         block = (doc or {}).get("minecraft:block") if isinstance(doc, dict) else None
@@ -545,6 +591,9 @@ def read_checks(behavior_pack: Path) -> Checks:
         button = _button_check(behavior_pack, ident, block, button_tables)
         if button is not None:
             checks.buttons.append(button)
+        gate = _gate_check(behavior_pack, ident, block, gate_tables)
+        if gate is not None:
+            checks.gates.append(gate)
     for path in sorted((behavior_pack / "items").rglob("*.json")):
         doc = _read_json(path)
         item = (doc or {}).get("minecraft:item") if isinstance(doc, dict) else None
@@ -561,6 +610,7 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks.trapdoors.sort(key=lambda d: d["id"])
     checks.plates.sort(key=lambda d: d["id"])
     checks.buttons.sort(key=lambda d: d["id"])
+    checks.gates.sort(key=lambda d: d["id"])
     checks.ores = _ore_checks(behavior_pack)
     checks.geodes = _geode_checks(behavior_pack)
     return checks
