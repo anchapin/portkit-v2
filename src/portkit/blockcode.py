@@ -882,6 +882,11 @@ class Machine:
         lib = getattr(self.classes, "is_library", None)
         return bool(lib and lib(name))
 
+    def _library_method(self, start: str, name: str, desc: str) -> bool:
+        """Whether ``start.name(desc)`` resolves to a dependency jar's method."""
+        found = self.find_method(start, name, desc)
+        return found is not None and self._library(found[0].name)
+
     def has_subclass(self, name: str) -> bool:
         """Whether any class of the mod or its libraries names ``name`` as
         its superclass (a class that can't be parsed counts as one)."""
@@ -1404,7 +1409,14 @@ class Machine:
             self.support_assumed = True
             return [1]
         start = recv.cls if isinstance(recv, Obj) and not special and not static else owner
-        if self.is_mod(start) and self.registrations is not None and self._library(owner):
+        # The method a call to the mod's own class resolves to may be one it
+        # inherits from a dependency jar (a library registry the mod
+        # subclasses, compiled against the subclass): that is a call into the
+        # jar's code too (#368; before a bundled library was attached the same
+        # call was one into code that isn't there).
+        inherited = self.registrations is not None and self.is_mod(start) and not self._library(owner) \
+            and self._library_method(start, name, desc)
+        if self.is_mod(start) and self.registrations is not None and (self._library(owner) or inherited):
             # A call into a dependency jar's code (#280) is a registration
             # the same way a call into code that isn't there is (a name and
             # the block handed to it, see _record), and is followed as well.

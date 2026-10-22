@@ -527,6 +527,9 @@ def convert(
             meta.notes.append(mapping_note)
         # Vanilla Blocks field -> id for the declared game version (#280).
         attach_vanilla_blocks(staged.classes, meta.minecraft or meta.loader_minecraft)
+        bundled_note = staged.bundled_note()
+        if bundled_note:
+            meta.notes.append(bundled_note)
         if libraries:
             meta.notes.extend(attach_libraries(staged.classes, libraries))
 
