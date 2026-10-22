@@ -7,9 +7,9 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 39.1,
-      "files": 3413,
-      "residue": 5317,
+      "coverage": 39.6,
+      "files": 3446,
+      "residue": 5257,
       "errors": 0
     },
     "create": {
@@ -43,9 +43,9 @@
       "errors": 0
     },
     "silent_gear_1165": {
-      "coverage": 37.0,
-      "files": 1115,
-      "residue": 1895,
+      "coverage": 36.9,
+      "files": 1113,
+      "residue": 1900,
       "errors": 0
     },
     "storage_drawers_1122": {
@@ -61,15 +61,15 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 29.6,
-      "files": 1518,
-      "residue": 3613,
+      "coverage": 29.5,
+      "files": 1516,
+      "residue": 3623,
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 52.4,
-      "files": 16671,
-      "residue": 15134,
+      "coverage": 52.5,
+      "files": 16684,
+      "residue": 15115,
       "errors": 0
     },
     "waystones": {
