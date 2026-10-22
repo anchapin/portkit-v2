@@ -821,6 +821,11 @@ class Machine:
         # call.
         self.bind_calls: frozenset = frozenset()
         self.binds: list | None = None
+        # A library adapter's reader of a library's builder API
+        # (portkit.adapters, ``renderer_bindings``, #362): called first with
+        # (owner, name, desc, args, static) for every call; a list is the
+        # call's results, None lets the call run as usual.
+        self.call_hook = None
         # (class, static field) -> whether it reads as null until written
         # (see _lazy_null).
         self._lazy: dict = {}
@@ -1384,6 +1389,10 @@ class Machine:
         """Possible results of calling ``owner.name(desc)`` with ``args``
         (receiver first unless static)."""
         recv = None if static or not args else args[0]
+        if self.call_hook is not None:
+            hooked = self.call_hook(owner, name, desc, args, static)
+            if hooked is not None:
+                return hooked
         if self.binds is not None and (owner, name) in self.bind_calls:
             self.binds.append((list(args if static else args[1:]), self._running[-1] if self._running else ""))
             return [None]

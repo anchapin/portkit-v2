@@ -137,6 +137,11 @@ class Adapter:
     station: StationHooks | None = None
     item_durability: Callable[["SourceMod", frozenset], Mapping[str, tuple[int, str]]] | None = None
     item_armor: Callable[["SourceMod", frozenset], Mapping[str, object]] | None = None
+    # (ClassIndex) -> [portkit.rendershape.Binding]: block-entity renderer
+    # bindings a library makes from its own code for a factory the mod hands
+    # its builder (#362), asked by portkit.rendershape.bindings after the
+    # core's own registration calls.
+    renderer_bindings: Callable[[object], list] | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -250,14 +255,19 @@ def item_armors(mod: "SourceMod", names: frozenset) -> dict[str, object]:
     return found
 
 
+def renderer_bindings(classes) -> list:
+    """Every adapter's ``renderer_bindings`` for ``classes``, in registry order."""
+    return [b for a in ADAPTERS if a.renderer_bindings is not None for b in a.renderer_bindings(classes)]
+
+
 def station_hooks() -> list[StationHooks]:
     """The adapters' ``station`` hooks, in registry order."""
     return [a.station for a in ADAPTERS if a.station is not None]
 
 
 from . import (  # noqa: E402  (each imports Adapter above)
-    alloy_forgery, bclib, betterend, citadel, create, farmersdelight, mantle, mekanism, mythicmetals, silentgear,
-    supplementaries, tconstruct, waystones, zeta,
+    alloy_forgery, bclib, betterend, citadel, create, farmersdelight, mantle, mekanism, mythicmetals, registrate,
+    silentgear, supplementaries, tconstruct, waystones, zeta,
 )
 
 ADAPTERS = (
@@ -270,6 +280,7 @@ ADAPTERS = (
     mantle.ADAPTER,
     mekanism.ADAPTER,
     mythicmetals.ADAPTER,
+    registrate.ADAPTER,
     silentgear.ADAPTER,
     supplementaries.ADAPTER,
     tconstruct.ADAPTER,
