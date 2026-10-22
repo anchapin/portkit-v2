@@ -50,9 +50,12 @@
 //              player's use takes): powered, lamp lit; read again a few ticks
 //              before its press time is up (still powered) and after it
 //              (unpowered, lamp unlit); then broken with `setblock ... air
-//              destroy` and its drop counted. Reported, not asserted: an
-//              arrow spawned flying at it (pressed where its set type lets
-//              arrows press it).
+//              destroy` and its drop counted. The lamp may take one more
+//              redstone tick (two game ticks) to follow (#367: which side of
+//              the circuit tick the press lands on moves with the number of
+//              ticks the earlier checks took; the lag is reported). Reported,
+//              not asserted: an arrow spawned flying at it (pressed where its
+//              set type lets arrows press it).
 //   ore        an ore feature the converter wrote (#281). Asserted
 //              (ore_generate): outside the flat Overworld, fresh chunks of the
 //              rule's dimension are loaded and the ore blocks the world
@@ -80,6 +83,8 @@ import {
 import { CHECKS } from "./data.js";
 
 const BATCH = 16;
+// A redstone tick in game ticks (Bedrock's circuit system updates every second game tick).
+const REDSTONE_TICK = 2;
 const say = (kind, payload) => console.warn(line(kind, payload));
 
 world.afterEvents.worldLoad.subscribe(() => {
@@ -484,6 +489,19 @@ async function run() {
       powered: dim.getBlock(at)?.permutation.getState(powered),
       lamp: dim.getBlock(beside)?.typeId === "minecraft:lit_redstone_lamp",
     });
+    // Bedrock's circuit system moves once a redstone tick (two game ticks), so
+    // where the press lands against it shifts the lamp by a game tick: the lamp
+    // gets up to one more redstone tick to read `want` (#367).
+    const settle = async (state, want) => {
+      let lag = 0;
+      while (lag < REDSTONE_TICK && state.lamp !== want) {
+        await system.waitTicks(1);
+        lag += 1;
+        state.lamp = dim.getBlock(beside)?.typeId === "minecraft:lit_redstone_lamp";
+      }
+      if (lag) state.lamp_lag = lag;
+      return lag;
+    };
     const judge = (check, want, state, lamp) => {
       const verdict = plateVerdict(want, { powered: state.powered });
       if (verdict.ok) tally.record(check, id, true);
@@ -518,9 +536,10 @@ async function run() {
       dim.runCommand(`scriptevent ${event} ${at.x} ${at.y} ${at.z}`);
       await system.waitTicks(2);
       seen.pressed = read();
+      const lag = seen.pressed.powered === true ? await settle(seen.pressed, true) : 0;
       judge("button_press", true, seen.pressed, true);
       if (ticks > 6) {
-        await system.waitTicks(ticks - 6);
+        await system.waitTicks(Math.max(1, ticks - 6 - lag));
         seen.held = read();
         judge("button_hold", true, seen.held, false);
         await system.waitTicks(10);
@@ -528,6 +547,7 @@ async function run() {
         await system.waitTicks(ticks + 4);
       }
       seen.released = read();
+      if (seen.released.powered === false) await settle(seen.released, false);
       judge("button_release", false, seen.released, true);
       // Reported only: an arrow flying down onto it.
       try {
