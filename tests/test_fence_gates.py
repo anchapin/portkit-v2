@@ -164,6 +164,15 @@ def test_read_wood_constant_and_built_in_code():
     assert family is None and "isn't a vanilla constant" in why
     family, why = fence_gates.read_wood(_gate_obj(GATE, props, _se("FENCE_GATE_OPEN"), _se("FENCE_GATE_CLOSE")))
     assert family is None and "isn't given one WoodType" in why
+    # Forge/NeoForge's patched FenceGateBlock(Properties, openSound, closeSound) (pick 8a).
+    loader = blockcode.Obj(GATE)
+    loader.fields["__vanilla_ctor"] = (GATE, wood_types.LOADER_SOUND_CTOR,
+                                       (props, _se("CHERRY_WOOD_FENCE_GATE_OPEN"), _se("CHERRY_WOOD_FENCE_GATE_CLOSE")))
+    family, where = fence_gates.read_wood(loader)
+    assert family == "CHERRY_WOOD" and "loader's constructor" in where
+    loader.fields["__vanilla_ctor"] = (GATE, wood_types.LOADER_SOUND_CTOR,
+                                       (props, _se("FENCE_GATE_OPEN"), blockcode.Const("com/x/Sounds", "GATE")))
+    assert fence_gates.read_wood(loader)[0] is None
 
 
 def test_gate_types_cover_the_sound_table():

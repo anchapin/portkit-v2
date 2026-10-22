@@ -156,6 +156,20 @@ def read_wood(obj) -> tuple[str | None, str]:
     if not ctor or ctor[0] != wood_types.FENCE_GATE_CLASS:
         return None, "its vanilla FenceGateBlock constructor call isn't read"
     found = [a for a in ctor[2] if _is_wood_type(a)]
+    if not found and ctor[1] == wood_types.LOADER_SOUND_CTOR and len(ctor[2]) == 3:
+        # (pick 8a) Forge/NeoForge's patched FenceGateBlock(Properties, openSound, closeSound).
+        opened, close = ctor[2][1], ctor[2][2]
+        fams = []
+        for a, table in ((close, wood_types.CLOSE_EVENTS), (opened, wood_types.OPEN_EVENTS)):
+            if isinstance(a, blockcode.Const) and a.owner == wood_types.SOUND_EVENTS and a.name in table:
+                fams.append((table[a.name], a.name))
+            else:
+                return None, ("its loader's FenceGateBlock(Properties, SoundEvent, SoundEvent) is given sounds "
+                              "that aren't vanilla fence gate SoundEvents read here")
+        if fams[0][0] != fams[1][0]:
+            return None, f"its open and close sounds are of two families ({fams[1][1]}, {fams[0][1]})"
+        return fams[0][0], (f"FenceGateBlock(Properties, SoundEvents.{fams[1][1]}, SoundEvents.{fams[0][1]}), "
+                            "the loader's constructor")
     if len(found) != 1:
         return None, f"its FenceGateBlock constructor ({ctor[1]}) isn't given one WoodType read here"
     v = found[0]

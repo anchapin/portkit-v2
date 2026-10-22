@@ -49,6 +49,14 @@ pack (``converters/fence_gates.py``).
 from __future__ import annotations
 
 CLASS = "net/minecraft/world/level/block/state/properties/WoodType"
+# Forge 1.20.1 and NeoForge 1.21.1 patch a third constructor into FenceGateBlock,
+# ``FenceGateBlock(Properties, SoundEvent openSound, SoundEvent closeSound)``, which plays
+# ``openSound`` when the gate is now open and ``closeSound`` otherwise in both use and
+# neighborChanged (MinecraftForge@a05f555ab8572b81f9914b7e3441ac4f1f71528e and
+# neoforged/NeoForge@916bfcbc540abf1a1b1ba4162905a28aa754894d,
+# patches/.../net/minecraft/world/level/block/FenceGateBlock.java.patch, read 2026-10-22).
+LOADER_SOUND_CTOR = ("(Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;"
+                     "Lnet/minecraft/sounds/SoundEvent;Lnet/minecraft/sounds/SoundEvent;)V")
 FENCE_GATE_CLASS = "net/minecraft/world/level/block/FenceGateBlock"
 SOUND_EVENTS = "net/minecraft/sounds/SoundEvents"
 
