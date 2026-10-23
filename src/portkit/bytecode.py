@@ -452,7 +452,64 @@ class Insn:
 
 
 def instructions(cf: ClassFile, code: bytes) -> list[Insn]:
-    """Decode ``code`` (a method's Code bytes) into instructions."""
+    """Decode ``code`` (a method's Code bytes) into instructions.
+
+    The decoding of each method's code is kept on its class file (#372: a
+    registration run that follows calls into a bundled library decodes the
+    same library methods again on every call), and each call gets a list of
+    its own over the same immutable :class:`Insn` objects, so a caller that
+    changes its list, or tells runs apart by the list's identity, sees what
+    a fresh decode gave it."""
+    return list(_decoded(cf, code)[0])
+
+
+def indexed_instructions(cf: ClassFile, code: bytes) -> tuple[list[Insn], dict[int, int]]:
+    """``instructions(cf, code)`` and {offset: index} into it. The list is
+    the caller's own; the index is shared and must not be changed."""
+    done, at = _decoded(cf, code)
+    return list(done), at
+
+
+def locals_used(cf: ClassFile, code: bytes) -> int:
+    """One past the highest local variable slot ``code`` loads, stores,
+    increments or returns through (``ret``), counting the second slot a
+    long or double may take; 0 when it touches none."""
+    cache = cf.__dict__.get("_locals_used")
+    if cache is None:
+        cache = cf.__dict__["_locals_used"] = {}
+    done = cache.get(code)
+    if done is None:
+        top = -1
+        for insn in _decoded(cf, code)[0]:
+            op = insn.op
+            if 0x15 <= op <= 0x19 or 0x36 <= op <= 0x3A or op == 0xA9:
+                index = insn.arg
+            elif 0x1A <= op <= 0x2D:
+                index = (op - 0x1A) % 4
+            elif 0x3B <= op <= 0x4E:
+                index = (op - 0x3B) % 4
+            elif op == 0x84:
+                index = insn.arg[0]
+            else:
+                continue
+            if isinstance(index, int) and index > top:
+                top = index
+        done = cache[code] = top + 2 if top >= 0 else 0
+    return done
+
+
+def _decoded(cf: ClassFile, code: bytes) -> tuple[tuple[Insn, ...], dict[int, int]]:
+    cache = cf.__dict__.get("_decoded")
+    if cache is None:
+        cache = cf.__dict__["_decoded"] = {}
+    done = cache.get(code)
+    if done is None:
+        insns = tuple(_decode(cf, code))
+        done = cache[code] = (insns, {insn.offset: k for k, insn in enumerate(insns)})
+    return done
+
+
+def _decode(cf: ClassFile, code: bytes) -> list[Insn]:
     out: list[Insn] = []
     pos = 0
     n = len(code)
