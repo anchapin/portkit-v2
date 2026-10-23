@@ -142,6 +142,14 @@ class Adapter:
     # its builder (#362), asked by portkit.rendershape.bindings after the
     # core's own registration calls.
     renderer_bindings: Callable[[object], list] | None = None
+    # (portkit.rendershape._Types) -> (a blockcode.Machine.call_hook, the
+    # mod's classes whose initializers to run again under it): reads the
+    # block entity types a library builds for the mod (its builder chain and
+    # the entry object the chain registers) while a block's own no-argument
+    # method returning its type is run (#366), asked by
+    # portkit.rendershape.typed_entities. The hook gives a type the core
+    # reads as a built one (an ``__betype`` object with its factory).
+    block_entity_types: Callable[[object], tuple] | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -258,6 +266,26 @@ def item_armors(mod: "SourceMod", names: frozenset) -> dict[str, object]:
 def renderer_bindings(classes) -> list:
     """Every adapter's ``renderer_bindings`` for ``classes``, in registry order."""
     return [b for a in ADAPTERS if a.renderer_bindings is not None for b in a.renderer_bindings(classes)]
+
+
+def block_entity_types(types) -> tuple:
+    """(one Machine.call_hook asking every adapter's ``block_entity_types``
+    hook in registry order, the first that answers deciding, or None when no
+    adapter has one; every class an adapter names to initialize again)."""
+    made = [a.block_entity_types(types) for a in ADAPTERS if a.block_entity_types is not None]
+    hooks = [h for h, _ in made if h is not None]
+    again = {c for _, cs in made for c in cs}
+    if not hooks:
+        return None, again
+
+    def hook(owner, name, desc, args, static):
+        for h in hooks:
+            got = h(owner, name, desc, args, static)
+            if got is not None:
+                return got
+        return None
+
+    return hook, again
 
 
 def station_hooks() -> list[StationHooks]:

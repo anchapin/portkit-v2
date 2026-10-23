@@ -34,8 +34,12 @@ Two facts per registered block class:
   the 1.12 renderer object) with a block entity class (the type's factory,
   run, or the 1.12 class literal). A block's block entity classes are the
   ones its ``BlockEntity``-returning methods construct (``newBlockEntity``,
-  1.12 ``createNewTileEntity``) and the ones its own generic signature names;
-  a renderer is the block's only when a read call binds it to exactly one of
+  1.12 ``createNewTileEntity``), the ones its own generic signature names,
+  and the one its own no-argument method returning its block entity type
+  builds (#366, :func:`typed_entities`: a block class whose field picks one
+  of several types, each registered through a library's builder, read by
+  that library's adapter), which stands in for the signature's when read; a
+  renderer is the block's only when a read call binds it to exactly one of
   those classes. A call that can't be read pairs nothing: the block ships as
   before, with no entry (the rule for an unread shape), never a guess from
   the renderer's class signature (which over-matches every block entity
@@ -578,9 +582,11 @@ def bindings(classes: ClassIndex | None) -> list[Binding]:
     return out + extra
 
 
-def block_entities(classes: ClassIndex, cls: str, renderers: _Types) -> list[str]:
-    """Block entity classes a block class constructs or names in its generic signature."""
+def block_entities(classes: ClassIndex, cls: str, renderers: _Types, parts: bool = False):
+    """Block entity classes a block class constructs or names in its generic
+    signature; with ``parts``, (constructed, signature-named) apart."""
     found: list[str] = []
+    named: list[str] = []
     seen: set[str] = set()
     name = cls
     while name and name not in seen:
@@ -599,9 +605,137 @@ def block_entities(classes: ClassIndex, cls: str, renderers: _Types) -> list[str
                         found.append(target)
         if cf.signature:
             params, rest = _signature_parts(cf.signature)
-            found += [x for x in rest if renderers.is_be(x)]
+            named += [x for x in rest if renderers.is_be(x)]
         name = cf.super_name
-    return list(dict.fromkeys(found))
+    if parts:
+        return list(dict.fromkeys(found)), list(dict.fromkeys(named))
+    return list(dict.fromkeys(found + named))
+
+
+# A block's own method returning its block entity type (#366), by descriptor
+# (any name: the method is the mod's, or a library's interface the mod
+# implements); 1.17+ Mojang names and the 1.14-1.16 MCP class name.
+_TYPE_DESCS = frozenset({"()Lnet/minecraft/world/level/block/entity/BlockEntityType;",
+                         "()Lnet/minecraft/tileentity/TileEntityType;"})
+
+
+def _type_methods(machine, cls: str) -> list:
+    """(class, method) a call on a ``cls`` object reaches for each
+    non-static no-argument method returning a block entity type that its
+    classes or their interfaces declare (synthetic bridges left out)."""
+    keys: list = []
+    todo: list = []
+    for c in machine.chain(cls):
+        cf = machine.classes.get(c)
+        if cf is None:
+            break
+        todo += list(cf.interfaces)
+        keys += [(m.name, m.desc) for m in cf.methods
+                 if m.desc in _TYPE_DESCS and not m.access & 0x1008]
+    seen: set = set()
+    while todo:
+        iname = todo.pop(0)
+        cf = None if iname in seen else machine.classes.get(iname)
+        seen.add(iname)
+        if cf is None:
+            continue
+        todo += list(cf.interfaces)
+        keys += [(m.name, m.desc) for m in cf.methods
+                 if m.desc in _TYPE_DESCS and not m.access & 0x1008]
+    out = []
+    for name, desc in dict.fromkeys(keys):
+        found = machine.find_method(cls, name, desc) or machine.default_method(cls, name, desc)
+        if found is not None and not found[1].access & 0x0008:
+            out.append(found)
+    return out
+
+
+class _TypedRun:
+    """The readings of :func:`typed_entities` over one registration run's
+    machine (#366): opened once, it saves the machine's static state, turns
+    on registry holders and type builders (Machine.holders) and the library
+    adapters' type hooks (portkit.adapters.block_entity_types), and runs
+    again, under them, the class initializers the adapters name (the mod's
+    classes that register types through the library: the registration run
+    ran them without the library's reading, so their entries hold no type
+    the core can read). Closing puts the machine back as it was, so the
+    readers that share the run see it unchanged."""
+
+    def __init__(self, machine, types: _Types):
+        self.machine, self.types, self.saved = machine, types, None
+
+    def __enter__(self):
+        from . import adapters
+        from .blockcode import Unreadable
+        m = self.machine
+        self.saved = (dict(m.statics), set(m._clinit_done), set(m._clinit_failed), m.holders, m.call_hook)
+        hook, again = adapters.block_entity_types(self.types)
+        m.holders, m.call_hook = True, hook
+        for name in sorted(again):
+            m._clinit_done.discard(name)
+            m._clinit_failed.discard(name)
+            m.steps = 0
+            try:
+                m.init_class(name)
+            except Unreadable:
+                m._clinit_failed.add(name)
+        return self
+
+    def __exit__(self, *exc):
+        m = self.machine
+        m.statics, m._clinit_done, m._clinit_failed, m.holders, m.call_hook = self.saved
+        return False
+
+    def entity(self, obj) -> tuple[str | None, str]:
+        """The block entity class (slashed) ``obj``'s type methods build, or
+        None with why (see :func:`typed_entities`)."""
+        from .blockcode import Unreadable
+        machine, types = self.machine, self.types
+        methods = _type_methods(machine, obj.cls)
+        if not methods:
+            return None, ""
+        found: set = set()
+        for cf, m in methods:
+            where = f"{_dotted(cf.name)}#{m.name}"
+            machine.steps = 0
+            machine.new_epoch()
+            try:
+                values = machine.run(cf, m, [obj])
+            except Unreadable as exc:
+                return None, f"{where} can't be followed ({exc})"
+            if not values:
+                return None, f"{where} returns no value the run reads"
+            for v in values:
+                cls, why = _entity_of(machine, types, v)
+                if cls is None:
+                    return None, f"the type {where} returns {why}"
+                found.add(cls)
+        if len(found) != 1:
+            return None, ("its type methods build different block entities: "
+                          + ", ".join(sorted(map(_dotted, found))))
+        return found.pop(), ""
+
+
+def typed_entities(machine, types: _Types, objs: dict) -> dict:
+    """Per name of ``objs`` (name -> block objects of one class, built by
+    ``machine``'s registration run), the block entity class (slashed) the
+    type its own no-argument method returning a block entity type gives is
+    built to make (#366): one block class whose field picks which of two
+    registered entries' ``get()`` it returns, each a type a library's
+    builder makes (read by that library's adapter). A name is
+    left out unless every path of every such method, on every object,
+    returns a type whose factory builds one class, the same one: a type that
+    isn't read pairs nothing (never a guess from the signature)."""
+    out: dict = {}
+    if machine is None or not objs:
+        return out
+    with _TypedRun(machine, types) as run:
+        for name, group in objs.items():
+            got = {run.entity(o) for o in group}
+            clss = {c for c, _ in got}
+            if len(clss) == 1 and None not in clss:
+                out[name] = clss.pop()
+    return out
 
 
 def read(classes: ClassIndex | None, registered: dict, minecraft: str | None,
@@ -617,6 +751,7 @@ def read(classes: ClassIndex | None, registered: dict, minecraft: str | None,
     vanilla = vanilla_for(minecraft)
     types: _Types | None = None
     bound: dict | None = None
+    model: dict = {}
     for name, (objs, why) in registered.items():
         r = RenderReading(name)
         out[name] = r
@@ -642,10 +777,19 @@ def read(classes: ClassIndex | None, registered: dict, minecraft: str | None,
                 for b in bindings(classes):
                     if b.renderer and b.entity:
                         bound.setdefault(b.entity, set()).add((b.renderer, b.where))
-            bes = block_entities(classes, clss[0], types)
-            r.block_entities = tuple(_dotted(b) for b in bes)
-            pairs = {p for b in r.block_entities for p in bound.get(b, ())}
-            r.renderers = tuple(sorted({p[0] for p in pairs}))
-            r.bound_by = tuple(sorted({p[1] for p in pairs}))
-            r.bound_to = tuple(b for b in r.block_entities if b in bound)
+            model[name] = (objs, block_entities(classes, clss[0], types, parts=True))
+    # Second pass, once every render shape is read on the machine as the
+    # run left it: each MODEL block's own type method (#366).
+    typed = typed_entities(machine, types, {n: objs for n, (objs, _) in model.items()}) if model else {}
+    for name, (_objs, (made, named)) in model.items():
+        r = out[name]
+        # A type read from the block's own method stands in for the classes
+        # its signature names (#366): the signature may name an abstract
+        # base, or a base of the type the block really makes.
+        bes = list(dict.fromkeys(made + ([typed[name]] if name in typed else named)))
+        r.block_entities = tuple(_dotted(b) for b in bes)
+        pairs = {p for b in r.block_entities for p in bound.get(b, ())}
+        r.renderers = tuple(sorted({p[0] for p in pairs}))
+        r.bound_by = tuple(sorted({p[1] for p in pairs}))
+        r.bound_to = tuple(b for b in r.block_entities if b in bound)
     return out
