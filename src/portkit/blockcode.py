@@ -3248,9 +3248,10 @@ class Machine:
         javac's form) whose body only reads: it loads and stores locals no
         code outside the body loads, reads fields, casts, compares and jumps
         within the body or back to the head, and calls only this iterator's
-        ``next``/``hasNext``/``remove``, java.util's reading methods
-        (_COLLECTION_READS) and trivial getters of the jar's classes (a
-        method that returns one field of its receiver, a record accessor).
+        ``next``/``hasNext``/``remove``, java.util list reads that run no
+        element code (_LOOP_COLLECTION_READS) and trivial getters of the
+        jar's classes (a method that returns one field of its receiver, a
+        record accessor).
         Such a loop's only effect is removals from the list it iterates
         (#365)."""
         frame = self._frame
@@ -3302,7 +3303,7 @@ class Machine:
                             or prev.op not in (0x19, 0x2A, 0x2B, 0x2C, 0x2D):
                         return False
                     continue
-                if ref.owner in _COLLECTION_TYPES | _READ_SETS and ref.name in _COLLECTION_READS:
+                if ref.owner in _COLLECTION_TYPES and ref.name in _LOOP_COLLECTION_READS:
                     continue
                 if self._getter(ref):
                     continue
@@ -4028,7 +4029,9 @@ _COLLECTION_READS = frozenset({"iterator", "listIterator", "size", "isEmpty", "g
 _LOOP_READ_OPS = frozenset({0x00, *range(0x01, 0x14), *range(0x2E, 0x36), *range(0x57, 0x60),
                             *range(0x60, 0x6C), *range(0x74, 0x84), *range(0x85, 0x99), 0xB4, 0xBE, 0xC0,
                             0xC1})
-_READ_SETS = frozenset({"java/util/Set", "java/util/HashSet", "java/util/LinkedHashSet"})
+# java.util reads that call no code of the elements' (contains/indexOf call
+# equals, forEach a lambda): what a read-only loop body may call on a list.
+_LOOP_COLLECTION_READS = frozenset({"size", "isEmpty", "get", "getFirst", "getLast"})
 
 
 def _reads_only(code: list, k: int) -> bool:
