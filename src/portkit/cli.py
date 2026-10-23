@@ -64,8 +64,6 @@ def _run_cost_cap(per_run: float | None, remaining: float | None) -> float | Non
 
 
 def cmd_convert(args) -> int:
-    from portkit import _prof372  # TEMPORARY (#372 profiling)
-    _prof372.install()
     repeat = getattr(args, "repeat", 1) or 1
     total_cap = getattr(args, "agent_max_total_cost", None)
     if repeat < 1:
