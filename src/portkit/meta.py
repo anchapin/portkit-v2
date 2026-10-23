@@ -40,10 +40,13 @@ class ModMetadata:
     # The Minecraft version the mod declares it runs on (the lower bound of a
     # range, the newest of a list), as written; None when it doesn't say (#160).
     minecraft: str | None = None
-    # A NeoForge jar that declares no minecraft dependency: the game version
-    # its required ``neoforge`` dependency's lower bound names under NeoForge's
-    # versioning (see :func:`_neoforge_minecraft`), else None. Only the vanilla
-    # Blocks table reads it (#280); ``minecraft`` stays as declared.
+    # A NeoForge or Forge jar that declares no minecraft dependency: the game
+    # version its required ``neoforge`` dependency's lower bound names under
+    # NeoForge's versioning (see :func:`_neoforge_minecraft`, #280), or its
+    # ``forge`` dependency's lower bound per Forge's release list (see
+    # :func:`_forge_minecraft`, #364, a DEFAULT the notes name), else None.
+    # Name mappings and the vanilla reference data read it; ``minecraft``
+    # stays as declared.
     loader_minecraft: str | None = None
     notes: list[str] = field(default_factory=list)
     # Every mod the file declares (id -> version as written), and the mods it
@@ -168,6 +171,36 @@ def _neoforge_minecraft(data: dict) -> str | None:
     return None
 
 
+def _forge_minecraft(data: dict, notes: list[str]) -> str | None:
+    """The Minecraft version a Forge jar's required ``forge`` dependency's
+    lower bound is built for, when the file names no ``minecraft`` dependency
+    of its own (#364): Forge's own release list (``1.20.1-47.1.3``, see
+    :mod:`portkit.data.forge_versions`) names one game version per major. The
+    result is a DEFAULT and the notes say so; None, with no guess, when the
+    major isn't in the table or the table isn't cached."""
+    if _toml_minecraft(data) is not None:
+        return None
+    deps = data.get("dependencies")
+    for group in deps.values() if isinstance(deps, dict) else []:
+        for dep in group if isinstance(group, list) else []:
+            if isinstance(dep, dict) and dep.get("modId") == "forge" \
+                    and isinstance(dep.get("versionRange"), str):
+                from .data import forge_versions
+
+                found = forge_versions.minecraft_for(dep["versionRange"])
+                if found:
+                    notes.append(
+                        f"declares no Minecraft version; game version {found} is a DEFAULT inferred "
+                        f"from its forge dependency {dep['versionRange']!r} (every Forge release of that "
+                        f"major is built for {found}, per Forge's maven-metadata.xml) and is used for "
+                        f"name mappings and vanilla reference data")
+                elif forge_versions.table() is None:
+                    notes.append("declares no Minecraft version; its forge dependency could name one, but "
+                                 "the Forge release table isn't cached (run `portkit reference fetch`)")
+                return found
+    return None
+
+
 def _text(value) -> str | None:
     """A free-text field, trimmed; None when empty or not a string."""
     if not isinstance(value, str):
@@ -254,6 +287,14 @@ def _quilt_minecraft(depends) -> str | None:
     return None
 
 
+def _loader_minecraft(data: dict, loader: str, notes: list[str]) -> str | None:
+    if loader == "neoforge":
+        return _neoforge_minecraft(data)
+    if loader == "forge":
+        return _forge_minecraft(data, notes)
+    return None
+
+
 def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
     data = tomllib.loads(blob.decode("utf-8", "replace"))
     mods = data.get("mods") or []
@@ -261,7 +302,7 @@ def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
         notes.append(f"{loader} metadata declares no [[mods]] entry")
         return ModMetadata(loader=loader, minecraft=_toml_minecraft(data), notes=notes,
                            mods={}, requires=_toml_requires(data),
-                           loader_minecraft=_neoforge_minecraft(data) if loader == "neoforge" else None)
+                           loader_minecraft=_loader_minecraft(data, loader, notes))
     if len(mods) > 1:
         ids = ", ".join(str(m.get("modId")) for m in mods)
         notes.append(f"{loader} metadata declares {len(mods)} mods ({ids}); using the first")
@@ -273,7 +314,7 @@ def _toml(blob: bytes, loader: str, notes: list[str]) -> ModMetadata:
         version_raw=first.get("version"),
         loader=loader,
         minecraft=_toml_minecraft(data),
-        loader_minecraft=_neoforge_minecraft(data) if loader == "neoforge" else None,
+        loader_minecraft=_loader_minecraft(data, loader, notes),
         notes=notes,
         mods=_declared({m.get("modId"): m.get("version") for m in mods if isinstance(m, dict)}),
         requires=_toml_requires(data),

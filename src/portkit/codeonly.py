@@ -341,7 +341,7 @@ def _attach_mappings(classes, source: Path) -> None:
         elif source.is_dir():
             metadata = {n: (source / n).read_bytes() for n in METADATA_NAMES if (source / n).is_file()}
         meta = parse(metadata, "")
-        attach(classes, meta.loader, meta.minecraft)
+        attach(classes, meta.loader, meta.minecraft or meta.loader_minecraft)
         from .data.vanilla_blocks import attach as attach_vanilla_blocks
         attach_vanilla_blocks(classes, meta.minecraft or meta.loader_minecraft)
     except Exception:  # noqa: BLE001 - without a table the names read as compiled

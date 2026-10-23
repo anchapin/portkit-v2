@@ -522,7 +522,7 @@ def convert(
 
         # Forge SRG / Fabric intermediary jars: read their code in Mojang's
         # names (#235), or say why the readers can't.
-        mapping_note = attach_mappings(staged.classes, meta.loader, meta.minecraft)
+        mapping_note = attach_mappings(staged.classes, meta.loader, meta.minecraft or meta.loader_minecraft)
         if mapping_note:
             meta.notes.append(mapping_note)
         # Vanilla Blocks field -> id for the declared game version (#280).
