@@ -437,12 +437,19 @@ def _renderer_of(machine, types: _Types, prov) -> tuple[str | None, str]:
         # the renderer another provider builds): its ``create`` is run, as
         # the client calls it (BlockEntityRenderers#createEntityRenderers,
         # MC 1.21.1).
+        # Each read is the client's first call (#365): a wrapper that caches
+        # what it built in its own fields (a WeakReference) gets them back as
+        # its constructor left them, so one bound to several types reads the
+        # same on each.
+        saved = dict(prov.fields), getattr(prov, "_defaults", False)
         machine.steps = 0
         machine.new_epoch()
         try:
             built = machine.call(prov.cls, "create", _PROVIDER_CREATE, [prov, UNKNOWN])
         except Unreadable as exc:
             return None, f"is a {_dotted(prov.cls)} whose create can't be followed ({exc})"
+        finally:
+            prov.fields, prov._defaults = saved
         return _one_class(built, types.is_renderer)
     if isinstance(prov, Obj):
         return None, f"is a {_dotted(prov.cls)}"
