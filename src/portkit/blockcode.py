@@ -4544,7 +4544,10 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     for name in [*names, *sorted(set(regs) - set(names))]:
         objs, others = [], []
         why = ""
+        asked = name in names
         for value in regs.get(name, []):
+            if _never_block(machine, value, asked):
+                continue
             machine.steps = 0
             machine.new_epoch()
             try:
@@ -4578,14 +4581,65 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     return machine, {n: out[n] for n in names}
 
 
-def read_blocks(classes: ClassIndex | None, names: list[str]) -> dict[str, Reading]:
+def _never_block(machine: Machine, value, asked: bool) -> bool:
+    """Whether building a registration value can be skipped (#375): a lambda
+    or method reference whose call returns nothing or a primitive (a
+    builder's data-generator or on-register callback) can never be a block
+    object; nor, for a name no reader asked for, one whose call returns a
+    class outside the block classes (an item, a block entity type), as its
+    declared return type says (the call site's dynamic type, else the
+    method's). For an asked name such a value is still built: what it
+    builds names the reason the name isn't a block. A constructor
+    reference, an Object or interface return, or a class the run can't
+    place is built."""
+    if not isinstance(value, Lam) or value.handle.kind == 8:
+        return False
+    desc = value.itype or value.handle.ref.desc
+    ret = desc[desc.rindex(")") + 1:]
+    if ret == "V" or ret[0] not in "L[":
+        return True
+    if asked:
+        return False
+    if ret[0] == "[":
+        return True
+    cls = ret[1:-1]
+    if cls == "java/lang/Object" or machine.is_block_class(cls):
+        return False
+    cf = machine.classes.get(cls)
+    if cf is None:
+        # Not in the jar or its libraries: a vanilla class the machine
+        # doesn't take for a block class isn't one; any other is unknown.
+        return cls.startswith("net/minecraft/")
+    if cf.access & 0x0200:
+        return False
+    # A jar class whose superclasses end in a class outside the jar, its
+    # libraries and the game (a dependency that isn't attached) can't be
+    # placed: it may be a block class.
+    last = machine.chain(cls)[-1]
+    return last.startswith(("net/minecraft/", "java/"))
+
+
+def _from_run(run, classes: ClassIndex, names: list[str]):
+    """``run``'s machine and its registrations for ``names`` when ``run`` is
+    a :func:`_registered` result over the same classes that covers every one
+    of them (#375: the converter's one run over every blockstate of the mod,
+    shared by its block readers); otherwise a run of their own. A reader on
+    a shared run sees the machine as the readers before it left it (the
+    class state they initialized, the objects they read), as the readers
+    that shared the run before #375 (#280) already did."""
+    if run is not None and run[0].classes is classes and all(n in run[1] for n in names):
+        return run[0], {n: run[1][n] for n in names}
+    return _registered(classes, names)
+
+
+def read_blocks(classes: ClassIndex | None, names: list[str], run=None) -> dict[str, Reading]:
     """A :class:`Reading` per blockstate name in ``names``."""
     readings = {n: Reading(n) for n in names}
     if classes is None or not len(classes):
         for r in readings.values():
             r.placement_why = r.shape_why = r.collision_why = "the mod ships no class files"
         return readings
-    machine, registered = _registered(classes, names)
+    machine, registered = _from_run(run, classes, names)
     for name, r in readings.items():
         objs, why = registered[name]
         if not objs:
@@ -4776,7 +4830,7 @@ def _light_values(results: list) -> set | None:
 
 
 def read_light(classes: ClassIndex | None, names: list[str],
-               drawn: dict[str, set] | None = None) -> dict[str, LightReading]:
+               drawn: dict[str, set] | None = None, run=None) -> dict[str, LightReading]:
     """A :class:`LightReading` per blockstate name in ``names``. ``drawn`` maps
     a name to the Java state names its converted Bedrock block carries (the
     ones its blockstate draws); a light that depends on one of those isn't
@@ -4786,7 +4840,7 @@ def read_light(classes: ClassIndex | None, names: list[str],
         for r in readings.values():
             r.why = "the mod ships no class files"
         return readings
-    machine, registered = _registered(classes, names)
+    machine, registered = _from_run(run, classes, names)
     for name, r in readings.items():
         objs, why = registered[name]
         if not objs:
@@ -4975,7 +5029,7 @@ def _with(state, bools: tuple, combo: tuple) -> "State":
     return base
 
 
-def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple]) -> dict[str, StateReading]:
+def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple], run=None) -> dict[str, StateReading]:
     """A :class:`StateReading` per blockstate name in ``bools`` (name ->
     the boolean state names its blockstate draws)."""
     names = list(bools)
@@ -4985,7 +5039,7 @@ def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple]) -> di
             r.placement_why = r.shape_why = r.collision_why = r.toggle_why = r.light_why = \
                 "the mod ships no class files"
         return readings
-    machine, registered = _registered(classes, names)
+    machine, registered = _from_run(run, classes, names)
     for name, r in readings.items():
         objs, why = registered[name]
         if not objs:
@@ -5377,14 +5431,14 @@ def _implements(machine: Machine, cls: str, iface: str) -> bool | None:
     return False
 
 
-def read_water(classes: ClassIndex | None, names: list[str]) -> dict[str, WaterReading]:
+def read_water(classes: ClassIndex | None, names: list[str], run=None) -> dict[str, WaterReading]:
     """A :class:`WaterReading` per blockstate name in ``names``."""
     readings = {n: WaterReading(n) for n in names}
     if classes is None or not len(classes):
         for r in readings.values():
             r.why = "the mod ships no class files"
         return readings
-    machine, registered = _registered(classes, names)
+    machine, registered = _from_run(run, classes, names)
     for name, r in readings.items():
         objs, why = registered[name]
         if not objs:
@@ -5547,14 +5601,14 @@ def _with_key(state: State, kind: str, key: tuple) -> State:
     return state.set("face", Const(_ATTACH_FACE, face.upper()))
 
 
-def read_directional(classes: ClassIndex | None, kinds: dict[str, str]) -> dict[str, DirReading]:
+def read_directional(classes: ClassIndex | None, kinds: dict[str, str], run=None) -> dict[str, DirReading]:
     """A :class:`DirReading` per blockstate name in ``kinds`` (name -> kind)."""
     readings = {n: DirReading(n, kind=k) for n, k in kinds.items()}
     if classes is None or not len(classes):
         for r in readings.values():
             r.rule_why = r.shape_why = r.collision_why = "the mod ships no class files"
         return readings
-    machine, registered = _registered(classes, list(kinds))
+    machine, registered = _from_run(run, classes, list(kinds))
     for name, r in readings.items():
         objs, why = registered[name]
         if not objs:
@@ -5988,14 +6042,14 @@ def _menu_built(machine: Machine, be: str) -> tuple[str, str, str]:
     return menus.pop().replace("/", "."), where, ""
 
 
-def read_containers(classes: ClassIndex | None, names: list[str]) -> dict[str, ContainerReading]:
+def read_containers(classes: ClassIndex | None, names: list[str], run=None) -> dict[str, ContainerReading]:
     """A :class:`ContainerReading` per blockstate name in ``names``."""
     readings = {n: ContainerReading(n) for n in names}
     if classes is None or not len(classes):
         for r in readings.values():
             r.why = "the mod ships no class files"
         return readings
-    machine, registered = _registered(classes, names)
+    machine, registered = _from_run(run, classes, names)
     # Block entity types are registered apart from blocks; follow them fresh.
     machine.holders = True
     machine.statics.clear()

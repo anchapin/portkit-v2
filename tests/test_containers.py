@@ -215,7 +215,7 @@ def test_emitted_block_passes_the_schema(tmp_path):
 def test_water_added_by_the_block_converter_keeps_its_clipping(tmp_path, monkeypatch):
     # A waterlogged crate that holds water (read_water stubbed to say so):
     # _add_water runs before the container's format move.
-    monkeypatch.setattr(blocks.blockcode, "read_water", lambda classes, names: {
+    monkeypatch.setattr(blocks.blockcode, "read_water", lambda classes, names, run=None: {
         n: blockcode.WaterReading(n, holds=True, source="test") for n in names})
     mod = _mod(tmp_path)
     ns = mod.namespace
