@@ -460,13 +460,25 @@ def instructions(cf: ClassFile, code: bytes) -> list[Insn]:
     its own over the same immutable :class:`Insn` objects, so a caller that
     changes its list, or tells runs apart by the list's identity, sees what
     a fresh decode gave it."""
+    return list(_decoded(cf, code)[0])
+
+
+def indexed_instructions(cf: ClassFile, code: bytes) -> tuple[list[Insn], dict[int, int]]:
+    """``instructions(cf, code)`` and {offset: index} into it. The list is
+    the caller's own; the index is shared and must not be changed."""
+    done, at = _decoded(cf, code)
+    return list(done), at
+
+
+def _decoded(cf: ClassFile, code: bytes) -> tuple[tuple[Insn, ...], dict[int, int]]:
     cache = cf.__dict__.get("_decoded")
     if cache is None:
         cache = cf.__dict__["_decoded"] = {}
     done = cache.get(code)
     if done is None:
-        done = cache[code] = tuple(_decode(cf, code))
-    return list(done)
+        insns = tuple(_decode(cf, code))
+        done = cache[code] = (insns, {insn.offset: k for k, insn in enumerate(insns)})
+    return done
 
 
 def _decode(cf: ClassFile, code: bytes) -> list[Insn]:

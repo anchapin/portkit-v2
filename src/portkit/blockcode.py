@@ -41,11 +41,12 @@ Vanilla behaviour the interpreter supplies itself, read from the Minecraft
 """
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 
 from . import entrypoints
-from .bytecode import ClassFile, ClassIndex, Handle, Indy, Insn, Method, Ref, instructions
+from .bytecode import ClassFile, ClassIndex, Handle, Indy, Insn, Method, Ref, indexed_instructions, instructions
 
 # Java's Direction enum, in declaration (ordinal) order.
 DIRECTIONS = ("down", "up", "north", "south", "west", "east")
@@ -614,6 +615,7 @@ class Frame:
         return Frame(self.pc, list(self.locals), list(self.stack), True, self.effects)
 
 
+@functools.lru_cache(maxsize=None)
 def _arg_count(desc: str) -> tuple[int, bool]:
     """(number of arguments, returns a value) for a method descriptor."""
     i, n = 1, 0
@@ -757,6 +759,10 @@ class Machine:
         self.classes = classes
         self._subclassed: set | None = None  # see has_subclass
         self._found: dict = {}  # see find_method
+        # Per-name answers of is_mod / _library and chains (see those).
+        self._mod_names: dict = {}
+        self._lib_names: dict = {}
+        self._chains: dict = {}
         # Two-pass reading of lists shared between top-level runs (#280,
         # see _mark_shared): which pass, whether the current run read one,
         # which shared lists it appended to, and the methods that stopped or
@@ -863,11 +869,22 @@ class Machine:
     # -- classes ------------------------------------------------------------
 
     def is_mod(self, name: str | None) -> bool:
-        return name is not None and self.classes.get(name) is not None
+        # The classes don't change while a machine runs (#372: kept per name).
+        try:
+            return self._mod_names[name]
+        except KeyError:
+            out = self._mod_names[name] = name is not None and self.classes.get(name) is not None
+            return out
 
     def chain(self, name: str) -> list[str]:
         """``name`` and its superclasses, as far as the mod's classes go,
         then the first vanilla superclass."""
+        done = self._chains.get(name)
+        if done is None:
+            done = self._chains[name] = tuple(self._chain(name))
+        return list(done)
+
+    def _chain(self, name: str) -> list[str]:
         out = []
         seen = set()
         while name and name not in seen:
@@ -880,8 +897,12 @@ class Machine:
         return out
 
     def _library(self, name: str) -> bool:
-        lib = getattr(self.classes, "is_library", None)
-        return bool(lib and lib(name))
+        try:
+            return self._lib_names[name]
+        except KeyError:
+            lib = getattr(self.classes, "is_library", None)
+            out = self._lib_names[name] = bool(lib and lib(name))
+            return out
 
     def _library_method(self, start: str, name: str, desc: str) -> bool:
         """Whether ``start.name(desc)`` resolves to a dependency jar's method."""
@@ -1849,8 +1870,7 @@ class Machine:
         return out
 
     def _run(self, cf: ClassFile, m: Method, args: list) -> list:
-        code = instructions(cf, m.code)
-        at = {insn.offset: k for k, insn in enumerate(code)}
+        code, at = indexed_instructions(cf, m.code)
         self._code.append((self.depth, code, at))
         self._running.append(cf.name)
         try:
@@ -1884,6 +1904,7 @@ class Machine:
                     recv.fields = _join_fields(ends)
 
     def _run_paths(self, cf, m, code, at, work, results, paths, stopped, recv, ends) -> list:
+        last = len(code) - 1
         while work:
             frame = work.pop()
             if recv is not None:
@@ -1893,10 +1914,11 @@ class Machine:
                     self.steps += 1
                     if self.steps > _MAX_STEPS:
                         raise Unreadable(_TOO_MUCH)
-                    insn = code[at[frame.pc]] if frame.pc in at else None
-                    if insn is None:
+                    k = at.get(frame.pc)
+                    if k is None:
                         raise Unreadable(f"jump into the middle of an instruction in {cf.name}.{m.name}")
-                    nxt = code[at[frame.pc] + 1].offset if at[frame.pc] + 1 < len(code) else None
+                    insn = code[k]
+                    nxt = code[k + 1].offset if k < last else None
                     outcome = self.step(cf, insn, frame, nxt)
                     if outcome is None:
                         continue
@@ -4492,6 +4514,7 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     unread: dict[str, str] = {}
     concat_only: set = set()
     plain: set = set()
+    found_ids: dict[str, set] = {}
     for reg in machine.registrations:
         if reg.value is None:
             if not reg.concat:
@@ -4501,8 +4524,11 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
         (concat_only if reg.concat else plain).add(id(reg.value))
         found = regs.setdefault(reg.name, [])
         # The same object handed on through a library's own registry
-        # methods (each recorded, #280) is one registration.
-        if not any(v is reg.value for v in found):
+        # methods (each recorded, #280) is one registration (kept by
+        # identity in a set beside the list, #372).
+        ids = found_ids.setdefault(reg.name, set())
+        if id(reg.value) not in ids:
+            ids.add(id(reg.value))
             found.append(reg.value)
     machine.registrations = None
 
