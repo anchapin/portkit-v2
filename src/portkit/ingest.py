@@ -6,9 +6,11 @@ module stages that tree onto disk and is honest about everything it drops.
 
 Nothing here guesses. Compiled code and jar-in-jar dependencies are reported as
 residue rather than silently ignored. The classes and service files of the
-jar-in-jar libraries a Forge/NeoForge mod lists in META-INF/jarjar/metadata.json
-are attached to the class index as library classes (#368, portkit.nested_jars),
-read-only like a --library jar; their resources are not staged.
+jar-in-jar libraries a mod's loader metadata lists (Forge/NeoForge
+META-INF/jarjar/metadata.json, #368; Fabric fabric.mod.json "jars" and Quilt
+quilt.mod.json quilt_loader.jars, #373) are attached to the class index as
+library classes (portkit.nested_jars), read-only like a --library jar; their
+resources are not staged.
 """
 from __future__ import annotations
 
@@ -66,18 +68,26 @@ class Ingested:
     # block's code says when nothing else does (portkit.blockcode). They are
     # still reported as residue: reading a pattern is not converting code.
     classes: ClassIndex = field(default_factory=lambda: ClassIndex({}))
-    # The Forge/NeoForge jar-in-jar libraries (META-INF/jarjar/metadata.json)
-    # whose classes and service files were attached to ``classes`` as library
-    # classes (#368), path -> classes added. They stay nested_jar residue.
+    # The jar-in-jar libraries the mod's loader metadata lists (Forge/NeoForge
+    # META-INF/jarjar/metadata.json, #368; fabric.mod.json / quilt.mod.json
+    # jars, #373) whose classes and service files were attached to ``classes``
+    # as library classes, path -> classes added. They stay nested_jar residue.
     bundled: dict[str, int] = field(default_factory=dict)
+    # path -> the metadata file that listed it (absent: jarjar's).
+    bundled_from: dict[str, str] = field(default_factory=dict)
 
     def bundled_note(self) -> str | None:
         """The conversion note naming the jar-in-jar libraries read, or None."""
         if not self.bundled:
             return None
-        jars = ", ".join(f"{p.rsplit('/', 1)[-1]} ({n} classes)" for p, n in self.bundled.items())
-        return (f"Read with the jar-in-jar libraries the mod bundles (META-INF/jarjar/metadata.json): {jars}; "
-                "read-only for registrations, base classes and services, nothing of them is shipped (#368).")
+        groups: dict[str, list[str]] = {}
+        for p, n in self.bundled.items():
+            listing = self.bundled_from.get(p, nested_jars.JARJAR_METADATA)
+            groups.setdefault(listing, []).append(f"{p.rsplit('/', 1)[-1]} ({n} classes)")
+        where = "; ".join(f"({listing}): {', '.join(jars)}" for listing, jars in groups.items())
+        issues = "#368" if set(groups) == {nested_jars.JARJAR_METADATA} else "#368, #373"
+        return (f"Read with the jar-in-jar libraries the mod bundles {where}; "
+                f"read-only for registrations, base classes and services, nothing of them is shipped ({issues}).")
 
     @property
     def namespace(self) -> str:
@@ -154,7 +164,7 @@ def from_directory(root: Path) -> Ingested:
         ):
             icons[rel] = candidate.read_bytes()
     index = _with_meta(ClassIndex.from_source(root), metadata)
-    bundled = _attach_jarjar_dir(index, root)
+    bundled, bundled_from = _attach_listed_dir(index, root, metadata)
     return Ingested(
         root=root,
         namespaces=_namespaces(root),
@@ -163,17 +173,19 @@ def from_directory(root: Path) -> Ingested:
         icons=icons,
         classes=index,
         bundled=bundled,
+        bundled_from=bundled_from,
     )
 
 
-def _attach_jarjar_dir(index: ClassIndex, root: Path) -> dict[str, int]:
-    """An unpacked mod's META-INF/jarjar/metadata.json jars, attached to
-    ``index`` as libraries (#368)."""
+def _attach_listed_dir(index: ClassIndex, root: Path,
+                       metadata: dict[str, bytes]) -> tuple[dict[str, int], dict[str, str]]:
+    """An unpacked mod's listed nested jars (META-INF/jarjar/metadata.json
+    #368, fabric.mod.json / quilt.mod.json #373), attached to ``index`` as
+    libraries; (path -> classes added, path -> listing file)."""
     listing = root / nested_jars.JARJAR_METADATA
-    if not listing.is_file():
-        return {}
-    out = {}
-    for rel in nested_jars.jarjar_paths(listing.read_bytes()):
+    jarjar_json = listing.read_bytes() if listing.is_file() else None
+    out, where = {}, {}
+    for rel, source in nested_jars.listed(metadata, jarjar_json):
         jar = root / rel
         if not jar.is_file() or jar.stat().st_size > nested_jars.MAX_NESTED_JAR_BYTES:
             continue
@@ -185,7 +197,9 @@ def _attach_jarjar_dir(index: ClassIndex, root: Path) -> dict[str, int]:
         except (zipfile.BadZipFile, OSError):
             continue
         out[rel] = nested_jars.attach(index, [contents])
-    return out
+        if source != nested_jars.JARJAR_METADATA:
+            where[rel] = source
+    return out, where
 
 
 def from_jar(jar_path: Path, workdir: Path) -> Ingested:
@@ -244,8 +258,9 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
             if info is not None and _safe_member(rel) and info.file_size <= _MAX_ICON_BYTES:
                 icons[rel] = zf.read(info)
 
-        # Forge/NeoForge jar-in-jar libraries, read as library classes (#368).
-        bundled_jars = nested_jars.jarjar(zf)
+        # The jar-in-jar libraries the loader metadata lists, read as library
+        # classes (Forge/NeoForge jarjar #368, Fabric/Quilt jars #373).
+        bundled_jars = nested_jars.listed_jars(zf, metadata)
 
     found = _namespaces(workdir)
     if not found and not set(metadata) & set(LOADER_METADATA):
@@ -258,7 +273,8 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
             "it is not a mod, nothing to convert"
         )
     index = _with_services(_with_meta(ClassIndex(classes), metadata), services)
-    bundled = {jar.name: nested_jars.attach(index, [jar]) for jar in bundled_jars}
+    bundled = {jar.name: nested_jars.attach(index, [jar]) for jar, _ in bundled_jars}
+    bundled_from = {jar.name: src for jar, src in bundled_jars if src != nested_jars.JARJAR_METADATA}
     return Ingested(
         root=workdir,
         namespaces=found,
@@ -268,6 +284,7 @@ def from_jar(jar_path: Path, workdir: Path) -> Ingested:
         icons=icons,
         classes=index,
         bundled=bundled,
+        bundled_from=bundled_from,
     )
 
 

@@ -233,3 +233,129 @@ def test_an_inherited_library_method_is_a_registration_boundary():
     nested_jars.attach(index, [nested_jars.JarContents("META-INF/jarjar/jjlib.jar", classes=lib)])
     _, reg = blockcode._registered(index, ["jj_lamp"])
     assert [o.cls for o in reg["jj_lamp"][0]] == ["com/example/jjmod/JJLampBlock"]
+
+
+# --- Fabric / Quilt: the jars fabric.mod.json / quilt.mod.json list (#373) ---------
+
+FABRIC = {"schemaVersion": 1, "id": "libmod", "version": "1.0"}
+
+
+def _fabric_jar(path: Path, own: dict[str, bytes], nested: dict[str, bytes], listed: list[str] | None,
+                file: str = "fabric.mod.json") -> Path:
+    if file == "fabric.mod.json":
+        doc = dict(FABRIC, **({"jars": [{"file": p} for p in listed]} if listed is not None else {}))
+    else:
+        doc = {"schema_version": 1, "quilt_loader": {"group": "com.example", "id": "libmod", "version": "1.0",
+                                                     **({"jars": listed} if listed is not None else {})}}
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(file, json.dumps(doc))
+        zf.writestr("assets/libmod/lang/en_us.json", "{}")
+        for name, raw in own.items():
+            zf.writestr(name + ".class", raw)
+        for name, raw in nested.items():
+            zf.writestr(name, raw)
+    return path
+
+
+def test_fabric_and_quilt_metadata_list_paths_in_order_once():
+    fabric = json.dumps({"jars": [{"file": "META-INF/jars/a.jar"}, {"file": "META-INF/jars/b.jar"},
+                                  {"file": "META-INF/jars/a.jar"}, {"file": 3}, {"file": "../x.jar"},
+                                  {"file": "META-INF/jars/readme.txt"}, "META-INF/jars/c.jar"]}).encode()
+    assert nested_jars.fabric_paths(fabric) == ["META-INF/jars/a.jar", "META-INF/jars/b.jar"]
+    quilt = json.dumps({"quilt_loader": {"jars": ["META-INF/jars/q.jar", {"file": "META-INF/jars/r.jar"},
+                                                  "META-INF/jars/q.jar"]}}).encode()
+    assert nested_jars.quilt_paths(quilt) == ["META-INF/jars/q.jar"]
+    # Fabric's own parser keeps raw control characters in strings (meta.load_json).
+    assert nested_jars.fabric_paths(b'{"description": "a\nb", "jars": [{"file": "META-INF/jars/a.jar"}]}') == \
+        ["META-INF/jars/a.jar"]
+
+
+@pytest.mark.parametrize("raw", [None, b"", b"not json", b"[]", b'{"jars": {}}', b'{"jars": [{"path": "a.jar"}]}'])
+def test_an_odd_fabric_metadata_file_lists_nothing(raw):
+    assert nested_jars.fabric_paths(raw) == [] and nested_jars.quilt_paths(raw) == []
+
+
+def test_a_path_listed_twice_is_read_once_under_the_first_listing():
+    meta = {"fabric.mod.json": json.dumps({"jars": [{"file": "META-INF/jars/a.jar"}]}).encode(),
+            "quilt.mod.json": json.dumps({"quilt_loader": {"jars": ["META-INF/jars/a.jar",
+                                                                    "META-INF/jars/q.jar"]}}).encode()}
+    assert nested_jars.listed(meta, _metadata("META-INF/jarjar/j.jar").encode()) == [
+        ("META-INF/jarjar/j.jar", nested_jars.JARJAR_METADATA),
+        ("META-INF/jars/a.jar", "fabric.mod.json"),
+        ("META-INF/jars/q.jar", "quilt.mod.json"),
+    ]
+
+
+@pytest.mark.parametrize("file", ["fabric.mod.json", "quilt.mod.json"])
+def test_a_listed_fabric_or_quilt_library_is_attached_as_library_classes(tmp_path, own, lib, file):
+    jar = _fabric_jar(tmp_path / "libmod.jar", own, {"META-INF/jars/examplelib-1.0.jar": _inner_jar(lib)},
+                      ["META-INF/jars/examplelib-1.0.jar"], file)
+    staged = from_jar(jar, tmp_path / "staging")
+    index = staged.classes
+    assert len(index) == len(own) and index.names() == sorted(own)
+    assert index.library_count() == len(lib) and index.is_library("com/example/lib/LibPlateBlock")
+    assert index.raw("com/example/lib/LibPlateBlock") is None
+    assert staged.class_count == len(own)
+    assert [u.kind for u in staged.residue() if u.source == "META-INF/jars/examplelib-1.0.jar"] == ["nested_jar"]
+    assert staged.bundled == {"META-INF/jars/examplelib-1.0.jar": len(lib)}
+    assert staged.bundled_from == {"META-INF/jars/examplelib-1.0.jar": file}
+    assert staged.bundled_note() == (
+        f"Read with the jar-in-jar libraries the mod bundles ({file}): examplelib-1.0.jar (4 classes); "
+        "read-only for registrations, base classes and services, nothing of them is shipped (#368, #373).")
+
+
+def test_the_jarjar_note_is_unchanged(tmp_path, own, lib):
+    jar = _mod_jar(tmp_path / "libmod.jar", own, {"META-INF/jarjar/examplelib-1.0.jar": _inner_jar(lib)},
+                   ["META-INF/jarjar/examplelib-1.0.jar"])
+    assert from_jar(jar, tmp_path / "s").bundled_note() == (
+        "Read with the jar-in-jar libraries the mod bundles (META-INF/jarjar/metadata.json): "
+        "examplelib-1.0.jar (4 classes); read-only for registrations, base classes and services, "
+        "nothing of them is shipped (#368).")
+
+
+def test_the_reader_follows_registrations_into_a_fabric_library(tmp_path, own, lib):
+    alone = _fabric_jar(tmp_path / "alone.jar", own, {}, None)
+    _, reg = blockcode._registered(from_jar(alone, tmp_path / "a").classes, NAMES)
+    assert all(objs == [] for objs, _ in reg.values())
+    jar = _fabric_jar(tmp_path / "libmod.jar", own, {"META-INF/jars/examplelib-1.0.jar": _inner_jar(lib)},
+                      ["META-INF/jars/examplelib-1.0.jar"])
+    _, reg = blockcode._registered(from_jar(jar, tmp_path / "b").classes, NAMES)
+    assert {n: [o.cls for o in objs] for n, (objs, _) in reg.items()} == {
+        "lib_stone_plate": ["com/example/lib/LibPlateBlock"],
+        "lib_lamp": ["com/example/lib/LibBlock"],
+        "lib_players_plate": ["com/example/libmod/PlayersPlateBlock"],
+    }
+
+
+def test_an_unlisted_or_unreadable_fabric_jar_is_not_read(tmp_path, own, lib):
+    nested = {"META-INF/jars/examplelib-1.0.jar": _inner_jar(lib), "META-INF/jars/broken.jar": b"PK\x03\x04no"}
+    unlisted = from_jar(_fabric_jar(tmp_path / "u.jar", own, nested, None), tmp_path / "u")
+    assert unlisted.classes.library_count() == 0 and unlisted.bundled == {} and unlisted.bundled_note() is None
+    # The unlisted jar is still nested_jar residue, as before.
+    assert sorted(u.source for u in unlisted.residue() if u.kind == "nested_jar") == sorted(nested)
+    broken = from_jar(_fabric_jar(tmp_path / "b.jar", own, nested, ["META-INF/jars/broken.jar",
+                                                                     "META-INF/jars/gone.jar"]), tmp_path / "b")
+    assert broken.classes.library_count() == 0 and broken.bundled == {}
+
+
+def test_a_fabric_librarys_metadata_follows_the_mods_own(tmp_path, own, lib):
+    inner_meta = json.dumps({"schemaVersion": 1, "id": "examplelib", "version": "1.0"}).encode()
+    inner = _inner_jar(lib, extra={"fabric.mod.json": inner_meta})
+    jar = _fabric_jar(tmp_path / "libmod.jar", own, {"META-INF/jars/l.jar": inner}, ["META-INF/jars/l.jar"])
+    meta = from_jar(jar, tmp_path / "s").classes.entry_meta
+    assert json.loads(meta[0]["fabric.mod.json"])["id"] == "libmod"
+    assert meta[1] == {"fabric.mod.json": inner_meta}
+
+
+def test_an_unpacked_fabric_mod_directory_attaches_its_listed_jars(tmp_path, lib):
+    root = tmp_path / "unpacked"
+    (root / "META-INF/jars").mkdir(parents=True)
+    (root / "assets/libmod/lang").mkdir(parents=True)
+    (root / "assets/libmod/lang/en_us.json").write_text("{}")
+    (root / "META-INF/jars/examplelib-1.0.jar").write_bytes(_inner_jar(lib))
+    (root / "META-INF/jars/unlisted.jar").write_bytes(_inner_jar({"z/Z": b"\xca\xfe\xba\xbe"}))
+    (root / "fabric.mod.json").write_text(json.dumps(dict(FABRIC, jars=[{"file": "META-INF/jars/examplelib-1.0.jar"}])))
+    staged = from_directory(root)
+    assert staged.classes.library_count() == len(lib) and staged.classes.get("z/Z") is None
+    assert staged.bundled == {"META-INF/jars/examplelib-1.0.jar": len(lib)}
+    assert staged.bundled_from == {"META-INF/jars/examplelib-1.0.jar": "fabric.mod.json"}
