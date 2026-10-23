@@ -2,7 +2,7 @@
 release list (#364).
 
 A Forge jar can declare no ``minecraft`` dependency at all and only require
-``forge`` at some version (Botania 1.20.1-456 asks ``forge [47.1.3,)``). Forge
+``forge`` at some version (a jar asking ``forge [47.1.3,)`` and nothing else). Forge
 publishes every release on its maven as ``<minecraft>-<forge>``
 (``1.20.1-47.1.3``) in
 ``https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml``,
