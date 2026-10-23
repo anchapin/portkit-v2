@@ -1512,9 +1512,11 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             water_dropped.add(stem)
         elif why:
             water_why[stem] = why
-    readings = _read_facing_code(mod, src, stations or {}, loaded)
-    bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded)
+    # One registration run over every blockstate, shared by every block
+    # reader (#375; #280 for the readers that shared it first).
     shared = _SharedRun(mod, loaded)
+    readings = _read_facing_code(mod, src, stations or {}, loaded, shared)
+    bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded, shared)
     render = _RenderRun(mod, shared)
     dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared)
     paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded, shared)
@@ -1703,10 +1705,12 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     plates.table(mod, result, [r for r in paired_records if r["kind"] == "plate"])
     fence_gates.table(mod, result, [r for r in paired_records if r["kind"] == "gate"])
     buttons.table(mod.namespace, result, [r for r in directional_bool if r.get("button")])
-    _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded)
-    _add_water(mod, result, sorted(water_dropped))
+    _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded,
+               shared=shared)
+    _add_water(mod, result, sorted(water_dropped), shared)
     later, result.notes = result.notes, notes
-    containers = _add_containers(mod, result, stations or {}, experiments)
+    # Last: the container reader resets the shared machine's class state.
+    containers = _add_containers(mod, result, stations or {}, experiments, shared)
     for record in coded + coded_bool + directional + directional_bool + vslabs:
         if record["name"] in containers:
             # Carried: the block entity and the use that opens its menu.
@@ -2679,7 +2683,8 @@ def _load_blockstates(src) -> dict:
     return out
 
 
-def _read_facing_code(mod: SourceMod, src, stations: dict, loaded: dict | None = None) -> dict:
+def _read_facing_code(mod: SourceMod, src, stations: dict, loaded: dict | None = None,
+                      shared: "_SharedRun | None" = None) -> dict:
     """blockcode readings for every facing-only blockstate that is no station."""
     names = []
     for stem, blockstate in (loaded if loaded is not None else _load_blockstates(src)).items():
@@ -2689,7 +2694,7 @@ def _read_facing_code(mod: SourceMod, src, stations: dict, loaded: dict | None =
             names.append(stem)
     if not names:
         return {}
-    return blockcode.read_blocks(getattr(mod, "classes", None), names)
+    return blockcode.read_blocks(getattr(mod, "classes", None), names, run=shared() if shared else None)
 
 
 def _java_turn(box: tuple, degrees: int) -> tuple:
@@ -3023,7 +3028,7 @@ def _has_light(definition: dict) -> bool:
 
 
 def _add_light(mod: SourceMod, result: ConversionResult, src, skip: set = frozenset(),
-               loaded: dict | None = None) -> None:
+               loaded: dict | None = None, shared: "_SharedRun | None" = None) -> None:
     # ``skip``: blocks whose light was read per state already (facing plus
     # booleans), with notes of their own.
     names = sorted(k[len("blocks/"):-len(".json")] for k, v in result.files.items()
@@ -3043,7 +3048,7 @@ def _add_light(mod: SourceMod, result: ConversionResult, src, skip: set = frozen
             drawn[name] = _drawn_states(json.loads(path.read_text())) if path.is_file() else set()
         except json.JSONDecodeError:
             drawn[name] = set()
-    readings = blockcode.read_light(getattr(mod, "classes", None), names, drawn)
+    readings = blockcode.read_light(getattr(mod, "classes", None), names, drawn, run=shared() if shared else None)
     for name in names:
         r = readings[name]
         if r.value:
@@ -3250,7 +3255,8 @@ def _coded_bool_variants(blockstate: dict) -> tuple[dict | None, str]:
     return {"bools": bools, "cells": cells}, ""
 
 
-def _read_bool_code(mod: SourceMod, src, stations: dict, loaded: dict | None = None) -> dict:
+def _read_bool_code(mod: SourceMod, src, stations: dict, loaded: dict | None = None,
+                    shared: "_SharedRun | None" = None) -> dict:
     """(spec, reading) per blockstate that draws facing and booleans and is
     no station; (spec-less) residue reasons go in the second dict."""
     specs, why = {}, {}
@@ -3270,7 +3276,8 @@ def _read_bool_code(mod: SourceMod, src, stations: dict, loaded: dict | None = N
     if not specs:
         return {}, why
     readings = blockcode.read_state_blocks(getattr(mod, "classes", None),
-                                           {n: s["bools"] for n, s in specs.items()})
+                                           {n: s["bools"] for n, s in specs.items()},
+                                           run=shared() if shared else None)
     return {n: (specs[n], readings[n]) for n in specs}, why
 
 
@@ -3910,13 +3917,14 @@ def _drop_waterlogged(blockstate: dict) -> tuple[dict | None, str]:
     return None, ""
 
 
-def _add_water(mod: SourceMod, result: ConversionResult, names: list[str]) -> None:
+def _add_water(mod: SourceMod, result: ConversionResult, names: list[str],
+               shared: "_SharedRun | None" = None) -> None:
     """liquid_detection for the converted blocks among ``names`` (their
     blockstates drew waterlogged), from their getFluidState or the DEFAULT."""
     names = [n for n in names if isinstance(result.files.get(f"blocks/{n}.json"), dict)]
     if not names:
         return
-    readings = blockcode.read_water(getattr(mod, "classes", None), names)
+    readings = blockcode.read_water(getattr(mod, "classes", None), names, run=shared() if shared else None)
     for name in names:
         r = readings[name]
         if r.holds is False:
@@ -4202,7 +4210,8 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
     out = {}
     classes = getattr(mod, "classes", None)
     if specs:
-        readings = blockcode.read_directional(classes, {n: k for n, (k, _) in specs.items()})
+        readings = blockcode.read_directional(classes, {n: k for n, (k, _) in specs.items()},
+                                              run=shared() if shared else None)
         out.update({n: (specs[n][0], {(k, ()): v for k, v in specs[n][1].items()}, readings[n], ())
                     for n in specs})
     if bool_specs:
@@ -4765,7 +4774,8 @@ def _container_bump(definition: dict) -> str:
 _CONTAINER_CARRIED = ("newBlockEntity", "useWithoutItem", "use", "useItemOn")
 
 
-def _add_containers(mod: SourceMod, result: ConversionResult, stations: dict, experiments: frozenset) -> dict:
+def _add_containers(mod: SourceMod, result: ConversionResult, stations: dict, experiments: frozenset,
+                    shared: "_SharedRun | None" = None) -> dict:
     """Make the converted blocks that hold items behind a menu containers
     when the experiment is on. Returns {name: True} for each block made one,
     plus the notes under the key ''."""
@@ -4774,7 +4784,7 @@ def _add_containers(mod: SourceMod, result: ConversionResult, stations: dict, ex
                    and path[len("blocks/"):-len(".json")] not in stations)
     if not names:
         return {}
-    readings = blockcode.read_containers(getattr(mod, "classes", None), names)
+    readings = blockcode.read_containers(getattr(mod, "classes", None), names, run=shared() if shared else None)
     found = [r for r in readings.values() if r.slots is not None]
     if not found:
         return {}
