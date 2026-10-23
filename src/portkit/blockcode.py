@@ -2341,8 +2341,8 @@ class Machine:
             if len(lams) == 1 and len(rest) == 2 and rest[0] is UNKNOWN and rest[1] is lams[0] \
                     and desc.startswith(_REGISTER_SUPPLIER):
                 # ``register(String, Supplier)`` with a name the run can't
-                # spell (#365: Mekanism's builder names a type after its
-                # block holder's id, a loader call): still a holder of that
+                # spell (#365: a builder that names a type after its block
+                # holder's id, a loader call): still a holder of that
                 # supplier; only the supplier is read from it.
                 return [Obj("__holder", {"supplier": lams[0]})]
         if static and name == "register" and owner == "net/minecraft/core/Registry" and len(rest) == 3 \
@@ -4025,7 +4025,9 @@ _COLLECTION_READS = frozenset({"iterator", "listIterator", "size", "isEmpty", "g
 
 # Instructions a read-only loop body (Machine._bookkeeping_loop) may hold
 # besides local loads/stores, branches and calls: constants, stack shuffles,
-# array and field reads, casts, instanceof and arithmetic that can't throw.
+# array and field reads, casts, instanceof and arithmetic other than integer
+# division and remainder (field/array reads and casts can still throw on a
+# null or a wrong type; the skipped loop is read as ending normally).
 _LOOP_READ_OPS = frozenset({0x00, *range(0x01, 0x14), *range(0x2E, 0x36), *range(0x57, 0x60),
                             *range(0x60, 0x6C), *range(0x74, 0x84), *range(0x85, 0x99), 0xB4, 0xBE, 0xC0,
                             0xC1})
