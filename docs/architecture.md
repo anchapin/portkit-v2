@@ -29,9 +29,11 @@ mod.jar ─▶ ingest ─▶ converters (per namespace) ─▶ write_tree ─▶
    right away. The class files are also kept in memory (`bytecode.ClassIndex`,
    never staged) so the block converter can read a facing block's placement
    rule and shape from them (`blockcode.py`, see below). The jar-in-jar
-   libraries a Forge/NeoForge mod lists in `META-INF/jarjar/metadata.json`
-   are attached to that index as read-only library classes, with their
-   `META-INF/services/` files (`nested_jars.py`, #368); the nested jars
+   libraries a mod's loader metadata lists (Forge/NeoForge
+   `META-INF/jarjar/metadata.json`, #368; Fabric `fabric.mod.json` `jars` and
+   Quilt `quilt.mod.json` `quilt_loader.jars`, #373) are attached to that index
+   as read-only library classes, with their `META-INF/services/` files
+   (`nested_jars.py`); the nested jars
    themselves stay `nested_jar` residue.
 2. **Metadata** (`meta.py`) reads `fabric.mod.json`, `mods.toml` and the rest, for
    the pack name, version and the primary namespace.
