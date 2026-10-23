@@ -452,7 +452,24 @@ class Insn:
 
 
 def instructions(cf: ClassFile, code: bytes) -> list[Insn]:
-    """Decode ``code`` (a method's Code bytes) into instructions."""
+    """Decode ``code`` (a method's Code bytes) into instructions.
+
+    The decoding of each method's code is kept on its class file (#372: a
+    registration run that follows calls into a bundled library decodes the
+    same library methods again on every call), and each call gets a list of
+    its own over the same immutable :class:`Insn` objects, so a caller that
+    changes its list, or tells runs apart by the list's identity, sees what
+    a fresh decode gave it."""
+    cache = cf.__dict__.get("_decoded")
+    if cache is None:
+        cache = cf.__dict__["_decoded"] = {}
+    done = cache.get(code)
+    if done is None:
+        done = cache[code] = tuple(_decode(cf, code))
+    return list(done)
+
+
+def _decode(cf: ClassFile, code: bytes) -> list[Insn]:
     out: list[Insn] = []
     pos = 0
     n = len(code)
