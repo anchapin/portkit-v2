@@ -756,6 +756,7 @@ class Machine:
     def __init__(self, classes: ClassIndex):
         self.classes = classes
         self._subclassed: set | None = None  # see has_subclass
+        self._found: dict = {}  # see find_method
         # Two-pass reading of lists shared between top-level runs (#280,
         # see _mark_shared): which pass, whether the current run read one,
         # which shared lists it appended to, and the methods that stopped or
@@ -908,6 +909,19 @@ class Machine:
             and "/state/" not in last and last.rsplit("/", 1)[-1].endswith("Block")
 
     def find_method(self, start: str, name: str, desc: str) -> tuple[ClassFile, Method] | None:
+        # The classes don't change while a machine runs, so each lookup is
+        # kept (#372: a registration run following calls into a bundled
+        # library resolves the same methods again on every call).
+        key = (start, name, desc)
+        try:
+            return self._found[key]
+        except KeyError:
+            pass
+        found = self._find_method(start, name, desc)
+        self._found[key] = found
+        return found
+
+    def _find_method(self, start: str, name: str, desc: str) -> tuple[ClassFile, Method] | None:
         for cname in self.chain(start):
             cf = self.classes.get(cname)
             if cf is None:
