@@ -8,9 +8,14 @@ A mod jar can ship library code nested in it rather than as a separate mod:
   keeps the format). A jar under ``META-INF/jarjar/`` the file doesn't list is
   not loaded by the loader, so it isn't read here either; a missing or
   unreadable metadata file reads none.
-* Fabric jar-in-jar: ``META-INF/jars/*.jar``. Only a *library* jar's are read
-  (:mod:`portkit.libraries`, since #321); a mod jar's own Fabric nested jars
-  are not attached by ingest (not part of #368).
+* Fabric jar-in-jar: ``fabric.mod.json`` ``"jars": [{"file": ...}]`` lists the
+  jars Fabric Loader loads, each by its path inside the jar (conventionally
+  ``META-INF/jars/``; Fabric Loader ``ModMetadataParser`` v1 ``jars[].file``).
+  Quilt: ``quilt.mod.json`` ``quilt_loader.jars``, a list of paths (Quilt RFC
+  0002, ``quilt_loader.jars``). A mod jar's own listed jars are attached by
+  ingest the same way as jarjar's (#373, the #368 picks); an unlisted one is
+  not loaded by the loader, so it isn't read. A pinned *library* jar's
+  ``META-INF/jars/*.jar`` are all read (:mod:`portkit.libraries`, since #321).
 
 A nested jar is read one level deep, each at most ``MAX_NESTED_JAR_BYTES``,
 for its classes, its ``META-INF/services/`` files and its loader metadata. They
@@ -25,6 +30,8 @@ import io
 import json
 import zipfile
 from dataclasses import dataclass, field
+
+from .meta import load_json
 
 JARJAR_METADATA = "META-INF/jarjar/metadata.json"
 # A nested jar is read into memory whole; larger ones are skipped rather than
@@ -66,6 +73,51 @@ def jarjar_paths(metadata_json: bytes | None) -> list[str]:
     return out
 
 
+def fabric_paths(fabric_mod_json: bytes | None) -> list[str]:
+    """The nested jar paths a ``fabric.mod.json`` lists (``jars[].file``), in
+    file order, once each; [] when missing or not that shape."""
+    return _paths(_json(fabric_mod_json), ("jars",), lambda e: e.get("file") if isinstance(e, dict) else None)
+
+
+def quilt_paths(quilt_mod_json: bytes | None) -> list[str]:
+    """The nested jar paths a ``quilt.mod.json`` lists (``quilt_loader.jars``,
+    each a path string), in file order, once each."""
+    return _paths(_json(quilt_mod_json), ("quilt_loader", "jars"), lambda e: e if isinstance(e, str) else None)
+
+
+def listed(metadata: dict[str, bytes], jarjar_json: bytes | None = None) -> list[tuple[str, str]]:
+    """(nested jar path, the file listing it) for every jar the mod's loader
+    metadata lists: ``META-INF/jarjar/metadata.json``, then ``fabric.mod.json``,
+    then ``quilt.mod.json``; a path once, under the first file listing it."""
+    out: dict[str, str] = {}
+    for listing, paths in ((JARJAR_METADATA, jarjar_paths(jarjar_json)),
+                           ("fabric.mod.json", fabric_paths(metadata.get("fabric.mod.json"))),
+                           ("quilt.mod.json", quilt_paths(metadata.get("quilt.mod.json")))):
+        for path in paths:
+            out.setdefault(path, listing)
+    return list(out.items())
+
+
+def _json(raw: bytes | None):
+    if not raw:
+        return None
+    try:
+        return load_json(raw)
+    except ValueError:
+        return None
+
+
+def _paths(doc, keys: tuple[str, ...], pick) -> list[str]:
+    for key in keys:
+        doc = doc.get(key) if isinstance(doc, dict) else None
+    out: list[str] = []
+    for entry in doc if isinstance(doc, list) else ():
+        path = pick(entry)
+        if isinstance(path, str) and path.endswith(".jar") and _safe(path) and path not in out:
+            out.append(path)
+    return out
+
+
 def _safe(name: str) -> bool:
     return not name.startswith(("/", "\\")) and ".." not in name.replace("\\", "/").split("/")
 
@@ -95,6 +147,19 @@ def jarjar(zf: zipfile.ZipFile, cap: int = MAX_NESTED_JAR_BYTES) -> list[JarCont
     except KeyError:
         return []
     return _open_each(zf, listed, cap)
+
+
+def listed_jars(zf: zipfile.ZipFile, metadata: dict[str, bytes],
+                cap: int = MAX_NESTED_JAR_BYTES) -> list[tuple[JarContents, str]]:
+    """Each jar the mod's loader metadata lists (:func:`listed`), read one
+    level deep, with the file that listed it; a missing, oversized or
+    unreadable one is skipped."""
+    try:
+        jarjar_json = zf.read(JARJAR_METADATA)
+    except KeyError:
+        jarjar_json = None
+    where = dict(listed(metadata, jarjar_json))
+    return [(jar, where[jar.name]) for jar in _open_each(zf, list(where), cap)]
 
 
 def fabric_jars(zf: zipfile.ZipFile, cap: int = MAX_NESTED_JAR_BYTES) -> list[JarContents]:
