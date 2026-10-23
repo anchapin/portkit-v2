@@ -4610,7 +4610,13 @@ def _never_block(machine: Machine, value, asked: bool) -> bool:
         # Not in the jar or its libraries: a vanilla class the machine
         # doesn't take for a block class isn't one; any other is unknown.
         return cls.startswith("net/minecraft/")
-    return not cf.access & 0x0200
+    if cf.access & 0x0200:
+        return False
+    # A jar class whose superclasses end in a class outside the jar, its
+    # libraries and the game (a dependency that isn't attached) can't be
+    # placed: it may be a block class.
+    last = machine.chain(cls)[-1]
+    return last.startswith(("net/minecraft/", "java/"))
 
 
 def _from_run(run, classes: ClassIndex, names: list[str]):
