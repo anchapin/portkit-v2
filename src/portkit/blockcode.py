@@ -1941,6 +1941,10 @@ class Machine:
         home = (self.depth, id(code))
         copies: dict = {}
         for slots in (g.locals, g.stack):
+            # Most frames hold no iterator: one pass in C over the slots'
+            # types skips them (#372; IterV has no subclasses).
+            if IterV not in set(map(type, slots)):
+                continue
             for i, v in enumerate(slots):
                 if isinstance(v, IterV) and not v.escaped and v.home == home:
                     if id(v) not in copies:
