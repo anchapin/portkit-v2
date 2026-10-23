@@ -2338,6 +2338,13 @@ class Machine:
             lams = [a for a in rest if isinstance(a, Lam)]
             if len(ids) == 1 and len(lams) == 1 and len(rest) == 2:
                 return [Obj("__holder", {"supplier": lams[0]})]
+            if len(lams) == 1 and len(rest) == 2 and rest[0] is UNKNOWN and rest[1] is lams[0] \
+                    and desc.startswith(_REGISTER_SUPPLIER):
+                # ``register(String, Supplier)`` with a name the run can't
+                # spell (#365: a builder that names a type after its block
+                # holder's id, a loader call): still a holder of that
+                # supplier; only the supplier is read from it.
+                return [Obj("__holder", {"supplier": lams[0]})]
         if static and name == "register" and owner == "net/minecraft/core/Registry" and len(rest) == 3 \
                 and isinstance(rest[2], Obj):
             # Registry.register(registry, id, value) returns the value
@@ -3235,6 +3242,88 @@ class Machine:
         registrations are collected, in a dependency jar's code."""
         return self.registrations is not None and bool(self._running) and self._library(self._running[-1])
 
+    def _bookkeeping_loop(self) -> bool:
+        """Whether the ``Iterator#hasNext`` call being run heads a loop
+        (``aload it; invokeinterface hasNext; ifeq END; BODY; goto head``,
+        javac's form) whose body only reads: it loads and stores locals no
+        code outside the body loads, reads fields, casts, compares and jumps
+        within the body or back to the head, and calls only this iterator's
+        ``next``/``hasNext``/``remove``, java.util list reads that run no
+        element code (_LOOP_COLLECTION_READS) and trivial getters of the
+        jar's classes (a method that returns one field of its receiver, a
+        record accessor).
+        Such a loop's only effect is removals from the list it iterates
+        (#365)."""
+        frame = self._frame
+        if frame is None or not self._code:
+            return False
+        _depth, code, at = self._code[-1]
+        k = at.get(frame.pc)  # the instruction after the call (step has moved on)
+        if k is None or k < 2 or k + 1 >= len(code):
+            return False
+        k -= 1
+        call = code[k]
+        if call.op != 0xB9 or getattr(call.arg, "name", None) != "hasNext":
+            return False
+        load, test = code[k - 1], code[k + 1]
+        slot = _local_load(load)
+        if slot is None or load.op not in (0x19, 0x2A, 0x2B, 0x2C, 0x2D) or test.op != 0x99:
+            return False
+        head, end = load.offset, test.arg
+        e = at.get(end)
+        if e is None or e <= k + 2:
+            return False
+        body = code[k + 2:e]
+        last = body[-1]
+        if last.op not in (0xA7, 0xC8) or last.arg != head:
+            return False
+        inside = {i.offset for i in body} | {end, head}
+        stored: set = set()
+        for j, insn in enumerate(body):
+            op = insn.op
+            store = insn.arg[0] if op == 0x84 else _local_store(insn)
+            if op == 0xA9:
+                return False
+            if store is not None:
+                if store == slot:
+                    return False
+                stored.add(store)
+                continue
+            if op in _LOOP_READ_OPS or _local_load(insn) is not None:
+                continue
+            if 0x99 <= op <= 0xA7 or op in (0xC6, 0xC7, 0xC8):
+                if any(t not in inside for t in _targets(insn)):
+                    return False
+                continue
+            if op in (0xB6, 0xB9) and isinstance(insn.arg, Ref):
+                ref = insn.arg
+                if ref.owner == "java/util/Iterator":
+                    prev = body[j - 1] if j else load
+                    if ref.name not in ("next", "hasNext", "remove") or _local_load(prev) != slot \
+                            or prev.op not in (0x19, 0x2A, 0x2B, 0x2C, 0x2D):
+                        return False
+                    continue
+                if ref.owner in _COLLECTION_TYPES and ref.name in _LOOP_COLLECTION_READS:
+                    continue
+                if self._getter(ref):
+                    continue
+            return False
+        outside = code[:k - 1] + code[e:]
+        return not any(_local_load(i) in stored for i in outside if _local_load(i) is not None)
+
+    def _getter(self, ref: Ref) -> bool:
+        """Whether ``ref`` resolves, in the jar, to a no-argument instance
+        method whose code is ``aload_0; getfield; <x>return`` (#365)."""
+        if not ref.desc.startswith("()") or not self.is_mod(ref.owner):
+            return False
+        found = self.find_method(ref.owner, ref.name, ref.desc)
+        if found is None or found[1].access & 0x0008 or found[1].code is None:
+            return False
+        if self.has_subclass(found[0].name):
+            return False  # an override elsewhere may do more
+        code = instructions(found[0], found[1].code)
+        return len(code) == 3 and code[0].op == 0x2A and code[1].op == 0xB4 and 0xAC <= code[2].op <= 0xB0
+
     def _write_by_call(self, target) -> None:
         """A modelled change to ``target`` made by the call being run is a
         write by that call's frame (see _write). A list changed on one way
@@ -3599,6 +3688,15 @@ class Machine:
         if isinstance(recv, IterV):
             src = recv.source
             items = self._known_items(src)
+            if isinstance(src, ListV) and src.havoc and name == "hasNext" and self._clinit_depth \
+                    and self._bookkeeping_loop():
+                # A class initializer's loop over a list whose contents aren't
+                # known, whose body only reads and removes elements of that
+                # list through this iterator (#365: a builder's
+                # ``without(capability)``): every turn leaves the list unknown
+                # and changes nothing else, so the loop is passed over as if
+                # it ended (skip, don't fork); the list stays unknown.
+                return [0]
             if isinstance(src, ListV) and src.havoc and name in ("hasNext", "next"):
                 # A loop over a list whose contents aren't known can't be
                 # followed (each way would only add another unknown turn).
@@ -3870,6 +3968,10 @@ _RESERVED_PROPERTIES = ("java.", "javax.", "jdk.", "sun.", "com.sun.", "os.", "f
 # equal elements in the order given).
 _SET_OF = frozenset({"com/google/common/collect/ImmutableSet", "java/util/Set"})
 _IMMUTABLE_OF = _SET_OF | {"com/google/common/collect/ImmutableList", "java/util/List"}
+# DeferredRegister#register(String, Supplier)'s parameters (NeoForge 1.21.1;
+# Forge's RegistryObject register keeps them), a subclass's covariant return
+# aside.
+_REGISTER_SUPPLIER = "(Ljava/lang/String;Ljava/util/function/Supplier;)"
 _BUILTIN_REGISTRIES = "net/minecraft/core/registries/BuiltInRegistries"
 _VANILLA_BLOCKS = "net/minecraft/world/level/block/Blocks"
 # A resource location's characters (ResourceLocation#isValidNamespace /
@@ -3919,6 +4021,19 @@ _COLLECTION_TYPES = frozenset({"java/util/List", "java/util/Collection", "java/l
                                "java/util/ArrayList", "java/util/LinkedList"})
 _COLLECTION_READS = frozenset({"iterator", "listIterator", "size", "isEmpty", "get", "stream", "forEach",
                                "contains", "toArray", "getFirst", "getLast", "indexOf"})
+
+
+# Instructions a read-only loop body (Machine._bookkeeping_loop) may hold
+# besides local loads/stores, branches and calls: constants, stack shuffles,
+# array and field reads, casts, instanceof and arithmetic other than integer
+# division and remainder (field/array reads and casts can still throw on a
+# null or a wrong type; the skipped loop is read as ending normally).
+_LOOP_READ_OPS = frozenset({0x00, *range(0x01, 0x14), *range(0x2E, 0x36), *range(0x57, 0x60),
+                            *range(0x60, 0x6C), *range(0x74, 0x84), *range(0x85, 0x99), 0xB4, 0xBE, 0xC0,
+                            0xC1})
+# java.util reads that call no code of the elements' (contains/indexOf call
+# equals, forEach a lambda): what a read-only loop body may call on a list.
+_LOOP_COLLECTION_READS = frozenset({"size", "isEmpty", "get", "getFirst", "getLast"})
 
 
 def _reads_only(code: list, k: int) -> bool:
@@ -4056,7 +4171,19 @@ def _value_equal(a, b) -> bool:
     if isinstance(a, (str, int, float, Const, Part, ClassLit, RL, RKey, Dir, Shape, Tail)) \
             and type(a) is type(b):
         return _equal(a, b)
+    if isinstance(a, Obj) and isinstance(b, Obj) and a.cls == b.cls == "__holder":
+        # Two holders of one supplier (Machine._holder_call, #365): ways that
+        # each register the same supplier hand back the same thing to read.
+        return _same_lambda(a.fields["supplier"], b.fields["supplier"])
     return False
+
+
+def _same_lambda(a, b) -> bool:
+    """Whether two lambda values are one lambda: the same method handle and
+    call site types, capturing the same objects or equal values."""
+    return isinstance(a, Lam) and isinstance(b, Lam) and a.handle == b.handle and a.itype == b.itype \
+        and a.iface == b.iface and len(a.captured) == len(b.captured) \
+        and all(x is y or _value_equal(x, y) for x, y in zip(a.captured, b.captured))
 
 
 def _hashable(v) -> bool:
