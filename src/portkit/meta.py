@@ -191,9 +191,9 @@ def _forge_minecraft(data: dict, notes: list[str]) -> str | None:
                 if found:
                     notes.append(
                         f"declares no Minecraft version; game version {found} is a DEFAULT inferred "
-                        f"from its forge dependency {dep['versionRange']!r} (every Forge release of that "
-                        f"major is built for {found}, per Forge's maven-metadata.xml) and is used for "
-                        f"name mappings and vanilla reference data")
+                        f"from its forge dependency {dep['versionRange']!r}: the oldest game version that "
+                        f"range accepts (every Forge release of that major is built for {found}, per "
+                        f"Forge's maven-metadata.xml), used for name mappings and vanilla reference data")
                 elif forge_versions.table() is None:
                     notes.append("declares no Minecraft version; its forge dependency could name one, but "
                                  "the Forge release table isn't cached (run `portkit reference fetch`)")
