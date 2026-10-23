@@ -46,7 +46,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import entrypoints
-from .bytecode import ClassFile, ClassIndex, Handle, Indy, Insn, Method, Ref, indexed_instructions, instructions
+from .bytecode import ClassFile, ClassIndex, Handle, Indy, Insn, Method, Ref, indexed_instructions, instructions, locals_used
 
 # Java's Direction enum, in declaration (ordinal) order.
 DIRECTIONS = ("down", "up", "north", "south", "west", "east")
@@ -1881,7 +1881,12 @@ class Machine:
 
     def _run_code(self, cf: ClassFile, m: Method, args: list, code: list, at: dict) -> list:
         # Longs and doubles take two local slots (JVMS 2.6.1).
-        local = self._wide_locals(m, args) + [UNKNOWN] * 256
+        # Room for every slot the code uses, as many as 256 past the
+        # arguments' (#372: a frame no longer carries 256 unused slots into
+        # every copy a branch makes; a slot past them is out of range as
+        # before).
+        local = self._wide_locals(m, args)
+        local += [UNKNOWN] * min(256, max(0, locals_used(cf, m.code) - len(local)))
         work = [Frame(0, local, [])]
         results: list = []
         paths = 1
