@@ -2,6 +2,7 @@ package net.minecraft.world.level.block;
 import net.minecraft.world.level.block.state.*; import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 public class Block extends BlockBehaviour { public Block(Properties p) { super(p); }
+  protected final StateDefinition stateDefinition = null;
   public static VoxelShape box(double a, double b, double c, double d, double e, double f) { return null; }
   public final BlockState defaultBlockState() { return null; }
   public StateDefinition getStateDefinition() { return null; }

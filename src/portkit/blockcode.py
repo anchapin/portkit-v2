@@ -2182,7 +2182,14 @@ class Machine:
         elif op == 0xB4:
             obj = s.pop()
             name = insn.arg.name
-            if isinstance(obj, Obj):
+            if isinstance(obj, Obj) and name not in obj.fields and name == "stateDefinition" \
+                    and self.is_block_class(obj.cls) \
+                    and self._field_owner(insn.arg.owner, name).startswith(_VANILLA_BLOCK_PACKAGE):
+                # Block#stateDefinition (MC 1.20.1/1.21.1 Mojang mappings),
+                # read in a constructor as ``this.stateDefinition.any()``:
+                # the same StateDefinition getStateDefinition() returns.
+                s.append(Obj("__statedef"))
+            elif isinstance(obj, Obj):
                 s.append(obj.fields[name] if name in obj.fields else self._field_default(obj, name))
             else:
                 site = self._site_map(insn.arg) if obj is UNKNOWN else None
@@ -4706,7 +4713,7 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
                 continue
             others += [o.cls for o in built if isinstance(o, Obj) and not machine.is_block_class(o.cls)
                        and "Item" not in o.cls.rsplit("/", 1)[-1] and "Entity" not in o.cls.rsplit("/", 1)[-1]]
-        others = [o for o in others if not machine.vanilla_base(o).startswith(("java/", "com/mojang/"))]
+        others = [o for o in others if _may_be_block(machine, o)]
         if not objs and others:
             outside = machine.vanilla_base(others[0])
             why = why or (f"registered as {others[0].replace('/', '.')}, whose superclasses leave the jar at "
@@ -4725,6 +4732,26 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
             objs = []
         out[name] = (objs, why)
     return machine, {n: out[n] for n in names}
+
+
+def _may_be_block(machine: Machine, cls: str) -> bool:
+    """Whether ``cls``, built for a name but not a block class the machine
+    knows, may still be a Block subclass, so naming it is the reason the
+    name isn't read (PR #384): only when that class or the one its
+    superclasses leave the jar at is named as a block class is
+    (``...Block``, the test is_block_class makes of a vanilla class): a
+    dependency that isn't attached (moonlight's WaterBlock), a game class
+    under a package the machine doesn't take for blocks (1.16's
+    net/minecraft/block/FenceGateBlock). A class whose chain reaches a game
+    class named for something else (AbstractContainerMenu, ShulkerBoxMenu),
+    java/ or com/mojang/, or a library class named for something else (a
+    shulkerboxtooltip BlockEntityPreviewProvider), is not a Block subclass:
+    the name is then not read, its reason the one it has without that
+    class, and none of the block's values come from it."""
+    outside = machine.vanilla_base(cls)
+    if outside.startswith(("java/", "com/mojang/")):
+        return False
+    return any(c.rsplit("/", 1)[-1].endswith("Block") for c in (cls, outside))
 
 
 def _never_block(machine: Machine, value, asked: bool) -> bool:
@@ -5175,9 +5202,13 @@ def _with(state, bools: tuple, combo: tuple) -> "State":
     return base
 
 
-def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple], run=None) -> dict[str, StateReading]:
+def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple], run=None,
+                      facingless: frozenset = frozenset()) -> dict[str, StateReading]:
     """A :class:`StateReading` per blockstate name in ``bools`` (name ->
-    the boolean state names its blockstate draws)."""
+    the boolean state names its blockstate draws). A name in ``facingless``
+    draws booleans and nothing else (#296): there is no placement to read,
+    and its shapes, toggle and light are read at each combination of the
+    booleans alone (``shapes_by`` keyed (None, combination))."""
     names = list(bools)
     readings = {n: StateReading(n, bools=tuple(sorted(bools[n]))) for n in names}
     if classes is None or not len(classes):
@@ -5200,21 +5231,24 @@ def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple], run=N
             # the jar doesn't hold, which isn't read.
             r.vanilla_parent = base.replace("/", ".")
             continue
+        flat = name in facingless
         _read_states(machine, obj, r)
         r.behaviour = _behaviour(machine, obj.cls)
-        _read_placement(machine, obj, r)
+        if not flat:
+            _read_placement(machine, obj, r)
         placed = _placed_states(machine, obj)
         _read_defaults(machine, obj, r, placed)
-        _read_state_shapes(machine, obj, r)
+        _read_state_shapes(machine, obj, r, flat)
         _read_shape_collision(machine, obj, r)
-        _read_toggle(machine, obj, r)
+        _read_toggle(machine, obj, r, [lambda s: s] if flat else None)
         r.changed_by = _changed_by(machine, obj.cls, r.bools)
-        _read_state_light(machine, obj, r, placed)
+        _read_state_light(machine, obj, r, placed, () if flat else ("facing",))
         if len(objs) > 1:
             other = StateReading(name, bools=r.bools)
-            _read_placement(machine, objs[1], other)
+            if not flat:
+                _read_placement(machine, objs[1], other)
             _read_defaults(machine, objs[1], other, _placed_states(machine, objs[1]))
-            _read_state_shapes(machine, objs[1], other)
+            _read_state_shapes(machine, objs[1], other, flat)
             _read_shape_collision(machine, objs[1], other)
             if (other.placement, other.shapes_by, other.collision, other.defaults) != \
                     (r.placement, r.shapes_by, r.collision, r.defaults):
@@ -5281,7 +5315,9 @@ def _read_defaults(machine: Machine, obj: Obj, r: StateReading, placed: list | N
         r.defaults[prop] = (False, "DEFAULT", why or "the default state isn't read")
 
 
-def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading) -> None:
+def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading, flat: bool = False) -> None:
+    """getShape at every (facing, combination); at every combination alone,
+    keyed (None, combination), for a block that draws no facing (``flat``)."""
     machine.steps = 0
     where = _declaring(machine, obj.cls, "getShape", _GET_SHAPE_DESC)
     default = obj.fields.get("__default", State())
@@ -5290,13 +5326,17 @@ def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading) -> None:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
         for combo in combinations(r.bools):
-            for d in HORIZONTAL:
-                state = _with(default, r.bools, combo).set("facing", Dir(d))
+            for d in ((None,) if flat else HORIZONTAL):
+                state = _with(default, r.bools, combo)
+                if d is not None:
+                    state = state.set("facing", Dir(d))
+                at = f"facing={d}" if d is not None else ",".join(
+                    f"{p}={'true' if v else 'false'}" for p, v in zip(r.bools, combo))
                 results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
                 if not results or any(not isinstance(x, Shape) for x in results):
-                    raise Unreadable(f"the shape at facing={d} is not built from boxes it can read")
+                    raise Unreadable(f"the shape at {at} is not built from boxes it can read")
                 if len({x for x in results}) != 1:
-                    raise Unreadable(f"the shape at facing={d} depends on more than the drawn states")
+                    raise Unreadable(f"the shape at {at} depends on more than the drawn states")
                 shapes[(d, combo)] = results[0].boxes
     except Unreadable as exc:
         r.shape_why = f"{where}: {exc}"
@@ -6396,9 +6436,15 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
             v = dict(s.values).get(r.prop, UNKNOWN)
             values.add(_serialized(machine, v) if v is not UNKNOWN else None)
         set_here = all(r.prop in dict(s.values) for s in placed)
+        # A placed state that only carries the registered default's own
+        # value (defaultBlockState(), now that the constructor's
+        # this.stateDefinition.any() is read, PR #384) leaves it there.
+        start = obj.fields.get("__default")
+        start = dict(start.values).get(r.prop, UNKNOWN) if isinstance(start, State) else UNKNOWN
+        kept = start is not UNKNOWN and all(dict(s.values).get(r.prop, UNKNOWN) == start for s in placed)
         if len(values) == 1 and None not in values and set_here:
             r.value, r.kind, r.source = values.pop(), "placed", where
-        elif not set_here and not any(r.prop in dict(s.values) for s in placed):
+        elif kept or (not set_here and not any(r.prop in dict(s.values) for s in placed)):
             why = f"{where} leaves it at the registered default"
         else:
             why = f"{where} sets it from the world" if None in values else f"{where} differs between paths"
