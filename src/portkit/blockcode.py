@@ -107,6 +107,11 @@ _VANILLA_PROPS = {
     ("net/minecraft/world/level/block/HorizontalDirectionalBlock", "FACING"): "facing",
     (_STATE_PROPS, "HORIZONTAL_FACING"): "facing",
     (_STATE_PROPS, "FACING"): "facing6",
+    # FACING_HOPPER, DirectionProperty.create("facing", <not UP>) (1.21.1
+    # client jar class dts <clinit> offsets 429-440, field Q; client.txt
+    # names it): down or a horizontal, read under facing as the horizontal
+    # one is (#296, a ``facing`` blockstate over those five values).
+    (_STATE_PROPS, "FACING_HOPPER"): "facing",
     # DirectionalBlock.FACING = BlockStateProperties.FACING (DirectionalBlock
     # <clinit> L8); FaceAttachedHorizontalDirectionalBlock.FACE =
     # BlockStateProperties.ATTACH_FACE, an EnumProperty named "face" of
@@ -5640,7 +5645,13 @@ def _read_water(machine: Machine, obj: Obj, r: WaterReading) -> None:
 # block up; Java would try the next looking direction or refuse to place. The
 # reading says when it leaned on this (support_assumed).
 
-DIRECTIONAL_KINDS = ("facing6", "attach", "vslab")
+DIRECTIONAL_KINDS = ("facing6", "attach", "vslab", "facing")
+# ``facing`` (#296): a blockstate whose only state is ``facing`` over some of
+# the six directions (not all six), one model per value: a hopper-like
+# down-or-horizontal facing (vanilla BlockStateProperties.FACING_HOPPER and
+# mods' own DirectionProperty.create("facing", ...)), up-or-down, or the four
+# horizontals each with a model of its own. Read like facing6, at only the
+# values the blockstate draws.
 # Vertical slabs (#296): ``type`` = the horizontal side the slab stands
 # against, or ``double``. The value is the mod's own enum (no vanilla class
 # has this state set), whose serialized names the interpreter doesn't
@@ -5667,18 +5678,23 @@ class DirReading(Reading):
     rule_conflict: str = ""
     support_assumed: bool = False
     shapes_by: dict | None = None
+    # ``facing`` kind: the facing values the blockstate draws (DIRECTIONS order).
+    facings: tuple = ()
 
 
-def directional_keys(kind: str) -> list[tuple[str, str]]:
-    """The Java (face, facing) keys a kind of blockstate draws."""
+def directional_keys(kind: str, facings: tuple = ()) -> list[tuple[str, str]]:
+    """The Java (face, facing) keys a kind of blockstate draws; ``facings``
+    are the values a ``facing`` blockstate draws."""
     if kind == "facing6":
         return [("", d) for d in DIRECTIONS]
+    if kind == "facing":
+        return [("", d) for d in DIRECTIONS if d in facings]
     if kind == "vslab":
         return [("", t) for t in VSLAB_TYPES]
     return [(f, d) for f in ("floor", "wall", "ceiling") for d in HORIZONTAL]
 
 
-def default_rule(kind: str) -> dict:
+def default_rule(kind: str, facings: tuple = ()) -> dict | None:
     """The labelled DEFAULT placement rule: facing6 faces away from the
     clicked face (facing = the clicked face, as vanilla's rods and amethyst
     clusters do); attach-face follows vanilla
@@ -5688,7 +5704,16 @@ def default_rule(kind: str) -> dict:
     SlabBlock#getStateForPlacement puts a slab against the face it was placed
     on); a clicked top or bottom face, where Java code picks the half by the
     point clicked and Bedrock exposes no such point, gives type = the
-    player's facing: the half nearest the player."""
+    player's facing: the half nearest the player.
+
+    A ``facing`` blockstate over the four horizontals takes the facing-only
+    DEFAULT (#212, blocks.DEFAULT_PLACEMENT: the block faces the player,
+    facing = the player's horizontal direction turned round); over any other
+    set of values no DEFAULT is approved, so there is none (None)."""
+    if kind == "facing":
+        if set(facings) == set(HORIZONTAL):
+            return {c: ("", ("player", 2)) for c in DIRECTIONS}
+        return None
     out = {}
     for c in DIRECTIONS:
         if kind == "vslab":
@@ -5723,14 +5748,17 @@ def _face_value(value):
 def _with_key(state: State, kind: str, key: tuple) -> State:
     face, facing = key
     state = state.set("facing", Dir(facing))
-    if kind == "facing6":
+    if kind in ("facing6", "facing"):
         return state.set("facing6", Dir(facing))
     return state.set("face", Const(_ATTACH_FACE, face.upper()))
 
 
-def read_directional(classes: ClassIndex | None, kinds: dict[str, str], run=None) -> dict[str, DirReading]:
-    """A :class:`DirReading` per blockstate name in ``kinds`` (name -> kind)."""
-    readings = {n: DirReading(n, kind=k) for n, k in kinds.items()}
+def read_directional(classes: ClassIndex | None, kinds: dict[str, str], run=None,
+                     facings: dict[str, tuple] | None = None) -> dict[str, DirReading]:
+    """A :class:`DirReading` per blockstate name in ``kinds`` (name -> kind);
+    ``facings`` gives a ``facing`` blockstate's drawn values (name -> values)."""
+    facings = facings or {}
+    readings = {n: DirReading(n, kind=k, facings=tuple(facings.get(n, ()))) for n, k in kinds.items()}
     if classes is None or not len(classes):
         for r in readings.values():
             r.rule_why = r.shape_why = r.collision_why = "the mod ships no class files"
@@ -5754,7 +5782,7 @@ def read_directional(classes: ClassIndex | None, kinds: dict[str, str], run=None
         _read_dir_shapes(machine, obj, r)
         _read_shape_collision(machine, obj, r)
         if len(objs) > 1:
-            other = DirReading(name, kind=r.kind)
+            other = DirReading(name, kind=r.kind, facings=r.facings)
             _read_rule(machine, objs[1], other)
             _read_dir_shapes(machine, objs[1], other)
             if (other.rule, other.shapes_by) != (r.rule, r.shapes_by):
@@ -5790,7 +5818,7 @@ def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
                     r.rule_conflict = (f"{where}: the player doesn't set face (the block keeps its "
                                        "default face), which Bedrock's placement traits can't give")
                     raise Unreadable(r.rule_conflict)
-                face = "" if r.kind == "facing6" else _face_value(res.get("face"))
+                face = "" if r.kind in ("facing6", "facing") else _face_value(res.get("face"))
                 token = _token(facing)
                 if face is None or token is None:
                     outs.add(None)
@@ -5825,7 +5853,7 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
     try:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
-        for key in directional_keys(r.kind):
+        for key in directional_keys(r.kind, r.facings):
             state = _with_key(default if isinstance(default, State) else State(), r.kind, key)
             results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
             label = f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}"

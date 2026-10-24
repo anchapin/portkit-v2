@@ -4007,7 +4007,7 @@ def _water_notes(readings: list) -> list[str]:
 _ATTACH_FACES = ("floor", "wall", "ceiling")
 _SIX = ("down", "up", "north", "south", "west", "east")
 _OPPOSITE = {"down": "up", "up": "down", "north": "south", "south": "north", "west": "east", "east": "west"}
-_DIR_LABEL = {"facing6": "6-way facing", "attach": "attach face", "vslab": "vertical slab"}
+_DIR_LABEL = {"facing6": "6-way facing", "attach": "attach face", "vslab": "vertical slab", "facing": "facing"}
 # The blockstate property a kind's second key is drawn on (``facing`` unless
 # named here).
 _DIR_PROP = {"vslab": "type"}
@@ -4036,6 +4036,11 @@ def _directional_variants(blockstate: dict) -> tuple[str | None, dict | None, st
         parsed[key] = cell
     if set(props) == {"facing"} and props["facing"] == set(_SIX):
         kind = "facing6"
+    elif set(props) == {"facing"} and len(props["facing"]) >= 2 and props["facing"] < set(_SIX) \
+            and _coded_facing_variants(blockstate)[0] is None:
+        # #296: facing over some of the six directions, one model per value
+        # (the four horizontals turning one model are the facing-only path).
+        kind = "facing"
     elif set(props) == {"type"} and props["type"] == set(blockcode.VSLAB_TYPES):
         # Vertical slabs (#296): one Java variant per side the slab stands
         # against, plus double.
@@ -4058,7 +4063,8 @@ def _directional_variants(blockstate: dict) -> tuple[str | None, dict | None, st
             return None, None, f"{label}: {key} turns a model by other than a quarter turn"
         cells[(cell.get("face", ""), cell[_DIR_PROP.get(kind, "facing")])] = (
             entry["model"], x % 360, y % 360, bool(entry.get("uvlock")))
-    if len(cells) != len(blockcode.directional_keys(kind)):
+    facings = tuple(d for d in _SIX if ("", d) in cells) if kind == "facing" else ()
+    if len(cells) != len(blockcode.directional_keys(kind, facings)):
         return None, None, f"{label}: not every combination has a variant"
     return kind, cells, ""
 
@@ -4210,8 +4216,9 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
     out = {}
     classes = getattr(mod, "classes", None)
     if specs:
+        facings = {n: _facings_of(c) for n, (k, c) in specs.items() if k == "facing"}
         readings = blockcode.read_directional(classes, {n: k for n, (k, _) in specs.items()},
-                                              run=shared() if shared else None)
+                                              run=shared() if shared else None, facings=facings)
         out.update({n: (specs[n][0], {(k, ()): v for k, v in specs[n][1].items()}, readings[n], ())
                     for n in specs})
     if bool_specs:
@@ -4223,6 +4230,13 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
                                                      run=run)
         out.update({n: (k, c, readings[n], b) for n, (k, b, c) in bool_specs.items()})
     return out, why
+
+
+def _facings_of(cells: dict) -> tuple:
+    """The facing values a ``facing`` blockstate's cells draw, in _SIX order
+    (keys are (face, facing) or ((face, facing), combination))."""
+    keys = {k[0] if isinstance(k[0], tuple) else k for k in cells}
+    return tuple(d for d in _SIX if ("", d) in keys)
 
 
 def _bedrock_cells(rule: dict) -> list[tuple[tuple, tuple]]:
@@ -4298,13 +4312,28 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         result.unhandled.append(Unhandled(rel, "block", f"{_DIR_LABEL[kind]}: {reading.rule_conflict}"))
         return None
     combos = blockcode.combinations(bools)
-    rule = reading.rule if reading.rule is not None else blockcode.default_rule(kind)
+    facings = _facings_of(cells) if kind == "facing" else ()
+    rule = reading.rule if reading.rule is not None else blockcode.default_rule(kind, facings)
+    if rule is None:
+        # #296: no DEFAULT is approved for a facing over these values.
+        result.unhandled.append(Unhandled(rel, "block", (
+            f"{label} ({', '.join(facings)}): placement isn't read ({reading.rule_why}), and no "
+            "DEFAULT covers a facing over these values")))
+        return None
     bedrock = _bedrock_cells(rule)
     conds_of: dict[tuple, list] = {}
     for conds, key in bedrock:
         conds_of.setdefault(key, []).append(conds)
-    reachable = [k for k in blockcode.directional_keys(kind) if k in conds_of]
-    unreachable = [k for k in blockcode.directional_keys(kind) if k not in conds_of]
+    keys = blockcode.directional_keys(kind, facings)
+    stray = sorted({k for k in conds_of if k not in keys}, key=lambda k: _SIX.index(k[1])) if kind == "facing" else []
+    if stray:
+        # The placement rule gives a facing the blockstate doesn't draw.
+        result.unhandled.append(Unhandled(rel, "block", (
+            f"{label} ({', '.join(facings)}): placement ({_rule_text(rule)}) gives "
+            + ", ".join(_key_label(k, kind) for k in stray) + ", which the blockstate doesn't draw")))
+        return None
+    reachable = [k for k in keys if k in conds_of]
+    unreachable = [k for k in keys if k not in conds_of]
     live = [(k, c) for k in reachable for c in combos]
 
     flats: dict[str, dict] = {}
@@ -4550,7 +4579,7 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         double_path = models.model_path(mod, cells[(("", "double"), ())][0])
         if double_path is not None and double_path.is_file():
             result.claim(mod, double_path)
-    drawn = {"facing"} if kind == "facing6" else {"type"} if kind == "vslab" else {"face", "facing"}
+    drawn = {"facing"} if kind in ("facing6", "facing") else {"type"} if kind == "vslab" else {"face", "facing"}
     record = {
         "name": name,
         "kind": kind,
@@ -4620,6 +4649,8 @@ _DIR_RULE_DEFAULT = {
     "attach": ("vanilla FaceAttachedHorizontalDirectionalBlock#getStateForPlacement L39-52: clicked top -> "
                "floor, clicked bottom -> ceiling (facing = the player's facing), clicked side -> wall facing "
                "away from it"),
+    "facing": ("over the four horizontals only, the facing-only DEFAULT: the block faces the player, facing = "
+               "the player's horizontal direction turned round (Bedrock cardinal_direction)"),
     "vslab": ("clicked side -> type = that face, the slab standing against the block it was placed on, as "
               "vanilla SlabBlock#getStateForPlacement puts a slab against the face clicked; clicked top or "
               "bottom -> type = the player's facing (Bedrock cardinal_direction), the half nearest the player: "
@@ -4680,7 +4711,7 @@ def _directional_notes(records: list[dict]) -> list[str]:
     read = [(f"{r['rule']} ({r['rule_text']})", r["name"]) for r in records if r["rule"]]
     if read:
         notes.append("Placement rule read from bytecode - " + _grouped(read) + ".")
-    for kind in ("facing6", "attach", "vslab"):
+    for kind in ("facing6", "attach", "vslab", "facing"):
         default = [(r["rule_why"], r["name"]) for r in records if not r["rule"] and r["kind"] == kind]
         if default:
             notes.append(f"{_DIR_LABEL[kind].capitalize()} placement DEFAULT, not read from code "
