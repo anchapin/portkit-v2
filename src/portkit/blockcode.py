@@ -5175,9 +5175,13 @@ def _with(state, bools: tuple, combo: tuple) -> "State":
     return base
 
 
-def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple], run=None) -> dict[str, StateReading]:
+def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple], run=None,
+                      facingless: frozenset = frozenset()) -> dict[str, StateReading]:
     """A :class:`StateReading` per blockstate name in ``bools`` (name ->
-    the boolean state names its blockstate draws)."""
+    the boolean state names its blockstate draws). A name in ``facingless``
+    draws booleans and nothing else (#296): there is no placement to read,
+    and its shapes, toggle and light are read at each combination of the
+    booleans alone (``shapes_by`` keyed (None, combination))."""
     names = list(bools)
     readings = {n: StateReading(n, bools=tuple(sorted(bools[n]))) for n in names}
     if classes is None or not len(classes):
@@ -5200,21 +5204,24 @@ def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple], run=N
             # the jar doesn't hold, which isn't read.
             r.vanilla_parent = base.replace("/", ".")
             continue
+        flat = name in facingless
         _read_states(machine, obj, r)
         r.behaviour = _behaviour(machine, obj.cls)
-        _read_placement(machine, obj, r)
+        if not flat:
+            _read_placement(machine, obj, r)
         placed = _placed_states(machine, obj)
         _read_defaults(machine, obj, r, placed)
-        _read_state_shapes(machine, obj, r)
+        _read_state_shapes(machine, obj, r, flat)
         _read_shape_collision(machine, obj, r)
-        _read_toggle(machine, obj, r)
+        _read_toggle(machine, obj, r, [lambda s: s] if flat else None)
         r.changed_by = _changed_by(machine, obj.cls, r.bools)
-        _read_state_light(machine, obj, r, placed)
+        _read_state_light(machine, obj, r, placed, () if flat else ("facing",))
         if len(objs) > 1:
             other = StateReading(name, bools=r.bools)
-            _read_placement(machine, objs[1], other)
+            if not flat:
+                _read_placement(machine, objs[1], other)
             _read_defaults(machine, objs[1], other, _placed_states(machine, objs[1]))
-            _read_state_shapes(machine, objs[1], other)
+            _read_state_shapes(machine, objs[1], other, flat)
             _read_shape_collision(machine, objs[1], other)
             if (other.placement, other.shapes_by, other.collision, other.defaults) != \
                     (r.placement, r.shapes_by, r.collision, r.defaults):
@@ -5281,7 +5288,9 @@ def _read_defaults(machine: Machine, obj: Obj, r: StateReading, placed: list | N
         r.defaults[prop] = (False, "DEFAULT", why or "the default state isn't read")
 
 
-def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading) -> None:
+def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading, flat: bool = False) -> None:
+    """getShape at every (facing, combination); at every combination alone,
+    keyed (None, combination), for a block that draws no facing (``flat``)."""
     machine.steps = 0
     where = _declaring(machine, obj.cls, "getShape", _GET_SHAPE_DESC)
     default = obj.fields.get("__default", State())
@@ -5290,13 +5299,17 @@ def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading) -> None:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
         for combo in combinations(r.bools):
-            for d in HORIZONTAL:
-                state = _with(default, r.bools, combo).set("facing", Dir(d))
+            for d in ((None,) if flat else HORIZONTAL):
+                state = _with(default, r.bools, combo)
+                if d is not None:
+                    state = state.set("facing", Dir(d))
+                at = f"facing={d}" if d is not None else ",".join(
+                    f"{p}={'true' if v else 'false'}" for p, v in zip(r.bools, combo))
                 results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
                 if not results or any(not isinstance(x, Shape) for x in results):
-                    raise Unreadable(f"the shape at facing={d} is not built from boxes it can read")
+                    raise Unreadable(f"the shape at {at} is not built from boxes it can read")
                 if len({x for x in results}) != 1:
-                    raise Unreadable(f"the shape at facing={d} depends on more than the drawn states")
+                    raise Unreadable(f"the shape at {at} depends on more than the drawn states")
                 shapes[(d, combo)] = results[0].boxes
     except Unreadable as exc:
         r.shape_why = f"{where}: {exc}"

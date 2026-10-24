@@ -1551,6 +1551,8 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
                  if hpillars else {})
     readings = _read_facing_code(mod, src, stations or {}, loaded, shared)
     bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded, shared)
+    flat_readings, flat_why = _read_flat_bool_code(mod, stations or {}, loaded, shared)
+    flat_bool: list[dict] = []
     render = _RenderRun(mod, shared)
     # Blockstates whose bare variants the mod's code registers as blocks of
     # their own (an adapter's block_variations hook, #296), read above.
@@ -1730,6 +1732,21 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             result.unhandled.append(Unhandled(rel, "block", why))
             continue
 
+        if name in flat_readings:
+            # Booleans alone (#296), after every other converter passed it by.
+            claimed = set(result.consumed)
+            record = _convert_coded_bool(mod, result, rel, name, *flat_readings[name])
+            if record is not None:
+                if name in water_dropped:
+                    record["states"] = [x for x in record["states"] if x != "waterlogged"]
+                flat_bool.append(record)
+            else:
+                result.consumed = claimed | {rel}
+            continue
+        if name in flat_why:
+            result.unhandled.append(Unhandled(rel, "block", flat_why[name]))
+            continue
+
         model_ref, why = _single_model(blockstate)
         if model_ref is None:
             result.unhandled.append(Unhandled(rel, "block", why))
@@ -1759,24 +1776,25 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     # what a container carries.
     notes = result.notes
     result.notes = []
-    _toggle_table(mod, result, coded_bool + directional_bool)
+    _toggle_table(mod, result, coded_bool + directional_bool + flat_bool)
     doors.door_table(mod, result, [r for r in paired_records if r["kind"] in ("door", "two_tall")])
     trapdoors.table(mod, result, [r for r in paired_records if r["kind"] == "trapdoor"])
     plates.table(mod, result, [r for r in paired_records if r["kind"] == "plate"])
     fence_gates.table(mod, result, [r for r in paired_records if r["kind"] == "gate"])
     buttons.table(mod.namespace, result, [r for r in directional_bool if r.get("button")])
-    _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool}, loaded=loaded,
+    _add_light(mod, result, src, skip={r["name"] for r in coded_bool + directional_bool + flat_bool}, loaded=loaded,
                shared=shared)
     _add_water(mod, result, sorted(water_dropped), shared)
     later, result.notes = result.notes, notes
     # Last: the container reader resets the shared machine's class state.
     containers = _add_containers(mod, result, stations or {}, experiments, shared)
-    for record in coded + coded_bool + directional + directional_bool + vslabs:
+    for record in coded + coded_bool + directional + directional_bool + vslabs + flat_bool:
         if record["name"] in containers:
             # Carried: the block entity and the use that opens its menu.
             record["behaviour"] = [m for m in record["behaviour"] if m not in _CONTAINER_CARRIED]
     result.notes.extend(_coded_facing_notes(coded))
     result.notes.extend(_coded_bool_notes(coded_bool))
+    result.notes.extend(_flat_bool_notes(flat_bool))
     result.notes.extend(_directional_notes(directional))
     result.notes.extend(_directional_bool_notes(directional_bool))
     result.notes.extend(_vslab_notes(vslabs))
@@ -3034,7 +3052,8 @@ def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, na
     extra_states = sorted(set(reading.states or ()) - {"facing"})
     return {
         "name": name,
-        "placement": (reading.placement_from, placement) if reading.placement is not None
+        "placement": (None, "no facing") if flat
+        else (reading.placement_from, placement) if reading.placement is not None
         else (None, reading.placement_why),
         "box": reading.shape_from if reading.shapes is not None else None,
         "box_why": reading.shape_why,
@@ -3424,6 +3443,77 @@ def _read_bool_code(mod: SourceMod, src, stations: dict, loaded: dict | None = N
     return {n: (specs[n], readings[n]) for n in specs}, why
 
 
+# Blocks whose blockstate draws booleans and nothing else (#296 sub-reason
+# 1: stools, lamps, frames, multiblock parts) convert as the facing-and-
+# boolean blocks above do (#215), less the facing: no placement trait, one
+# Bedrock state per boolean with the start read from code, a bone per
+# model, box and light per combination, a use toggle only where read. Booleans
+# named for a direction (north/east/south/west/up/down) are connection
+# states, not this; a blockstate any other converter takes is left to it
+# (they run first).
+_DIRECTION_NAMES = {"north", "east", "south", "west", "up", "down"}
+
+
+def _flat_bool_variants(blockstate: dict) -> tuple[dict | None, str]:
+    """{"bools", "cells": {(None, combination): (model, y, uvlock)},
+    "facings": (None,)} when ``blockstate`` is a variants map over one to
+    four booleans alone; (None, why) when it is one but not in a form read
+    here; (None, "") when it isn't."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or len(variants) < 2:
+        return None, ""
+    parsed = {}
+    props: dict[str, set] = {}
+    for key in variants:
+        pairs = [p.split("=", 1) for p in key.split(",") if p]
+        if not pairs or any(len(p) != 2 for p in pairs):
+            return None, ""
+        cell = {a.strip(): b.strip() for a, b in pairs}
+        for a, b in cell.items():
+            props.setdefault(a, set()).add(b)
+        parsed[key] = cell
+    if not props or any(not v <= _BOOL_VALUES for v in props.values()):
+        return None, ""
+    if "waterlogged" in props or set(props) & _DIRECTION_NAMES:
+        return None, ""
+    bools = tuple(sorted(props))
+    if len(bools) > _MAX_BOOLS:
+        return None, f"booleans: {len(bools)} booleans, more than {_MAX_BOOLS} aren't read"
+    cells = {}
+    for key, cell in parsed.items():
+        if set(cell) != set(bools):
+            return None, "booleans: some variants don't name every state"
+        got, why = _quarter(variants[key])
+        if got is None:
+            return None, f"booleans: {key} {why}"
+        cells[(None, tuple(int(cell[p] == "true") for p in bools))] = got
+    if len(cells) != 2 ** len(bools):
+        return None, "booleans: not every combination has a variant"
+    return {"bools": bools, "cells": cells, "facings": (None,)}, ""
+
+
+def _read_flat_bool_code(mod: SourceMod, stations: dict, loaded: dict,
+                         shared: "_SharedRun | None" = None) -> tuple[dict, dict]:
+    """(spec, reading) per blockstate that draws booleans alone and is no
+    station; residue reasons for ones not in a form read here."""
+    specs, why = {}, {}
+    for stem, blockstate in loaded.items():
+        if stem in stations:
+            continue
+        spec, reason = _flat_bool_variants(blockstate)
+        if spec is not None:
+            specs[stem] = spec
+        elif reason:
+            why[stem] = reason
+    if not specs:
+        return {}, why
+    readings = blockcode.read_state_blocks(getattr(mod, "classes", None),
+                                           {n: s["bools"] for n, s in specs.items()},
+                                           run=shared() if shared else None,
+                                           facingless=frozenset(specs))
+    return {n: (specs[n], readings[n]) for n in specs}, why
+
+
 def _state_name(namespace: str, prop: str) -> str:
     return f"{namespace}:{prop}"
 
@@ -3462,10 +3552,14 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
                         spec: dict, reading) -> dict | None:
     ns = mod.namespace
     bools, cells = spec["bools"], spec["cells"]
+    # A blockstate that draws booleans alone (#296) has the one "facing" None.
+    facings = spec.get("facings", _CARDINALS)
+    flat = facings == (None,)
+    label = "booleans" if flat else "facing and booleans"
     combos = blockcode.combinations(bools)
     if reading.vanilla_parent:
         result.unhandled.append(Unhandled(rel, "block", (
-            f"facing and booleans: {reading.cls} is a vanilla {reading.vanilla_parent.rsplit('.', 1)[-1]}, "
+            f"{label}: {reading.cls} is a vanilla {reading.vanilla_parent.rsplit('.', 1)[-1]}, "
             "whose placement, shape and state changes are vanilla code that isn't read")))
         return None
     if reading.placement_conflict:
@@ -3480,7 +3574,7 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         if model_ref not in flats:
             flat, why = _model_elements(mod, result, model_ref)
             if flat is None:
-                result.unhandled.append(Unhandled(rel, "block", f"facing and booleans model: {why}"))
+                result.unhandled.append(Unhandled(rel, "block", f"{label} model: {why}"))
                 return None
             flats[model_ref] = flat
     textures: dict = {}
@@ -3547,11 +3641,11 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
             visibility[bone] = "1.0"
             continue
         terms = []
-        for combo, facings in sorted(by_combo.items()):
-            if facings == set(_CARDINALS):
+        for combo, at in sorted(by_combo.items()):
+            if flat or at == set(_CARDINALS):
                 terms.append(_cell_test(ns, bools, None, combo))
             else:
-                terms += [_cell_test(ns, bools, f, combo) for f in _CARDINALS if f in facings]
+                terms += [_cell_test(ns, bools, f, combo) for f in _CARDINALS if f in at]
         visibility[bone] = " || ".join(f"({t})" for t in terms) if len(terms) > 1 else terms[0]
 
     # Boxes per cell: Java's (read) in the frame the cell's geometry is drawn in.
@@ -3573,7 +3667,7 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
             bounds = _element_bounds(flats[model_ref].get("elements") or [])
             boxes[cell] = None if bounds is None else frame(bounds, y if lock else 0)
     if outside:
-        result.unhandled.append(Unhandled(rel, "block", "facing and booleans: Java's shape lies outside the "
+        result.unhandled.append(Unhandled(rel, "block", f"{label}: Java's shape lies outside the "
                                           "block at some state, and a Bedrock box can't"))
         return None
     collides = reading.collision if reading.collision is not None else True
@@ -3613,9 +3707,14 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         if not same_light:
             extra["minecraft:light_emission"] = light[combo]
         extras[(facing, combo)] = extra
-    per_facing = all(len({json.dumps(extras[(f, c)], sort_keys=True) for c in combos}) == 1 for f in _CARDINALS)
+    per_facing = not flat and all(
+        len({json.dumps(extras[(f, c)], sort_keys=True) for c in combos}) == 1 for f in _CARDINALS)
     permutations = []
-    if per_facing:
+    if flat:
+        for c in combos:
+            if extras[(None, c)]:
+                permutations.append({"condition": _cell_test(ns, bools, None, c), "components": extras[(None, c)]})
+    elif per_facing:
         for f in _CARDINALS:
             if extras[(f, combos[0])]:
                 permutations.append({"condition": _cell_test(ns, bools, f, None),
@@ -3635,6 +3734,8 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         },
         "components": components,
     }
+    if flat:
+        del block["description"]["traits"]
     if permutations:
         block["permutations"] = permutations
     fmt = _BLOCK_FORMAT
@@ -3646,11 +3747,12 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         fmt = SCRIPT_FORMAT
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = {"format_version": fmt, "minecraft:block": block}
-    extra_states = sorted(set(reading.states or ()) - {"facing", *bools})
+    extra_states = sorted(set(reading.states or ()) - ({*bools} if flat else {"facing", *bools}))
     return {
         "name": name,
         "bools": bools,
-        "placement": (reading.placement_from, placement) if reading.placement is not None
+        "placement": (None, "no facing") if flat
+        else (reading.placement_from, placement) if reading.placement is not None
         else (None, reading.placement_why),
         "box": reading.shape_from if reading.shapes_by is not None else None,
         "box_why": reading.shape_why,
@@ -3688,6 +3790,49 @@ def _coded_bool_notes(records: list[dict]) -> list[str]:
         "per block below (a DEFAULT is not a citation)."
     ]
     notes += _coded_facing_notes(records)[1:]
+    return notes + _bool_state_notes(records)
+
+
+def _flat_bool_notes(records: list[dict]) -> list[str]:
+    """Notes for blocks that draw booleans alone (#296): per block, each
+    value read from bytecode (class#method) or the labelled DEFAULT."""
+    if not records:
+        return []
+    notes = [
+        f"{len(records)} block(s) whose blockstate draws boolean states alone convert outside a station "
+        "runtime: one Bedrock state per boolean (<namespace>:<name>, the value a placed block starts with "
+        "listed first), the model drawn at each state shown by bone_visibility, no placement trait (Java "
+        "has nothing to place by); box, starting values, toggle and light read from the jar's bytecode "
+        "where it can be read deterministically, otherwise a documented DEFAULT, named per block below "
+        "(a DEFAULT is not a citation)."
+    ]
+    read_b = [(r["box"], r["name"]) for r in records if r["box"]]
+    if read_b:
+        notes.append("Box read from bytecode (the bounding box of getShape at each combination of the "
+                     "booleans) - " + _grouped(read_b) + ".")
+    default_b = [(r["box_why"], r["name"]) for r in records if not r["box"]]
+    if default_b:
+        notes.append(f"Box DEFAULT, not read from code ({_BOX_DEFAULT}) - " + _grouped(default_b) + ".")
+    no_coll = [r["name"] for r in records if r["collision"] is False]
+    if no_coll:
+        notes.append("No collision, read from bytecode (the block's Properties call noCollission, so "
+                     "BlockBehaviour#getCollisionShape is empty): " + ", ".join(no_coll) + ".")
+    default_c = [(r["collision_why"], r["name"]) for r in records if r["collision"] is None]
+    if default_c:
+        notes.append(f"Collision DEFAULT, not read from code ({_COLLISION_DEFAULT}) - "
+                     + _grouped(default_c) + ".")
+    clamped = [r["name"] for r in records if r["clamped"]]
+    if clamped:
+        notes.append("Java's shape reaches outside the block, and Bedrock's boxes stop at its edges: "
+                     + ", ".join(clamped) + ".")
+    states = [(", ".join(r["states"]), r["name"]) for r in records if r["states"]]
+    if states:
+        notes.append("The block's code declares states its blockstate doesn't draw; Bedrock doesn't "
+                     "carry them (the block behaves as placed) - " + _grouped(states) + ".")
+    acts = [(", ".join(r["behaviour"]), r["name"]) for r in records if r["behaviour"]]
+    if acts:
+        notes.append("The block's own classes override behaviour methods that the converted block "
+                     "doesn't carry - " + _grouped(acts) + ".")
     return notes + _bool_state_notes(records)
 
 
@@ -3744,7 +3889,7 @@ def _bool_state_notes(records: list[dict]) -> list[str]:
                      "state) - " + _grouped(const) + ".")
     dark = [r["name"] for r in records if r["light"] is not None and r["light_kind"] == "dark"]
     if dark:
-        notes.append(f"No light, read from bytecode: {len(dark)} facing-and-boolean block(s) whose Properties "
+        notes.append(f"No light, read from bytecode: {len(dark)} block(s) with boolean states whose Properties "
                      "never set one (BlockBehaviour$Properties default, state -> 0).")
     nolight = [(r["light_why"], r["name"]) for r in records if r["light"] is None]
     if nolight:
