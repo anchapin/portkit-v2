@@ -112,6 +112,10 @@ _VANILLA_PROPS = {
     # names it): down or a horizontal, read under facing as the horizontal
     # one is (#296, a ``facing`` blockstate over those five values).
     (_STATE_PROPS, "FACING_HOPPER"): "facing",
+    # HORIZONTAL_AXIS, EnumProperty.create("axis", Direction.Axis.class,
+    # X, Z) (Mojang mappings, BlockStateProperties): a horizontal pillar's
+    # axis (#296).
+    (_STATE_PROPS, "HORIZONTAL_AXIS"): "axis",
     # DirectionalBlock.FACING = BlockStateProperties.FACING (DirectionalBlock
     # <clinit> L8); FaceAttachedHorizontalDirectionalBlock.FACE =
     # BlockStateProperties.ATTACH_FACE, an EnumProperty named "face" of
@@ -261,6 +265,14 @@ class PlayerDir:
     """The player's horizontal facing, turned clockwise by ``quarters``."""
 
     quarters: int = 0
+
+
+@dataclass(frozen=True)
+class PlayerAxis:
+    """The axis of the player's horizontal facing (``PlayerDir.getAxis``),
+    or the other horizontal axis when ``turned`` (an odd quarter turn)."""
+
+    turned: bool = False
 
 
 @dataclass(frozen=True)
@@ -3173,6 +3185,8 @@ class Machine:
                 return [PlayerDir((recv.quarters + 1) % 4)]
             if name == "getCounterClockWise":
                 return [PlayerDir((recv.quarters + 3) % 4)]
+            if name == "getAxis":
+                return [PlayerAxis(recv.quarters % 2 == 1)]
             return [UNKNOWN]
         return [UNKNOWN]
 
@@ -6288,3 +6302,194 @@ def _read_container(machine: Machine, obj: Obj, found, r: ContainerReading) -> N
         "Lnet/minecraft/world/level/block/entity/BlockEntityTicker;"))
     if ticker is not None:
         r.ticks = f"{ticker[0].name.replace('/', '.')}#getTicker"
+
+
+# -- held states (#296) -------------------------------------------------------
+
+@dataclass
+class HeldReading:
+    """The start value of one enum state a blockstate draws beside its
+    placement states (``facing``/``axis``), read from the block's code.
+
+    ``value`` is the serialized value Java starts the state at, with
+    ``kind`` ``placed`` (getStateForPlacement puts it on every path) or
+    ``registered`` (the registered default state, where placement reads it
+    from the world or differs between paths, as #215 item 2 reads a
+    boolean's), and ``source`` citing it; None with ``why`` when unread.
+    ``changed_by`` names the methods of the block's own classes that change
+    the state (``+redstone`` when one reads a signal), as #215's scan."""
+
+    name: str
+    prop: str
+    cls: str = ""
+    value: str | None = None
+    kind: str = ""
+    source: str = ""
+    why: str = ""
+    changed_by: tuple = ()
+    vanilla_parent: str = ""
+
+
+def _serialized(machine: Machine, value) -> str | None:
+    """The blockstate name of an enum state's value: a mod enum constant's
+    getSerializedName (StringRepresentable, what EnumProperty writes),
+    run on the machine; None when it can't be had."""
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, Obj) or "__enum_name" not in value.fields:
+        return None
+    machine.steps = 0
+    try:
+        got = machine.call(value.cls, "getSerializedName", "()Ljava/lang/String;", [value])
+    except Unreadable:
+        return None
+    names = {g for g in got if isinstance(g, str)}
+    return names.pop() if len(names) == 1 and len(got) == len([g for g in got if isinstance(g, str)]) else None
+
+
+def read_held_states(classes: ClassIndex | None, props: dict[str, str], run=None) -> dict[str, HeldReading]:
+    """A :class:`HeldReading` per blockstate name in ``props`` (name -> the
+    enum state's name)."""
+    readings = {n: HeldReading(n, p) for n, p in props.items()}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.why = "the mod ships no class files"
+        return readings
+    machine, registered = _from_run(run, classes, list(props))
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.why = why
+            continue
+        found = []
+        for obj in objs:
+            one = HeldReading(name, r.prop)
+            _read_held(machine, obj, one)
+            found.append(one)
+        first = found[0]
+        if any((o.value, o.kind, o.vanilla_parent) != (first.value, first.kind, first.vanilla_parent)
+               for o in found[1:]):
+            r.cls = first.cls
+            r.why = "registered twice with different settings"
+            continue
+        readings[name] = first
+    return readings
+
+
+def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
+    r.cls = obj.cls.replace("/", ".")
+    base = machine.vanilla_base(obj.cls)
+    if base not in _PLAIN_VANILLA:
+        # As #215 item 7: a vanilla class with behaviour of its own sets its
+        # states in code the jar doesn't hold.
+        r.vanilla_parent = base.replace("/", ".")
+        r.why = f"{r.cls} reaches vanilla {r.vanilla_parent}, whose states are vanilla code"
+        return
+    where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+    placed = _placed_states(machine, obj)
+    why = ""
+    if placed is None:
+        why = f"{where} isn't read"
+    else:
+        values = set()
+        for s in placed:
+            v = dict(s.values).get(r.prop, UNKNOWN)
+            values.add(_serialized(machine, v) if v is not UNKNOWN else None)
+        set_here = all(r.prop in dict(s.values) for s in placed)
+        if len(values) == 1 and None not in values and set_here:
+            r.value, r.kind, r.source = values.pop(), "placed", where
+        elif not set_here and not any(r.prop in dict(s.values) for s in placed):
+            why = f"{where} leaves it at the registered default"
+        else:
+            why = f"{where} sets it from the world" if None in values else f"{where} differs between paths"
+    if r.value is None:
+        default = obj.fields.get("__default")
+        v = dict(default.values).get(r.prop, UNKNOWN) if isinstance(default, State) else UNKNOWN
+        name = _serialized(machine, v) if v is not UNKNOWN else None
+        if name is not None:
+            r.value, r.kind = name, "registered"
+            r.source = f"{r.cls}#<init> (registerDefaultState); {why}"
+        else:
+            # StateDefinition#any's value (the enum's first constant) isn't
+            # taken: no reader of an enum's order is approved (#87).
+            r.why = f"{why}; the registered default state doesn't set it" if why else \
+                "the registered default state doesn't set it"
+            return
+    r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
+
+
+
+# -- horizontal pillars (#296) ------------------------------------------------
+
+@dataclass
+class AxisReading:
+    """How a horizontal pillar (axis x or z) takes its axis on placement,
+    read by running ``getStateForPlacement`` once per clicked face: ``rule``
+    ``face`` (each side face clicked gives its own axis, as vanilla
+    RotatedPillarBlock does), ``player`` (the axis of the player's facing,
+    ``turned`` for the other one), or None with ``why``; ``source`` cites
+    the method."""
+
+    name: str
+    cls: str = ""
+    rule: str | None = None
+    turned: bool = False
+    source: str = ""
+    why: str = ""
+
+
+def read_horizontal_axis(classes: ClassIndex | None, names: list[str], run=None) -> dict[str, AxisReading]:
+    readings = {n: AxisReading(n) for n in names}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.why = "the mod ships no class files"
+        return readings
+    machine, registered = _from_run(run, classes, list(names))
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.why = why
+            continue
+        found = []
+        for obj in objs:
+            one = AxisReading(name)
+            _read_axis(machine, obj, one)
+            found.append(one)
+        first = found[0]
+        if any((o.rule, o.turned) != (first.rule, first.turned) for o in found[1:]):
+            first.rule, first.why = None, "registered twice with different settings"
+        readings[name] = first
+    return readings
+
+
+def _read_axis(machine: Machine, obj: Obj, r: AxisReading) -> None:
+    r.cls = obj.cls.replace("/", ".")
+    base = machine.vanilla_base(obj.cls)
+    if base not in _PLAIN_VANILLA:
+        r.why = f"{r.cls} reaches vanilla {base.replace('/', '.')}, whose placement is vanilla code"
+        return
+    where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+    by_face = {}
+    for face in DIRECTIONS:
+        machine.steps = 0
+        try:
+            results = machine.call(obj.cls, "getStateForPlacement", _PLACEMENT_DESC, [obj, _Ctx(face)])
+        except Unreadable as exc:
+            r.why = f"{where}: {exc}"
+            return
+        values = {res.get("axis") if isinstance(res, State) else UNKNOWN for res in results if res is not None}
+        if len(values) != 1:
+            r.why = f"{where}: axis differs between paths through the method" if values else \
+                f"{where}: the block isn't placed"
+            return
+        by_face[face] = values.pop()
+    sides = {f: by_face[f] for f in ("north", "south", "east", "west")}
+    want = {"north": "Z", "south": "Z", "east": "X", "west": "X"}
+    if all(isinstance(v, Const) and v.owner == _DIRECTION + "$Axis" and v.name == want[f] for f, v in sides.items()):
+        r.rule, r.source = "face", where
+        return
+    players = set(by_face.values())
+    if len(players) == 1 and isinstance(next(iter(players)), PlayerAxis):
+        r.rule, r.turned, r.source = "player", next(iter(players)).turned, where
+        return
+    r.why = f"{where}: axis is set neither from the clicked face nor from the player's facing"

@@ -13,9 +13,9 @@
       "errors": 0
     },
     "create": {
-      "coverage": 41.9,
-      "files": 4080,
-      "residue": 5662,
+      "coverage": 42.0,
+      "files": 4083,
+      "residue": 5641,
       "errors": 0
     },
     "farmers_delight_fabric": {
@@ -55,9 +55,9 @@
       "errors": 0
     },
     "storage_drawers_1192": {
-      "coverage": 73.2,
-      "files": 723,
-      "residue": 265,
+      "coverage": 73.6,
+      "files": 726,
+      "residue": 260,
       "errors": 0
     },
     "supplementaries": {
