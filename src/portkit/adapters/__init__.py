@@ -58,6 +58,13 @@ Hooks, and the core seam that asks each one:
   item the adapter knows is armor can't be read. Asked by
   :func:`portkit.converters.armor.convert` (#274) right after the item
   converter, so the recipe converter sees which items are wearable.
+- ``block_variations``: ``SourceMod -> {blockstate name: VariationSet}``,
+  for a mod whose code registers a block per named variant of one
+  blockstate (Chisel's builder chains, #296): which variants its code
+  registers, the translation key of each one's name and why Java may not
+  register it. Asked by :func:`portkit.converters.blocks.convert`, which
+  converts each registered variant from the blockstate's defaults and its
+  own textures.
 
 """
 from __future__ import annotations
@@ -115,6 +122,31 @@ class StationHooks:
     shared_types: frozenset = frozenset()
 
 
+@dataclass(frozen=True)
+class Variation:
+    """One variant of a blockstate that the mod's code registers as a block
+    (the ``block_variations`` hook): its variant key, the translation key of
+    the block's name ("" when not read), why Java may not register it (a
+    required mod, a branch the reading can't decide; "" when it always
+    does) and where it was read."""
+
+    name: str
+    lang_key: str = ""
+    gate: str = ""
+    source: str = ""
+
+
+@dataclass(frozen=True)
+class VariationSet:
+    """The variants of one blockstate the mod's code registers, in
+    registration order, why the reading of some is incomplete ("" when it
+    isn't), and where it was read."""
+
+    variations: tuple = ()
+    why: str = ""
+    source: str = ""
+
+
 def _empty() -> Mapping:
     return MappingProxyType({})
 
@@ -150,6 +182,9 @@ class Adapter:
     # portkit.rendershape.typed_entities. The hook gives a type the core
     # reads as a built one (an ``__betype`` object with its factory).
     block_entity_types: Callable[[object], tuple] | None = None
+    # (SourceMod) -> {blockstate name: VariationSet} (#296), see the module
+    # docstring.
+    block_variations: Callable[["SourceMod"], Mapping[str, VariationSet]] | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -288,13 +323,24 @@ def block_entity_types(types) -> tuple:
     return hook, again
 
 
+def block_variations(mod: "SourceMod") -> dict[str, VariationSet]:
+    """Every adapter's ``block_variations`` for ``mod``; the first adapter
+    (registry order) to answer a blockstate wins."""
+    found: dict[str, VariationSet] = {}
+    for a in ADAPTERS:
+        if a.block_variations is not None:
+            for name, vset in a.block_variations(mod).items():
+                found.setdefault(name, vset)
+    return found
+
+
 def station_hooks() -> list[StationHooks]:
     """The adapters' ``station`` hooks, in registry order."""
     return [a.station for a in ADAPTERS if a.station is not None]
 
 
 from . import (  # noqa: E402  (each imports Adapter above)
-    alloy_forgery, bclib, betterend, citadel, create, farmersdelight, mantle, mekanism, mythicmetals, registrate,
+    alloy_forgery, bclib, betterend, chisel, citadel, create, farmersdelight, mantle, mekanism, mythicmetals, registrate,
     silentgear, supplementaries, tconstruct, waystones, zeta,
 )
 
@@ -302,6 +348,7 @@ ADAPTERS = (
     alloy_forgery.ADAPTER,
     bclib.ADAPTER,
     betterend.ADAPTER,
+    chisel.ADAPTER,
     citadel.ADAPTER,
     create.ADAPTER,
     farmersdelight.ADAPTER,
