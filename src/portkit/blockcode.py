@@ -789,6 +789,11 @@ class Machine:
         # The depth a running class initializer's own code runs at, one per
         # initializer on the stack (see init_class, _clinit_call).
         self._clinit_at: list = []
+        # (class-initializer depth, statics written, static values read or
+        # stored) per _clinit_call on the stack: what its callee touches
+        # outside a class initializer of its own (a class it initializes on
+        # the way, run to the end, is as the game leaves it).
+        self._static_writes: list = []
         self._deferred_now = False
         self._shared_wrote: dict = {}
         self._stopped_methods: set = set()
@@ -1824,24 +1829,31 @@ class Machine:
         = RegUtils.registerFlags(...)``, one field among hundreds). Followed
         as any call; when it can't be followed, it is taken as havoc, as a
         dependency jar's method is (#280 pick 4a, see _havoc): what it
-        returns is unknown, everything reachable from its arguments loses
-        what it held, every static it wrote reads unknown, and the
+        returns is unknown, everything reachable from its arguments and
+        from every static value it (or a method it calls) read or stored
+        loses what it held (a list it appended to before it stopped is
+        partial), every static it (or a method it calls) wrote reads
+        unknown (a class initializer it ran to the end on the way keeps
+        what it wrote: that is what the game's run of it leaves), and the
         registrations it recorded before it stopped stay (as a top-level run
         that stops keeps them, see _run_method). The initializer then goes
         on to the fields after it, instead of stopping there and leaving
         every later field of the class unregistered. One that runs out of
         the step budget still stops the initializer."""
-        before = dict(self.statics)
+        written: set = set()
+        reached: dict = {}
+        self._static_writes.append((self._clinit_depth, written, reached))
         try:
             return self.run(*found, args)
         except Unreadable as exc:
             if str(exc) == _TOO_MUCH:
                 raise
-            for key, value in list(self.statics.items()):
-                if key not in before or before[key] is not value:
-                    self.statics[key] = UNKNOWN
-            self._havoc(args, f"{found[0].name}.{name}: {exc}")
+            for key in written:
+                self.statics[key] = UNKNOWN
+            self._havoc(list(args) + list(reached.values()), f"{found[0].name}.{name}: {exc}")
             return [UNKNOWN] if _arg_count(desc)[1] else [None]
+        finally:
+            self._static_writes.pop()
 
     def _unregistered_default(self, obj: "Obj") -> "State":
         """What ``defaultBlockState()`` returns on a block object none of
@@ -2223,6 +2235,8 @@ class Machine:
             return ("return", None)
         elif op == 0xB2:
             value = self.get_static(insn.arg)
+            if self._static_writes and self._static_writes[-1][0] == self._clinit_depth:
+                self._static_writes[-1][2][id(value)] = value
             if (value is UNKNOWN or value is None) and self._lazy_guard(insn):
                 value = None
             s.append(value)
@@ -2236,6 +2250,9 @@ class Machine:
             if isinstance(v, ListV) and v.shared is not None and v.shared != (owner, ref.name):
                 self._escape_shared(v)
             self.statics[(owner, ref.name)] = v
+            if self._static_writes and self._static_writes[-1][0] == self._clinit_depth:
+                self._static_writes[-1][1].add((owner, ref.name))
+                self._static_writes[-1][2][id(v)] = v
         elif op == 0xB4:
             obj = s.pop()
             name = insn.arg.name
