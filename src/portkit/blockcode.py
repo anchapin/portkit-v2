@@ -571,6 +571,10 @@ class Props:
     shared_changed: bool = False
     # For the copy a block keeps: the Properties object it was taken from.
     origin: object = None
+    # Properties#air (BlockBehaviour$Properties.isAir, what vanilla's air
+    # blocks are built with): True once called, False if never called,
+    # UNKNOWN when a call can't be told apart from it (#296).
+    air: object = False
 
 
 @dataclass(frozen=True)
@@ -762,7 +766,7 @@ def _format(rest: list):
 def _snapshot(props):
     if not isinstance(props, Props):
         return props
-    return Props(props.has_collision, props.light, props.epoch, origin=props.origin or props)
+    return Props(props.has_collision, props.light, props.epoch, origin=props.origin or props, air=props.air)
 
 
 def _shared_changed(props) -> bool:
@@ -3252,28 +3256,33 @@ class Machine:
                 else:
                     light = CopiedLight("a block it can't read")
                 # Whether a vanilla block (or one it can't read) collides is
-                # that block's, not read here.
-                return [Props(collision, light, self.epoch)]
-            return [Props(UNKNOWN, UNKNOWN, self.epoch)]
+                # that block's, not read here. Whether a copy is air isn't
+                # read (#296), so a copy is never taken for an air block.
+                return [Props(collision, light, self.epoch, air=UNKNOWN)]
+            return [Props(UNKNOWN, UNKNOWN, self.epoch, air=UNKNOWN)]
         if not isinstance(recv, Props):
             return [UNKNOWN]
+        air = recv.air
         if name in _NO_COLLISION:
             collision, light = False, recv.light
         elif name == "lightLevel" and len(rest) == 1:
             fn = rest[0]
             ok = isinstance(fn, Lam) or (isinstance(fn, Obj) and self.is_mod(fn.cls))
             collision, light = recv.has_collision, fn if ok else UNKNOWN
+        elif name == "air" and not rest:
+            # Properties#air sets isAir (#296), nothing else.
+            collision, light, air = recv.has_collision, recv.light, True
         elif _OBFUSCATED.match(name):
             # A Forge SRG / Fabric intermediary name: which setting it is
-            # can't be told, so neither collision nor light is known.
-            collision, light = UNKNOWN, UNKNOWN
+            # can't be told, so neither collision, light nor air is known.
+            collision, light, air = UNKNOWN, UNKNOWN, UNKNOWN
         else:
             return [recv]
         if self._forked:
-            return [Props(collision, light, self.epoch)]
+            return [Props(collision, light, self.epoch, air=air)]
         if recv.epoch != self.epoch:
             recv.shared_changed = True
-        recv.has_collision, recv.light = collision, light
+        recv.has_collision, recv.light, recv.air = collision, light, air
         return [recv]
 
     def _direction(self, name: str, recv, rest: list, static: bool):
@@ -4957,6 +4966,27 @@ def read_blocks(classes: ClassIndex | None, names: list[str], run=None) -> dict[
                 r.placement, r.shapes, r.collision = None, None, None
                 r.placement_why = r.shape_why = r.collision_why = "registered twice with different settings"
     return readings
+
+
+def read_air(classes: ClassIndex | None, names: list[str], run=None) -> dict[str, str]:
+    """name -> the block class, for each name in ``names`` registered as air
+    (#296): every object registered under it was built from Properties that
+    called ``Properties#air`` (``BlockBehaviour$Properties.isAir``, the
+    setting vanilla's air blocks are built with), read on that path and not
+    changed by another registration. A name not read, or read as anything
+    else, is left out."""
+    if classes is None or not len(classes):
+        return {}
+    machine, registered = _from_run(run, classes, names)
+    out: dict[str, str] = {}
+    for name in names:
+        objs, _why = registered[name]
+        if not objs:
+            continue
+        props = [o.fields.get("__props", UNKNOWN) for o in objs]
+        if all(isinstance(p, Props) and p.air is True and not _shared_changed(p) for p in props):
+            out[name] = objs[0].cls.replace("/", ".")
+    return out
 
 
 # Block methods (Mojang names, 1.21.1 BlockBehaviour/Block/EntityBlock) whose
