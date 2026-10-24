@@ -1554,6 +1554,9 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     flat_readings, flat_why = _read_flat_bool_code(mod, stations or {}, loaded, shared)
     flat_bool: list[dict] = []
     render = _RenderRun(mod, shared)
+    # Blocks the mod registers as air (Properties#air, #296): no block a
+    # player sees or places in Java, so none in Bedrock either.
+    air_blocks = _read_air(mod, stations or {}, loaded, shared)
     # Blockstates whose bare variants the mod's code registers as blocks of
     # their own (an adapter's block_variations hook, #296), read above.
     variation_lang = variations.read_lang(mod) if variation_sets else {}
@@ -1577,6 +1580,13 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             json.loads(path.read_text())
         except json.JSONDecodeError as exc:
             result.unhandled.append(Unhandled(rel, "block", f"invalid JSON: {exc}"))
+            continue
+        if name in air_blocks:
+            # The models are claimed as the code-drawn path claims them, so
+            # the move out of `block` changes no residue count.
+            for model_file in _model_chain_files(mod, _blockstate_models(loaded[name])):
+                result.claim(mod, model_file)
+            result.unhandled.append(Unhandled(rel, AIR_BLOCK, _air_reason(air_blocks[name])))
             continue
         drawn_read: list = []
         drawn_by_code = (None if name in (stations or {}) or name not in loaded
@@ -2631,6 +2641,33 @@ def _coded_facing_variants(blockstate: dict) -> tuple[str | None, dict | None, b
 # renderer to hand that to, and drawing a stand-in would invent the look
 # (#87), so the block is `code_drawn_block` residue: an explained kind.
 CODE_DRAWN = "code_drawn_block"
+
+# A block the mod registers as air (#296): its Properties call
+# Properties#air (BlockBehaviour$Properties.isAir, the setting vanilla's
+# air, cave_air and void_air are built with), so BlockState#isAir is true and
+# the game treats it as empty space. What it is for (a holder for models the
+# mod's code draws, a light or marker its code places) is the mod's code; a
+# Bedrock block definition would ship a solid, placeable block. It is
+# explained residue, its models claimed with it.
+AIR_BLOCK = "air_block"
+
+
+def _air_reason(cls: str) -> str:
+    return (f"the mod registers this block as air ({cls} is built with Properties#air, so BlockState#isAir "
+            "is true, as for vanilla's air blocks): Java's world treats it as empty space "
+            "(LevelReader#isEmptyBlock answers isAir), and what it is for (models the mod's code draws, "
+            "a light or marker its code places) is the mod's code; a Bedrock block definition would ship "
+            "a solid, placeable block instead")
+
+
+def _read_air(mod: SourceMod, stations: dict, loaded: dict,
+              shared: "_SharedRun | None" = None) -> dict[str, str]:
+    """name -> block class, for each blockstate (no station) registered as air."""
+    classes = getattr(mod, "classes", None)
+    names = sorted(n for n in loaded if n not in stations)
+    if classes is None or not len(classes) or not names:
+        return {}
+    return blockcode.read_air(classes, names, run=shared() if shared is not None else None)
 
 
 # A block whose Java render shape is ENTITYBLOCK_ANIMATED or INVISIBLE for every
