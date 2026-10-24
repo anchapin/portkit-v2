@@ -4597,6 +4597,8 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         "uvlock": any(cells[c][3] for c in live),
         "unreachable": [_key_label(k, kind) for k in unreachable],
     }
+    if kind == "facing":
+        record["facings"] = list(facings)
     if button is not None:
         record["button"] = button
     if bools:
@@ -4708,6 +4710,10 @@ def _directional_notes(records: list[dict]) -> list[str]:
         "be read deterministically, otherwise a documented DEFAULT, named per block below (a DEFAULT is not a "
         "citation)."
     ]
+    partial = [(", ".join(r["facings"]), r["name"]) for r in records if r["kind"] == "facing"]
+    if partial:
+        notes.append("Facing over some of the six directions (one model per value; #296), placed through the same "
+                     "states, at only the values the blockstate draws - " + _grouped(partial) + ".")
     read = [(f"{r['rule']} ({r['rule_text']})", r["name"]) for r in records if r["rule"]]
     if read:
         notes.append("Placement rule read from bytecode - " + _grouped(read) + ".")

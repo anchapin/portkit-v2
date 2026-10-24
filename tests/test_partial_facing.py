@@ -151,6 +151,8 @@ def test_quoin_on_the_facing_only_default(converted):
     assert "q.block_state('minecraft:cardinal_direction') == 'north'" in vis.values()
     notes = " ".join(converted.notes)
     assert "Facing placement DEFAULT" in notes and "quoin" in notes
+    assert "Facing over some of the six directions" in notes
+    assert "down, north, south, west, east: spout" in notes and "north, south, west, east: quoin" in notes
 
 
 def test_residue(converted):
