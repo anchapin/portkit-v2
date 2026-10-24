@@ -1543,6 +1543,12 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             continue
         loaded[stem] = reduced
         held[stem] = (reading, values, passed, None)
+    # Horizontal pillars (axis x or z, #296): how the axis is placed is the
+    # block's code, read per clicked face.
+    hpillars = [stem for stem, bs in loaded.items() if stem not in (stations or {})
+                and set((_axis_variants(bs)[0] or {})) == {"x", "z"}]
+    axis_read = (blockcode.read_horizontal_axis(getattr(mod, "classes", None), hpillars, run=shared())
+                 if hpillars else {})
     readings = _read_facing_code(mod, src, stations or {}, loaded, shared)
     bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded, shared)
     render = _RenderRun(mod, shared)
@@ -1674,6 +1680,15 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             continue
 
         by_axis, why = _axis_variants(blockstate)
+        if by_axis is not None and "y" not in by_axis:
+            placed = axis_read.get(name)
+            if placed is None or placed.rule is None:
+                result.unhandled.append(Unhandled(rel, "block", (
+                    "horizontal pillar (axis x or z): how the axis is placed isn't read: "
+                    + (placed.why if placed is not None else "the block isn't read"))))
+                continue
+            _convert_axis_block(mod, result, rel, name, by_axis, placed)
+            continue
         if by_axis is not None:
             _convert_axis_block(mod, result, rel, name, by_axis)
             continue
@@ -1802,8 +1817,10 @@ def _convert_axis_block(
     rel: str,
     name: str,
     by_axis: dict[str, tuple[str, int, int]],
+    placed=None,
 ) -> None:
-    """A pillar: one geometry per axis, selected by the face it was built on."""
+    """A pillar: one geometry per axis, selected by the face it was built on
+    (a horizontal pillar: by ``placed``, its axis rule read from code)."""
     resolved: dict[str, tuple[str, dict, dict | None]] = {}
     for axis in sorted(by_axis):
         model_ref, x, y = by_axis[axis]
@@ -1823,25 +1840,29 @@ def _convert_axis_block(
         if geo is not None:
             result.files[f"models/blocks/{name}_{axis}.geo.json"] = geo
 
-    result.files[f"blocks/{name}.json"] = _axis_block_definition(
-        mod.namespace,
-        name,
-        {axis: (ident, instances) for axis, (ident, instances, _) in resolved.items()},
-    )
+    shapes = {axis: (ident, instances) for axis, (ident, instances, _) in resolved.items()}
     if "y" not in resolved:
-        result.notes.append(HORIZONTAL_AXIS_NOTE.format(name=name))
+        result.files[f"blocks/{name}.json"] = _horizontal_axis_definition(mod.namespace, name, shapes, placed)
+        if placed.rule == "face":
+            result.notes.append(HORIZONTAL_AXIS_NOTE.format(name=name, source=placed.source))
+        else:
+            result.notes.append(
+                f"{name}: horizontal pillar (axis x or z) placed along the "
+                f"{'other horizontal axis to' if placed.turned else 'axis of'} the player's facing "
+                f"(read: {placed.source}), by minecraft:placement_direction")
+        return
+    result.files[f"blocks/{name}.json"] = _axis_block_definition(mod.namespace, name, shapes)
 
 
-# A horizontal pillar (axis x or z only, #296): a side face clicked gives
-# its axis as a pillar's does. Java has no y for it, and a block whose
-# getStateForPlacement sets axis from the clicked face would throw
-# (Property#setValue refuses a value the property lacks), so a top or bottom
-# face clicked takes a labelled DEFAULT: the axis the player faces along
-# (minecraft:placement_direction cardinal_direction), the way the log lies
-# ahead of them.
+# A horizontal pillar (axis x or z only, #296) whose code sets the axis from
+# the clicked face: a side face clicked gives its axis as a pillar's does.
+# Java has no y for it (getStateForPlacement would throw on a top or bottom
+# face: Property#setValue refuses a value the property lacks), so a top or
+# bottom face clicked takes a labelled DEFAULT: the axis the player faces
+# along (minecraft:placement_direction cardinal_direction).
 HORIZONTAL_AXIS_NOTE = (
-    "{name}: horizontal pillar (axis x or z); a side face clicked gives its axis; DEFAULT: a top or "
-    "bottom face clicked gives the axis the player faces along (Java has no y for it)")
+    "{name}: horizontal pillar (axis x or z); a side face clicked gives its axis (read: {source}); "
+    "DEFAULT: a top or bottom face clicked gives the axis the player faces along (Java has no y for it)")
 
 
 def _face_condition(faces: tuple[str, ...]) -> str:
@@ -1852,8 +1873,6 @@ def _face_condition(faces: tuple[str, ...]) -> str:
 def _axis_block_definition(
     namespace: str, name: str, by_axis: dict[str, tuple[str, dict[str, dict]]]
 ) -> dict:
-    if "y" not in by_axis:
-        return _horizontal_axis_definition(namespace, name, by_axis)
     # y is the default: Bedrock's block_face defaults to "down", which is a
     # vertical placement, and that is the axis Java calls y.
     geometry, instances = by_axis["y"]
@@ -1887,32 +1906,38 @@ def _axis_block_definition(
 
 
 def _horizontal_axis_definition(
-    namespace: str, name: str, by_axis: dict[str, tuple[str, dict[str, dict]]]
+    namespace: str, name: str, by_axis: dict[str, tuple[str, dict[str, dict]]], placed
 ) -> dict:
-    """A horizontal pillar (see HORIZONTAL_AXIS_NOTE): z is the block's own
-    geometry, x a permutation on an east/west face clicked, or a top/bottom
-    face clicked facing east or west (DEFAULT)."""
+    """A horizontal pillar: z is the block's own geometry, x a permutation.
+    Rule ``face`` (see HORIZONTAL_AXIS_NOTE): x on an east/west face
+    clicked, or a top/bottom face clicked facing east or west (DEFAULT).
+    Rule ``player``: x when the player faces east or west (north or south
+    when ``turned``)."""
     geometry, instances = by_axis["z"]
-    sideways = _face_condition(_AXIS_FACES["x"])
-    flat = _face_condition(_AXIS_FACES["y"])
-    facing_x = " || ".join(f"q.block_state('minecraft:cardinal_direction') == '{d}'" for d in ("east", "west"))
+    cardinal = ("north", "south") if placed.turned else ("east", "west")
+    facing_x = " || ".join(f"q.block_state('minecraft:cardinal_direction') == '{d}'" for d in cardinal)
+    traits = {"minecraft:placement_direction": {"enabled_states": ["minecraft:cardinal_direction"]}}
+    if placed.rule == "face":
+        facing_x = " || ".join(f"q.block_state('minecraft:cardinal_direction') == '{d}'" for d in ("east", "west"))
+        condition = (f"{_face_condition(_AXIS_FACES['x'])} || "
+                     f"(({_face_condition(_AXIS_FACES['y'])}) && ({facing_x}))")
+        traits = {"minecraft:placement_position": {"enabled_states": ["minecraft:block_face"]}, **traits}
+    else:
+        condition = facing_x
     return {
         "format_version": _BLOCK_FORMAT,
         "minecraft:block": {
             "description": {
                 "identifier": f"{namespace}:{name}",
                 "menu_category": {"category": _MENU_CATEGORY},
-                "traits": {
-                    "minecraft:placement_position": {"enabled_states": ["minecraft:block_face"]},
-                    "minecraft:placement_direction": {"enabled_states": ["minecraft:cardinal_direction"]},
-                },
+                "traits": traits,
             },
             "components": {
                 "minecraft:geometry": geometry,
                 "minecraft:material_instances": instances,
             },
             "permutations": [{
-                "condition": f"{sideways} || (({flat}) && ({facing_x}))",
+                "condition": condition,
                 "components": {
                     "minecraft:geometry": by_axis["x"][0],
                     "minecraft:material_instances": by_axis["x"][1],

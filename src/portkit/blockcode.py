@@ -112,6 +112,10 @@ _VANILLA_PROPS = {
     # names it): down or a horizontal, read under facing as the horizontal
     # one is (#296, a ``facing`` blockstate over those five values).
     (_STATE_PROPS, "FACING_HOPPER"): "facing",
+    # HORIZONTAL_AXIS, EnumProperty.create("axis", Direction.Axis.class,
+    # X, Z) (Mojang mappings, BlockStateProperties): a horizontal pillar's
+    # axis (#296).
+    (_STATE_PROPS, "HORIZONTAL_AXIS"): "axis",
     # DirectionalBlock.FACING = BlockStateProperties.FACING (DirectionalBlock
     # <clinit> L8); FaceAttachedHorizontalDirectionalBlock.FACE =
     # BlockStateProperties.ATTACH_FACE, an EnumProperty named "face" of
@@ -261,6 +265,14 @@ class PlayerDir:
     """The player's horizontal facing, turned clockwise by ``quarters``."""
 
     quarters: int = 0
+
+
+@dataclass(frozen=True)
+class PlayerAxis:
+    """The axis of the player's horizontal facing (``PlayerDir.getAxis``),
+    or the other horizontal axis when ``turned`` (an odd quarter turn)."""
+
+    turned: bool = False
 
 
 @dataclass(frozen=True)
@@ -3173,6 +3185,8 @@ class Machine:
                 return [PlayerDir((recv.quarters + 1) % 4)]
             if name == "getCounterClockWise":
                 return [PlayerDir((recv.quarters + 3) % 4)]
+            if name == "getAxis":
+                return [PlayerAxis(recv.quarters % 2 == 1)]
             return [UNKNOWN]
         return [UNKNOWN]
 
@@ -6402,3 +6416,80 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
                 "the registered default state doesn't set it"
             return
     r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
+
+
+
+# -- horizontal pillars (#296) ------------------------------------------------
+
+@dataclass
+class AxisReading:
+    """How a horizontal pillar (axis x or z) takes its axis on placement,
+    read by running ``getStateForPlacement`` once per clicked face: ``rule``
+    ``face`` (each side face clicked gives its own axis, as vanilla
+    RotatedPillarBlock does), ``player`` (the axis of the player's facing,
+    ``turned`` for the other one), or None with ``why``; ``source`` cites
+    the method."""
+
+    name: str
+    cls: str = ""
+    rule: str | None = None
+    turned: bool = False
+    source: str = ""
+    why: str = ""
+
+
+def read_horizontal_axis(classes: ClassIndex | None, names: list[str], run=None) -> dict[str, AxisReading]:
+    readings = {n: AxisReading(n) for n in names}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.why = "the mod ships no class files"
+        return readings
+    machine, registered = _from_run(run, classes, list(names))
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.why = why
+            continue
+        found = []
+        for obj in objs:
+            one = AxisReading(name)
+            _read_axis(machine, obj, one)
+            found.append(one)
+        first = found[0]
+        if any((o.rule, o.turned) != (first.rule, first.turned) for o in found[1:]):
+            first.rule, first.why = None, "registered twice with different settings"
+        readings[name] = first
+    return readings
+
+
+def _read_axis(machine: Machine, obj: Obj, r: AxisReading) -> None:
+    r.cls = obj.cls.replace("/", ".")
+    base = machine.vanilla_base(obj.cls)
+    if base not in _PLAIN_VANILLA:
+        r.why = f"{r.cls} reaches vanilla {base.replace('/', '.')}, whose placement is vanilla code"
+        return
+    where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+    by_face = {}
+    for face in DIRECTIONS:
+        machine.steps = 0
+        try:
+            results = machine.call(obj.cls, "getStateForPlacement", _PLACEMENT_DESC, [obj, _Ctx(face)])
+        except Unreadable as exc:
+            r.why = f"{where}: {exc}"
+            return
+        values = {res.get("axis") if isinstance(res, State) else UNKNOWN for res in results if res is not None}
+        if len(values) != 1:
+            r.why = f"{where}: axis differs between paths through the method" if values else \
+                f"{where}: the block isn't placed"
+            return
+        by_face[face] = values.pop()
+    sides = {f: by_face[f] for f in ("north", "south", "east", "west")}
+    want = {"north": "Z", "south": "Z", "east": "X", "west": "X"}
+    if all(isinstance(v, Const) and v.owner == _DIRECTION + "$Axis" and v.name == want[f] for f, v in sides.items()):
+        r.rule, r.source = "face", where
+        return
+    players = set(by_face.values())
+    if len(players) == 1 and isinstance(next(iter(players)), PlayerAxis):
+        r.rule, r.turned, r.source = "player", next(iter(players)).turned, where
+        return
+    r.why = f"{where}: axis is set neither from the clicked face nor from the player's facing"
