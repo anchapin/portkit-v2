@@ -34,7 +34,8 @@ from code, not data:
   property, ``BlockCarvable.java`` lines 71-72) is drawn by
   ``ChiselModelRegistry.ChiselStateMapper``: blockstate file
   ``chisel:<folder>``, variant ``<name>`` (the variation's path
-  ``<folder>/<name>`` split at its last slash). A block class with more
+  ``<folder>/<name>`` split at its last slash), both lowercased as 1.12's
+  ``ResourceLocation`` and ``ModelResourceLocation`` take them. A block class with more
   properties draws from ``chisel:<folder>/<name>`` instead, so only
   ``BlockCarvable`` chains are offered as variations of ``<folder>``.
 * The block's translation key: ``ChiselBlockBuilder#build`` sets the
@@ -291,6 +292,11 @@ def read(classes) -> tuple[dict, list[str]]:
             if folder is None:
                 problems.append(f"a chain in {where}: {'; '.join(chain['unread']) or 'its folder is not read'}")
                 continue
+            # Java asks the blockstate for the location and variant lowercased
+            # (1.12 ResourceLocation; "the variant string is silently
+            # toLowerCase'd", Forge 1.12.x docs, Connecting Blocks and Items
+            # to Models): registered "screenMetallic" is variant "screenmetallic".
+            folder = folder.lower()
             entry = out.setdefault(folder, {"vars": {}, "why": [], "where": where})
             if chain["cls"] is None:
                 entry["why"].append(f"{where}: the block class isn't read ({chain['cls_why']}), so whether its "
@@ -309,7 +315,7 @@ def read(classes) -> tuple[dict, list[str]]:
                            if chain["forked"] else "")
             key = f"tile.{domain}.{chain['name']}.name" if domain and chain["name"] else ""
             for v in chain["variations"]:
-                entry["vars"].setdefault(v, Variation(v, key, own, f"{where} (block {chain['name']!r})"))
+                entry["vars"].setdefault(v.lower(), Variation(v.lower(), key, own, f"{where} (block {chain['name']!r})"))
     sets = {folder: VariationSet(tuple(e["vars"].values()), "; ".join(dict.fromkeys(e["why"])), e["where"])
             for folder, e in out.items()}
     return sets, problems

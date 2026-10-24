@@ -33,8 +33,9 @@ def _png() -> bytes:
 def test_adapter_reads_the_chains():
     sets, problems = chisel.read(ClassIndex.from_source(CLASSES))
     assert problems == []
+    # Java asks for the variant lowercased (1.12 ModelResourceLocation).
     assert [v.name for v in sets["andesite"].variations] == ["cracked", "bricks-soft", "circularct", "pillar",
-                                                             "encased"]
+                                                             "encased", "screenmetallic"]
     assert {v.lang_key for v in sets["andesite"].variations} == {"tile.chisel.andesite.name"}
     assert not any(v.gate for v in sets["andesite"].variations)
     # setParentFolder moves the blockstate; the name keys the translation.
@@ -86,6 +87,7 @@ def _mod(tmp_path: Path) -> SourceMod:
                 "side": "chisel:blocks/andesite/pillar-side", "end": "chisel:blocks/andesite/pillar-top"}}],
             "encased": _tex("andesite/encased"),
             "emboss": _tex("andesite/emboss"),
+            "screenmetallic": _tex("andesite/cracked"),
         }),
         "ancient_stone": _forge({"cracked": _tex("andesite/cracked"), "raw": _tex("andesite/emboss")}),
         "bloodmagic": _forge({"brick": _tex("andesite/cracked")}),
@@ -112,7 +114,7 @@ def _residue(result, name):
 
 def test_registered_variations_convert(converted):
     files = converted.files
-    for v in ("cracked", "bricks-soft", "pillar"):
+    for v in ("cracked", "bricks-soft", "pillar", "screenmetallic"):
         assert f"blocks/andesite_{v}.json" in files
     cracked = files["blocks/andesite_cracked.json"]["minecraft:block"]
     assert cracked["description"]["identifier"] == "chisel:andesite_cracked"
