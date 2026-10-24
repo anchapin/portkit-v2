@@ -2182,7 +2182,14 @@ class Machine:
         elif op == 0xB4:
             obj = s.pop()
             name = insn.arg.name
-            if isinstance(obj, Obj):
+            if isinstance(obj, Obj) and name not in obj.fields and name == "stateDefinition" \
+                    and self.is_block_class(obj.cls) \
+                    and self._field_owner(insn.arg.owner, name).startswith(_VANILLA_BLOCK_PACKAGE):
+                # Block#stateDefinition (MC 1.20.1/1.21.1 Mojang mappings),
+                # read in a constructor as ``this.stateDefinition.any()``:
+                # the same StateDefinition getStateDefinition() returns.
+                s.append(Obj("__statedef"))
+            elif isinstance(obj, Obj):
                 s.append(obj.fields[name] if name in obj.fields else self._field_default(obj, name))
             else:
                 site = self._site_map(insn.arg) if obj is UNKNOWN else None
@@ -4706,7 +4713,7 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
                 continue
             others += [o.cls for o in built if isinstance(o, Obj) and not machine.is_block_class(o.cls)
                        and "Item" not in o.cls.rsplit("/", 1)[-1] and "Entity" not in o.cls.rsplit("/", 1)[-1]]
-        others = [o for o in others if not machine.vanilla_base(o).startswith(("java/", "com/mojang/"))]
+        others = [o for o in others if _may_be_block(machine, o)]
         if not objs and others:
             outside = machine.vanilla_base(others[0])
             why = why or (f"registered as {others[0].replace('/', '.')}, whose superclasses leave the jar at "
@@ -4725,6 +4732,25 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
             objs = []
         out[name] = (objs, why)
     return machine, {n: out[n] for n in names}
+
+
+def _may_be_block(machine: Machine, cls: str) -> bool:
+    """Whether ``cls``, built for a name but not a block class the machine
+    knows, may still be a Block subclass, so naming it is the reason the
+    name isn't read (PR #384): only when its superclasses leave the jar at
+    a class outside the game (a dependency that isn't attached, such as
+    moonlight's WaterBlock) and that class or ``cls`` is named as a block
+    class is (``...Block``, the test is_block_class makes of a vanilla
+    class). A class whose chain reaches a game class that isn't a block
+    (AbstractContainerMenu, ShulkerBoxMenu), java/ or com/mojang/ is known
+    not to be one, and so is a class named for something else (a
+    shulkerboxtooltip BlockEntityPreviewProvider): the name is then not
+    read, its reason the one it has without that class, and none of the
+    block's values come from it."""
+    outside = machine.vanilla_base(cls)
+    if outside.startswith(("java/", "com/mojang/", "net/minecraft/")):
+        return False
+    return any(c.rsplit("/", 1)[-1].endswith("Block") for c in (cls, outside))
 
 
 def _never_block(machine: Machine, value, asked: bool) -> bool:
