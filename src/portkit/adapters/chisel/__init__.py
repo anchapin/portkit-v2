@@ -106,25 +106,30 @@ class _Reading:
         self.machine = machine
         self.chains: list[dict] = []
         self.following = False
+        self.clinit_why = ""
 
-    def block_class(self, provider) -> str | None:
+    def block_class(self, provider) -> tuple[str | None, str]:
+        """(the block class a provider (or a class literal) names, or why not)."""
         from ...blockcode import ClassLit, Obj, Unreadable
         if isinstance(provider, ClassLit):
-            return provider.name
+            return provider.name, ""
         if not isinstance(provider, Obj):
-            return None
+            why = "the provider handed to newBlock isn't read"
+            return None, f"{why} ({self.clinit_why})" if self.clinit_why else why
         self.following = True
         try:
             got = self.machine.call(provider.cls, "getBlockClass", "()Ljava/lang/Class;", [provider])
-        except Unreadable:
-            got = []
+        except Unreadable as exc:
+            return None, f"the provider's getBlockClass can't be followed ({exc})"
         finally:
             self.following = False
-        return got[0].name if len(got) == 1 and isinstance(got[0], ClassLit) else None
+        if len(got) == 1 and isinstance(got[0], ClassLit):
+            return got[0].name, ""
+        return None, "the provider's getBlockClass isn't read"
 
     def finish(self, chain) -> None:
         f = chain.fields
-        self.chains.append({"name": f["name"], "folder": f["folder"], "cls": f["cls"],
+        self.chains.append({"name": f["name"], "folder": f["folder"], "cls": f["cls"], "cls_why": f["cls_why"],
                             "variations": list(f["variations"]), "unread": list(f["unread"]),
                             "forked": f["forked"] or self.machine._forked})
 
@@ -139,12 +144,12 @@ class _Reading:
             params = _params(desc)
             name = rest[1] if len(rest) > 1 else None
             if params[2:3] == ["Lteam/chisel/api/block/BlockCreator;"]:
-                cls = self.block_class(rest[3] if len(rest) > 3 else None)
+                cls, cls_why = self.block_class(rest[3] if len(rest) > 3 else None)
             else:
-                cls = self.block_class(rest[-1] if rest else None)
+                cls, cls_why = self.block_class(rest[-1] if rest else None)
             unread = [] if isinstance(name, str) else ["the block name isn't read"]
             return [Obj(_B, {"name": name if isinstance(name, str) else None,
-                             "folder": name if isinstance(name, str) else None, "cls": cls,
+                             "folder": name if isinstance(name, str) else None, "cls": cls, "cls_why": cls_why,
                              "variations": [], "unread": unread, "forked": self.machine._forked})]
         if isinstance(recv, Obj) and recv.cls == _B:
             f = recv.fields
@@ -177,6 +182,12 @@ class _Reading:
             return None
         if any(isinstance(a, Obj) and a.cls in (_F, _B, _V) for a in args):
             return None  # a helper handed the factory or a builder is followed
+        found = self.machine.find_method(owner, mname, desc)
+        if found is not None and found[1].access & 0x1000:
+            # A synthetic method (javac 8's access$NNN, through which a
+            # constant's body reads Features' private provider fields; a
+            # lambda body) is followed: it is the read, not a registry.
+            return None
         # Chisel's own code that touches no builder (its carving registry,
         # ore groups, recipes): registers no variation, not followed.
         return [None] if ret == "V" else [UNKNOWN]
@@ -237,10 +248,26 @@ def read(classes) -> tuple[dict, list[str]]:
     problems: list[str] = []
     consts: dict[str, object] = {}
     for base in sorted({cf.super_name for cf, _ in owners if cf.super_name}):
+        # The enum's class initializer (its constants, then its provider
+        # fields), run as Machine.init_class runs it, keeping why it stopped.
+        bcf = classes.get(base)
+        clinit = bcf and bcf.method("<clinit>", "()V")
+        if base in machine._clinit_done or clinit is None or clinit.code is None:
+            continue
+        machine._clinit_done.add(base)
+        if bcf.super_name:
+            machine.init_class(bcf.super_name)
         machine.steps = 0
-        machine.init_class(base)
-        if base in machine._clinit_failed:
-            problems.append(f"{_dotted(base)}'s class initializer can't be followed to the end")
+        machine.new_epoch()
+        machine._clinit_depth += 1
+        try:
+            machine.run(bcf, clinit, [])
+        except Unreadable as exc:
+            machine._clinit_failed.add(base)
+            reading.clinit_why = f"{_dotted(base)}'s class initializer can't be followed to the end ({exc})"
+            problems.append(reading.clinit_why)
+        finally:
+            machine._clinit_depth -= 1
     for (owner, field), value in machine.statics.items():
         if isinstance(value, Obj) and any(value.cls == cf.name for cf, _ in owners):
             consts.setdefault(value.cls, value)
@@ -265,11 +292,15 @@ def read(classes) -> tuple[dict, list[str]]:
                 problems.append(f"a chain in {where}: {'; '.join(chain['unread']) or 'its folder is not read'}")
                 continue
             entry = out.setdefault(folder, {"vars": {}, "why": [], "where": where})
+            if chain["cls"] is None:
+                entry["why"].append(f"{where}: the block class isn't read ({chain['cls_why']}), so whether its "
+                                    "state has the one variation property ChiselStateMapper draws from this "
+                                    "blockstate isn't known")
+                continue
             if chain["cls"] != _CARVABLE:
                 entry["why"].append(
-                    f"{where} makes it with block class "
-                    f"{_dotted(chain['cls']) if chain['cls'] else '(not read)'}, not BlockCarvable: whether its state "
-                    "has the one variation property, which ChiselStateMapper draws from this blockstate, "
+                    f"{where} makes it with block class {_dotted(chain['cls'])}, not BlockCarvable: whether its "
+                    "state has the one variation property, which ChiselStateMapper draws from this blockstate, "
                     "isn't read (a block with more draws from a blockstate per variation)")
                 continue
             if chain["unread"]:
