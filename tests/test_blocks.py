@@ -62,14 +62,28 @@ def test_a_column_maps_ends_and_sides_separately(tmp_path):
 
 def test_a_block_with_real_states_is_residue_naming_them(tmp_path):
     blockstate = {"variants": {
-        "facing=east": {"model": "examplemod:block/steel_block"},
-        "facing=north": {"model": "examplemod:block/steel_block"},
+        "color=blue": {"model": "examplemod:block/steel_block"},
+        "color=red": {"model": "examplemod:block/steel_block"},
     }}
     result = blocks.convert(build(tmp_path, blockstate, CUBE_ALL))
     assert result.files == {}
     reason = result.unhandled[0].reason
     assert "2 blockstate variant(s)" in reason
-    assert "facing=east" in reason
+    assert "color=blue" in reason
+
+
+def test_a_facing_over_two_values_without_code_is_residue(tmp_path):
+    """#296: facing over some of the six directions takes the 6-way path; with
+    no class to read and no DEFAULT for those values it stays residue."""
+    blockstate = {"variants": {
+        "facing=east": {"model": "examplemod:block/steel_block"},
+        "facing=north": {"model": "examplemod:block/steel_block"},
+    }}
+    result = blocks.convert(build(tmp_path, blockstate, CUBE_ALL))
+    assert result.files == {}
+    assert result.unhandled[0].reason == (
+        "facing (north, east): placement isn't read (the mod ships no class files), and no DEFAULT covers a "
+        "facing over these values")
 
 
 def test_multipart_is_refused(tmp_path):
