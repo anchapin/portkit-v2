@@ -786,6 +786,14 @@ class Machine:
         # finished at any depth.
         self.pass_no = 0
         self._clinit_depth = 0
+        # The depth a running class initializer's own code runs at, one per
+        # initializer on the stack (see init_class, _clinit_call).
+        self._clinit_at: list = []
+        # (class-initializer depth, statics written, static values read or
+        # stored) per _clinit_call on the stack: what its callee touches
+        # outside a class initializer of its own (a class it initializes on
+        # the way, run to the end, is as the game leaves it).
+        self._static_writes: list = []
         self._deferred_now = False
         self._shared_wrote: dict = {}
         self._stopped_methods: set = set()
@@ -1094,6 +1102,7 @@ class Machine:
         self.new_epoch()
         serial = _ALLOCATED[0]
         self._clinit_depth += 1
+        self._clinit_at.append(self.depth + 1)
         try:
             self.run(cf, m, [])
         except Unreadable:
@@ -1103,6 +1112,7 @@ class Machine:
         finally:
             self.epoch = saved
             self._clinit_depth -= 1
+            self._clinit_at.pop()
 
     def _mark_shared(self, cf: ClassFile, serial: int) -> None:
         """While registrations are collected, a list this class initializer
@@ -1485,6 +1495,9 @@ class Machine:
                 self.init_class(start)
             found = self.find_method(start, name, desc)
             if found is not None:
+                if self.registrations is not None and static and not self._library(found[0].name) \
+                        and self._clinit_at and self.depth == self._clinit_at[-1]:
+                    return self._clinit_call(found, name, desc, args)
                 if self.registrations is None or not self._library(found[0].name):
                     return self.run(*found, args)
                 try:
@@ -1808,6 +1821,62 @@ class Machine:
                 todo += [v.left, v.right]
             elif isinstance(v, Opt):
                 todo.append(v.value)
+
+    def _clinit_call(self, found, name: str, desc: str, args: list) -> list:
+        """A static call to the mod's own method made by a class
+        initializer's own code while registrations are collected (the
+        registry class's ``static final Map<DyeColor, Supplier<Block>> FLAGS
+        = RegUtils.registerFlags(...)``, one field among hundreds). Followed
+        as any call; when it can't be followed, it is taken as havoc, as a
+        dependency jar's method is (#280 pick 4a, see _havoc): what it
+        returns is unknown, everything reachable from its arguments and
+        from every static value it (or a method it calls) read or stored
+        loses what it held (a list it appended to before it stopped is
+        partial), every static it (or a method it calls) wrote reads
+        unknown (a class initializer it ran to the end on the way keeps
+        what it wrote: that is what the game's run of it leaves), and the
+        registrations it recorded before it stopped stay (as a top-level run
+        that stops keeps them, see _run_method). The initializer then goes
+        on to the fields after it, instead of stopping there and leaving
+        every later field of the class unregistered. One that runs out of
+        the step budget still stops the initializer."""
+        written: set = set()
+        reached: dict = {}
+        self._static_writes.append((self._clinit_depth, written, reached))
+        try:
+            return self.run(*found, args)
+        except Unreadable as exc:
+            if str(exc) == _TOO_MUCH:
+                raise
+            for key in written:
+                self.statics[key] = UNKNOWN
+            self._havoc(list(args) + list(reached.values()), f"{found[0].name}.{name}: {exc}")
+            return [UNKNOWN] if _arg_count(desc)[1] else [None]
+        finally:
+            self._static_writes.pop()
+
+    def _unregistered_default(self, obj: "Obj") -> "State":
+        """What ``defaultBlockState()`` returns on a block object none of
+        whose code run so far registered a default state: Block's own
+        constructor registers ``this.stateDefinition.any()`` (Block#<init>,
+        MC 1.20.1 and 1.21.1, Mojang mappings: ``registerDefaultState(
+        stateDefinition.any())``), so it is StateDefinition#any's state,
+        marked as ``any()`` marks it (a boolean the code never sets reads
+        true, BooleanProperty's first value). Only for an object ``new``
+        made here whose construction nothing the machine couldn't follow
+        has touched (``_defaults``, see _field_default), on which no
+        registerDefaultState with an unread state was called, and whose
+        superclasses leave the jar at a vanilla class whose constructor
+        registers no default of its own (_PLAIN_VANILLA: Block itself, and
+        classes whose constructors only call super, client.txt 1.21.1; a
+        vanilla ButtonBlock or DoorBlock registers its own, which isn't
+        modelled); otherwise an unmarked state, as before (each property
+        unread)."""
+        if getattr(obj, "_defaults", False) and "__partial" not in obj.fields \
+                and "__default_unread" not in obj.fields \
+                and self.vanilla_base(obj.cls) in _PLAIN_VANILLA:
+            return State(((_ANY, 1),))
+        return State()
 
     def _final_field(self, owner: str, name: str, static: bool = True) -> bool:
         """Whether ``owner`` (or the class in its chain declaring ``name``)
@@ -2166,6 +2235,8 @@ class Machine:
             return ("return", None)
         elif op == 0xB2:
             value = self.get_static(insn.arg)
+            if self._static_writes and self._static_writes[-1][0] == self._clinit_depth:
+                self._static_writes[-1][2][id(value)] = value
             if (value is UNKNOWN or value is None) and self._lazy_guard(insn):
                 value = None
             s.append(value)
@@ -2179,6 +2250,9 @@ class Machine:
             if isinstance(v, ListV) and v.shared is not None and v.shared != (owner, ref.name):
                 self._escape_shared(v)
             self.statics[(owner, ref.name)] = v
+            if self._static_writes and self._static_writes[-1][0] == self._clinit_depth:
+                self._static_writes[-1][1].add((owner, ref.name))
+                self._static_writes[-1][2][id(v)] = v
         elif op == 0xB4:
             obj = s.pop()
             name = insn.arg.name
@@ -2843,10 +2917,12 @@ class Machine:
             if name == "getFluidState" and desc == _FLUID_STATE_DESC and base in _PLAIN_VANILLA:
                 return [NO_FLUID]
             if name == "defaultBlockState":
-                return [recv.fields.get("__default", State())]
+                return [recv.fields.get("__default", self._unregistered_default(recv))]
             if name == "registerDefaultState" and rest:
                 if isinstance(rest[0], State):
                     recv.fields["__default"] = rest[0]
+                else:
+                    recv.fields["__default_unread"] = True
                 return [None]
             if name in ("getStateDefinition",):
                 return [Obj("__statedef")]
