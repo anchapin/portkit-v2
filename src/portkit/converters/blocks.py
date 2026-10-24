@@ -3058,11 +3058,30 @@ def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, na
         "box_why": reading.shape_why,
         "collision": reading.collision,
         "collision_why": reading.collision_why,
+        "collision_from": reading.collision_from,
         "states": extra_states,
         "behaviour": list(reading.behaviour),
         "clamped": clamped,
         "uvlock": uvlock,
     }
+
+
+def _no_collision_notes(records: list[dict]) -> list[str]:
+    """No collision read from bytecode: the Properties' noCollission (the
+    vanilla getCollisionShape is then empty), or a getCollisionShape the
+    block overrides that returns Shapes.empty() (#296)."""
+    notes = []
+    props = [r["name"] for r in records if r["collision"] is False and not r.get("collision_from")]
+    if props:
+        notes.append("No collision, read from bytecode (the block's Properties call noCollission, so "
+                     "BlockBehaviour#getCollisionShape is empty): " + ", ".join(props) + ".")
+    own = [(r["collision_from"], r["name"]) for r in records
+           if r["collision"] is False and r.get("collision_from")]
+    if own:
+        notes.append("No collision, read from bytecode (the block's getCollisionShape returns "
+                     "Shapes.empty() in every state, read for an entity its code doesn't single out; "
+                     "Bedrock has one collision box for every entity) - " + _grouped(own) + ".")
+    return notes
 
 
 def _grouped(pairs: list[tuple[str, str]]) -> str:
@@ -3103,10 +3122,7 @@ def _coded_facing_notes(records: list[dict]) -> list[str]:
     if default_b:
         notes.append(f"Facing box DEFAULT, not read from code ({_BOX_DEFAULT}) - "
                      + _grouped(default_b) + ".")
-    no_coll = [r["name"] for r in records if r["collision"] is False]
-    if no_coll:
-        notes.append("No collision, read from bytecode (the block's Properties call noCollission, so "
-                     "BlockBehaviour#getCollisionShape is empty): " + ", ".join(no_coll) + ".")
+    notes += _no_collision_notes(records)
     default_c = [(r["collision_why"], r["name"]) for r in records if r["collision"] is None]
     if default_c:
         notes.append(f"Facing collision DEFAULT, not read from code ({_COLLISION_DEFAULT}) - "
@@ -3757,6 +3773,7 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         "box_why": reading.shape_why,
         "collision": reading.collision,
         "collision_why": reading.collision_why,
+        "collision_from": reading.collision_from,
         "states": extra_states,
         # A use toggle read is carried; the rest of the behaviour isn't.
         "behaviour": [m for m in reading.behaviour if not (reading.toggle and m in ("useWithoutItem", "use"))],
@@ -3812,10 +3829,7 @@ def _flat_bool_notes(records: list[dict]) -> list[str]:
     default_b = [(r["box_why"], r["name"]) for r in records if not r["box"]]
     if default_b:
         notes.append(f"Box DEFAULT, not read from code ({_BOX_DEFAULT}) - " + _grouped(default_b) + ".")
-    no_coll = [r["name"] for r in records if r["collision"] is False]
-    if no_coll:
-        notes.append("No collision, read from bytecode (the block's Properties call noCollission, so "
-                     "BlockBehaviour#getCollisionShape is empty): " + ", ".join(no_coll) + ".")
+    notes += _no_collision_notes(records)
     default_c = [(r["collision_why"], r["name"]) for r in records if r["collision"] is None]
     if default_c:
         notes.append(f"Collision DEFAULT, not read from code ({_COLLISION_DEFAULT}) - "
@@ -4878,6 +4892,7 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         "box_why": reading.shape_why,
         "collision": reading.collision,
         "collision_why": reading.collision_why,
+        "collision_from": reading.collision_from,
         "states": sorted(set(reading.states or ()) - drawn - {"facing6"} - set(bools)),
         "behaviour": [m for m in reading.behaviour if not (toggle and m in ("useWithoutItem", "use"))],
         "clamped": clamped,
@@ -5022,9 +5037,7 @@ def _directional_notes(records: list[dict]) -> list[str]:
     if default_b:
         notes.append("Box DEFAULT, not read from code (the turned model's element bounds) - "
                      + _grouped(default_b) + ".")
-    no_coll = [r["name"] for r in records if r["collision"] is False]
-    if no_coll:
-        notes.append("No collision, read from bytecode (Properties#noCollission): " + ", ".join(no_coll) + ".")
+    notes += _no_collision_notes(records)
     default_c = [(r["collision_why"], r["name"]) for r in records if r["collision"] is None]
     if default_c:
         notes.append(f"Collision DEFAULT, not read from code ({_COLLISION_DEFAULT}) - " + _grouped(default_c) + ".")
