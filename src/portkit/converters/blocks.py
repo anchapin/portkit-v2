@@ -33,7 +33,7 @@ from portkit import png as png_reader
 
 from .. import blockcode, rendershape
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import buttons, doors, fence_gates, models, plates, trapdoors, variations
+from . import buttons, doors, fence_gates, held_states, models, plates, trapdoors, variations
 
 _MENU_CATEGORY = "construction"
 
@@ -106,6 +106,9 @@ def _axis_variants(blockstate: dict) -> tuple[dict[str, tuple[str, int, int]] | 
         models_by_axis[axis] = (model, x % 360, y % 360)
 
     missing = sorted(set(_AXIS_FACES) - set(models_by_axis))
+    if set(models_by_axis) == {"x", "z"}:
+        # A horizontal pillar (#296, Java's HORIZONTAL_AXIS): x or z only.
+        return models_by_axis, ""
     if missing:
         return None, (
             f"blockstate covers only {sorted(models_by_axis)} of the three axes "
@@ -1524,13 +1527,27 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     # One registration run over every blockstate, shared by every block
     # reader (#375; #280 for the readers that shared it first).
     shared = _SharedRun(mod, loaded)
+    # An enum state the player doesn't set on placement is held at the start
+    # value read from code before the placement readers look (#296); the
+    # run is over every blockstate's name, which holding doesn't change.
+    from ..adapters import block_variations
+    variation_sets = block_variations(mod)
+    held_read = held_states.read(mod, loaded, set(stations or {}) | set(variation_sets), shared)
+    held: dict[str, tuple] = {}
+    held_why: dict[str, str] = {}
+    for stem, (reading, values) in held_read.items():
+        reduced, passed = (held_states.hold(loaded[stem], reading.prop, reading.value)
+                           if reading.value is not None else (None, []))
+        if reduced is None:
+            held_why[stem] = held_states.refusal(reading, values)
+            continue
+        loaded[stem] = reduced
+        held[stem] = (reading, values, passed, None)
     readings = _read_facing_code(mod, src, stations or {}, loaded, shared)
     bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded, shared)
     render = _RenderRun(mod, shared)
     # Blockstates whose bare variants the mod's code registers as blocks of
-    # their own (an adapter's block_variations hook, #296).
-    from ..adapters import block_variations
-    variation_sets = block_variations(mod)
+    # their own (an adapter's block_variations hook, #296), read above.
     variation_lang = variations.read_lang(mod) if variation_sets else {}
     variation_terrain = variations.terrain_keys(mod) if variation_sets else frozenset()
     variation_records: list[dict] = []
@@ -1573,6 +1590,11 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
         if name in water_why:
             result.unhandled.append(Unhandled(rel, "block", water_why[name]))
             continue
+        if name in held_why:
+            result.unhandled.append(Unhandled(rel, "block", held_why[name]))
+            continue
+        if name in held:
+            held[name] = held[name][:3] + (rel,)
         blockstate = loaded[name]
 
         if name in variation_sets and name not in (stations or {}):
@@ -1714,6 +1736,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             mod.namespace, name, identifier, instances or {}
         )
     models.RENDER_TYPES_SEEN.reset(outer)
+    held_notes = _held_claims(mod, result, held)
     _one_render_method(result, render_types)
     _flag_renderer_parts(mod, result, render)
     # Containers go last: the format move reads every component the block
@@ -1743,6 +1766,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(_directional_bool_notes(directional_bool))
     result.notes.extend(_vslab_notes(vslabs))
     result.notes.extend(variations.notes(variation_records))
+    result.notes.extend(held_notes)
     result.notes.extend(doors.notes([r for r in paired_records if r["kind"] in ("door", "two_tall")]))
     result.notes.extend(trapdoors.notes([r for r in paired_records if r["kind"] == "trapdoor"]))
     result.notes.extend(plates.notes([r for r in paired_records if r["kind"] == "plate"]))
@@ -1751,6 +1775,25 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(later)
     result.notes.extend(containers.pop("", []))
     return result
+
+
+def _held_claims(mod: SourceMod, result: ConversionResult, held: dict) -> list[str]:
+    """For each held blockstate that converted (#296): claim the models only
+    the other values draw (read and passed over on purpose, as random
+    alternates are) and say what isn't drawn. One that didn't convert
+    claims nothing more."""
+    failed = {u.source for u in result.unhandled}
+    out = []
+    for name in sorted(held):
+        reading, values, passed, rel = held[name]
+        if rel is None or rel in failed:
+            continue
+        for ref in passed:
+            path = models.model_path(mod, ref)
+            if path is not None and path.is_file():
+                result.claim(mod, path)
+        out.append(held_states.note(name, reading, values, passed))
+    return out
 
 
 def _convert_axis_block(
@@ -1785,6 +1828,20 @@ def _convert_axis_block(
         name,
         {axis: (ident, instances) for axis, (ident, instances, _) in resolved.items()},
     )
+    if "y" not in resolved:
+        result.notes.append(HORIZONTAL_AXIS_NOTE.format(name=name))
+
+
+# A horizontal pillar (axis x or z only, #296): a side face clicked gives
+# its axis as a pillar's does. Java has no y for it, and a block whose
+# getStateForPlacement sets axis from the clicked face would throw
+# (Property#setValue refuses a value the property lacks), so a top or bottom
+# face clicked takes a labelled DEFAULT: the axis the player faces along
+# (minecraft:placement_direction cardinal_direction), the way the log lies
+# ahead of them.
+HORIZONTAL_AXIS_NOTE = (
+    "{name}: horizontal pillar (axis x or z); a side face clicked gives its axis; DEFAULT: a top or "
+    "bottom face clicked gives the axis the player faces along (Java has no y for it)")
 
 
 def _face_condition(faces: tuple[str, ...]) -> str:
@@ -1795,6 +1852,8 @@ def _face_condition(faces: tuple[str, ...]) -> str:
 def _axis_block_definition(
     namespace: str, name: str, by_axis: dict[str, tuple[str, dict[str, dict]]]
 ) -> dict:
+    if "y" not in by_axis:
+        return _horizontal_axis_definition(namespace, name, by_axis)
     # y is the default: Bedrock's block_face defaults to "down", which is a
     # vertical placement, and that is the axis Java calls y.
     geometry, instances = by_axis["y"]
@@ -1823,6 +1882,42 @@ def _axis_block_definition(
                 "minecraft:material_instances": instances,
             },
             "permutations": permutations,
+        },
+    }
+
+
+def _horizontal_axis_definition(
+    namespace: str, name: str, by_axis: dict[str, tuple[str, dict[str, dict]]]
+) -> dict:
+    """A horizontal pillar (see HORIZONTAL_AXIS_NOTE): z is the block's own
+    geometry, x a permutation on an east/west face clicked, or a top/bottom
+    face clicked facing east or west (DEFAULT)."""
+    geometry, instances = by_axis["z"]
+    sideways = _face_condition(_AXIS_FACES["x"])
+    flat = _face_condition(_AXIS_FACES["y"])
+    facing_x = " || ".join(f"q.block_state('minecraft:cardinal_direction') == '{d}'" for d in ("east", "west"))
+    return {
+        "format_version": _BLOCK_FORMAT,
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{namespace}:{name}",
+                "menu_category": {"category": _MENU_CATEGORY},
+                "traits": {
+                    "minecraft:placement_position": {"enabled_states": ["minecraft:block_face"]},
+                    "minecraft:placement_direction": {"enabled_states": ["minecraft:cardinal_direction"]},
+                },
+            },
+            "components": {
+                "minecraft:geometry": geometry,
+                "minecraft:material_instances": instances,
+            },
+            "permutations": [{
+                "condition": f"{sideways} || (({flat}) && ({facing_x}))",
+                "components": {
+                    "minecraft:geometry": by_axis["x"][0],
+                    "minecraft:material_instances": by_axis["x"][1],
+                },
+            }],
         },
     }
 

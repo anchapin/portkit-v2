@@ -6288,3 +6288,117 @@ def _read_container(machine: Machine, obj: Obj, found, r: ContainerReading) -> N
         "Lnet/minecraft/world/level/block/entity/BlockEntityTicker;"))
     if ticker is not None:
         r.ticks = f"{ticker[0].name.replace('/', '.')}#getTicker"
+
+
+# -- held states (#296) -------------------------------------------------------
+
+@dataclass
+class HeldReading:
+    """The start value of one enum state a blockstate draws beside its
+    placement states (``facing``/``axis``), read from the block's code.
+
+    ``value`` is the serialized value Java starts the state at, with
+    ``kind`` ``placed`` (getStateForPlacement puts it on every path) or
+    ``registered`` (the registered default state, where placement reads it
+    from the world or differs between paths, as #215 item 2 reads a
+    boolean's), and ``source`` citing it; None with ``why`` when unread.
+    ``changed_by`` names the methods of the block's own classes that change
+    the state (``+redstone`` when one reads a signal), as #215's scan."""
+
+    name: str
+    prop: str
+    cls: str = ""
+    value: str | None = None
+    kind: str = ""
+    source: str = ""
+    why: str = ""
+    changed_by: tuple = ()
+    vanilla_parent: str = ""
+
+
+def _serialized(machine: Machine, value) -> str | None:
+    """The blockstate name of an enum state's value: a mod enum constant's
+    getSerializedName (StringRepresentable, what EnumProperty writes),
+    run on the machine; None when it can't be had."""
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, Obj) or "__enum_name" not in value.fields:
+        return None
+    machine.steps = 0
+    try:
+        got = machine.call(value.cls, "getSerializedName", "()Ljava/lang/String;", [value])
+    except Unreadable:
+        return None
+    names = {g for g in got if isinstance(g, str)}
+    return names.pop() if len(names) == 1 and len(got) == len([g for g in got if isinstance(g, str)]) else None
+
+
+def read_held_states(classes: ClassIndex | None, props: dict[str, str], run=None) -> dict[str, HeldReading]:
+    """A :class:`HeldReading` per blockstate name in ``props`` (name -> the
+    enum state's name)."""
+    readings = {n: HeldReading(n, p) for n, p in props.items()}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.why = "the mod ships no class files"
+        return readings
+    machine, registered = _from_run(run, classes, list(props))
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.why = why
+            continue
+        found = []
+        for obj in objs:
+            one = HeldReading(name, r.prop)
+            _read_held(machine, obj, one)
+            found.append(one)
+        first = found[0]
+        if any((o.value, o.kind, o.vanilla_parent) != (first.value, first.kind, first.vanilla_parent)
+               for o in found[1:]):
+            r.cls = first.cls
+            r.why = "registered twice with different settings"
+            continue
+        readings[name] = first
+    return readings
+
+
+def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
+    r.cls = obj.cls.replace("/", ".")
+    base = machine.vanilla_base(obj.cls)
+    if base not in _PLAIN_VANILLA:
+        # As #215 item 7: a vanilla class with behaviour of its own sets its
+        # states in code the jar doesn't hold.
+        r.vanilla_parent = base.replace("/", ".")
+        r.why = f"{r.cls} reaches vanilla {r.vanilla_parent}, whose states are vanilla code"
+        return
+    where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+    placed = _placed_states(machine, obj)
+    why = ""
+    if placed is None:
+        why = f"{where} isn't read"
+    else:
+        values = set()
+        for s in placed:
+            v = dict(s.values).get(r.prop, UNKNOWN)
+            values.add(_serialized(machine, v) if v is not UNKNOWN else None)
+        set_here = all(r.prop in dict(s.values) for s in placed)
+        if len(values) == 1 and None not in values and set_here:
+            r.value, r.kind, r.source = values.pop(), "placed", where
+        elif not set_here and not any(r.prop in dict(s.values) for s in placed):
+            why = f"{where} leaves it at the registered default"
+        else:
+            why = f"{where} sets it from the world" if None in values else f"{where} differs between paths"
+    if r.value is None:
+        default = obj.fields.get("__default")
+        v = dict(default.values).get(r.prop, UNKNOWN) if isinstance(default, State) else UNKNOWN
+        name = _serialized(machine, v) if v is not UNKNOWN else None
+        if name is not None:
+            r.value, r.kind = name, "registered"
+            r.source = f"{r.cls}#<init> (registerDefaultState); {why}"
+        else:
+            # StateDefinition#any's value (the enum's first constant) isn't
+            # taken: no reader of an enum's order is approved (#87).
+            r.why = f"{why}; the registered default state doesn't set it" if why else \
+                "the registered default state doesn't set it"
+            return
+    r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
