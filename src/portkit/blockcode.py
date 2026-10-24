@@ -4737,18 +4737,19 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
 def _may_be_block(machine: Machine, cls: str) -> bool:
     """Whether ``cls``, built for a name but not a block class the machine
     knows, may still be a Block subclass, so naming it is the reason the
-    name isn't read (PR #384): only when its superclasses leave the jar at
-    a class outside the game (a dependency that isn't attached, such as
-    moonlight's WaterBlock) and that class or ``cls`` is named as a block
-    class is (``...Block``, the test is_block_class makes of a vanilla
-    class). A class whose chain reaches a game class that isn't a block
-    (AbstractContainerMenu, ShulkerBoxMenu), java/ or com/mojang/ is known
-    not to be one, and so is a class named for something else (a
-    shulkerboxtooltip BlockEntityPreviewProvider): the name is then not
-    read, its reason the one it has without that class, and none of the
-    block's values come from it."""
+    name isn't read (PR #384): only when that class or the one its
+    superclasses leave the jar at is named as a block class is
+    (``...Block``, the test is_block_class makes of a vanilla class): a
+    dependency that isn't attached (moonlight's WaterBlock), a game class
+    under a package the machine doesn't take for blocks (1.16's
+    net/minecraft/block/FenceGateBlock). A class whose chain reaches a game
+    class named for something else (AbstractContainerMenu, ShulkerBoxMenu),
+    java/ or com/mojang/, or a library class named for something else (a
+    shulkerboxtooltip BlockEntityPreviewProvider), is not a Block subclass:
+    the name is then not read, its reason the one it has without that
+    class, and none of the block's values come from it."""
     outside = machine.vanilla_base(cls)
-    if outside.startswith(("java/", "com/mojang/", "net/minecraft/")):
+    if outside.startswith(("java/", "com/mojang/")):
         return False
     return any(c.rsplit("/", 1)[-1].endswith("Block") for c in (cls, outside))
 
@@ -6435,9 +6436,15 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
             v = dict(s.values).get(r.prop, UNKNOWN)
             values.add(_serialized(machine, v) if v is not UNKNOWN else None)
         set_here = all(r.prop in dict(s.values) for s in placed)
+        # A placed state that only carries the registered default's own
+        # value (defaultBlockState(), now that the constructor's
+        # this.stateDefinition.any() is read, PR #384) leaves it there.
+        start = obj.fields.get("__default")
+        start = dict(start.values).get(r.prop, UNKNOWN) if isinstance(start, State) else UNKNOWN
+        kept = start is not UNKNOWN and all(dict(s.values).get(r.prop, UNKNOWN) == start for s in placed)
         if len(values) == 1 and None not in values and set_here:
             r.value, r.kind, r.source = values.pop(), "placed", where
-        elif not set_here and not any(r.prop in dict(s.values) for s in placed):
+        elif kept or (not set_here and not any(r.prop in dict(s.values) for s in placed)):
             why = f"{where} leaves it at the registered default"
         else:
             why = f"{where} sets it from the world" if None in values else f"{where} differs between paths"
