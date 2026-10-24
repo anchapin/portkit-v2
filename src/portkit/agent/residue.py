@@ -178,8 +178,9 @@ SKIP_KINDS = {
                          "client never draws its blockstate model in the world"),
     # #296: a block the mod registers as air (portkit.converters.blocks).
     "air_block": ("the mod registers the block as air (its Properties call Properties#air, so BlockState#isAir "
-                  "is true, as for vanilla's air blocks): Java treats it as empty space, a holder for models "
-                  "the mod's own code draws, not a block a player places; a Bedrock block would invent one"),
+                  "is true, as for vanilla's air blocks): Java's world treats it as empty space, and what it "
+                  "is for (models the mod's code draws, a light or marker its code places) is the mod's "
+                  "code; a Bedrock block definition would ship a solid, placeable block instead"),
     # #352 (pending Alex): a shipped block a block-entity renderer also draws (count 0).
     "renderer_drawn_parts": ("the block shipped as its static blockstate model (Java's render shape is MODEL), "
                              "but a block-entity renderer of the jar also draws its block entity (moving parts "

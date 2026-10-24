@@ -1,6 +1,7 @@
-"""A block the mod registers as air (#296, Storage Drawers 1.21.1's ``meta_*``
-model holders: ``BLOCKS.register(name, () -> new BlockMeta(Properties.of().air()))``,
-``ModBlocks`` L284-317) is explained residue ``air_block``, not a Bedrock block.
+"""A block the mod registers as air (#296: Storage Drawers 1.21.1's ``meta_*``
+model holders, ``BLOCKS.register(name, () -> new BlockMeta(Properties.of().air()))``,
+``ModBlocks`` L284-317; also invisible lights and markers a mod's code places)
+is explained residue ``air_block``, not a Bedrock block.
 
 tests/data/airblk/classes are javac 21 output (build.sh): an example mod whose
 blocks are built from Properties that call ``Properties#air`` or don't.

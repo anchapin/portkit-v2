@@ -2645,17 +2645,19 @@ CODE_DRAWN = "code_drawn_block"
 # A block the mod registers as air (#296): its Properties call
 # Properties#air (BlockBehaviour$Properties.isAir, the setting vanilla's
 # air, cave_air and void_air are built with), so BlockState#isAir is true and
-# the game treats it as empty space. Such a block is a holder for models the
-# mod's own code draws, not a block a player places; a Bedrock block would
-# invent one. It is explained residue, its models claimed with it.
+# the game treats it as empty space. What it is for (a holder for models the
+# mod's code draws, a light or marker its code places) is the mod's code; a
+# Bedrock block definition would ship a solid, placeable block. It is
+# explained residue, its models claimed with it.
 AIR_BLOCK = "air_block"
 
 
 def _air_reason(cls: str) -> str:
-    return (f"the mod registers this block as air ({cls} is built with Properties#air, which sets "
-            "BlockState#isAir, as vanilla's air blocks are), so Java treats it as empty space: a holder "
-            "for models the mod's own code draws, not a block a player places; a Bedrock block would "
-            "invent one")
+    return (f"the mod registers this block as air ({cls} is built with Properties#air, so BlockState#isAir "
+            "is true, as for vanilla's air blocks): Java's world treats it as empty space "
+            "(LevelReader#isEmptyBlock answers isAir), and what it is for (models the mod's code draws, "
+            "a light or marker its code places) is the mod's code; a Bedrock block definition would ship "
+            "a solid, placeable block instead")
 
 
 def _read_air(mod: SourceMod, stations: dict, loaded: dict,
