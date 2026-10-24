@@ -105,6 +105,8 @@ SKIP_KINDS = {
                                "does can't be decided), so converting it would ship content the mod doesn't have"),
     "conditional_item": ("Java doesn't register this item with the mod config this conversion holds "
                          "(a config flag gates it), so converting it would ship content the mod doesn't have"),
+    "conditional_block": ("Java registers this block only when another mod is loaded (or whether it does "
+                          "can't be decided), so converting it would ship content the mod doesn't have"),
     "station_recipe": ("a station recipe runs from the station's script data table, which the agent's "
                        "tools don't write; the reason says what the converter could not state exactly"),
     "feast": ("a feast's loot tables are wired per serving count by the feast runtime (#177), which the "
