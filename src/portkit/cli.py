@@ -1131,6 +1131,18 @@ def cmd_reference(args) -> int:
     from .data import tags
 
     cache = data.cache_dir()
+    from .data import forge_versions
+
+    # Forge release -> game version (#364) first: a Forge jar that declares no
+    # minecraft dependency reads its game version from it.
+    forge_failed = 0
+    if args.action != "list":
+        try:
+            path, downloaded = forge_versions.fetch(cache)
+            print(f"{'fetched' if downloaded else 'cached ':7} {forge_versions.SET_ID} -> {path}")
+        except data.ReferenceDataError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            forge_failed = 1
     sets, meta = _reference_sets(args)
     if meta is not None:
         chosen = ", ".join(s.id for s in sets) or "none"
@@ -1156,7 +1168,7 @@ def cmd_reference(args) -> int:
     if meta is None:
         mapping_sets = list(mapping_data.SETS)
     else:
-        chosen_map = mapping_data.select(meta.loader, meta.minecraft)
+        chosen_map = mapping_data.select(meta.loader, meta.minecraft or meta.loader_minecraft)
         mapping_sets = [chosen_map] if chosen_map else []
         print(f"{args.mod}: name mappings: {chosen_map.id if chosen_map else 'none needed'}")
     # Vanilla Blocks field -> id tables (#280): every pinned set, or the one
@@ -1179,6 +1191,8 @@ def cmd_reference(args) -> int:
             if tool_set is not None:
                 state = "cached" if block_tool_data.cached(tool_set, cache) else "missing"
                 print(f"{tool_set.id:28} {tool_set.label} {state}")
+        state = "cached" if forge_versions.cached(cache) else "missing"
+        print(f"{forge_versions.SET_ID:28} {forge_versions.LABEL} {state}")
         state = "cached" if data.cached_sounds(cache) else "missing"
         print(f"{'vanilla-sounds':28} {data.REPO}@{data.COMMIT[:12]} {state}")
         state = "cached" if model_data.cached(cache) else "missing"
@@ -1199,7 +1213,7 @@ def cmd_reference(args) -> int:
             state = "cached" if tags.cached(tag_set, cache) else "missing"
             print(f"{'tags-' + tag_set.id:28} {tag_set.label} {state}")
         return 0
-    failed = 0
+    failed = forge_failed
     try:
         path, downloaded = data.fetch_sounds(cache)
         print(f"{'fetched' if downloaded else 'cached ':7} vanilla-sounds -> {path}")
