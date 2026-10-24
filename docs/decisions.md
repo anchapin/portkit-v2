@@ -27,6 +27,37 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-23 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #381): a `facing` over some of the six directions, one model per value, converts on the 6-way placement path at only the values the blockstate draws; vanilla FACING_HOPPER is read as facing
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). This is #296 sub-reason 1, part of #277; Alex chose this slice on 2026-10-23. No new policy call. Placement is read from bytecode first. The only DEFAULT used is #212's facing-only DEFAULT, and only over the four horizontals, the state set it was approved for. Mapping and notes are #218's: a Java variant no placement reaches is named unreachable, as #218 and #307 already do. A set of values with no approved DEFAULT stays residue.
+- **Decision:** a `variants` blockstate whose only state is `facing` is the new directional kind `facing` (`blockcode.DIRECTIONAL_KINDS`) when it meets all of these:
+  - it draws at least two of the six directions, but not all six;
+  - every value has a quarter-turn variant;
+  - it isn't the facing-only shape (the four horizontals turning one model by y with no x).
+
+  It converts through `_convert_directional` like `facing6`, with `directional_keys` and the `getShape` reading limited to the drawn values. Placement:
+  - **Read:** `getStateForPlacement`, once per clicked face.
+  - **Unread, over exactly the four horizontals:** the facing-only DEFAULT (faces the player: facing = the player's horizontal direction turned round), labelled.
+  - **Unread, over any other set:** no DEFAULT. Residue: "placement isn't read (...), and no DEFAULT covers a facing over these values".
+  - **A rule that gives a value the blockstate doesn't draw:** residue that names those values.
+
+  `blockcode` reads vanilla `BlockStateProperties.FACING_HOPPER` under `facing`. Source: 1.21.1 client jar class `dts` `<clinit>` offsets 429-440, `DirectionProperty.create("facing", <not UP>)` into field `Q`, named by client.txt. The notes list each such block with its drawn values.
+- **Why:** these state sets (down + horizontals, up/down, horizontals with a model each) went to the generic "block has N blockstate variant(s)" residue, although the 6-way machinery already maps any read placement rule onto Bedrock's placement traits. Sub-reason 1 has no larger slice that is generic and deterministic (#296 comment: Chisel's named variations need their features read from code; Twilight Forest's hollow logs and banisters change by use or by neighbour).
+- **Measured** (develop 1b14bdd vs this branch):
+  - **Local `portkit convert --no-addon`, md5 of every output file, 13 corpus + 9 gauntlet Modrinth jars:**
+    - Tinkers' Construct +6 files: `{seared,scorched}_faucet` blocks, geometry and recipes. `FaucetBlock#getStateForPlacement` is read: facing = the clicked face, a clicked top face turned down (Tinkers 1.20.1 source). Boxes come from `getShape`, and `renderer_drawn_parts` is flagged for `FaucetBlockEntityRenderer`.
+    - Create +3: `basin`. `Block#getStateForPlacement` is inherited, so it is placed at its registered `facing=down`, as Java does. The other four facings are named unreachable. `BasinRenderer` is flagged.
+    - Immersive Engineering +3: `clinker_brick_quoin`, on the labelled facing-only DEFAULT.
+    - Quark's bamboo mats stay residue with the read reason (`BambooMatBlock` places by pitch and neighbours). So do IE's `clinker_brick_sill` (`VerticalFacingBlock` reads the clicked point) and `machine_interface` (the player doesn't set facing).
+    - BetterEnd: `unhandled.json` only. Nine 4-way blocks with random models per facing name that reason.
+    - The other 17 jars are byte-identical.
+  - **Gauntlet** (gap-leaderboard 40053119930 vs 40029005262): Twilight Forest 2313 -> 2318 files. `terrorcotta_curves`, a vanilla `GlazedTerracottaBlock` whose rule is the same "faces the player", converts. Its 8 drying racks name their random models. Tinkers 15383 -> 15389, IE 2292 -> 2295. Board done 40/50, mean 11.34% -> 11.35%. `block` 1041 -> 1037 files. docs/gauntlet.md is banked from that run.
+- **Rejected:**
+  - Applying the 6-way DEFAULT (facing = the clicked face) to a partial set. It gives values the blockstate doesn't draw, and no DEFAULT is approved for those sets (#87).
+  - Keeping the bamboo mats on a guessed rule.
+  - Treating a 5-value facing as `facing6` with the missing value stubbed.
+- **Links:** #296, #277, #218, #212, #307, #354, #87, PR #381.
+
 ## 2026-10-23 (approved (Alex, 2026-10-23): 1a, 2a, 3a, PR #380): a Forge jar that declares no game version takes the oldest one its forge dependency accepts, read from Forge's own release list, as a noted DEFAULT
 
 - **Status:** approved (Alex, 2026-10-23): 1a, 2a, 3a (#364, part of #277; follow-up of #362 / PR #363 and the #357 "no MC version" limit). Policy call: which metadata source names a version the jar doesn't declare, and which readers take it. Picks comment https://github.com/anchapin/portkit-v2/issues/364#issuecomment-6375499939 ; the branch implements picks 1a, 2a, 3a.
