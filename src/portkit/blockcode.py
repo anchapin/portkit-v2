@@ -5454,11 +5454,23 @@ def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading, flat: bool =
         r.shape_from = where
 
 
+def _every_state(obj: Obj, r: Reading) -> State:
+    """A state standing for every state of the block: each state name its
+    createBlockStateDefinition adds (else its default state's) is there, so
+    ``hasProperty`` answers as in Java, with its value unknown, so every way
+    a test of it leads is followed."""
+    names = r.states
+    if names is None:
+        default = obj.fields.get("__default")
+        names = [k for k, _v in default.values] if isinstance(default, State) else ()
+    return State(tuple((n, UNKNOWN) for n in sorted(set(names)) if isinstance(n, str) and not n.startswith("__")))
+
+
 def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
     """A getCollisionShape the block's classes override (#296): no collision
     when it returns ``Shapes.empty()`` on every path, read at every state
-    (a bare state: each property it reads is unknown, so each way is
-    followed) for an entity the code doesn't single out (see Collider).
+    (see _every_state) for an entity the code doesn't single out (see
+    Collider).
     Anything else (a box, a shape it can't read, a test on the world it
     can't decide that leads to a box) keeps the DEFAULT, with the reason."""
     where = f"{own[0].name.replace('/', '.')}#getCollisionShape"
@@ -5467,7 +5479,7 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
         results = machine.call(obj.cls, "getCollisionShape", _GET_SHAPE_DESC,
-                               [obj, State(), UNKNOWN, UNKNOWN, COLLIDER_CONTEXT])
+                               [obj, _every_state(obj, r), UNKNOWN, UNKNOWN, COLLIDER_CONTEXT])
     except Unreadable as exc:
         r.collision_why = f"{where} overrides the collision shape and can't be followed ({exc})"
         return
