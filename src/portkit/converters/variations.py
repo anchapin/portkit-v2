@@ -125,11 +125,20 @@ def read_lang(mod: SourceMod) -> dict[str, dict[str, str]]:
     return out
 
 
+def terrain_keys(mod: SourceMod) -> frozenset:
+    """The block texture keys the textures converter ships for ``mod``."""
+    from . import textures
+    index = textures.convert(mod).files.get("textures/terrain_texture.json") or {}
+    return frozenset(index.get("texture_data") or {})
+
+
 def convert(mod: SourceMod, result: ConversionResult, rel: str, name: str, blockstate: dict,
-            vset, lang: dict, model_block, block_definition) -> dict:
+            vset, lang: dict, model_block, block_definition, terrain: frozenset = frozenset()) -> dict:
     """Convert the registered variants of blockstate ``name`` (see the module
     docstring); ``model_block`` is :func:`portkit.converters.blocks._model_dict_block`
-    and ``block_definition`` :func:`portkit.converters.blocks._block_definition`.
+    and ``block_definition`` :func:`portkit.converters.blocks._block_definition`;
+    ``terrain`` is :func:`terrain_keys`: a variant wearing a texture of the
+    mod's own that isn't in it stays residue.
     Returns the record the notes are written from."""
     record = {"name": name, "converted": [], "left": {}, "unregistered": [], "kinds": set(),
               "why": vset.why}
@@ -167,6 +176,17 @@ def convert(mod: SourceMod, result: ConversionResult, rel: str, name: str, block
         if geometry is None:
             result.consumed = claimed
             record["left"][v.name] = ("block", why)
+            continue
+        missing = sorted({i["texture"] for i in (instances or {}).values()
+                          if isinstance(i, dict) and isinstance(i.get("texture"), str)
+                          and i["texture"].startswith(f"{mod.namespace}:") and i["texture"] not in terrain})
+        if missing:
+            # The textures converter refuses it on its own terms (two files on
+            # one key, an animation Bedrock can't express); the pipeline would
+            # withdraw the block (drop_untextured), so it is never emitted.
+            result.consumed = claimed
+            record["left"][v.name] = ("block", f"uses texture {', '.join(missing)}, which did not convert "
+                                               "(see that texture's own residue entry)")
             continue
         if geo is not None:
             result.files[f"models/blocks/{ident}.geo.json"] = geo

@@ -35,7 +35,7 @@ def test_adapter_reads_the_chains():
     assert problems == []
     # Java asks for the variant lowercased (1.12 ModelResourceLocation).
     assert [v.name for v in sets["andesite"].variations] == ["cracked", "bricks-soft", "circularct", "pillar",
-                                                             "encased", "screenmetallic"]
+                                                             "encased", "screenmetallic", "bricks"]
     assert {v.lang_key for v in sets["andesite"].variations} == {"tile.chisel.andesite.name"}
     assert not any(v.gate for v in sets["andesite"].variations)
     # setParentFolder moves the blockstate; the name keys the translation.
@@ -70,6 +70,8 @@ def _mod(tmp_path: Path) -> SourceMod:
               "andesite/pillar-side", "andesite/pillar-top", "andesite/encased", "andesite/emboss",
               "andesite/encased-ctm", "marble/raw"):
         (a / f"textures/blocks/{t}.png").write_bytes(_png())
+    (a / "textures/blocks/andesite/bricks.png").write_bytes(_png())
+    (a / "textures/blocks/andesite/bricks.png.mcmeta").write_text(json.dumps({"villager": {}}))
     (a / "textures/blocks/andesite/encased.png.mcmeta").write_text(json.dumps(
         {"ctm": {"ctm_version": 1, "type": "ctm", "textures": ["chisel:blocks/andesite/encased-ctm"]}}))
     (a / "models/block/cube_ctm.json").write_text(json.dumps({
@@ -88,6 +90,7 @@ def _mod(tmp_path: Path) -> SourceMod:
             "encased": _tex("andesite/encased"),
             "emboss": _tex("andesite/emboss"),
             "screenmetallic": _tex("andesite/cracked"),
+            "bricks": _tex("andesite/bricks"),
         }),
         "ancient_stone": _forge({"cracked": _tex("andesite/cracked"), "raw": _tex("andesite/emboss")}),
         "bloodmagic": _forge({"brick": _tex("andesite/cracked")}),
@@ -130,6 +133,9 @@ def test_registered_variations_convert(converted):
     [note] = [n for n in converted.notes if n.startswith("andesite:")]
     assert "circularct (connected_texture" in note and "encased (connected_texture" in note
     assert "not registered by the mod's code: emboss" in note
+    # A texture the textures converter refuses: the variant is never emitted.
+    assert "blocks/andesite_bricks.json" not in files
+    assert "bricks (block: uses texture chisel:andesite_bricks, which did not convert" in note
 
 
 def test_display_name_is_javas(converted):

@@ -1532,6 +1532,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     from ..adapters import block_variations
     variation_sets = block_variations(mod)
     variation_lang = variations.read_lang(mod) if variation_sets else {}
+    variation_terrain = variations.terrain_keys(mod) if variation_sets else frozenset()
     variation_records: list[dict] = []
     dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared)
     paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded, shared)
@@ -1577,7 +1578,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
         if name in variation_sets and name not in (stations or {}):
             variation_records.append(variations.convert(
                 mod, result, rel, name, blockstate, variation_sets[name], variation_lang,
-                _model_dict_block, _block_definition))
+                _model_dict_block, _block_definition, variation_terrain))
             continue
 
         if name in bool_readings:

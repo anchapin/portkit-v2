@@ -40,6 +40,7 @@ public enum Features {
                     .next("pillar")
                     .next("encased")
                     .next("screenMetallic")
+                    .next("bricks")
                     .addOreDict("stoneAndesite")
                     .build(b -> b.setHardness(1.5F));
         }
