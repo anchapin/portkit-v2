@@ -7,15 +7,15 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 39.6,
-      "files": 3446,
-      "residue": 5257,
+      "coverage": 39.7,
+      "files": 3451,
+      "residue": 5250,
       "errors": 0
     },
     "create": {
-      "coverage": 42.0,
-      "files": 4083,
-      "residue": 5641,
+      "coverage": 42.2,
+      "files": 4105,
+      "residue": 5629,
       "errors": 0
     },
     "farmers_delight_fabric": {
@@ -31,15 +31,15 @@
       "errors": 0
     },
     "mekanism": {
-      "coverage": 16.0,
-      "files": 1240,
-      "residue": 6523,
+      "coverage": 16.2,
+      "files": 1257,
+      "residue": 6500,
       "errors": 0
     },
     "mythicmetals": {
-      "coverage": 58.8,
-      "files": 1915,
-      "residue": 1344,
+      "coverage": 58.9,
+      "files": 1918,
+      "residue": 1340,
       "errors": 0
     },
     "silent_gear_1165": {
@@ -61,9 +61,9 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 29.5,
-      "files": 1516,
-      "residue": 3623,
+      "coverage": 30.7,
+      "files": 1567,
+      "residue": 3534,
       "errors": 0
     },
     "tinkers_construct": {
