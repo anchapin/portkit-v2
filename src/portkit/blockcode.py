@@ -1843,6 +1843,29 @@ class Machine:
             self._havoc(args, f"{found[0].name}.{name}: {exc}")
             return [UNKNOWN] if _arg_count(desc)[1] else [None]
 
+    def _unregistered_default(self, obj: "Obj") -> "State":
+        """What ``defaultBlockState()`` returns on a block object none of
+        whose code run so far registered a default state: Block's own
+        constructor registers ``this.stateDefinition.any()`` (Block#<init>,
+        MC 1.20.1 and 1.21.1, Mojang mappings: ``registerDefaultState(
+        stateDefinition.any())``), so it is StateDefinition#any's state,
+        marked as ``any()`` marks it (a boolean the code never sets reads
+        true, BooleanProperty's first value). Only for an object ``new``
+        made here whose construction nothing the machine couldn't follow
+        has touched (``_defaults``, see _field_default), on which no
+        registerDefaultState with an unread state was called, and whose
+        superclasses leave the jar at a vanilla class whose constructor
+        registers no default of its own (_PLAIN_VANILLA: Block itself, and
+        classes whose constructors only call super, client.txt 1.21.1; a
+        vanilla ButtonBlock or DoorBlock registers its own, which isn't
+        modelled); otherwise an unmarked state, as before (each property
+        unread)."""
+        if getattr(obj, "_defaults", False) and "__partial" not in obj.fields \
+                and "__default_unread" not in obj.fields \
+                and self.vanilla_base(obj.cls) in _PLAIN_VANILLA:
+            return State(((_ANY, 1),))
+        return State()
+
     def _final_field(self, owner: str, name: str, static: bool = True) -> bool:
         """Whether ``owner`` (or the class in its chain declaring ``name``)
         declares field ``name`` final; False for a field no class of the
@@ -2877,10 +2900,12 @@ class Machine:
             if name == "getFluidState" and desc == _FLUID_STATE_DESC and base in _PLAIN_VANILLA:
                 return [NO_FLUID]
             if name == "defaultBlockState":
-                return [recv.fields.get("__default", State())]
+                return [recv.fields.get("__default", self._unregistered_default(recv))]
             if name == "registerDefaultState" and rest:
                 if isinstance(rest[0], State):
                     recv.fields["__default"] = rest[0]
+                else:
+                    recv.fields["__default_unread"] = True
                 return [None]
             if name in ("getStateDefinition",):
                 return [Obj("__statedef")]
