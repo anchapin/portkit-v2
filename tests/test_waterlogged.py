@@ -160,7 +160,9 @@ def test_facing_block_holds_water(converted):
 
 def test_facing_and_boolean_block_keeps_only_its_booleans(converted):
     block = _file(converted, "pond_lamp")["minecraft:block"]
-    assert block["description"]["states"] == {f"{NS}:lit": [False, True]}
+    # lit is never set: defaultBlockState() is Block#<init>'s
+    # stateDefinition.any(), BooleanProperty's first value (true), start first.
+    assert block["description"]["states"] == {f"{NS}:lit": [True, False]}
     assert block["components"]["minecraft:liquid_detection"] == {"detection_rules": [RULE]}
     assert "waterlogged" not in json.dumps(block)
 
