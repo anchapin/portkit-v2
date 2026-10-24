@@ -1788,10 +1788,10 @@ def _held_claims(mod: SourceMod, result: ConversionResult, held: dict) -> list[s
         reading, values, passed, rel = held[name]
         if rel is None or rel in failed or not ({f"blocks/{name}.json", f"blocks/_{name}.json"} & set(result.files)):
             continue
-        for ref in passed:
-            path = models.model_path(mod, ref)
-            if path is not None and path.is_file():
-                result.claim(mod, path)
+        # With their parents inside the mod: a template only the passed-over
+        # models name would otherwise be left unowned.
+        for path in _model_chain_files(mod, passed):
+            result.claim(mod, path)
         out.append(held_states.note(name, reading, values, passed))
     return out
 
