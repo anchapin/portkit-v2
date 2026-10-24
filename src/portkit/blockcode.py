@@ -595,6 +595,34 @@ class RL:
     lookup: bool = False
 
 
+@dataclass(frozen=True)
+class Collider:
+    """What the collision reader (#296) hands ``getCollisionShape``: an
+    entity's ``CollisionContext`` (``part="context"``) and the entity it
+    returns from ``getEntity`` (``part="entity"``). Bedrock gives one
+    collision box to every entity, so the override is read for an entity
+    the block's code doesn't single out: the context is an
+    ``EntityCollisionContext`` (what ``CollisionContext.of(entity)`` and
+    ``CollisionContext.empty()`` build, 1.20.1 and 1.21.1 client jars), the
+    entity is an ``Entity``, and every other ``instanceof`` test on either
+    is false (a projectile, a player, an item: an entity the code tests for
+    is one it treats apart)."""
+
+    part: str
+
+    def __repr__(self):
+        return f"collider-{self.part}"
+
+
+COLLIDER_CONTEXT = Collider("context")
+COLLIDER_ENTITY = Collider("entity")
+_COLLIDER_TYPES = {
+    "context": ("net/minecraft/world/phys/shapes/EntityCollisionContext",
+                "net/minecraft/world/phys/shapes/CollisionContext"),
+    "entity": ("net/minecraft/world/entity/Entity",),
+}
+
+
 class _Ctx:
     """A BlockPlaceContext. ``clicked`` is the face the player clicked
     (UseOnContext#getClickedFace), fixed per run by read_directional;
@@ -1015,6 +1043,8 @@ class Machine:
         on a block of the jar)."""
         if v is None:
             return 0
+        if isinstance(v, Collider):
+            return int(cls in _COLLIDER_TYPES[v.part])
         if isinstance(cls, str) and self._vanilla_block_id(v) is not None and self.is_mod(cls):
             # A vanilla Blocks constant is an object of a vanilla class (#280).
             return 0
@@ -2768,6 +2798,9 @@ class Machine:
             # class (#280: a trait key's javac-style ``equals`` compares
             # ``getClass()`` of both sides).
             return [ClassLit(recv.cls)]
+        if recv is COLLIDER_CONTEXT and name == "getEntity" and not rest:
+            # EntityCollisionContext#getEntity: the colliding entity (#296).
+            return [COLLIDER_ENTITY]
         if owner == _BLOCK_SET_TYPE and not static and not rest and isinstance(recv, Const) \
                 and recv.owner == _BLOCK_SET_TYPE \
                 and ((name in _BLOCK_SET_TYPE_PARTS and desc.startswith("()L") and desc != "()Ljava/lang/String;")
@@ -3206,18 +3239,25 @@ class Machine:
             # the same once an SRG / intermediary jar is remapped (#235).
             if name in ("ofFullCopy", "ofLegacyCopy", "copy") and rest:
                 src = rest[0]
+                collision = UNKNOWN
                 if isinstance(src, Obj) and isinstance(src.fields.get("__props"), Props):
                     light = src.fields["__props"].light  # a mod block's own Properties
+                    # It copies hasCollision too (1.20.1 Properties#copy,
+                    # 1.21.1 ofFullCopy/ofLegacyCopy), unless that object
+                    # is shared and changed elsewhere (#296).
+                    if not _shared_changed(src.fields["__props"]):
+                        collision = src.fields["__props"].has_collision
                 elif isinstance(src, Const):
                     light = CopiedLight(f"{src.owner.rsplit('/', 1)[-1]}.{src.name}")
                 else:
                     light = CopiedLight("a block it can't read")
-                # Whether it collides is the copied block's (not read here).
-                return [Props(UNKNOWN, light, self.epoch)]
+                # Whether a vanilla block (or one it can't read) collides is
+                # that block's, not read here.
+                return [Props(collision, light, self.epoch)]
             return [Props(UNKNOWN, UNKNOWN, self.epoch)]
         if not isinstance(recv, Props):
             return [UNKNOWN]
-        if name == "noCollission":
+        if name in _NO_COLLISION:
             collision, light = False, recv.light
         elif name == "lightLevel" and len(rest) == 1:
             fn = rest[0]
@@ -4368,12 +4408,19 @@ class Reading:
     shape_from: str = ""
     collision: bool | None = None
     collision_why: str = ""
+    # Where a read collision comes from: "" for the Properties
+    # (noCollission or not), else the getCollisionShape override read (#296).
+    collision_from: str = ""
     # The state names createBlockStateDefinition adds, or None if unread.
     states: tuple | None = None
     # Behaviour methods the block's own classes override (use, ticks, a block
     # entity...), which a converted facing block doesn't carry.
     behaviour: tuple = ()
 
+
+# Properties#noCollission, renamed noCollision in later Mojang mappings
+# (1.21.2+); SRG / intermediary names are read through the #235 remapper.
+_NO_COLLISION = ("noCollission", "noCollision")
 
 _SHARED_WHY = ("its Properties object is shared with other registrations that change it, so "
                "what it holds when this block is built depends on registration order")
@@ -5004,21 +5051,7 @@ def _read_shape(machine: Machine, obj: Obj, r: Reading) -> None:
         r.shape_from = where
     # Collision: the vanilla getCollisionShape (hasCollision ? getShape :
     # empty) unless the mod overrides it.
-    collision_desc = _GET_SHAPE_DESC
-    own = machine.find_method(obj.cls, "getCollisionShape", collision_desc)
-    if own is not None:
-        r.collision_why = (f"{own[0].name.replace('/', '.')}#getCollisionShape overrides the "
-                           "collision shape")
-        return
-    props = obj.fields.get("__props", UNKNOWN)
-    if _shared_changed(props):
-        r.collision_why = _SHARED_WHY
-        return
-    if not isinstance(props, Props) or props.has_collision is UNKNOWN:
-        r.collision_why = ("its Properties copy a vanilla block's or aren't read, so whether "
-                           "it collides isn't known")
-        return
-    r.collision = bool(props.has_collision)
+    _read_shape_collision(machine, obj, r)
 
 
 # --- Light ------------------------------------------------------------------
@@ -5421,12 +5454,39 @@ def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading, flat: bool =
         r.shape_from = where
 
 
+def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
+    """A getCollisionShape the block's classes override (#296): no collision
+    when it returns ``Shapes.empty()`` on every path, read at every state
+    (a bare state: each property it reads is unknown, so each way is
+    followed) for an entity the code doesn't single out (see Collider).
+    Anything else (a box, a shape it can't read, a test on the world it
+    can't decide that leads to a box) keeps the DEFAULT, with the reason."""
+    where = f"{own[0].name.replace('/', '.')}#getCollisionShape"
+    machine.steps = 0
+    try:
+        if "__partial" in obj.fields:
+            raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
+        results = machine.call(obj.cls, "getCollisionShape", _GET_SHAPE_DESC,
+                               [obj, State(), UNKNOWN, UNKNOWN, COLLIDER_CONTEXT])
+    except Unreadable as exc:
+        r.collision_why = f"{where} overrides the collision shape and can't be followed ({exc})"
+        return
+    if results and all(isinstance(x, Shape) and not x.boxes for x in results):
+        r.collision = False
+        r.collision_from = where
+        return
+    if results and all(isinstance(x, Shape) for x in results):
+        r.collision_why = f"{where} overrides the collision shape with a box of its own"
+    else:
+        r.collision_why = f"{where} overrides the collision shape with one it can't read"
+
+
 def _read_shape_collision(machine: Machine, obj: Obj, r: Reading) -> None:
     """Collision as _read_shape reads it (Properties#noCollission, or a
     getCollisionShape override), without reading the facing-only shapes."""
     own = machine.find_method(obj.cls, "getCollisionShape", _GET_SHAPE_DESC)
     if own is not None:
-        r.collision_why = f"{own[0].name.replace('/', '.')}#getCollisionShape overrides the collision shape"
+        _override_collision(machine, obj, own, r)
         return
     props = obj.fields.get("__props", UNKNOWN)
     if _shared_changed(props):
