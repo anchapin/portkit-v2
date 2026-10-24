@@ -3052,8 +3052,7 @@ def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, na
     extra_states = sorted(set(reading.states or ()) - {"facing"})
     return {
         "name": name,
-        "placement": (None, "no facing") if flat
-        else (reading.placement_from, placement) if reading.placement is not None
+        "placement": (reading.placement_from, placement) if reading.placement is not None
         else (None, reading.placement_why),
         "box": reading.shape_from if reading.shapes is not None else None,
         "box_why": reading.shape_why,
