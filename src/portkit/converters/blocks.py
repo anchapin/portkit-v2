@@ -3553,8 +3553,8 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
     bools, cells = spec["bools"], spec["cells"]
     # A blockstate that draws booleans alone (#296) has the one "facing" None.
     facings = spec.get("facings", _CARDINALS)
-    flat = facings == (None,)
-    label = "booleans" if flat else "facing and booleans"
+    facingless = facings == (None,)
+    label = "booleans" if facingless else "facing and booleans"
     combos = blockcode.combinations(bools)
     if reading.vanilla_parent:
         result.unhandled.append(Unhandled(rel, "block", (
@@ -3641,7 +3641,7 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
             continue
         terms = []
         for combo, at in sorted(by_combo.items()):
-            if flat or at == set(_CARDINALS):
+            if facingless or at == set(_CARDINALS):
                 terms.append(_cell_test(ns, bools, None, combo))
             else:
                 terms += [_cell_test(ns, bools, f, combo) for f in _CARDINALS if f in at]
@@ -3706,10 +3706,10 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         if not same_light:
             extra["minecraft:light_emission"] = light[combo]
         extras[(facing, combo)] = extra
-    per_facing = not flat and all(
+    per_facing = not facingless and all(
         len({json.dumps(extras[(f, c)], sort_keys=True) for c in combos}) == 1 for f in _CARDINALS)
     permutations = []
-    if flat:
+    if facingless:
         for c in combos:
             if extras[(None, c)]:
                 permutations.append({"condition": _cell_test(ns, bools, None, c), "components": extras[(None, c)]})
@@ -3733,7 +3733,7 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         },
         "components": components,
     }
-    if flat:
+    if facingless:
         del block["description"]["traits"]
     if permutations:
         block["permutations"] = permutations
@@ -3746,11 +3746,11 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         fmt = SCRIPT_FORMAT
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = {"format_version": fmt, "minecraft:block": block}
-    extra_states = sorted(set(reading.states or ()) - ({*bools} if flat else {"facing", *bools}))
+    extra_states = sorted(set(reading.states or ()) - ({*bools} if facingless else {"facing", *bools}))
     return {
         "name": name,
         "bools": bools,
-        "placement": (None, "no facing") if flat
+        "placement": (None, "no facing") if facingless
         else (reading.placement_from, placement) if reading.placement is not None
         else (None, reading.placement_why),
         "box": reading.shape_from if reading.shapes_by is not None else None,
