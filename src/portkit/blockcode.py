@@ -786,6 +786,9 @@ class Machine:
         # finished at any depth.
         self.pass_no = 0
         self._clinit_depth = 0
+        # The depth a running class initializer's own code runs at, one per
+        # initializer on the stack (see init_class, _clinit_call).
+        self._clinit_at: list = []
         self._deferred_now = False
         self._shared_wrote: dict = {}
         self._stopped_methods: set = set()
@@ -1094,6 +1097,7 @@ class Machine:
         self.new_epoch()
         serial = _ALLOCATED[0]
         self._clinit_depth += 1
+        self._clinit_at.append(self.depth + 1)
         try:
             self.run(cf, m, [])
         except Unreadable:
@@ -1103,6 +1107,7 @@ class Machine:
         finally:
             self.epoch = saved
             self._clinit_depth -= 1
+            self._clinit_at.pop()
 
     def _mark_shared(self, cf: ClassFile, serial: int) -> None:
         """While registrations are collected, a list this class initializer
@@ -1485,6 +1490,9 @@ class Machine:
                 self.init_class(start)
             found = self.find_method(start, name, desc)
             if found is not None:
+                if self.registrations is not None and static and not self._library(found[0].name) \
+                        and self._clinit_at and self.depth == self._clinit_at[-1]:
+                    return self._clinit_call(found, name, desc, args)
                 if self.registrations is None or not self._library(found[0].name):
                     return self.run(*found, args)
                 try:
@@ -1808,6 +1816,32 @@ class Machine:
                 todo += [v.left, v.right]
             elif isinstance(v, Opt):
                 todo.append(v.value)
+
+    def _clinit_call(self, found, name: str, desc: str, args: list) -> list:
+        """A static call to the mod's own method made by a class
+        initializer's own code while registrations are collected (the
+        registry class's ``static final Map<DyeColor, Supplier<Block>> FLAGS
+        = RegUtils.registerFlags(...)``, one field among hundreds). Followed
+        as any call; when it can't be followed, it is taken as havoc, as a
+        dependency jar's method is (#280 pick 4a, see _havoc): what it
+        returns is unknown, everything reachable from its arguments loses
+        what it held, every static it wrote reads unknown, and the
+        registrations it recorded before it stopped stay (as a top-level run
+        that stops keeps them, see _run_method). The initializer then goes
+        on to the fields after it, instead of stopping there and leaving
+        every later field of the class unregistered. One that runs out of
+        the step budget still stops the initializer."""
+        before = dict(self.statics)
+        try:
+            return self.run(*found, args)
+        except Unreadable as exc:
+            if str(exc) == _TOO_MUCH:
+                raise
+            for key, value in list(self.statics.items()):
+                if key not in before or before[key] is not value:
+                    self.statics[key] = UNKNOWN
+            self._havoc(args, f"{found[0].name}.{name}: {exc}")
+            return [UNKNOWN] if _arg_count(desc)[1] else [None]
 
     def _final_field(self, owner: str, name: str, static: bool = True) -> bool:
         """Whether ``owner`` (or the class in its chain declaring ``name``)
