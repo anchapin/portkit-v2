@@ -10,6 +10,7 @@ public abstract class BlockBehaviour { public BlockBehaviour(Properties p) {}
     public static Properties ofFullCopy(BlockBehaviour b) { return null; }
     public static Properties copy(BlockBehaviour b) { return null; }
     public Properties noCollission() { return this; } public Properties noOcclusion() { return this; }
+    public Properties air() { return this; }
     public Properties lightLevel(java.util.function.ToIntFunction<BlockState> f) { return this; }
     public Properties m_60953_(java.util.function.ToIntFunction<BlockState> f) { return this; } }
   protected VoxelShape getShape(BlockState s, BlockGetter g, BlockPos p, CollisionContext c) { return null; }
