@@ -33,7 +33,7 @@ from portkit import png as png_reader
 
 from .. import blockcode, rendershape
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import buttons, doors, fence_gates, models, plates, trapdoors
+from . import buttons, doors, fence_gates, models, plates, trapdoors, variations
 
 _MENU_CATEGORY = "construction"
 
@@ -1387,7 +1387,16 @@ def _model_block(
         model = json.loads(model_file.read_text())
     except json.JSONDecodeError as exc:
         return None, None, None, f"{model_rel}: invalid JSON: {exc}"
+    return _model_dict_block(mod, result, model, model_ref, geo_name, turn)
 
+
+def _model_dict_block(
+    mod: SourceMod, result: ConversionResult, model: dict, model_ref: str, geo_name: str,
+    turn: tuple[int, int] = (0, 0),
+) -> tuple[str | None, dict | None, dict | None, str]:
+    """:func:`_model_block` on a parsed model (``model_ref`` names it in
+    reasons): a model file's, or one a blockstate composes (a Forge
+    blockstate's model and textures, #296)."""
     flat, parents, why = models.resolve(mod, model)
     for parent_file in parents:
         result.claim(mod, parent_file)
@@ -1518,6 +1527,13 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     readings = _read_facing_code(mod, src, stations or {}, loaded, shared)
     bool_readings, bool_why = _read_bool_code(mod, src, stations or {}, loaded, shared)
     render = _RenderRun(mod, shared)
+    # Blockstates whose bare variants the mod's code registers as blocks of
+    # their own (an adapter's block_variations hook, #296).
+    from ..adapters import block_variations
+    variation_sets = block_variations(mod)
+    variation_lang = variations.read_lang(mod) if variation_sets else {}
+    variation_terrain = variations.terrain_keys(mod) if variation_sets else frozenset()
+    variation_records: list[dict] = []
     dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared)
     paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded, shared)
     paired_records: list[dict] = []
@@ -1558,6 +1574,12 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             result.unhandled.append(Unhandled(rel, "block", water_why[name]))
             continue
         blockstate = loaded[name]
+
+        if name in variation_sets and name not in (stations or {}):
+            variation_records.append(variations.convert(
+                mod, result, rel, name, blockstate, variation_sets[name], variation_lang,
+                _model_dict_block, _block_definition, variation_terrain))
+            continue
 
         if name in bool_readings:
             # A block that doesn't convert leaves the models it looked at
@@ -1720,6 +1742,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(_directional_notes(directional))
     result.notes.extend(_directional_bool_notes(directional_bool))
     result.notes.extend(_vslab_notes(vslabs))
+    result.notes.extend(variations.notes(variation_records))
     result.notes.extend(doors.notes([r for r in paired_records if r["kind"] in ("door", "two_tall")]))
     result.notes.extend(trapdoors.notes([r for r in paired_records if r["kind"] == "trapdoor"]))
     result.notes.extend(plates.notes([r for r in paired_records if r["kind"] == "plate"]))
