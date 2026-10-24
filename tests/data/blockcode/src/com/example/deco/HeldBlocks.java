@@ -9,5 +9,6 @@ public class HeldBlocks {
     public static final DeferredRegister BLOCKS = DeferredRegister.createBlocks("examplemod");
     public static final Object LYING_LOG = BLOCKS.register("lying_log", () -> new LyingLogBlock(Properties.of()));
     public static final Object PLACED_FILL = BLOCKS.register("placed_fill", () -> new PlacedFillBlock(Properties.of()));
+    public static final Object CRATE = BLOCKS.register("crate", () -> new CrateBlock(Properties.of()));
     public static final Object UNSET_FILL = BLOCKS.register("unset_fill", () -> new UnsetFillBlock(Properties.of()));
 }
