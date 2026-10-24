@@ -27,11 +27,11 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-24 (pending Alex, PR #387): a block the mod registers as air (`Properties#air`) is explained residue `air_block`, not a Bedrock block
+## 2026-10-24 (approved (Alex, 2026-10-24): 1a, PR #387): a block the mod registers as air (`Properties#air`) is explained residue `air_block`, not a Bedrock block
 
-- **Status:** pending Alex (picks comment on PR #387; 'a' recommended). #296 sub-reason 1 (the Storage Drawers part), part of #277. A policy call: the rule drops six Storage Drawers blocks that ship on develop.
+- **Status:** approved (Alex, 2026-10-24): 1a (picks comment https://github.com/anchapin/portkit-v2/pull/387#issuecomment-6390037028). The branch implements pick 1a. #296 sub-reason 1 (the Storage Drawers part), part of #277. A policy call: the rule drops six Storage Drawers blocks that ship on develop.
 - **Root cause:** the 16 Storage Drawers items in sub-reason 1 are the gauntlet row `storage_drawers` (NeoForge 1.21.1, 13.11.4), not the real-mods row `storage_drawers_1192` (whose one blockstate residue, `compacting_drawers_3`, is a held state refused for SRG names). 15 of the 16 are `meta_*` blocks: `ModBlocks` L149-192 / L284-317 (StorageDrawers branch 1.21) registers 43 of them as `new BlockMeta*(Properties.of().air())`, plain `Block` subclasses with `facing` x `half` x `slots`/`slot` states (`slots` is the mod's own `IntegerSetProperty`) and no item: holders for models the drawers' own code draws. No converter takes facing x boolean x int, so they fell to "block has N blockstate variant(s)". Converting them would make placeable solid blocks Java doesn't have; six state-less ones already ship on develop that way (`meta_hopper` in the construction menu, with the hopper indicator model). The 16th, `framing_table` (two blocks wide, `part=left/right`, a block entity with a menu), is not touched here.
-- **Decision (proposed, pick 1a):**
+- **Decision (as built, pick 1a):**
   1. *Read* (`blockcode.Props.air`, `blockcode.read_air`). `Properties#air` (Mojang name; SRG / intermediary through the #235 remapper) sets `air`; a later call under an SRG / intermediary name that can't be told apart makes it unknown; a copy (`ofFullCopy`/`ofLegacyCopy`/`copy`) is not read as air. A blockstate name is air only when every object registered under it was built from Properties read as air and not changed by another registration.
   2. *Convert* (`converters.blocks`, before every other path, stations excluded). Such a blockstate is the new explained kind `air_block`, its models (and their in-mod parents) claimed with it, as `code_drawn_block` claims them; the reason names the class: Java's world treats it as empty space (`BlockState#isAir`, `LevelReader#isEmptyBlock`) and what it is for is the mod's code; a Bedrock block definition would ship a solid, placeable block.
   No mod names in core (#220); no DEFAULTs added.
