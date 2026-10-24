@@ -167,3 +167,31 @@ def test_flat_notes(converted):
     assert "Box read from bytecode (the bounding box of getShape at each combination of the booleans)" in notes
     assert "The block's code declares states its blockstate doesn't draw" in notes and "facing: " in notes
     assert "Facing placement" not in notes
+
+
+# --- PR #384 review fixes ---------------------------------------------------------
+
+def test_flat_start_from_registered_default_through_the_field():
+    # StartLitBlock registers lit=true through this.stateDefinition.any()
+    # (Supplementaries' SconceBlock does the same): the start is read, not
+    # the labelled DEFAULT false.
+    r = blockcode.read_state_blocks(ClassIndex.from_source(CLASSES), {"start_lit": ("lit",)},
+                                    facingless=frozenset({"start_lit"}))["start_lit"]
+    assert r.cls == "com.example.deco.StartLitBlock"
+    assert r.defaults["lit"][:2] == (True, "placed")
+
+
+def test_registered_non_block_class_is_not_read():
+    # "gift" is registered as GiftMenu, an AbstractContainerMenu: not a Block
+    # subclass, so the name is not read (no reason naming the menu, no values
+    # from it), as Supplementaries' present/PresentContainerMenu.
+    r = blockcode.read_state_blocks(ClassIndex.from_source(CLASSES), {"gift": ("packed",)},
+                                    facingless=frozenset({"gift"}))["gift"]
+    assert r.cls == "" or r.cls is None
+    assert "GiftMenu" not in r.shape_why and "registered as" not in r.shape_why
+    assert r.shape_why == "no registration of this block was found in the mod's classes"
+
+
+def test_may_be_block_by_chain_and_name():
+    machine = blockcode.Machine(ClassIndex.from_source(CLASSES))
+    assert not blockcode._may_be_block(machine, "com/example/deco/GiftMenu")
