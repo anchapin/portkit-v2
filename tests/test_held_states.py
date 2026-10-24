@@ -65,7 +65,9 @@ def _mod(tmp_path: Path) -> SourceMod:
         (root / f"assets/{NS}/textures/block/{tex}.png").write_bytes(_png())
     for name, model in {"log": _model("bark"), "log_moss": _model("moss", 15)}.items():
         (root / f"assets/{NS}/models/block/{name}.json").write_text(json.dumps(model))
-    for name, bs in {"lying_log": _log_states(), "unset_fill": _log_states(), "placed_fill": _fill_states()}.items():
+    crate = {"variants": {"axis=x": {"model": f"{NS}:block/log", "y": 90}, "axis=z": {"model": f"{NS}:block/log"}}}
+    for name, bs in {"lying_log": _log_states(), "unset_fill": _log_states(), "placed_fill": _fill_states(),
+                     "lying_crate": crate, "flip_box": crate}.items():
         (root / f"assets/{NS}/blockstates/{name}.json").write_text(json.dumps(bs))
     return SourceMod(root=root, namespace=NS, classes=ClassIndex.from_source(CLASSES))
 
@@ -155,7 +157,9 @@ def test_horizontal_pillar_held_at_empty(converted):
     assert ("lying_log: Java's fill starts at empty (registered: com.example.deco.LyingLogBlock#<init> "
             "(registerDefaultState)") in notes
     assert "changed by useItemOn; Bedrock holds it at empty, so moss, waterlogged (log_moss) aren't drawn" in notes
-    assert "lying_log: horizontal pillar (axis x or z)" in notes and "DEFAULT: a top or bottom face" in notes
+    assert ("lying_log: horizontal pillar (axis x or z); a side face clicked gives its axis (read: "
+            "com.example.deco.LyingLogBlock#getStateForPlacement)") in notes
+    assert "DEFAULT: a top or bottom face" in notes
     # The moss model is read and passed over, so it counts as accounted for.
     assert any(p.endswith("models/block/log_moss.json") for p in converted.consumed)
 
@@ -172,3 +176,30 @@ def test_unread_start_stays_residue(converted):
     assert miss.kind == "block"
     assert miss.reason.startswith("held state: fill (empty, moss, waterlogged) isn't set by the player")
     assert "blocks/unset_fill.json" not in converted.files
+
+
+# --- horizontal pillars -----------------------------------------------------------
+
+def test_axis_rule_read_from_code():
+    got = blockcode.read_horizontal_axis(ClassIndex.from_source(CLASSES), ["lying_log", "lying_crate", "flip_box"])
+    assert (got["lying_log"].rule, got["lying_log"].source) == (
+        "face", "com.example.deco.LyingLogBlock#getStateForPlacement")
+    assert (got["lying_crate"].rule, got["lying_crate"].turned) == ("player", False)
+    # FlipBlock sets no axis: neither rule.
+    assert got["flip_box"].rule is None and "neither from the clicked face" in got["flip_box"].why
+
+
+def test_player_axis_crate(converted):
+    block = converted.files["blocks/lying_crate.json"]["minecraft:block"]
+    assert block["description"]["traits"] == {
+        "minecraft:placement_direction": {"enabled_states": ["minecraft:cardinal_direction"]}}
+    (perm,) = block["permutations"]
+    assert perm["condition"] == ("q.block_state('minecraft:cardinal_direction') == 'east' || "
+                                 "q.block_state('minecraft:cardinal_direction') == 'west'")
+    assert any(n.startswith("lying_crate: horizontal pillar (axis x or z) placed along the axis of the player's facing")
+               for n in converted.notes)
+
+
+def test_unread_axis_rule_stays_residue(converted):
+    (miss,) = [u for u in converted.unhandled if u.source.endswith("blockstates/flip_box.json")]
+    assert miss.reason.startswith("horizontal pillar (axis x or z): how the axis is placed isn't read: ")
