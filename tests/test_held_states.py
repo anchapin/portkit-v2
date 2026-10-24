@@ -85,6 +85,9 @@ def test_held_shape():
     gap = _log_states()
     del gap["variants"]["axis=x,fill=moss"]
     assert held_states.held_prop(gap) is None
+    attach = {"variants": {f"face={f},facing={d}": {"model": "m"} for f in ("floor", "wall", "ceiling")
+                           for d in CARDINALS}}
+    assert held_states.held_prop(attach) is None
     six = {"variants": {f"facing={d},fill={f}": {"model": "m"} for d in ("up", "down") for f in "ab"}}
     assert held_states.held_prop(six) is None
 

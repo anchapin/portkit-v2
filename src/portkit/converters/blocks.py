@@ -1786,7 +1786,7 @@ def _held_claims(mod: SourceMod, result: ConversionResult, held: dict) -> list[s
     out = []
     for name in sorted(held):
         reading, values, passed, rel = held[name]
-        if rel is None or rel in failed:
+        if rel is None or rel in failed or not ({f"blocks/{name}.json", f"blocks/_{name}.json"} & set(result.files)):
             continue
         for ref in passed:
             path = models.model_path(mod, ref)

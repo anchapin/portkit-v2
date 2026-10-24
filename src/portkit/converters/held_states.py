@@ -21,6 +21,10 @@ from .. import blockcode
 PLACEMENT_STATES = ("axis", "facing")
 _CARDINALS = {"north", "east", "south", "west"}
 _BOOLS = {"true", "false"}
+# States other readers own as placement or shape: attach-face blocks
+# (``face``), slabs and vertical slabs (``type``), stairs, doors, trapdoors
+# and two-tall blocks (``half``, ``shape``, ``hinge``), beds (``part``).
+_PLACEMENT_OWNED = {"face", "type", "half", "shape", "hinge", "part"}
 
 
 def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
@@ -41,7 +45,7 @@ def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
         for a, b in cell.items():
             props.setdefault(a, set()).add(b)
     rest = [p for p in props if p not in PLACEMENT_STATES]
-    if len(rest) != 1 or len(props) < 2 or props[rest[0]] <= _BOOLS or len(props[rest[0]]) < 2:
+    if len(rest) != 1 or rest[0] in _PLACEMENT_OWNED or len(props) < 2 or props[rest[0]] <= _BOOLS or len(props[rest[0]]) < 2:
         return None
     if "facing" in props and not props["facing"] <= _CARDINALS:
         return None
