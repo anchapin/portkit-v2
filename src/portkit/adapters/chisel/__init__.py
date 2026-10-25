@@ -56,7 +56,7 @@ guessed.
 """
 from __future__ import annotations
 
-from .. import Adapter, Variation, VariationSet
+from .. import Adapter, BlockRegistry, Variation, VariationSet
 
 _FACTORY = "team/chisel/api/block/ChiselBlockFactory"
 _BUILDER = "team/chisel/api/block/ChiselBlockBuilder"
@@ -66,6 +66,12 @@ _ADD_BLOCKS = f"(L{_FACTORY};)V"
 # The reading's own stand-ins for the factory, a block builder and a
 # variation builder.
 _F, _B, _V = "__chisel_factory", "__chisel_block", "__chisel_variation"
+# The block registry ``ChiselBlockFactory#getRegistry`` hands back, and a
+# block ``setRegistryName(String)`` named (a block registered straight on the
+# registry, as ``Features.AUTOCHISEL`` registers ``BlockAutoChisel``).
+_R, _N = "__chisel_registry", "__chisel_named"
+_REGISTRIES = "net/minecraftforge/fml/common/registry/ForgeRegistries"
+_BLOCK_EVENT = b"RegistryEvent$Register<Lnet/minecraft/block/Block;>"
 
 
 def _params(desc: str) -> list[str]:
@@ -108,6 +114,10 @@ class _Reading:
         self.chains: list[dict] = []
         self.following = False
         self.clinit_why = ""
+        # Names registered straight on the factory's registry, and why such a
+        # registration (or another registration call) wasn't read.
+        self.direct: list[str] = []
+        self.direct_why: list[str] = []
 
     def block_class(self, provider) -> tuple[str | None, str]:
         """(the block class a provider (or a class literal) names, or why not)."""
@@ -139,6 +149,21 @@ class _Reading:
         recv = None if static or not args else args[0]
         ret = desc.rsplit(")", 1)[-1]
         rest = list(args[1:]) if recv is not None else list(args)
+        if isinstance(recv, Obj) and recv.cls == _F and mname == "getRegistry":
+            return [Obj(_R, {})]
+        if isinstance(recv, Obj) and recv.cls == _R:
+            if mname == "register" and len(rest) == 1 and isinstance(rest[0], Obj) and rest[0].cls == _N \
+                    and isinstance(rest[0].fields.get("name"), str):
+                self.direct.append(rest[0].fields["name"].lower())
+            else:
+                self.direct_why.append(f"a call {mname} on the block registry isn't read as a registration")
+            return [None] if ret == "V" else [UNKNOWN]
+        if mname == "setRegistryName" and recv is not None and desc.startswith("(Ljava/lang/String;)") \
+                and not self.following:
+            name = rest[0] if rest else None
+            return [Obj(_N, {"name": name if isinstance(name, str) else None})]
+        if mname in ("register", "registerAll") and not self.following:
+            self.direct_why.append(f"a registration call {owner.replace('/', '.')}#{mname} isn't read")
         if isinstance(recv, Obj) and recv.cls == _F:
             if mname != "newBlock":
                 return [None] if ret == "V" else [UNKNOWN]
@@ -181,7 +206,7 @@ class _Reading:
         if self.following or mname in ("<init>", "<clinit>") or not self.machine.is_mod(owner) \
                 or ret in (f"L{_BUILDER};", f"L{_VARIATION};"):
             return None
-        if any(isinstance(a, Obj) and a.cls in (_F, _B, _V) for a in args):
+        if any(isinstance(a, Obj) and a.cls in (_F, _B, _V, _R) for a in args):
             return None  # a helper handed the factory or a builder is followed
         found = self.machine.find_method(owner, mname, desc)
         if found is not None and found[1].access & 0x1000:
@@ -230,6 +255,15 @@ def _gate(machine, const, seen=()) -> str:
 
 def read(classes) -> tuple[dict, list[str]]:
     """(blockstate folder -> VariationSet, reasons a feature couldn't be read)."""
+    sets, problems, _registry = _read(classes)
+    return sets, problems
+
+
+def _read(classes) -> tuple[dict, list[str], dict]:
+    """:func:`read`, and what the registry reading needs: {"names": every
+    folder a chain was read with and every name registered straight on the
+    registry (lowercased), "why": why a registration may have been missed,
+    "bases": the enum classes whose constants were read}."""
     from ...blockcode import Machine, Obj, UNKNOWN, Unreadable
     from ...rendershape import _dotted
     owners = []
@@ -241,7 +275,7 @@ def read(classes) -> tuple[dict, list[str]]:
         if m is not None and m.code is not None and not (m.access & 0x0008):
             owners.append((cf, m))
     if not owners:
-        return {}, []
+        return {}, [], {"names": set(), "why": ["no feature's addBlocks is found"], "bases": set()}
     domain = _domain(classes)
     machine = Machine(classes)
     reading = _Reading(machine)
@@ -273,6 +307,7 @@ def read(classes) -> tuple[dict, list[str]]:
         if isinstance(value, Obj) and any(value.cls == cf.name for cf, _ in owners):
             consts.setdefault(value.cls, value)
     out: dict[str, dict] = {}
+    names: set[str] = set()
     for cf, m in sorted(owners, key=lambda t: t[0].name):
         const = consts.get(cf.name)
         if const is None and cf.super_name is not None and cf.name in {c.super_name for c, _ in owners}:
@@ -289,6 +324,8 @@ def read(classes) -> tuple[dict, list[str]]:
             continue
         for chain in reading.chains[start:]:
             folder = chain["folder"]
+            if folder is not None:
+                names.add(folder.lower())
             if folder is None:
                 problems.append(f"a chain in {where}: {'; '.join(chain['unread']) or 'its folder is not read'}")
                 continue
@@ -318,7 +355,45 @@ def read(classes) -> tuple[dict, list[str]]:
                 entry["vars"].setdefault(v.lower(), Variation(v.lower(), key, own, f"{where} (block {chain['name']!r})"))
     sets = {folder: VariationSet(tuple(e["vars"].values()), "; ".join(dict.fromkeys(e["why"])), e["where"])
             for folder, e in out.items()}
-    return sets, problems
+    names.update(reading.direct)
+    bases = {cf.super_name for cf, _ in owners if cf.super_name and cf.super_name in {c.name for c, _ in owners}}
+    return sets, problems, {"names": names, "why": problems + reading.direct_why, "bases": bases}
+
+
+def _other_paths(classes, bases: set) -> list[str]:
+    """Why a block may be registered outside the features' ``addBlocks``
+    (the reading :func:`_read` follows): a ``RegistryEvent.Register<Block>``
+    handler in a class other than the features' enum (whose ``loadBlocks``
+    hands every enabled feature the factory, ``Features.java`` L3319-3335 on
+    Chisel-Team/Chisel 1.12/dev), a ``register``/``registerAll`` call in a
+    method that reads ``ForgeRegistries.BLOCKS``, or a registry looked up or
+    listened to by type (``GameRegistry.findRegistry``,
+    ``addGenericListener``). Empty when the jar's own classes show none."""
+    from ...bytecode import instructions
+    from ...rendershape import _dotted
+    out = []
+    for name in classes.names():
+        if classes.is_library(name):
+            continue
+        raw = classes.raw(name) or b""
+        if _BLOCK_EVENT in raw and name not in bases:
+            out.append(f"{_dotted(name)} handles RegistryEvent.Register<Block>, which the reading doesn't follow")
+        if b"findRegistry" in raw or b"addGenericListener" in raw:
+            out.append(f"{_dotted(name)} looks up or listens to a registry by type, which the reading doesn't "
+                       "follow")
+        if _REGISTRIES.encode() not in raw:
+            continue
+        cf = classes.get(name)
+        for m in cf.methods if cf else ():
+            if m.code is None:
+                continue
+            refs = [i.arg for i in instructions(cf, m.code)]
+            blocks = any(getattr(r, "owner", None) == _REGISTRIES and getattr(r, "name", None) == "BLOCKS"
+                         for r in refs)
+            if blocks and any(getattr(r, "name", None) in ("register", "registerAll") for r in refs):
+                out.append(f"{_dotted(name)}#{m.name} registers on ForgeRegistries.BLOCKS, which the reading "
+                           "doesn't follow")
+    return out
 
 
 def block_variations(mod) -> dict:
@@ -329,8 +404,34 @@ def block_variations(mod) -> dict:
     return sets
 
 
+def block_registry(mod):
+    """The blockstate names Chisel's code registers blocks under (#296):
+    every chain's folder (a ``BlockCarvable`` draws blockstate ``<folder>``;
+    any other class is counted under its folder too, so it is never said to
+    be missing) and every name registered straight on the factory's registry
+    (``Features.AUTOCHISEL``: ``factory.getRegistry().register(new
+    BlockAutoChisel().setRegistryName("auto_chisel"))``, Features.java
+    L286-291), whatever feature gate it sits behind. ``why`` names every
+    reason the reading may have missed one: a feature it couldn't follow, a
+    chain whose folder it couldn't read, a registration call it doesn't read,
+    a registration path outside ``addBlocks`` (:func:`_other_paths`), or a
+    factory domain that isn't the jar's namespace."""
+    classes = getattr(mod, "classes", None)
+    if classes is None or not len(classes) or not classes.mentions(_FACTORY.encode()):
+        return None
+    _sets, _problems, reg = _read(classes)
+    why = list(reg["why"])
+    domain = _domain(classes)
+    if domain != mod.namespace:
+        why.append(f"the factory's domain ({domain or 'not read'}) isn't the jar's namespace {mod.namespace!r}")
+    why += _other_paths(classes, reg["bases"])
+    return BlockRegistry(frozenset(reg["names"]), "; ".join(dict.fromkeys(why)),
+                         "Chisel's Features#addBlocks builder chains and registry calls")
+
+
 ADAPTER = Adapter(
     name="chisel",
     namespaces=frozenset({"chisel"}),
     block_variations=block_variations,
+    block_registry=block_registry,
 )
