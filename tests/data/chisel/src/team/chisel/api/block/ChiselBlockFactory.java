@@ -1,10 +1,14 @@
 package team.chisel.api.block;
+import net.minecraft.block.Block;
 import net.minecraft.block.material.Material;
-// Chisel 1.12/dev team.chisel.api.block.ChiselBlockFactory, the overloads only.
+import net.minecraftforge.registries.IForgeRegistry;
+// Chisel 1.12/dev team.chisel.api.block.ChiselBlockFactory, the overloads and getRegistry only.
 public class ChiselBlockFactory {
+    private final IForgeRegistry<Block> registry;
     private final String domain;
-    private ChiselBlockFactory(String domain) { this.domain = domain; }
-    public static ChiselBlockFactory newFactory(Object registry, String domain) { return new ChiselBlockFactory(domain); }
+    private ChiselBlockFactory(IForgeRegistry<Block> registry, String domain) { this.registry = registry; this.domain = domain; }
+    public static ChiselBlockFactory newFactory(IForgeRegistry<Block> registry, String domain) { return new ChiselBlockFactory(registry, domain); }
+    public IForgeRegistry<Block> getRegistry() { return registry; }
     public <T> ChiselBlockBuilder<T> newBlock(Material material, String blockName, BlockCreator<T> creator, Class<T> blockClass) {
         return newBlock(material, blockName, new BlockProvider<T>() {
             public T createBlock(Material m, int i, int t, VariationData... d) { return creator.createBlock(m, i, t, d); }

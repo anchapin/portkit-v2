@@ -6,7 +6,10 @@ The class files under tests/data/chisel/classes are javac 21 output
 (tests/data/chisel/build.sh) of classes shaped as Chisel 1.12/dev's own:
 ``team.chisel.Features`` (constants with builder chains, a required mod, a
 commented-out ANCIENT_STONE), the ``ChiselBlockFactory`` /
-``ChiselBlockBuilder`` / ``VariationBuilder`` API and two block classes.
+``ChiselBlockBuilder`` / ``VariationBuilder`` API and two block classes;
+an AUTOCHISEL constant registers ``BlockAutoChisel`` straight on the
+factory's registry. A blockstate no block is registered under (ANCIENT_STONE,
+``thinwood-oak``) is explained residue ``unregistered_blockstate``.
 """
 from __future__ import annotations
 
@@ -15,9 +18,11 @@ from pathlib import Path
 
 import pytest
 
-from portkit.adapters import chisel
+from portkit.adapters import chisel, unregistered_blockstates
+from portkit.agent.residue import SKIP_KINDS
 from portkit.bytecode import ClassIndex
 from portkit.converters import blocks
+from portkit.converters.blocks import UNREGISTERED_BLOCKSTATE
 from portkit.converters.variations import CONDITIONAL_BLOCK
 from portkit.model import SourceMod
 from portkit.png import encode_png
@@ -96,6 +101,11 @@ def _mod(tmp_path: Path) -> SourceMod:
         "bloodmagic": _forge({"brick": _tex("andesite/cracked")}),
         "carpet_white": _forge({"legacy": _tex("andesite/cracked")}),
         "marble": _forge({"raw": _tex("marble/raw")}),
+        # In no feature (Chisel 1.12 ships thinwood-*.json with no code).
+        "thinwood-oak": _forge({"raw": _tex("andesite/cracked"), "planks": _tex("marble/raw")}),
+        # Registered straight on the registry (Features.AUTOCHISEL); its
+        # forge:multi-layer variants stay the generic residue.
+        "auto_chisel": _forge({"normal": [{}], "base": _tex("andesite/cracked"), "glass": _tex("marble/raw")}),
     }
     for name, bs in states.items():
         (a / f"blockstates/{name}.json").write_text(json.dumps(bs))
@@ -148,9 +158,10 @@ def test_display_name_is_javas(converted):
 
 def test_left_variations(converted):
     files = converted.files
-    # ANCIENT_STONE is commented out in Features: its blockstate keeps the old residue.
+    # ANCIENT_STONE is commented out in Features: no block is registered under
+    # its blockstate, which is explained residue (#296).
     [ancient] = _residue(converted, "ancient_stone")
-    assert ancient.kind == "block" and "blockstate variant(s)" in ancient.reason
+    assert ancient.kind == UNREGISTERED_BLOCKSTATE and "registers no block" in ancient.reason
     assert not any(p.startswith("blocks/ancient_stone") for p in files)
     # Gated on another mod (pick 4a).
     [blood] = _residue(converted, "bloodmagic")
@@ -170,3 +181,44 @@ def test_no_chisel_classes_no_variations(tmp_path):
     assert not any(p.startswith("blocks/andesite_") for p in result.files)
     [res] = _residue(result, "andesite")
     assert "blockstate variant(s)" in res.reason
+
+
+def test_registry_reading_names_every_registered_blockstate():
+    mod = _mod_classes()
+    reg = chisel.block_registry(mod)
+    assert reg.why == ""
+    # Every chain's folder, whatever its block class or gate, and the name
+    # registered straight on the registry.
+    assert {"andesite", "metals/aluminum", "marble", "bloodmagic", "carpet_white", "carpet_black",
+            "auto_chisel"} <= reg.names
+    assert "ancient_stone" not in reg.names
+
+
+def _mod_classes(namespace: str = NS) -> SourceMod:
+    return SourceMod(root=Path("."), namespace=namespace, classes=ClassIndex.from_source(CLASSES),
+                     minecraft="1.12.2")
+
+
+def test_unregistered_blockstates_are_explained_residue(converted):
+    for name in ("ancient_stone", "thinwood-oak"):
+        [res] = _residue(converted, name)
+        assert res.kind == UNREGISTERED_BLOCKSTATE
+        assert "Chisel's Features#addBlocks" in res.reason and "Java never loads it" in res.reason
+        assert not any(p.startswith(f"blocks/{name}") for p in converted.files)
+    # A block registered straight on the registry is a real block: its
+    # blockstate keeps the residue it had.
+    [auto] = _residue(converted, "auto_chisel")
+    assert auto.kind == "block" and "blockstate variant(s)" in auto.reason
+    assert UNREGISTERED_BLOCKSTATE in SKIP_KINDS
+
+
+def test_no_claim_from_an_incomplete_reading(tmp_path):
+    # A factory domain other than the jar's namespace: the reading isn't the
+    # jar's own registry, so nothing is said to be unregistered (#87).
+    other = _mod_classes("otherns")
+    reg = chisel.block_registry(other)
+    assert "isn't the jar's namespace" in reg.why
+    assert unregistered_blockstates(other, ["thinwood-oak"]) == {}
+    # No adapter reads a jar without Chisel's classes.
+    plain = SourceMod(root=Path("."), namespace=NS, classes=None, minecraft="1.12.2")
+    assert unregistered_blockstates(plain, ["thinwood-oak"]) == {}

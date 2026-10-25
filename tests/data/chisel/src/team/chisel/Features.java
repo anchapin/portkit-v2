@@ -5,13 +5,15 @@ import team.chisel.api.block.BlockCreator;
 import team.chisel.api.block.ChiselBlockFactory;
 import team.chisel.api.block.VariationData;
 import team.chisel.common.Helper;
+import team.chisel.common.block.BlockAutoChisel;
 import team.chisel.common.block.BlockCarvable;
 import team.chisel.common.block.BlockCarvableCarpet;
 
 // The shape of Chisel 1.12/dev team.chisel.Features: one enum constant per
 // feature, its blocks made by builder chains in a constant-specific
 // addBlocks; a required mod in the constructor; ANCIENT_STONE commented out
-// as in Chisel's source, so its blockstate ships with no feature.
+// as in Chisel's source, so its blockstate ships with no feature; AUTOCHISEL
+// registers its block straight on the factory's registry.
 public enum Features {
     ALUMINUM {
         @Override
@@ -43,6 +45,13 @@ public enum Features {
                     .next("bricks")
                     .addOreDict("stoneAndesite")
                     .build(b -> b.setHardness(1.5F));
+        }
+    },
+    AUTOCHISEL {
+        @Override
+        void addBlocks(ChiselBlockFactory factory) {
+            String name = "auto_chisel";
+            factory.getRegistry().register(new BlockAutoChisel().setRegistryName(name));
         }
     },
     BLOODMAGIC("bloodmagic") {
@@ -85,7 +94,7 @@ public enum Features {
         @Override public Class<T> getBlockClass() { return blockClass; }
     }
 
-    public static void loadBlocks(Object registry) {
+    public static void loadBlocks(net.minecraftforge.registries.IForgeRegistry<Block> registry) {
         ChiselBlockFactory factory = ChiselBlockFactory.newFactory(registry, Chisel.MOD_ID);
         for (Features f : values()) {
             f.addBlocks(factory);

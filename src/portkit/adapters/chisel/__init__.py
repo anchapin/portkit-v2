@@ -66,9 +66,10 @@ _ADD_BLOCKS = f"(L{_FACTORY};)V"
 # The reading's own stand-ins for the factory, a block builder and a
 # variation builder.
 _F, _B, _V = "__chisel_factory", "__chisel_block", "__chisel_variation"
-# The block registry ``ChiselBlockFactory#getRegistry`` hands back, and a
-# block ``setRegistryName(String)`` named (a block registered straight on the
-# registry, as ``Features.AUTOCHISEL`` registers ``BlockAutoChisel``).
+# The block registry ``ChiselBlockFactory#getRegistry`` hands back, and the
+# field a block's ``setRegistryName(String)`` name is kept under (a block
+# registered straight on the registry, as ``Features.AUTOCHISEL`` registers
+# ``BlockAutoChisel``).
 _R, _N = "__chisel_registry", "__chisel_named"
 _REGISTRIES = "net/minecraftforge/fml/common/registry/ForgeRegistries"
 _BLOCK_EVENT = b"RegistryEvent$Register<Lnet/minecraft/block/Block;>"
@@ -152,16 +153,21 @@ class _Reading:
         if isinstance(recv, Obj) and recv.cls == _F and mname == "getRegistry":
             return [Obj(_R, {})]
         if isinstance(recv, Obj) and recv.cls == _R:
-            if mname == "register" and len(rest) == 1 and isinstance(rest[0], Obj) and rest[0].cls == _N \
-                    and isinstance(rest[0].fields.get("name"), str):
-                self.direct.append(rest[0].fields["name"].lower())
+            named = rest[0].fields.get(_N) if len(rest) == 1 and isinstance(rest[0], Obj) else None
+            if mname == "register" and isinstance(named, str):
+                self.direct.append(named.lower())
             else:
                 self.direct_why.append(f"a call {mname} on the block registry isn't read as a registration")
             return [None] if ret == "V" else [UNKNOWN]
         if mname == "setRegistryName" and recv is not None and desc.startswith("(Ljava/lang/String;)") \
                 and not self.following:
+            # The name rides on the block itself, which the call returns, so
+            # a chain that goes on (setCreativeTab, ...) keeps the object.
             name = rest[0] if rest else None
-            return [Obj(_N, {"name": name if isinstance(name, str) else None})]
+            if isinstance(recv, Obj):
+                recv.fields[_N] = name if isinstance(name, str) else None
+                return [recv]
+            return [UNKNOWN]
         if mname in ("register", "registerAll") and not self.following:
             self.direct_why.append(f"a registration call {owner.replace('/', '.')}#{mname} isn't read")
         if isinstance(recv, Obj) and recv.cls == _F:
@@ -255,8 +261,21 @@ def _gate(machine, const, seen=()) -> str:
 
 def read(classes) -> tuple[dict, list[str]]:
     """(blockstate folder -> VariationSet, reasons a feature couldn't be read)."""
-    sets, problems, _registry = _read(classes)
+    sets, problems, _registry = _cached(classes)
     return sets, problems
+
+
+_LAST: list = []
+
+
+def _cached(classes):
+    """:func:`_read` of the last ``classes`` asked (one conversion asks
+    twice: block_variations and block_registry)."""
+    if _LAST and _LAST[0] is classes:
+        return _LAST[1]
+    got = _read(classes)
+    _LAST[:] = [classes, got]
+    return got
 
 
 def _read(classes) -> tuple[dict, list[str], dict]:
@@ -419,7 +438,7 @@ def block_registry(mod):
     classes = getattr(mod, "classes", None)
     if classes is None or not len(classes) or not classes.mentions(_FACTORY.encode()):
         return None
-    _sets, _problems, reg = _read(classes)
+    _sets, _problems, reg = _cached(classes)
     why = list(reg["why"])
     domain = _domain(classes)
     if domain != mod.namespace:
