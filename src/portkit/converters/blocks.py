@@ -1697,6 +1697,12 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
         if name in dir_readings:
             claimed = set(result.consumed)
             record = _convert_directional(mod, result, rel, name, *dir_readings[name])
+            if record is not None and record.get("spin"):
+                # The models only a held boolean's other value draws were
+                # read and passed over on purpose (as _held_claims does).
+                for held_state in record["spin"]["held"]:
+                    for model_file in _model_chain_files(mod, held_state["passed"]):
+                        result.claim(mod, model_file)
             if record is not None:
                 if name in water_dropped:
                     record["states"] = [x for x in record["states"] if x != "waterlogged"]
@@ -4751,9 +4757,11 @@ def _read_spin_code(mod: SourceMod, specs: dict, shared, out: dict, why: dict) -
     """Fill ``out`` (name -> _convert_directional's arguments) and ``why``
     for the facing-with-second-state blockstates in ``specs`` an adapter
     places."""
-    from ..adapters import orientations
+    from ..adapters import orientations, reads_orientations
     classes = getattr(mod, "classes", None)
-    if classes is None or not len(classes):
+    if classes is None or not len(classes) or not reads_orientations(mod):
+        # No adapter places this mod's orientations: nothing is read, so
+        # the shared run is left exactly as the other readers find it.
         return
     run = shared() if shared else None
     readings = blockcode.read_directional(classes, {n: "facing6" for n in specs}, run=run)

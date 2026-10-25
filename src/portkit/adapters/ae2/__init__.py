@@ -206,9 +206,40 @@ def _uses_full(classes, cls: str) -> bool:
                                                                 ("areturn", None)):
         return False
     made = _shape(holder, init)
-    return ("invokespecial", "FacingWithSpinStrategy.<init>") in made and \
-        made[made.index(("invokespecial", "FacingWithSpinStrategy.<init>")) + 1] == \
-        ("putstatic", "OrientationStrategies.full")
+    built = ("invokespecial", "FacingWithSpinStrategy.<init>")
+    if built not in made or made.index(built) + 1 >= len(made) or \
+            made[made.index(built) + 1] != ("putstatic", "OrientationStrategies.full"):
+        return False
+    return _sets_up(classes)
+
+
+# IOrientationStrategy's default setOrientation(state, facing, up) and setUp
+# (L47-59) as compiled; FacingWithSpinStrategy must not override either, and
+# SpinMapping.getSpinFromUp must be the row lookup (L34-42: the index of up
+# in the facing's row, 0 when it isn't there).
+_SET_ORIENTATION = (("invokeinterface", "IOrientationStrategy.setFacing"),
+                    ("invokeinterface", "IOrientationStrategy.setUp"), ("areturn", None))
+_SET_UP = (("invokeinterface", "IOrientationStrategy.getFacing"), ("invokestatic", "SpinMapping.getSpinFromUp"),
+           ("invokeinterface", "IOrientationStrategy.setSpin"), ("areturn", None))
+_SPIN_FROM_UP = (("getstatic", "SpinMapping.SPIN_DIRECTIONS"), ("invokevirtual", "Direction.ordinal"))
+_DIR_DESC = "Lnet/minecraft/core/Direction;"
+_STATE_DESC = "Lnet/minecraft/world/level/block/state/BlockState;"
+
+
+def _sets_up(classes) -> bool:
+    full, base, mapping = classes.get(_FULL), classes.get(_STRATEGY), classes.get(_SPIN_MAPPING)
+    if full is None or base is None or mapping is None:
+        return False
+    orient_desc = f"({_STATE_DESC}{_DIR_DESC}{_DIR_DESC}){_STATE_DESC}"
+    up_desc = f"({_STATE_DESC}{_DIR_DESC}){_STATE_DESC}"
+    if full.method("setOrientation", orient_desc) is not None or full.method("setUp", up_desc) is not None:
+        return False
+    orient, up = base.method("setOrientation", orient_desc), base.method("setUp", up_desc)
+    lookup = mapping.method("getSpinFromUp", f"({_DIR_DESC}{_DIR_DESC})I")
+    if any(m is None or m.code is None for m in (orient, up, lookup)):
+        return False
+    return (_shape(base, orient) == _SET_ORIENTATION and _shape(base, up) == _SET_UP
+            and _shape(mapping, lookup) == _SPIN_FROM_UP)
 
 
 def orientations(mod, classes_by_name) -> dict[str, Orientation]:

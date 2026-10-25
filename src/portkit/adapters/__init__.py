@@ -408,6 +408,12 @@ def unregistered_blockstates(mod: "SourceMod", names) -> dict[str, str]:
     return {n: where for n in names if n not in known}
 
 
+def reads_orientations(mod: "SourceMod") -> bool:
+    """Whether an adapter with an ``orientations`` hook serves ``mod``'s
+    namespace (the core reads candidates' classes only then)."""
+    return any(a.orientations is not None and getattr(mod, "namespace", None) in a.namespaces for a in ADAPTERS)
+
+
 def orientations(mod: "SourceMod", classes_by_name: Mapping[str, str]) -> dict[str, Orientation]:
     """Every adapter's ``orientations`` for ``mod``'s blockstates in
     ``classes_by_name`` (name -> block class); the first adapter (registry
