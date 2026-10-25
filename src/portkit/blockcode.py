@@ -87,8 +87,10 @@ _PLAIN_VANILLA = {
 # RotatedPillarBlock (1.21.1 client jar class dml + client.txt): <init>
 # L22-24 registers defaultBlockState().setValue(AXIS, Y); getStateForPlacement
 # L55 is defaultBlockState().setValue(AXIS, context.getClickedFace().getAxis()),
-# so every other state is placed at the registered default (#296, read by
-# the held-state reader only).
+# so every other state is placed at the registered default. The same nine
+# instructions in 1.20.1 (cvy L47), 1.19.2 (cpv L47), 1.18.2 (cjl L47) and
+# 1.16.5 (bzl L43). Only the held-state reader (#296) takes another state of
+# a pillar from it; the axis itself stays vanilla code.
 _PILLAR = "net/minecraft/world/level/block/RotatedPillarBlock"
 _SHAPES = "net/minecraft/world/phys/shapes/Shapes"
 _DIRECTION = "net/minecraft/core/Direction"
