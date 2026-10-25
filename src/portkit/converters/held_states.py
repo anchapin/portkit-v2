@@ -15,6 +15,13 @@ models are read and named in a note, not drawn (#215 item 6: everything the
 code changes after placement is static at the start value). Nothing is held
 at a value the code doesn't give (#87): an unread start leaves the
 blockstate as it was.
+
+A block's own ``shape`` enum (a railing's short/tall/connected, a vine's
+bottom/middle/top, set from its neighbours) is held like any other enum
+when no ``half`` is beside it: the stairs reader draws ``shape`` only with
+``half``. Booleans beside the enum (not named for a direction: those are
+connections, #221) are left in the blockstate for the boolean readers
+(#215, #384), which read their own starts.
 """
 from __future__ import annotations
 
@@ -61,10 +68,9 @@ def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
     owned = _PLACEMENT_OWNED if "half" in props else _PLACEMENT_OWNED - {"shape"}
     if len(enums) != 1 or enums[0] in owned or len(props[enums[0]]) < 2:
         return None
-    if any(f in _CONNECTIONS or f in owned or f == "waterlogged" for f in flags):
+    if any(f in _CONNECTIONS or f == "waterlogged" for f in flags):
         # A direction-named boolean is a connection (#221's multipart
-        # reader); a held block keeps no water (#383 item 4) and draws no
-        # other reader's state.
+        # reader); a held block keeps no water (#383 item 4).
         return None
     alone = not any(p in PLACEMENT_STATES for p in props)
     if alone and any(v.lstrip("-").isdigit() for v in props[enums[0]]):

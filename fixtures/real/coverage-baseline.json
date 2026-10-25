@@ -7,15 +7,15 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 40.7,
-      "files": 3514,
-      "residue": 5113,
+      "coverage": 41.0,
+      "files": 3525,
+      "residue": 5067,
       "errors": 0
     },
     "create": {
-      "coverage": 42.2,
-      "files": 4105,
-      "residue": 5629,
+      "coverage": 42.7,
+      "files": 4118,
+      "residue": 5527,
       "errors": 0
     },
     "farmers_delight_fabric": {
