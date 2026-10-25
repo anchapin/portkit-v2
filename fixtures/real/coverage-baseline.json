@@ -7,9 +7,9 @@
       "errors": 0
     },
     "betterend": {
-      "coverage": 39.7,
-      "files": 3451,
-      "residue": 5250,
+      "coverage": 40.7,
+      "files": 3514,
+      "residue": 5113,
       "errors": 0
     },
     "create": {
@@ -61,9 +61,9 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 30.7,
-      "files": 1564,
-      "residue": 3538,
+      "coverage": 30.9,
+      "files": 1566,
+      "residue": 3510,
       "errors": 0
     },
     "tinkers_construct": {
