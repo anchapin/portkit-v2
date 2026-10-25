@@ -65,6 +65,14 @@ Hooks, and the core seam that asks each one:
   register it. Asked by :func:`portkit.converters.blocks.convert`, which
   converts each registered variant from the blockstate's defaults and its
   own textures.
+- ``orientations``: ``(SourceMod, {blockstate name: block class}) ->
+  {blockstate name: Orientation}``, for a mod whose blocks take ``facing``
+  and a second orientation state (AE2's ``spin``) from a placement rule of
+  the mod's own that the core's interpreter can't follow (#296): which
+  Bedrock placement states give which Java orientation, read from the
+  mod's code, and what the blockstate's own variant keys turn. Asked by
+  :func:`portkit.converters.blocks.convert` for blockstates drawing a
+  six-way ``facing`` beside another state no reader takes.
 
 """
 from __future__ import annotations
@@ -160,6 +168,38 @@ class BlockRegistry:
     source: str = ""
 
 
+@dataclass(frozen=True)
+class Orientation:
+    """How a block's code places its orientation states (the
+    ``orientations`` hook, #296).
+
+    ``states``: the orientation states, ``facing`` first (``("facing",
+    "spin")``). ``turns``: blockstate variant keys of the mod's own that turn
+    a model, each to the axis it turns about (``{"ae2:z": "z"}``: a quarter
+    turn applied before x and y, as vanilla composes x and y). ``placed``:
+    ``(conditions, values)`` per Bedrock placement, ``conditions`` ``(state,
+    value)`` pairs of ``minecraft:facing_direction`` /
+    ``minecraft:cardinal_direction`` and ``values`` ``(state, value)`` pairs
+    of the Java orientation states that placement gives. Every state not in
+    ``states`` or ``sets`` starts where the registered default has it.
+    ``sets``: other states placement sets (``waterlogged``). ``text``: the
+    rule in words; ``source``: where it was read; ``default``: the DEFAULT
+    the Bedrock mapping leans on ("" when none); ``turned_by``: what turns
+    the block to the orientations placement never gives; ``why``: why the
+    rule isn't read ("" when it is).
+    """
+
+    states: tuple = ()
+    turns: Mapping = field(default_factory=dict)
+    placed: tuple = ()
+    sets: tuple = ()
+    text: str = ""
+    source: str = ""
+    default: str = ""
+    turned_by: str = ""
+    why: str = ""
+
+
 def _empty() -> Mapping:
     return MappingProxyType({})
 
@@ -201,6 +241,9 @@ class Adapter:
     # (SourceMod) -> BlockRegistry, or None for a jar the adapter doesn't
     # read (#296): the blockstate names the mod's code registers blocks under.
     block_registry: Callable[["SourceMod"], "BlockRegistry | None"] | None = None
+    # (SourceMod, {blockstate name: block class}) -> {blockstate name:
+    # Orientation} (#296), see the module docstring.
+    orientations: Callable[["SourceMod", Mapping[str, str]], Mapping[str, Orientation]] | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -365,17 +408,31 @@ def unregistered_blockstates(mod: "SourceMod", names) -> dict[str, str]:
     return {n: where for n in names if n not in known}
 
 
+def orientations(mod: "SourceMod", classes_by_name: Mapping[str, str]) -> dict[str, Orientation]:
+    """Every adapter's ``orientations`` for ``mod``'s blockstates in
+    ``classes_by_name`` (name -> block class); the first adapter (registry
+    order) to answer a blockstate wins."""
+    found: dict[str, Orientation] = {}
+    for a in ADAPTERS:
+        if a.orientations is not None:
+            for name, orientation in a.orientations(mod, classes_by_name).items():
+                if name in classes_by_name:
+                    found.setdefault(name, orientation)
+    return found
+
+
 def station_hooks() -> list[StationHooks]:
     """The adapters' ``station`` hooks, in registry order."""
     return [a.station for a in ADAPTERS if a.station is not None]
 
 
 from . import (  # noqa: E402  (each imports Adapter above)
-    alloy_forgery, bclib, betterend, chisel, citadel, create, farmersdelight, mantle, mekanism, mythicmetals, registrate,
+    ae2, alloy_forgery, bclib, betterend, chisel, citadel, create, farmersdelight, mantle, mekanism, mythicmetals, registrate,
     silentgear, supplementaries, tconstruct, waystones, zeta,
 )
 
 ADAPTERS = (
+    ae2.ADAPTER,
     alloy_forgery.ADAPTER,
     bclib.ADAPTER,
     betterend.ADAPTER,

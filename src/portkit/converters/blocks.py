@@ -4430,13 +4430,16 @@ def _water_notes(readings: list) -> list[str]:
 _ATTACH_FACES = ("floor", "wall", "ceiling")
 _SIX = ("down", "up", "north", "south", "west", "east")
 _OPPOSITE = {"down": "up", "up": "down", "north": "south", "south": "north", "west": "east", "east": "west"}
-_DIR_LABEL = {"facing6": "6-way facing", "attach": "attach face", "vslab": "vertical slab", "facing": "facing"}
+_DIR_LABEL = {"facing6": "6-way facing", "attach": "attach face", "vslab": "vertical slab", "facing": "facing",
+              "facing_spin": "facing with a second orientation state"}
 # The blockstate property a kind's second key is drawn on (``facing`` unless
 # named here).
 _DIR_PROP = {"vslab": "type"}
 
 
-def _key_label(key: tuple, kind: str = "") -> str:
+def _key_label(key: tuple, kind: str = "", second: str | None = None) -> str:
+    if second:
+        return f"facing={key[1]},{second}={key[0]}"
     prop = _DIR_PROP.get(kind, "facing")
     return f"face={key[0]},{prop}={key[1]}" if key[0] else f"{prop}={key[1]}"
 
@@ -4621,7 +4624,7 @@ def _directional_bool_variants(blockstate: dict) -> tuple[str | None, tuple, dic
 
 def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
                            shared: "_SharedRun | None" = None) -> tuple[dict, dict]:
-    specs, why, bool_specs = {}, {}, {}
+    specs, why, bool_specs, spin_specs = {}, {}, {}, {}
     for stem, blockstate in loaded.items():
         if stem in stations:
             continue
@@ -4636,8 +4639,12 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
                 bool_specs[stem] = (kind, bools, cells)
             elif reason:
                 why[stem] = reason
+            elif _spin_candidate(blockstate):
+                spin_specs[stem] = blockstate
     out = {}
     classes = getattr(mod, "classes", None)
+    if spin_specs:
+        _read_spin_code(mod, spin_specs, shared, out, why)
     if specs:
         facings = {n: _facings_of(c) for n, (k, c) in specs.items() if k == "facing"}
         readings = blockcode.read_directional(classes, {n: k for n, (k, _) in specs.items()},
@@ -4653,6 +4660,165 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
                                                      run=run)
         out.update({n: (k, c, readings[n], b) for n, (k, b, c) in bool_specs.items()})
     return out, why
+
+
+# Facing with a second orientation state (#296): a blockstate drawing a
+# six-way ``facing`` beside another state of the block's own (AE2's ``spin``,
+# 0-3: the 24 orientations of a cube) whose placement rule an adapter reads
+# from the mod's code (the ``orientations`` hook: which Bedrock
+# minecraft:facing_direction / minecraft:cardinal_direction placement gives
+# which Java facing and second state). It converts through
+# _convert_directional with that rule in place of the clicked-face one.
+# Booleans beside them are held where the registered default has them, as
+# placement leaves them there (#215 item 6: what the code changes after
+# placement is static at its start). A variant key of the mod's own that
+# turns about z (applied before x and y, as vanilla composes x and y) is
+# folded into the x/y turn that gives the same rotation; a variant no x/y
+# turn gives is drawn only if placement never reaches it.
+
+
+def _spin_candidate(blockstate: dict) -> bool:
+    """A variants blockstate drawing all six ``facing`` values beside at
+    least one state that isn't a boolean, every combination named."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or len(variants) < 12:
+        return False
+    props: dict[str, set] = {}
+    for key in variants:
+        pairs = [p.split("=", 1) for p in key.split(",") if p]
+        if not pairs or any(len(p) != 2 for p in pairs):
+            return False
+        for a, b in pairs:
+            props.setdefault(a.strip(), set()).add(b.strip())
+    if props.get("facing") != set(_SIX):
+        return False
+    others = [p for p in props if p != "facing"]
+    return any(not props[p] <= _BOOL_VALUES for p in others)
+
+
+def _rotation(x: int, y: int, z: int) -> tuple:
+    """Java's quarter turns as one rotation matrix, composed as
+    ``rotateYXZ(-y, -x, -z)`` (vanilla BlockModelRotation for x and y)."""
+    def r(axis, deg):
+        q = (deg // 90) % 4
+        c, n = (1, 0, -1, 0)[q], (0, 1, 0, -1)[q]
+        return {"x": ((1, 0, 0), (0, c, -n), (0, n, c)), "y": ((c, 0, n), (0, 1, 0), (-n, 0, c)),
+                "z": ((c, -n, 0), (n, c, 0), (0, 0, 1))}[axis]
+
+    def mul(a, b):
+        return tuple(tuple(sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)) for i in range(3))
+    return mul(mul(r("y", -y), r("x", -x)), r("z", -z))
+
+
+_PLAIN_TURNS: dict = {}
+for _x in (0, 90, 180, 270):
+    for _y in (0, 90, 180, 270):
+        _PLAIN_TURNS.setdefault(_rotation(_x, _y, 0), (_x, _y))
+
+
+def _spin_cells(blockstate: dict, orientation, label: str) -> tuple[dict | None, set, str]:
+    """({(second, facing): (model, x, y, uvlock)}, keys only a z turn draws,
+    "") or (None, set(), why)."""
+    second = orientation.states[1]
+    turns = dict(orientation.turns)
+    cells, z_only = {}, set()
+    for key, entry in blockstate["variants"].items():
+        cell = dict(tuple(x.strip() for x in p.split("=", 1)) for p in key.split(",") if p)
+        if set(cell) != {"facing", second}:
+            return None, set(), f"{label}: {key} draws states besides facing and {second}"
+        if isinstance(entry, list):
+            return None, set(), f"{label}: {key} picks a model at random"
+        if not isinstance(entry, dict) or not isinstance(entry.get("model"), str):
+            return None, set(), f"{label}: {key} has no model"
+        extra = [k for k in entry if k not in ("model", "x", "y", "uvlock", "weight")]
+        if any(turns.get(k) != "z" for k in extra):
+            return None, set(), f"{label}: {key} has a variant key no reader takes ({', '.join(extra)})"
+        x, y = entry.get("x") or 0, entry.get("y") or 0
+        z = sum(entry.get(k) or 0 for k in extra)
+        if any(not isinstance(v, int) or isinstance(v, bool) or v % 90 for v in (x, y, z)):
+            return None, set(), f"{label}: {key} turns a model by other than a quarter turn"
+        lock = bool(entry.get("uvlock"))
+        plain = _PLAIN_TURNS.get(_rotation(x, y, z))
+        k = (cell[second], cell["facing"])
+        if plain is None or (lock and z % 360):
+            z_only.add(k)
+            continue
+        cells[k] = (entry["model"], plain[0] % 360, plain[1] % 360, lock)
+    return cells, z_only, ""
+
+
+def _read_spin_code(mod: SourceMod, specs: dict, shared, out: dict, why: dict) -> None:
+    """Fill ``out`` (name -> _convert_directional's arguments) and ``why``
+    for the facing-with-second-state blockstates in ``specs`` an adapter
+    places."""
+    from ..adapters import orientations
+    classes = getattr(mod, "classes", None)
+    if classes is None or not len(classes):
+        return
+    run = shared() if shared else None
+    readings = blockcode.read_directional(classes, {n: "facing6" for n in specs}, run=run)
+    placed_by = orientations(mod, {n: r.cls for n, r in readings.items() if r.cls})
+    if not placed_by:
+        return
+    held_props: dict[str, tuple] = {}
+    for name, o in placed_by.items():
+        props = {a.strip() for k in specs[name]["variants"] for a, _ in
+                 (p.split("=", 1) for p in k.split(",") if p)}
+        held_props[name] = tuple(sorted(props - set(o.states)))
+    defaults = blockcode.read_registered_defaults(
+        classes, {n: p for n, p in held_props.items() if p}, run=run,
+        booleans=frozenset(held_props)) if any(held_props.values()) else {}
+    for name, o in sorted(placed_by.items()):
+        second = o.states[1]
+        label = f"facing and {second}"
+        if o.why:
+            why[name] = f"{label}: placement isn't read ({o.why})"
+            continue
+        blockstate, held = specs[name], []
+        for p in held_props[name]:
+            values = sorted({b.strip() for k in blockstate["variants"] for a, b in
+                             (q.split("=", 1) for q in k.split(",") if q) if a.strip() == p})
+            if not set(values) <= _BOOL_VALUES or p in o.sets:
+                why[name] = (f"{label}: {p} ({', '.join(values)}) is set by placement or isn't a boolean, "
+                             "so it has no start to hold")
+                break
+            d = defaults[name]
+            if d.why:
+                why[name] = f"{label}: {p} isn't set by the player on placement and its start isn't read: {d.why}"
+                break
+            reduced, passed = held_states.hold(blockstate, p, d.values[p])
+            if reduced is None:
+                why[name] = f"{label}: no variant has {p}={d.values[p]}"
+                break
+            blockstate = reduced
+            held.append({"prop": p, "value": d.values[p], "values": values, "source": d.source,
+                         "changed_by": list(d.changed_by.get(p, ())), "passed": passed})
+        else:
+            cells, z_only, reason = _spin_cells(blockstate, o, label)
+            if cells is None:
+                why[name] = reason
+                continue
+            placed = [(conds, (dict(values)[second], dict(values)["facing"])) for conds, values in o.placed]
+            drawn = set(cells) | z_only
+            stray = sorted({k for _, k in placed if k not in drawn})
+            if stray:
+                why[name] = (f"{label}: placement ({o.text}) gives "
+                             + ", ".join(f"facing={f},{second}={v}" for v, f in stray)
+                             + ", which the blockstate doesn't draw")
+                continue
+            turned = sorted({k for _, k in placed if k in z_only})
+            if turned:
+                why[name] = (f"{label}: placement gives "
+                             + ", ".join(f"facing={f},{second}={v}" for v, f in turned)
+                             + ", whose variant turns about z in a way no x/y turn gives")
+                continue
+            order = sorted({v for v, _ in drawn}, key=lambda v: (not v.lstrip("-").isdigit(), int(v)
+                                                                  if v.lstrip("-").isdigit() else 0, v))
+            keys = [(v, f) for f in _SIX for v in order if (v, f) in drawn]
+            reading = readings[name]
+            out[name] = ("facing_spin", {(k, ()): v for k, v in cells.items()}, reading, (), {
+                "orientation": o, "second": second, "placed": placed, "keys": keys,
+                "z_only": sorted(z_only, key=keys.index), "held": held})
 
 
 def _facings_of(cells: dict) -> tuple:
@@ -4710,12 +4876,14 @@ def _molang(conds_list: list[tuple]) -> str:
 
 
 def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, name: str,
-                         kind: str, cells: dict, reading, bools: tuple = ()) -> dict | None:
+                         kind: str, cells: dict, reading, bools: tuple = (), spin: dict | None = None) -> dict | None:
     """``cells`` maps (Java key, combination) to (model, x, y, uvlock); the
     combination is () without booleans (#218), else 0/1 per name in
-    ``bools`` (with a :class:`blockcode.DirStateReading`)."""
+    ``bools`` (with a :class:`blockcode.DirStateReading`). ``spin``: a
+    facing-with-second-state block's adapter-read placement (_read_spin_code),
+    whose keys are (second state's value, facing)."""
     ns = mod.namespace
-    label = _DIR_LABEL[kind] + (" and booleans" if bools else "")
+    label = (f"facing and {spin['second']}" if spin else _DIR_LABEL[kind]) + (" and booleans" if bools else "")
     button = None
     if bools and reading.vanilla_parent:
         if reading.vanilla_parent.replace(".", "/") == buttons.block_set_types.BUTTON_CLASS \
@@ -4736,18 +4904,20 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         return None
     combos = blockcode.combinations(bools)
     facings = _facings_of(cells) if kind == "facing" else ()
-    rule = reading.rule if reading.rule is not None else blockcode.default_rule(kind, facings)
-    if rule is None:
+    rule = reading.rule if reading.rule is not None or spin else blockcode.default_rule(kind, facings)
+    if rule is None and not spin:
         # #296: no DEFAULT is approved for a facing over these values.
         result.unhandled.append(Unhandled(rel, "block", (
             f"{label} ({', '.join(facings)}): placement isn't read ({reading.rule_why}), and no "
             "DEFAULT covers a facing over these values")))
         return None
-    bedrock = _bedrock_cells(rule)
+    bedrock = list(spin["placed"]) if spin else _bedrock_cells(rule)
     conds_of: dict[tuple, list] = {}
     for conds, key in bedrock:
         conds_of.setdefault(key, []).append(conds)
-    keys = blockcode.directional_keys(kind, facings)
+    keys = list(spin["keys"]) if spin else blockcode.directional_keys(kind, facings)
+    # A facing-with-second-state block's boxes aren't read per second state.
+    shapes_by = None if spin else reading.shapes_by
     stray = sorted({k for k in conds_of if k not in keys}, key=lambda k: _SIX.index(k[1])) if kind == "facing" else []
     if stray:
         # The placement rule gives a facing the blockstate doesn't draw.
@@ -4875,8 +5045,8 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
     for cell in live:
         key, combo = cell
         model_ref, x, y, lock = cells[cell]
-        if reading.shapes_by is not None:
-            world = _bbox(reading.shapes_by[cell] if bools else reading.shapes_by[key])
+        if shapes_by is not None:
+            world = _bbox(shapes_by[cell] if bools else shapes_by[key])
             boxes[cell] = None if world is None else frame(world, 0 if lock else 360 - y)
         else:
             bounds = _element_bounds(bone_elements[bone_key(cell)])
@@ -5003,15 +5173,17 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         if double_path is not None and double_path.is_file():
             result.claim(mod, double_path)
     drawn = {"facing"} if kind in ("facing6", "facing") else {"type"} if kind == "vslab" else {"face", "facing"}
+    if spin:
+        drawn = {"facing", spin["second"]} | {h["prop"] for h in spin["held"]}
     record = {
         "name": name,
         "kind": kind,
-        "rule": reading.rule_from if reading.rule is not None else None,
-        "rule_why": reading.rule_why,
-        "rule_text": _rule_text(rule, _DIR_PROP.get(kind, "facing")),
-        "support": reading.support_assumed or reading.rule is None and kind == "attach",
-        "box": reading.shape_from if reading.shapes_by is not None else None,
-        "box_why": reading.shape_why,
+        "rule": spin["orientation"].source if spin else reading.rule_from if reading.rule is not None else None,
+        "rule_why": "" if spin else reading.rule_why,
+        "rule_text": spin["orientation"].text if spin else _rule_text(rule, _DIR_PROP.get(kind, "facing")),
+        "support": not spin and (reading.support_assumed or reading.rule is None and kind == "attach"),
+        "box": reading.shape_from if shapes_by is not None else None,
+        "box_why": (f"the box isn't read per {spin['second']}" if spin else reading.shape_why),
         "collision": reading.collision,
         "collision_why": reading.collision_why,
         "collision_from": reading.collision_from,
@@ -5019,8 +5191,13 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         "behaviour": [m for m in reading.behaviour if not (toggle and m in ("useWithoutItem", "use"))],
         "clamped": clamped,
         "uvlock": any(cells[c][3] for c in live),
-        "unreachable": [_key_label(k, kind) for k in unreachable],
+        "unreachable": [_key_label(k, kind, spin and spin["second"]) for k in unreachable],
     }
+    if spin:
+        o = spin["orientation"]
+        record["spin"] = {"second": spin["second"], "default": o.default, "turned_by": o.turned_by,
+                          "z_only": [_key_label(k, kind, spin["second"]) for k in spin["z_only"]],
+                          "held": spin["held"]}
     if kind == "facing":
         record["facings"] = list(facings)
     if button is not None:
@@ -5103,6 +5280,35 @@ def _directional_bool_notes(records: list[dict]) -> list[str]:
     return notes + _directional_notes(records)[1:] + _bool_state_notes(records)
 
 
+def _spin_notes(records: list[dict]) -> list[str]:
+    """Notes for facing-with-second-state blocks (#296)."""
+    if not records:
+        return []
+    notes = ["Facing with a second orientation state (#296): placed by the mod's own rule, read from its code by "
+             "its adapter, on minecraft:placement_direction's facing_direction and cardinal_direction; a variant "
+             "turned about z by the mod's own variant key is drawn as the x/y turn that gives the same rotation - "
+             + _grouped([(f"{r['rule']}: {r['rule_text']}", r["name"]) for r in records]) + "."]
+    default = [(r["spin"]["default"], r["name"]) for r in records if r["spin"]["default"]]
+    if default:
+        notes.append("Placement DEFAULT, not read from code - " + _grouped(default) + ".")
+    turned = [(r["spin"]["turned_by"], r["name"]) for r in records if r["unreachable"] and r["spin"]["turned_by"]]
+    if turned:
+        notes.append("Orientations placement never gives are reached in Java by - " + _grouped(turned) + ".")
+    z_only = [(", ".join(r["spin"]["z_only"]), r["name"]) for r in records if r["spin"]["z_only"]]
+    if z_only:
+        notes.append("Of those, variants turned about z in a way no x/y turn gives (not drawn) - "
+                     + _grouped(z_only) + ".")
+    for r in records:
+        for h in r["spin"]["held"]:
+            others = [v for v in h["values"] if v != h["value"]]
+            changed = ", ".join(h["changed_by"]) or "no method of the block's own classes"
+            looks = ", ".join(m.split("/")[-1] for m in h["passed"]) or "no other model"
+            notes.append(f"{r['name']}: Java's {h['prop']} starts at {h['value']} (registered: {h['source']}; "
+                         f"placement leaves it there) and is changed by {changed}; Bedrock holds it at "
+                         f"{h['value']}, so {', '.join(others)} ({looks}) aren't drawn.")
+    return notes
+
+
 def _vslab_notes(records: list[dict]) -> list[str]:
     """Notes for vertical slabs (#296): placement, box and collision as the
     6-way / attach-face notes word them, plus the double slab set aside as
@@ -5138,9 +5344,10 @@ def _directional_notes(records: list[dict]) -> list[str]:
     if partial:
         notes.append("Facing over some of the six directions (one model per value; #296), placed through the same "
                      "states, at only the values the blockstate draws - " + _grouped(partial) + ".")
-    read = [(f"{r['rule']} ({r['rule_text']})", r["name"]) for r in records if r["rule"]]
+    read = [(f"{r['rule']} ({r['rule_text']})", r["name"]) for r in records if r["rule"] and not r.get("spin")]
     if read:
         notes.append("Placement rule read from bytecode - " + _grouped(read) + ".")
+    notes += _spin_notes([r for r in records if r.get("spin")])
     for kind in ("facing6", "attach", "vslab", "facing"):
         default = [(r["rule_why"], r["name"]) for r in records if not r["rule"] and r["kind"] == kind]
         if default:

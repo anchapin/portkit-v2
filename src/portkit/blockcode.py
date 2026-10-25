@@ -6671,6 +6671,59 @@ def read_held_states(classes: ClassIndex | None, props: dict[str, str], run=None
     return readings
 
 
+@dataclass
+class DefaultReading:
+    """The registered default state's value of each of ``props`` (#296: the
+    states a placement rule read elsewhere leaves where ``defaultBlockState()``
+    has them), with the methods of the block's own classes that change each,
+    or ``why`` not."""
+
+    name: str
+    cls: str = ""
+    values: dict = field(default_factory=dict)
+    changed_by: dict = field(default_factory=dict)
+    source: str = ""
+    why: str = ""
+
+
+def read_registered_defaults(classes: ClassIndex | None, props: dict[str, tuple], run=None,
+                             booleans: frozenset = frozenset()) -> dict[str, DefaultReading]:
+    """A :class:`DefaultReading` per blockstate name in ``props`` (name -> the
+    states to read); ``booleans``: the names whose states are all booleans."""
+    readings = {n: DefaultReading(n) for n in props}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.why = "the mod ships no class files"
+        return readings
+    machine, registered = _from_run(run, classes, list(props))
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.why = why
+            continue
+        found = []
+        for obj in objs:
+            default = obj.fields.get("__default")
+            values = {}
+            for p in props[name]:
+                v = dict(default.values).get(p, UNKNOWN) if isinstance(default, State) else UNKNOWN
+                values[p] = _held_name(machine, v, name in booleans) if v is not UNKNOWN else None
+            found.append((obj.cls, values))
+        r.cls = found[0][0].replace("/", ".")
+        if any(v != found[0][1] for _, v in found[1:]):
+            r.why = "registered twice with different settings"
+            continue
+        missing = sorted(p for p, v in found[0][1].items() if v is None)
+        if missing:
+            r.why = f"the registered default state doesn't set {', '.join(missing)}"
+            continue
+        r.values = found[0][1]
+        r.source = f"{r.cls}#<init> (registerDefaultState)"
+        changed = _changed_by(machine, found[0][0], tuple(props[name]))
+        r.changed_by = {p: tuple(changed.get(p, [])) for p in props[name]}
+    return readings
+
+
 def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
     r.cls = obj.cls.replace("/", ".")
     base = machine.vanilla_base(obj.cls)
