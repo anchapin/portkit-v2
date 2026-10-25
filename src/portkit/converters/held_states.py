@@ -23,6 +23,8 @@ from .. import blockcode
 PLACEMENT_STATES = ("axis", "facing")
 _CARDINALS = {"north", "east", "south", "west"}
 _BOOLS = {"true", "false"}
+# Booleans named for a direction are connection states (#221).
+_CONNECTIONS = {"north", "east", "south", "west", "up", "down"}
 # States other readers own as placement or shape: attach-face blocks
 # (``face``), slabs and vertical slabs (``type``), stairs, doors, trapdoors
 # and two-tall blocks (``half``, ``shape``, ``hinge``), beds (``part``).
@@ -32,8 +34,10 @@ _PLACEMENT_OWNED = PLACEMENT_OWNED
 
 def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
     """(state, values) when ``blockstate`` is a variants map over placement
-    states (none, for an enum whose values aren't numbers) and exactly one
-    non-boolean state, every combination named; else None."""
+    states (none, for an enum whose values aren't numbers), exactly one
+    non-boolean state and any booleans not named for a direction (left to
+    the boolean readers once the enum is held), every combination named;
+    else None."""
     variants = blockstate.get("variants")
     if not isinstance(variants, dict) or len(variants) < 2:
         return None
@@ -48,10 +52,24 @@ def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
         for a, b in cell.items():
             props.setdefault(a, set()).add(b)
     rest = [p for p in props if p not in PLACEMENT_STATES]
-    if len(rest) != 1 or rest[0] in _PLACEMENT_OWNED or props[rest[0]] <= _BOOLS or len(props[rest[0]]) < 2:
+    enums = [p for p in rest if not props[p] <= _BOOLS]
+    flags = [p for p in rest if props[p] <= _BOOLS]
+    # A ``shape`` beside no ``half`` is not a stair's shape: the stairs
+    # reader draws ``shape`` only with ``half``, so a block's own ``shape``
+    # enum (a railing's short/tall/connected, set from its neighbours) is
+    # held like any other enum.
+    owned = _PLACEMENT_OWNED if "half" in props else _PLACEMENT_OWNED - {"shape"}
+    if len(enums) != 1 or enums[0] in owned or len(props[enums[0]]) < 2:
         return None
-    if len(props) == 1 and any(v.lstrip("-").isdigit() for v in props[rest[0]]):
-        # An enum drawn alone is held as it is beside a placement state; a
+    if any(f in _CONNECTIONS or f in owned or f == "waterlogged" for f in flags):
+        # A direction-named boolean is a connection (#221's multipart
+        # reader); a held block keeps no water (#383 item 4) and draws no
+        # other reader's state.
+        return None
+    alone = not any(p in PLACEMENT_STATES for p in props)
+    if alone and any(v.lstrip("-").isdigit() for v in props[enums[0]]):
+        # An enum drawn alone (or beside booleans the boolean readers take
+        # once it is held) is held as it is beside a placement state; a
         # number drawn alone (a crop's age, a pile's layers) is not: no
         # approved rule holds a count at its start.
         return None
@@ -70,7 +88,7 @@ def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
         combos *= len(values)
     if combos != len(variants):
         return None
-    prop = rest[0]
+    prop = enums[0]
     return prop, tuple(sorted(props[prop]))
 
 
