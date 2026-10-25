@@ -77,11 +77,13 @@ def _mod(tmp_path: Path) -> SourceMod:
 def test_held_shape():
     assert held_states.held_prop(_log_states()) == ("fill", ("empty", "moss", "waterlogged"))
     assert held_states.held_prop(_fill_states()) == ("fill", ("empty", "moss", "waterlogged"))
-    # Booleans are #215's; a lone enum has no placement state; two enums
-    # aren't read; a missing combination isn't held.
+    # Booleans are #215's; a lone enum is held too (tests/test_held_alone.py),
+    # a lone number isn't; two enums aren't read; a missing combination isn't
+    # held.
     lit = {"variants": {f"facing={d},lit={v}": {"model": "m"} for d in CARDINALS for v in ("true", "false")}}
     assert held_states.held_prop(lit) is None
-    assert held_states.held_prop({"variants": {"fill=a": {"model": "m"}, "fill=b": {"model": "n"}}}) is None
+    assert held_states.held_prop({"variants": {"fill=a": {"model": "m"}, "fill=b": {"model": "n"}}}) == ("fill", ("a", "b"))
+    assert held_states.held_prop({"variants": {"age=0": {"model": "m"}, "age=1": {"model": "n"}}}) is None
     two = {"variants": {f"axis=x,a={a},b={b}": {"model": "m"} for a in "pq" for b in "rs"}}
     assert held_states.held_prop(two) is None
     gap = _log_states()

@@ -27,6 +27,25 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-24 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #388): an enum drawn alone is held at its code's start value; a blockstate whose every variant draws the same look converts as that one look
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). #296 sub-reason 1 (the Twilight Forest part), part of #277. No new policy call: rule 1 is #383 pick 1a (approved by Alex) with no placement state left beside the enum; rule 2 gives a `variants` map that draws nothing per state what a `""` blockstate already gets.
+- **Root cause:** Twilight Forest's 46 "block has N blockstate variant(s)" items (gauntlet row `twilight_forest`, 4.8.3345): 19 banisters (`extended` x `facing` x `shape`), 12 berry bushes (`age` x `layers`), 4 leaves (`distance` x `persistent`, every variant the same look), 4 magic log cores (`active` x `axis`), 2 caskets (`multilogged`), `carminite_builder` and `encased_fire_jet` (one enum `state`), `nagastone` (one enum `variant`), `experiment_115` (`omnomnom` x `regenerate`), `fallen_leaves` (`layers`). #383 held an enum only beside a placement state, so an enum drawn alone, and a blockstate whose states draw no difference, fell to residue.
+- **Decision:**
+  1. *Held enum alone* (`held_states.held_prop`). A blockstate that draws one enum state alone (values not numbers) is held at the start value its code sets, read as #383 reads it, and goes to the stateless path with that value's look. A number state drawn alone (a crop's `age`, a pile's `layers`) is not held: no approved rule holds a count at its start. A lone enum whose every value draws the same look is left to rule 2.
+  2. *One look* (`blocks._undrawn_states`). A `variants` blockstate over named states, every combination named, whose every variant draws exactly the same entry (models, turns, weights), converts as that one look, with a note naming the states not ported. Half/part structures and other readers' shape states (`PLACEMENT_OWNED`: `face`, `type`, `half`, `shape`, `hinge`, `part`) are excluded: one block in place of two would change the block.
+  3. *Model failure*. A held or one-look block that fails at its model gives its models back to the blockstate's residue (they are not left consumed).
+  No mod names in core (#220); no DEFAULTs added.
+- **Lost:** Twilight Forest leaves don't decay (`distance`/`persistent` not ported); the nagastone doesn't connect (held at its start `variant`); stacked BetterEnd pedestals keep a single look (held at the default state); the Supplementaries `end_stone_lamp` always shows rune a. Each is stated in the block's conversion note.
+- **Gap-leaderboard** 40152742590 on 3e07ee7 vs 40135480568: done 40/50, mean 11.60% -> 11.61%. Twilight Forest sub-reason 1 46 -> 37 (the 4 leaves, `carminite_builder`, `encased_fire_jet` and `nagastone` convert; the 2 caskets move to the held refusal, start value unread), 2377/6779 25.96% -> 2392/6753 26.16%; Botania 3 -> 1 (3671/4038 -> 3675/4022); AE2 8 -> 7 (801/3410 -> 802/3407); mct errors 0. docs/gauntlet.md banked from this run.
+- **Byte diffs** (local `portkit convert --no-addon`, develop vs branch, md5 of every file, all 13 real-mods incl. optional): BetterEnd +63 files (13 pedestals held at their default state, `PedestalBlock`; 8 flower pots converted as the empty pot, `FlowerPotBlock` `POT_LIGHT` start 0); Supplementaries `end_stone_lamp` held at rune a; Create (`lit_blaze_burner`), Storage Drawers 1.12.2 and Mekanism change a residue reason only; every other mod byte-identical.
+- **Real-mods** (include_optional) 40152739600 on 3e07ee7: rebanked `coverage-baseline.json` from this run: betterend 3451/5250 -> 3514/5113 (39.7% -> 40.7%), supplementaries 1564/3538 -> 1566/3510 (30.7% -> 30.9%); the other 11 rows unchanged, errors 0.
+- **Ingame** 40152741011 on 3e07ee7: 18/18 boots pass, 0 content errors.
+- **CI** 40152202870 on 3e07ee7 green. Fixture `tests/data/heldalone` + `tests/test_held_alone.py`.
+- **Rejected:** holding a number drawn alone at its start (a berry bush stuck at age 0 or a pile at one layer is a different block, and no approved rule holds a count); one look for half/part structures (one block in place of two); leaving uniform-look blockstates as residue (Java draws them the same either way).
+- **Left on Twilight Forest (37):** 19 banisters (connections), 12 berry bushes and `fallen_leaves` (number states), 4 log cores (axis plus boolean), `experiment_115`, 2 caskets (start value unread).
+- **Links:** #296, #277, #383, #220, #87, PR #388.
+
 ## 2026-10-24 (approved (Alex, 2026-10-24): 1a, PR #387): a block the mod registers as air (`Properties#air`) is explained residue `air_block`, not a Bedrock block
 
 - **Status:** approved (Alex, 2026-10-24): 1a (picks comment https://github.com/anchapin/portkit-v2/pull/387#issuecomment-6390037028). The branch implements pick 1a. #296 sub-reason 1 (the Storage Drawers part), part of #277. A policy call: the rule drops six Storage Drawers blocks that ship on develop.
