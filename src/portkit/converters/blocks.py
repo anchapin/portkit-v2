@@ -1817,8 +1817,13 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             # they are accounted for rather than left looking unconverted.
             _claim_alternates(mod, result, random_entry, model_ref)
 
+        claimed = set(result.consumed)
         identifier, instances, geo, why = _model_block(mod, result, model_ref, name)
         if identifier is None:
+            if name in held or undrawn is not None:
+                # A held or one-look block that doesn't convert leaves its
+                # models to the blockstate's residue, as on the states path.
+                result.consumed = claimed | {rel}
             result.unhandled.append(Unhandled(rel, "block", why))
             continue
         if geo is not None:
