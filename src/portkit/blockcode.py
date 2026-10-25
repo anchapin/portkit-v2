@@ -77,10 +77,11 @@ _PLAIN_VANILLA = {
     "net/minecraft/world/level/block/TransparentBlock",
     "net/minecraft/world/level/block/HalfTransparentBlock",
     "net/minecraft/world/level/block/BaseEntityBlock",
-    # BushBlock's constructor only calls super (1.21.1 client jar class dgh
-    # <init>: aload_0; aload_1; invokespecial Block.<init>; return); it
-    # declares no state (client.txt 1.21.1: codec, mayPlaceOn, updateShape,
-    # canSurvive, propagatesSkylightDown, isPathfindable).
+    # BushBlock's constructor only calls super (client jars with client.txt:
+    # 1.21.1 dgh, 1.20.1 cpv, 1.19.2 cka, 1.16.5 buu <init>: aload_0;
+    # aload_1; invokespecial Block.<init>; return); it declares no state
+    # (client.txt 1.21.1: codec, mayPlaceOn, updateShape, canSurvive,
+    # propagatesSkylightDown, isPathfindable).
     "net/minecraft/world/level/block/BushBlock",
 }
 _SHAPES = "net/minecraft/world/phys/shapes/Shapes"

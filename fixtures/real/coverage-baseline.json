@@ -1,15 +1,15 @@
 {
   "fixtures": {
     "alexs_mobs": {
-      "coverage": 29.0,
-      "files": 1098,
-      "residue": 2693,
+      "coverage": 29.6,
+      "files": 1103,
+      "residue": 2618,
       "errors": 0
     },
     "betterend": {
-      "coverage": 41.0,
-      "files": 3525,
-      "residue": 5067,
+      "coverage": 41.2,
+      "files": 3531,
+      "residue": 5033,
       "errors": 0
     },
     "create": {
@@ -25,9 +25,9 @@
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 47.2,
-      "files": 883,
-      "residue": 987,
+      "coverage": 48.9,
+      "files": 894,
+      "residue": 936,
       "errors": 0
     },
     "mekanism": {
@@ -61,9 +61,9 @@
       "errors": 0
     },
     "supplementaries": {
-      "coverage": 30.9,
-      "files": 1566,
-      "residue": 3510,
+      "coverage": 31.0,
+      "files": 1570,
+      "residue": 3487,
       "errors": 0
     },
     "tinkers_construct": {
