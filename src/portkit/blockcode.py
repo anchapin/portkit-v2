@@ -77,6 +77,11 @@ _PLAIN_VANILLA = {
     "net/minecraft/world/level/block/TransparentBlock",
     "net/minecraft/world/level/block/HalfTransparentBlock",
     "net/minecraft/world/level/block/BaseEntityBlock",
+    # BushBlock's constructor only calls super (1.21.1 client jar class dgh
+    # <init>: aload_0; aload_1; invokespecial Block.<init>; return); it
+    # declares no state (client.txt 1.21.1: codec, mayPlaceOn, updateShape,
+    # canSurvive, propagatesSkylightDown, isPathfindable).
+    "net/minecraft/world/level/block/BushBlock",
 }
 _SHAPES = "net/minecraft/world/phys/shapes/Shapes"
 _DIRECTION = "net/minecraft/core/Direction"
@@ -176,6 +181,40 @@ _VANILLA_PROPS = {
     (_STATE_PROPS, "CRACKED"): "cracked",
     (_STATE_PROPS, "CRAFTING"): "crafting",
     (_STATE_PROPS, "OMINOUS"): "ominous",
+    # Every IntegerProperty field of BlockStateProperties, by the name its
+    # <clinit> creates it with (IntegerProperty.create("...", min, max) into
+    # the field; MC 1.21.1 client jar class dts + Mojang mappings client.txt,
+    # #296): a number state is held at its code's start like an enum.
+    (_STATE_PROPS, "FLOWER_AMOUNT"): "flower_amount",
+    (_STATE_PROPS, "AGE_1"): "age",
+    (_STATE_PROPS, "AGE_2"): "age",
+    (_STATE_PROPS, "AGE_3"): "age",
+    (_STATE_PROPS, "AGE_4"): "age",
+    (_STATE_PROPS, "AGE_5"): "age",
+    (_STATE_PROPS, "AGE_7"): "age",
+    (_STATE_PROPS, "AGE_15"): "age",
+    (_STATE_PROPS, "AGE_25"): "age",
+    (_STATE_PROPS, "BITES"): "bites",
+    (_STATE_PROPS, "CANDLES"): "candles",
+    (_STATE_PROPS, "DELAY"): "delay",
+    (_STATE_PROPS, "DISTANCE"): "distance",
+    (_STATE_PROPS, "EGGS"): "eggs",
+    (_STATE_PROPS, "HATCH"): "hatch",
+    (_STATE_PROPS, "LAYERS"): "layers",
+    (_STATE_PROPS, "LEVEL_CAULDRON"): "level",
+    (_STATE_PROPS, "LEVEL_COMPOSTER"): "level",
+    (_STATE_PROPS, "LEVEL_FLOWING"): "level",
+    (_STATE_PROPS, "LEVEL_HONEY"): "honey_level",
+    (_STATE_PROPS, "LEVEL"): "level",
+    (_STATE_PROPS, "MOISTURE"): "moisture",
+    (_STATE_PROPS, "NOTE"): "note",
+    (_STATE_PROPS, "PICKLES"): "pickles",
+    (_STATE_PROPS, "POWER"): "power",
+    (_STATE_PROPS, "STAGE"): "stage",
+    (_STATE_PROPS, "STABILITY_DISTANCE"): "distance",
+    (_STATE_PROPS, "RESPAWN_ANCHOR_CHARGES"): "charges",
+    (_STATE_PROPS, "ROTATION_16"): "rotation",
+    (_STATE_PROPS, "DUSTED"): "dusted",
 }
 
 # Vanilla subclasses of FaceAttachedHorizontalDirectionalBlock that declare no
@@ -6565,6 +6604,16 @@ def _serialized(machine: Machine, value) -> str | None:
     return names.pop() if len(names) == 1 and len(got) == len([g for g in got if isinstance(g, str)]) else None
 
 
+def _held_name(machine: Machine, value) -> str | None:
+    """A held state's value as the blockstate names it: an enum constant's
+    serialized name, or an IntegerProperty's number (Integer.valueOf is the
+    int itself on the machine; IntegerProperty#getName is
+    ``value.toString()``, 1.21.1 client jar class duc + client.txt)."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    return _serialized(machine, value)
+
+
 def read_held_states(classes: ClassIndex | None, props: dict[str, str], run=None) -> dict[str, HeldReading]:
     """A :class:`HeldReading` per blockstate name in ``props`` (name -> the
     enum state's name)."""
@@ -6612,7 +6661,7 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
         values = set()
         for s in placed:
             v = dict(s.values).get(r.prop, UNKNOWN)
-            values.add(_serialized(machine, v) if v is not UNKNOWN else None)
+            values.add(_held_name(machine, v) if v is not UNKNOWN else None)
         set_here = all(r.prop in dict(s.values) for s in placed)
         # A placed state that only carries the registered default's own
         # value (defaultBlockState(), now that the constructor's
@@ -6629,7 +6678,7 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
     if r.value is None:
         default = obj.fields.get("__default")
         v = dict(default.values).get(r.prop, UNKNOWN) if isinstance(default, State) else UNKNOWN
-        name = _serialized(machine, v) if v is not UNKNOWN else None
+        name = _held_name(machine, v) if v is not UNKNOWN else None
         if name is not None:
             r.value, r.kind = name, "registered"
             r.source = f"{r.cls}#<init> (registerDefaultState); {why}"

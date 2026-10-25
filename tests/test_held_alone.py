@@ -3,7 +3,8 @@
 A blockstate that draws one enum state and nothing else (a device's
 ``mode``: idle, flame, timeout) is held at the start value read from code,
 as an enum beside a placement state is (#383), and converts on the
-stateless path; a number drawn alone (a pile's ``layers``) is not held. A
+stateless path; a number drawn alone (a pile's ``layers``) is held too
+(tests/test_held_numbers.py) when its start is read. A
 blockstate whose every variant draws the same entry (leaves' ``distance``
 and ``persistent``) converts as the one look it is.
 
@@ -68,8 +69,9 @@ def _mod(tmp_path: Path) -> SourceMod:
 
 def test_enum_alone_shape():
     assert held_states.held_prop(_jet()) == ("mode", MODES)
-    # A number drawn alone isn't held; a boolean alone is #384's.
-    assert held_states.held_prop(_pile()) is None
+    # A number drawn alone is held too (tests/test_held_numbers.py); a
+    # boolean alone is #384's.
+    assert held_states.held_prop(_pile()) == ("layers", ("1", "2", "3", "4"))
     lit = {"variants": {"lit=true": {"model": "m"}, "lit=false": {"model": "n"}}}
     assert held_states.held_prop(lit) is None
     # Another reader's own state alone (a slab's type) is left to it.
@@ -129,6 +131,9 @@ def test_undrawn_states_convert_as_one_look(converted):
     assert any(n.startswith("hedge: Java turns this block to 2 random rotations") for n in converted.notes)
 
 
-def test_number_alone_stays_residue(converted):
+def test_number_alone_with_no_registered_start_stays_residue(converted):
+    # A number drawn alone is held like an enum (tests/test_held_numbers.py),
+    # but this pile registers no class that sets it: nothing is held (#87).
     (u,) = _residue(converted, "pile")
-    assert u.reason.startswith("block has 4 blockstate variant(s)")
+    assert u.reason.startswith("held state: layers (1, 2, 3, 4)")
+    assert "the registered default state doesn't set it" in u.reason

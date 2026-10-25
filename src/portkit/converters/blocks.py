@@ -1577,14 +1577,20 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     held_read = held_states.read(mod, loaded, set(stations or {}) | set(variation_sets), shared)
     held: dict[str, tuple] = {}
     held_why: dict[str, str] = {}
-    for stem, (reading, values) in held_read.items():
-        reduced, passed = (held_states.hold(loaded[stem], reading.prop, reading.value)
-                           if reading.value is not None else (None, []))
-        if reduced is None:
-            held_why[stem] = held_states.refusal(reading, values)
-            continue
-        loaded[stem] = reduced
-        held[stem] = (reading, values, passed, None)
+    for stem, found in held_read.items():
+        # Each state in turn (numbers first, then an enum, #296); the
+        # blockstate is held only when every one's start is read.
+        reduced, done = loaded[stem], []
+        for reading, values in found:
+            reduced, passed = (held_states.hold(reduced, reading.prop, reading.value)
+                               if reading.value is not None else (None, []))
+            if reduced is None:
+                held_why[stem] = held_states.refusal(reading, values)
+                break
+            done.append((reading, values, passed))
+        else:
+            loaded[stem] = reduced
+            held[stem] = (done, None)
     # Horizontal pillars (axis x or z, #296): how the axis is placed is the
     # block's code, read per clicked face.
     hpillars = [stem for stem, bs in loaded.items() if stem not in (stations or {})
@@ -1654,7 +1660,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             result.unhandled.append(Unhandled(rel, "block", held_why[name]))
             continue
         if name in held:
-            held[name] = held[name][:3] + (rel,)
+            held[name] = (held[name][0], rel)
         blockstate = loaded[name]
 
         if name in variation_sets and name not in (stations or {}):
@@ -1882,14 +1888,15 @@ def _held_claims(mod: SourceMod, result: ConversionResult, held: dict) -> list[s
     failed = {u.source for u in result.unhandled}
     out = []
     for name in sorted(held):
-        reading, values, passed, rel = held[name]
+        done, rel = held[name]
         if rel is None or rel in failed or not ({f"blocks/{name}.json", f"blocks/_{name}.json"} & set(result.files)):
             continue
-        # With their parents inside the mod: a template only the passed-over
-        # models name would otherwise be left unowned.
-        for path in _model_chain_files(mod, passed):
-            result.claim(mod, path)
-        out.append(held_states.note(name, reading, values, passed))
+        for reading, values, passed in done:
+            # With their parents inside the mod: a template only the
+            # passed-over models name would otherwise be left unowned.
+            for path in _model_chain_files(mod, passed):
+                result.claim(mod, path)
+            out.append(held_states.note(name, reading, values, passed))
     return out
 
 
