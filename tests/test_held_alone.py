@@ -86,6 +86,9 @@ def test_undrawn_states_shape():
     del gap["variants"]["distance=3,persistent=true"]
     assert blocks._undrawn_states(gap) is None  # a combination missing
     assert blocks._undrawn_states({"variants": {"": {"model": "m"}}}) is None
+    # Two halves drawing one model are still two blocks.
+    tall = {"variants": {"half=lower": {"model": "m"}, "half=upper": {"model": "m"}}}
+    assert blocks._undrawn_states(tall) is None
 
 
 @pytest.fixture()

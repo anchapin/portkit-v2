@@ -26,7 +26,8 @@ _BOOLS = {"true", "false"}
 # States other readers own as placement or shape: attach-face blocks
 # (``face``), slabs and vertical slabs (``type``), stairs, doors, trapdoors
 # and two-tall blocks (``half``, ``shape``, ``hinge``), beds (``part``).
-_PLACEMENT_OWNED = {"face", "type", "half", "shape", "hinge", "part"}
+PLACEMENT_OWNED = {"face", "type", "half", "shape", "hinge", "part"}
+_PLACEMENT_OWNED = PLACEMENT_OWNED
 
 
 def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
@@ -53,6 +54,10 @@ def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
         # An enum drawn alone is held as it is beside a placement state; a
         # number drawn alone (a crop's age, a pile's layers) is not: no
         # approved rule holds a count at its start.
+        return None
+    if len(props) == 1 and len({repr(v) for v in variants.values()}) == 1:
+        # Every value draws the same look: nothing to hold (the blocks
+        # converter takes it as that one look).
         return None
     if "facing" in props and not props["facing"] <= _CARDINALS:
         return None

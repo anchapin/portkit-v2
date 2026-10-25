@@ -190,6 +190,10 @@ def _undrawn_states(blockstate: dict) -> tuple[dict, list[str]] | None:
             props.setdefault(a, set()).add(b)
     if any(set(c) != set(props) for c in cells):
         return None
+    if set(props) & held_states.PLACEMENT_OWNED:
+        # A two-block structure (half, part) or another reader's shape state
+        # is not a look: one block in place of two would change the block.
+        return None
     combos = 1
     for values in props.values():
         combos *= len(values)
@@ -1800,6 +1804,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             # Every state draws the same look (#296): the block converts as
             # the stateless one its look is; what the states do is code.
             blockstate, states = undrawn
+            loaded[name] = blockstate  # the light reader reads no state of it
             result.notes.append(_undrawn_note(name, states))
         model_ref, why = _single_model(blockstate)
         if model_ref is None:

@@ -63,13 +63,38 @@ def test_a_column_maps_ends_and_sides_separately(tmp_path):
 def test_a_block_with_real_states_is_residue_naming_them(tmp_path):
     blockstate = {"variants": {
         "color=blue": {"model": "examplemod:block/steel_block"},
-        "color=red": {"model": "examplemod:block/steel_block"},
+        "color=red": {"model": "examplemod:block/steel_block", "y": 90},
+        "level=1": {"model": "examplemod:block/steel_block"},
     }}
     result = blocks.convert(build(tmp_path, blockstate, CUBE_ALL))
     assert result.files == {}
     reason = result.unhandled[0].reason
-    assert "2 blockstate variant(s)" in reason
+    assert "3 blockstate variant(s)" in reason
     assert "color=blue" in reason
+
+
+def test_an_enum_drawn_alone_with_no_code_is_held_state_residue(tmp_path):
+    """#296: an enum drawn alone is held at its start read from code; with no
+    class to read, nothing is held."""
+    blockstate = {"variants": {
+        "color=blue": {"model": "examplemod:block/steel_block"},
+        "color=red": {"model": "examplemod:block/steel_block", "y": 90},
+    }}
+    result = blocks.convert(build(tmp_path, blockstate, CUBE_ALL))
+    assert result.files == {}
+    assert result.unhandled[0].reason == ("held state: color (blue, red) isn't set by the player on "
+                                          "placement and its start isn't read: the mod ships no class files")
+
+
+def test_states_that_draw_one_look_convert_as_it(tmp_path):
+    """#296: every value draws the same entry, so the block is that one look."""
+    blockstate = {"variants": {
+        "color=blue": {"model": "examplemod:block/steel_block"},
+        "color=red": {"model": "examplemod:block/steel_block"},
+    }}
+    result = blocks.convert(build(tmp_path, blockstate, CUBE_ALL))
+    assert any(k.startswith("blocks/") for k in result.files)
+    assert any("every value of color draws the same model" in n for n in result.notes)
 
 
 def test_a_facing_over_two_values_without_code_is_residue(tmp_path):
