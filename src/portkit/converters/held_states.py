@@ -189,5 +189,8 @@ def note(name: str, reading, values: tuple, passed_over: list[str]) -> str:
 
 def refusal(reading, values: tuple) -> str:
     """The residue reason when the start isn't read."""
+    if getattr(reading, "player_set", False):
+        return (f"held state: {reading.prop} ({', '.join(values)}) is set by the player on placement, "
+                f"so it has no start to hold: {reading.why}")
     return (f"held state: {reading.prop} ({', '.join(values)}) isn't set by the player on placement "
             f"and its start isn't read: {reading.why}")

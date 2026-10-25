@@ -6606,6 +6606,7 @@ class HeldReading:
     changed_by: tuple = ()
     vanilla_parent: str = ""
     boolean: bool = False
+    player_set: bool = False
 
 
 def _serialized(machine: Machine, value) -> str | None:
@@ -6681,6 +6682,15 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
         r.why = f"{r.cls} reaches vanilla {r.vanilla_parent}, whose states are vanilla code"
         return
     where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+    if r.boolean:
+        # A boolean beside a pillar's axis (#296) is held only where
+        # placement gives it one read value whatever face is clicked: one
+        # set from the clicked face is the player's choice, and one read
+        # from the world isn't taken here.
+        _read_held_boolean(machine, obj, r, where)
+        if r.value is not None:
+            r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
+        return
     placed = _placed_states(machine, obj)
     why = ""
     if placed is None:
@@ -6718,6 +6728,33 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
             return
     r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
 
+
+
+def _read_held_boolean(machine: Machine, obj: Obj, r: HeldReading, where: str) -> None:
+    """``r.value`` the boolean every clicked face places (kind ``placed``),
+    else ``r.why``: read per face as read_horizontal_axis reads an axis."""
+    found = set()
+    for face in DIRECTIONS:
+        machine.steps = 0
+        try:
+            results = machine.call(obj.cls, "getStateForPlacement", _PLACEMENT_DESC, [obj, _Ctx(face)])
+        except Unreadable as exc:
+            r.why = f"{where} isn't read: {exc}"
+            return
+        placed = [s for s in results if s is not None]
+        if not placed or any(not isinstance(s, State) for s in placed):
+            r.why = f"{where} isn't read"
+            return
+        for s in placed:
+            v = dict(s.values).get(r.prop, UNKNOWN)
+            found.add((face, _held_name(machine, v, True) if v is not UNKNOWN else None))
+    values = {v for _, v in found}
+    if None in values:
+        r.why = f"{where} sets it from something it can't read (the clicked face or the world)"
+    elif len(values) > 1:
+        r.why, r.player_set = f"{where} sets it from the clicked face, which the player chooses", True
+    else:
+        r.value, r.kind, r.source = values.pop(), "placed", where
 
 
 # -- horizontal pillars (#296) ------------------------------------------------

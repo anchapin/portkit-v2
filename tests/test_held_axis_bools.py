@@ -5,7 +5,9 @@ A log core on vanilla RotatedPillarBlock draws ``axis`` by its own
 takes booleans beside ``axis``, so the boolean is held at its start, as
 #215 item 6 holds a boolean the code changes after placement, and the
 block converts on the pillar path with the axis still the player's. A
-pillar whose boolean no registered default sets stays residue (#87).
+pillar whose boolean no registered default sets stays residue (#87), and
+so does one whose boolean placement sets from the clicked face (the
+player's choice, as Twilight Forest's nagastone pillars' ``reversed``).
 Booleans named for a direction and ``waterlogged`` are not held.
 
 The class files under tests/data/pillarcore/classes are javac 21 output of
@@ -58,7 +60,7 @@ def _mod(tmp_path: Path) -> SourceMod:
     root = tmp_path / "mod"
     for sub in ("textures/block", "models/block", "blockstates"):
         (root / f"assets/{NS}/{sub}").mkdir(parents=True)
-    for stem, flag in (("log_core", "active"), ("beacon", "lit")):
+    for stem, flag in (("log_core", "active"), ("beacon", "lit"), ("eel_pillar", "reversed")):
         for tex in (stem, f"{stem}_top", f"{stem}_on", f"{stem}_on_top"):
             (root / f"assets/{NS}/textures/block/{tex}.png").write_bytes(_png())
         (root / f"assets/{NS}/models/block/{stem}.json").write_text(json.dumps(_column(stem)))
@@ -91,15 +93,20 @@ def test_booleans_beside_axis_shape():
 
 
 def test_boolean_start_read_through_vanilla_pillar_placement():
-    got = blockcode.read_held_states(ClassIndex.from_source(CLASSES), {"log_core": "active", "beacon": "lit"},
-                                     booleans=frozenset({"log_core", "beacon"}))
+    got = blockcode.read_held_states(ClassIndex.from_source(CLASSES),
+                                     {"log_core": "active", "beacon": "lit", "eel_pillar": "reversed"},
+                                     booleans=frozenset({"log_core", "beacon", "eel_pillar"}))
     core = got["log_core"]
     assert (core.value, core.kind) == ("false", "placed")
     assert core.source == "net.minecraft.world.level.block.RotatedPillarBlock#getStateForPlacement (vanilla, inherited)"
     assert "useWithoutItem" in core.changed_by
     # No registered default of its own: RotatedPillarBlock's isn't modelled.
     assert got["beacon"].value is None
-    assert "the registered default state doesn't set it" in got["beacon"].why
+    assert got["beacon"].why.endswith("isn't read: vanilla RotatedPillarBlock's own registered default isn't modelled")
+    # Set from the clicked face's axis direction: the player's, not held.
+    assert got["eel_pillar"].value is None
+    assert got["eel_pillar"].why == ("com.example.core.EelPillar#getStateForPlacement sets it from the "
+                                     "clicked face, which the player chooses")
     # The pillar's own axis is still vanilla code, not held.
     axis = blockcode.read_held_states(ClassIndex.from_source(CLASSES), {"log_core": "axis"})
     assert axis["log_core"].value is None and "RotatedPillarBlock" in axis["log_core"].why
@@ -128,3 +135,11 @@ def test_pillar_whose_boolean_start_is_unread_stays_residue(converted):
     assert "blocks/beacon.json" not in converted.files
     why = next(u.reason for u in converted.unhandled if u.source.endswith("blockstates/beacon.json"))
     assert why.startswith("held state: lit (false, true) isn't set by the player on placement")
+
+
+def test_pillar_whose_boolean_the_clicked_face_sets_stays_residue(converted):
+    assert "blocks/eel_pillar.json" not in converted.files
+    why = next(u.reason for u in converted.unhandled if u.source.endswith("blockstates/eel_pillar.json"))
+    assert why == ("held state: reversed (false, true) is set by the player on placement, so it has no start "
+                   "to hold: com.example.core.EelPillar#getStateForPlacement sets it from the clicked face, "
+                   "which the player chooses")
