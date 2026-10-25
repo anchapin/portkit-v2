@@ -84,6 +84,14 @@ _PLAIN_VANILLA = {
     # propagatesSkylightDown, isPathfindable).
     "net/minecraft/world/level/block/BushBlock",
 }
+# RotatedPillarBlock (1.21.1 client jar class dml + client.txt): <init>
+# L22-24 registers defaultBlockState().setValue(AXIS, Y); getStateForPlacement
+# L55 is defaultBlockState().setValue(AXIS, context.getClickedFace().getAxis()),
+# so every other state is placed at the registered default. The same nine
+# instructions in 1.20.1 (cvy L47), 1.19.2 (cpv L47), 1.18.2 (cjl L47) and
+# 1.16.5 (bzl L43). Only the held-state reader (#296) takes another state of
+# a pillar from it; the axis itself stays vanilla code.
+_PILLAR = "net/minecraft/world/level/block/RotatedPillarBlock"
 _SHAPES = "net/minecraft/world/phys/shapes/Shapes"
 _DIRECTION = "net/minecraft/core/Direction"
 _PLACE_CONTEXT = "net/minecraft/world/item/context/BlockPlaceContext"
@@ -3021,6 +3029,17 @@ class Machine:
                     state = state.set("face", Const(_ATTACH_FACE, "WALL")).set("facing", first.opposite())
                 self.support_assumed = True
                 return [state]
+            if base == _PILLAR and name == "getStateForPlacement" and desc == _PLACEMENT_DESC:
+                # RotatedPillarBlock#getStateForPlacement L55 (see _PILLAR):
+                # the registered default with the clicked face's axis. Its
+                # own constructor's default (axis y) isn't modelled, so a
+                # block that registers none of its own isn't read.
+                if "__default" not in recv.fields:
+                    raise Unreadable("vanilla RotatedPillarBlock's own registered default isn't modelled")
+                clicked = rest[0].clicked if rest and isinstance(rest[0], _Ctx) else None
+                axis = (Const(_DIRECTION + "$Axis", "Y" if clicked in ("up", "down") else
+                              "Z" if clicked in ("north", "south") else "X") if clicked else UNKNOWN)
+                return [recv.fields["__default"].set("axis", axis)]
             if base == _FACE_ATTACHED and name == "getShape" and desc == _GET_SHAPE_DESC:
                 # It declares no getShape (client.txt 1.21.1): BlockBehaviour's.
                 return [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),))]
@@ -6586,6 +6605,8 @@ class HeldReading:
     why: str = ""
     changed_by: tuple = ()
     vanilla_parent: str = ""
+    boolean: bool = False
+    player_set: bool = False
 
 
 def _serialized(machine: Machine, value) -> str | None:
@@ -6605,20 +6626,26 @@ def _serialized(machine: Machine, value) -> str | None:
     return names.pop() if len(names) == 1 and len(got) == len([g for g in got if isinstance(g, str)]) else None
 
 
-def _held_name(machine: Machine, value) -> str | None:
+def _held_name(machine: Machine, value, boolean: bool = False) -> str | None:
     """A held state's value as the blockstate names it: an enum constant's
-    serialized name, or an IntegerProperty's number (Integer.valueOf is the
+    serialized name, an IntegerProperty's number (Integer.valueOf is the
     int itself on the machine; IntegerProperty#getName is
-    ``value.toString()``, 1.21.1 client jar class duc + client.txt)."""
+    ``value.toString()``, 1.21.1 client jar class duc + client.txt), or a
+    BooleanProperty's ``true``/``false`` (1/0 on the machine, as
+    _bool_value reads it)."""
+    if boolean:
+        return {0: "false", 1: "true"}.get(value) if isinstance(value, int) and not isinstance(value, bool) \
+            else None
     if isinstance(value, int) and not isinstance(value, bool):
         return str(value)
     return _serialized(machine, value)
 
 
-def read_held_states(classes: ClassIndex | None, props: dict[str, str], run=None) -> dict[str, HeldReading]:
+def read_held_states(classes: ClassIndex | None, props: dict[str, str], run=None,
+                     booleans: frozenset = frozenset()) -> dict[str, HeldReading]:
     """A :class:`HeldReading` per blockstate name in ``props`` (name -> the
-    enum state's name)."""
-    readings = {n: HeldReading(n, p) for n, p in props.items()}
+    state's name); ``booleans``: the names whose state is a boolean."""
+    readings = {n: HeldReading(n, p, boolean=n in booleans) for n, p in props.items()}
     if classes is None or not len(classes):
         for r in readings.values():
             r.why = "the mod ships no class files"
@@ -6631,7 +6658,7 @@ def read_held_states(classes: ClassIndex | None, props: dict[str, str], run=None
             continue
         found = []
         for obj in objs:
-            one = HeldReading(name, r.prop)
+            one = HeldReading(name, r.prop, boolean=r.boolean)
             _read_held(machine, obj, one)
             found.append(one)
         first = found[0]
@@ -6647,13 +6674,23 @@ def read_held_states(classes: ClassIndex | None, props: dict[str, str], run=None
 def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
     r.cls = obj.cls.replace("/", ".")
     base = machine.vanilla_base(obj.cls)
-    if base not in _PLAIN_VANILLA:
+    if base not in _PLAIN_VANILLA and not (base == _PILLAR and r.prop != "axis"):
         # As #215 item 7: a vanilla class with behaviour of its own sets its
-        # states in code the jar doesn't hold.
+        # states in code the jar doesn't hold. RotatedPillarBlock sets only
+        # axis (see _PILLAR), so another state of a pillar is read.
         r.vanilla_parent = base.replace("/", ".")
         r.why = f"{r.cls} reaches vanilla {r.vanilla_parent}, whose states are vanilla code"
         return
     where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
+    if r.boolean:
+        # A boolean beside a pillar's axis (#296) is held only where
+        # placement gives it one read value whatever face is clicked: one
+        # set from the clicked face is the player's choice, and one read
+        # from the world isn't taken here.
+        _read_held_boolean(machine, obj, r, where)
+        if r.value is not None:
+            r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
+        return
     placed = _placed_states(machine, obj)
     why = ""
     if placed is None:
@@ -6662,7 +6699,7 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
         values = set()
         for s in placed:
             v = dict(s.values).get(r.prop, UNKNOWN)
-            values.add(_held_name(machine, v) if v is not UNKNOWN else None)
+            values.add(_held_name(machine, v, r.boolean) if v is not UNKNOWN else None)
         set_here = all(r.prop in dict(s.values) for s in placed)
         # A placed state that only carries the registered default's own
         # value (defaultBlockState(), now that the constructor's
@@ -6679,7 +6716,7 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
     if r.value is None:
         default = obj.fields.get("__default")
         v = dict(default.values).get(r.prop, UNKNOWN) if isinstance(default, State) else UNKNOWN
-        name = _held_name(machine, v) if v is not UNKNOWN else None
+        name = _held_name(machine, v, r.boolean) if v is not UNKNOWN else None
         if name is not None:
             r.value, r.kind = name, "registered"
             r.source = f"{r.cls}#<init> (registerDefaultState); {why}"
@@ -6691,6 +6728,33 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
             return
     r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
 
+
+
+def _read_held_boolean(machine: Machine, obj: Obj, r: HeldReading, where: str) -> None:
+    """``r.value`` the boolean every clicked face places (kind ``placed``),
+    else ``r.why``: read per face as read_horizontal_axis reads an axis."""
+    found = set()
+    for face in DIRECTIONS:
+        machine.steps = 0
+        try:
+            results = machine.call(obj.cls, "getStateForPlacement", _PLACEMENT_DESC, [obj, _Ctx(face)])
+        except Unreadable as exc:
+            r.why = f"{where} isn't read: {exc}"
+            return
+        placed = [s for s in results if s is not None]
+        if not placed or any(not isinstance(s, State) for s in placed):
+            r.why = f"{where} isn't read"
+            return
+        for s in placed:
+            v = dict(s.values).get(r.prop, UNKNOWN)
+            found.add((face, _held_name(machine, v, True) if v is not UNKNOWN else None))
+    values = {v for _, v in found}
+    if None in values:
+        r.why = f"{where} sets it from something it can't read (the clicked face or the world)"
+    elif len(values) > 1:
+        r.why, r.player_set = f"{where} sets it from the clicked face, which the player chooses", True
+    else:
+        r.value, r.kind, r.source = values.pop(), "placed", where
 
 
 # -- horizontal pillars (#296) ------------------------------------------------

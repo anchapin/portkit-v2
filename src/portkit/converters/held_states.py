@@ -29,6 +29,13 @@ booleans, and beside at most one enum; each is read and held in turn. The
 game changes such counts later (random-tick growth, a layer added on use),
 which Bedrock would need a script for, so the block stays at its code's
 start and the note names the values not drawn (#296, Alex 2026-10-25).
+
+A boolean beside ``axis`` (a log core's ``active``, toggled on use) is held
+the same way, after any number or enum: no reader converts booleans beside
+a pillar's axis, and the axis itself stays the player's (the pillar
+converters). Booleans named for a direction (connections, #221) and
+``waterlogged`` (#383 item 4) are still not held. Booleans beside
+``facing`` or drawn alone stay with #215's and #384's readers.
 """
 from __future__ import annotations
 
@@ -53,7 +60,7 @@ def _is_number(values) -> bool:
 def held_props(blockstate: dict) -> tuple[tuple[str, tuple], ...] | None:
     """The states to hold, in order, each as (state, values): every number
     state (an ``IntegerProperty``: a crop's ``age``, a pile's ``layers``),
-    then at most one enum, when ``blockstate`` is a variants map over
+    then at most one enum, then, beside ``axis``, every boolean, when ``blockstate`` is a variants map over
     placement states (``facing`` over the four horizontals, or ``axis``),
     those and any booleans not named for a direction (left to the boolean
     readers once the rest is held), every combination named; else None."""
@@ -83,7 +90,10 @@ def held_props(blockstate: dict) -> tuple[tuple[str, tuple], ...] | None:
     # Two enums: no approved rule holds both. Numbers are held beside one
     # (#296, Alex 2026-10-25: a count the game changes later is held at
     # the start its code sets, as #215 item 6 holds a boolean).
-    if not enums or len(named) > 1 or any(p in owned for p in enums) \
+    # Booleans beside a pillar's axis are held too: no reader takes a
+    # boolean beside ``axis`` (#215 reads them beside ``facing``, #384 alone).
+    held_flags = sorted(flags) if "axis" in props else []
+    if not (enums or held_flags) or len(named) > 1 or any(p in owned for p in enums) \
             or any(len(props[p]) < 2 for p in enums):
         return None
     if any(f in _CONNECTIONS or f == "waterlogged" for f in flags):
@@ -106,7 +116,7 @@ def held_props(blockstate: dict) -> tuple[tuple[str, tuple], ...] | None:
     if combos != len(variants):
         return None
     return tuple((p, tuple(sorted(props[p], key=int) if p in numbers else sorted(props[p])))
-                 for p in numbers + named)
+                 for p in numbers + named + held_flags)
 
 
 def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
@@ -160,8 +170,9 @@ def read(mod, loaded: dict, skip, shared=None) -> dict:
     run = shared() if shared else None
     for k in range(max(len(f) for f in props.values())):
         at = {n: f[k] for n, f in props.items() if k < len(f)}
-        readings = blockcode.read_held_states(getattr(mod, "classes", None),
-                                              {n: p for n, (p, _) in at.items()}, run=run)
+        readings = blockcode.read_held_states(
+            getattr(mod, "classes", None), {n: p for n, (p, _) in at.items()}, run=run,
+            booleans=frozenset(n for n, (_, values) in at.items() if set(values) <= _BOOLS))
         for n, (_, values) in at.items():
             out[n].append((readings[n], values))
     return out
@@ -178,5 +189,8 @@ def note(name: str, reading, values: tuple, passed_over: list[str]) -> str:
 
 def refusal(reading, values: tuple) -> str:
     """The residue reason when the start isn't read."""
+    if getattr(reading, "player_set", False):
+        return (f"held state: {reading.prop} ({', '.join(values)}) is set by the player on placement, "
+                f"so it has no start to hold: {reading.why}")
     return (f"held state: {reading.prop} ({', '.join(values)}) isn't set by the player on placement "
             f"and its start isn't read: {reading.why}")
