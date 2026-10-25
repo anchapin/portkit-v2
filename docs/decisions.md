@@ -27,6 +27,54 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-25 (pending Alex: pick 1 (the pitch DEFAULT), PR #393): a six-way `facing` beside a second orientation state converts when the mod's adapter reads the placement rule from its code; AE2's machines on `facing_direction` x `cardinal_direction`
+
+- **Status:** pending Alex (picks comment on #296). #296 sub-reason 1 (AE2's last 5), part of #277. The code is generic and the AE2 part is an adapter; the one call Hark isn't confident about is the Bedrock stand-in for AE2's 65-degree pitch rule, a new **DEFAULT** (pick 1). Holding `powered`/`active` follows #215 item 6, #383 pick 1a and #391.
+- **Root cause:** AE2 19.2.18 (NeoForge 1.21.1; source AppliedEnergistics/Applied-Energistics-2 tag `neoforge/v19.2.18`, db17504) draws `charger`, `inscriber` (`facing` x `spin`, 24 variants), `io_port`, `spatial_io_port` (`powered` x `facing` x `spin`, 48) and `vibration_chamber` (`active` x `facing` x `spin`, 48). `spin` (0-3) is AE2's own `IntegerProperty` (`FacingWithSpinStrategy`); with `facing` it gives the 24 orientations of a cube. Three things kept them in the generic "block has N blockstate variant(s)" residue:
+  1. No reader takes a six-way `facing` beside a non-boolean state.
+  2. Placement: `AEBaseBlock#getStateForPlacement` (L108-111) is `getOrientationStrategy().getStateForPlacement(defaultBlockState(), ctx)`. All five return `OrientationStrategies.full()` (`ChargerBlock` L65-66, `InscriberBlock` L84-85, `IOPortBlock` L65-66, `SpatialIOPortBlock` L65-66, `VibrationChamberBlock` L64-65). `FacingWithSpinStrategy#getStateForPlacement` (L60-75): facing = the player's horizontal facing turned round, up = UP; pitch above 65 gives facing UP, and below -65 facing DOWN, with up = the player's horizontal facing. `spin` = `SpinMapping.getSpinFromUp(facing, up)` (L34-42). The core interpreter stops at "too many paths through SpinMapping.getSpinFromUp", and it has no player pitch.
+  3. The variants turn by `x`, `y` and AE2's own key `ae2:z`. AE2's mixin `VariantDeserializerMixin` (L36-48) reads it into `BlockstateDefinitionHook#rotateVariant` (L20-48) as `rotateYXZ(-y, -x, -z)`, a z turn applied before x and y.
+- **Decision (generic core + `src/portkit/adapters/ae2/`, no mod names in core):**
+  1. New adapter hook `orientations` (`adapters.Orientation`), asked only for a mod whose namespace an adapter with the hook serves. For a `variants` blockstate drawing all six `facing` values beside a state that isn't a boolean, the hook gives:
+     - which Bedrock `minecraft:facing_direction` / `minecraft:cardinal_direction` placement gives which Java `facing` and second state;
+     - which of the mod's own variant keys turn the model, and about which axis;
+     - the states placement sets besides those;
+     - the rule's text, source and DEFAULT.
+  2. The core converts through `_convert_directional` with that rule (kind `facing_spin`), on the existing x-baked / y-transformed geometry. A variant whose z turn has an equal plain x/y turn is drawn as that turn. That covers all 12 orientations placement gives: facing horizontal at spin 0, and up or down at any spin. A placed variant with no x/y equal would be residue. The 8 side-spin variants (spin 1/3 on a horizontal facing) have none, and only the wrench reaches them. They are named, not drawn.
+  3. Booleans beside them are held where `defaultBlockState()` has them. The adapter reads that placement starts from it and sets only `facing`/`spin` (plus `waterlogged` for an override shaped like `InscriberBlock`'s L88-94). The start comes from the registered default (new `blockcode.read_registered_defaults`). A boolean placement sets is refused. The other value's models are claimed and named in a note, as `_held_claims` does.
+  4. The ae2 adapter reads from the jar, never from a table:
+     - the method each class resolves;
+     - `OrientationStrategies.full` and its initializer;
+     - the instruction shape of `FacingWithSpinStrategy#getStateForPlacement`, with its two pitch constants (65.0, -65.0);
+     - `IOrientationStrategy#setOrientation`/`setUp` and `SpinMapping.getSpinFromUp` (not overridden);
+     - `SpinMapping.SPIN_DIRECTIONS` from `<clinit>`.
+
+     Any other shape gives a reason, not a guess. `LitPort` in the fixture is an override that sets another state, and it stays residue.
+  5. **DEFAULT (pending Alex, pick 1):** Bedrock has no pitch trait. `minecraft:facing_direction` is "the player's facing over six values", and its up/down cut isn't documented (MicrosoftDocs minecraft-creator, Block Traits: placement_direction). Its `down`/`up` stand in for AE2's pitch above 65 / below -65, and the cardinal direction gives the spin. This is the existing reading of `facing_direction` as Java's looking direction (the 6-way "look" token, #212/#218). Each block's note labels it.
+- **Lost (stated in each block's conversion note):**
+  - All five machines: when the player's pitch is between Bedrock's up/down cut and AE2's 65 degrees, the facing differs (Bedrock may place up/down where Java places horizontal, or the reverse; the cut isn't documented).
+  - The wrench's 12 other orientations aren't reachable, and the 8 side-spin variants aren't drawn.
+  - `io_port` and `spatial_io_port` always show unpowered (`powered` false; Java sets it from the block entity, `updateBlockStateFromBlockEntity`), and `vibration_chamber` always shows off (`active` false).
+  - `charger` and `inscriber` already flag their block-entity renderers (`renderer_drawn_parts`: the item on the charger, the inscriber's press animation). Boxes are the turned model's element bounds (DEFAULT, not read per spin), and the charger's collision is DEFAULT (its `getCollisionShape` override isn't read).
+  - None of the machines work (Java block entities, networks, power): that is Java code, as before.
+- **Byte diffs** (local `pipeline.convert`, `emit_addon=False`, develop 8bafad6 vs branch a56d0ac (same converter as a1001cc), md5 of every file):
+  - AE2 (gauntlet jar 19.2.18): +`blocks/{charger,inscriber,io_port,spatial_io_port,vibration_chamber}.json`, +5 geometries, +`recipes/crystal_processing_charger.json`, +`recipes/inscribers.json` (their only refused item was the block), `unhandled.json`. The 5 blockstate reasons go. 2 renderer flags come. `io_port`/`spatial_io_port` recipes move to the over-cap tag reason (#302) they now reach. `energy_vibration_chamber` still waits on `fluix_crystal`. 8 fewer model files are owned by residue. Checked against the source above: placement L60-75, spin rows L14-23, `BlockOrientation` angles L39-72 (the fixture's blockstates use them).
+  - 13 real mods: no namespace is served by an `orientations` adapter, so nothing new is read for them. **Real-mods** (include_optional) 40241701332 on a1001cc: 13/13 rows equal the baseline (files, residue, errors 0), so they weren't byte-diffed and nothing was rebanked.
+- **Gap-leaderboard** 40241704612 on a1001cc vs 40236467144:
+  - Done 40/50, mean 11.66% unchanged.
+  - Only AE2 changed: 802/3407 19.05% -> 814/3392 19.35%.
+  - `block` 825 -> 820 files.
+  - Sub-reason 1 by mod: AE2 5 -> 0; Chisel 1, IE 2, Quark 2, BoP 1, Storage Drawers 1 unchanged.
+  - mct errors 0.
+  - docs/gauntlet.md banked from this run.
+- **Ingame** 40241702990 on a1001cc: 18/18 pass, 0 content errors (`ingame-ae2` included). **CI** 40241522668 on a1001cc green. Fixture `tests/data/ae2spin` (AE2's placement classes cut down, javac 21) + `tests/test_facing_spin.py`.
+- **Rejected:**
+  - A Bedrock `spin` state set by nothing. Nothing in Bedrock sets it apart from placement: the wrench is a new interaction model.
+  - Holding every machine at its registered orientation (`facing` north, `spin` 0; pick 1b).
+  - Teaching the core interpreter a player pitch: no vanilla block reads one, and the 65-degree cut has no Bedrock trait in any case.
+  - A Bedrock z rotation in `minecraft:transformation` for the side spins: no placement gives them.
+- **Links:** #296, #277, #212, #215, #218, #383, #391, #87, PR #393.
+
 ## 2026-10-25 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #392): a blockstate the mod's code registers no block under is explained residue `unregistered_blockstate`
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). #296 sub-reason 1 (Chisel's 16), part of #277. No policy call: nothing shipped changes. #382 had already decided that blockstates for features Java never registers stay residue; this entry names that residue (an explained kind instead of "block has N blockstate variant(s)") and reads it from code instead of leaving it unexplained. No new interaction model.
