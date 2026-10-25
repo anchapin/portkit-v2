@@ -2,13 +2,15 @@
 
 A blockstate that draws placement states (``facing`` over the four
 horizontals, or ``axis``) and one more state whose values are not booleans
-(a hollow log's ``variant``: empty, moss, snow...) is read from the block's
-code: the value Java starts that state at (``getStateForPlacement`` on every
+(a hollow log's ``variant``: empty, moss, snow...), or that draws one enum
+state alone (a device's ``state``: idle, active...), is read from the
+block's code: the value Java starts that state at (``getStateForPlacement`` on every
 path, else the registered default state, as #215 item 2 reads a boolean's
 start) and the methods that change it later. When the start is read, the
 blockstate is held at it: only the variants at the start value are kept, the
 state is dropped from their keys, and what is left goes to the converters
-that read placement states alone (pillars, facing blocks). The other values'
+that read placement states alone (pillars, facing blocks), or, for an enum
+drawn alone, to the stateless block path. The other values'
 models are read and named in a note, not drawn (#215 item 6: everything the
 code changes after placement is static at the start value). Nothing is held
 at a value the code doesn't give (#87): an unread start leaves the
@@ -29,8 +31,8 @@ _PLACEMENT_OWNED = {"face", "type", "half", "shape", "hinge", "part"}
 
 def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
     """(state, values) when ``blockstate`` is a variants map over placement
-    states and exactly one non-boolean state, every combination named;
-    else None."""
+    states (none, for an enum whose values aren't numbers) and exactly one
+    non-boolean state, every combination named; else None."""
     variants = blockstate.get("variants")
     if not isinstance(variants, dict) or len(variants) < 2:
         return None
@@ -45,7 +47,12 @@ def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
         for a, b in cell.items():
             props.setdefault(a, set()).add(b)
     rest = [p for p in props if p not in PLACEMENT_STATES]
-    if len(rest) != 1 or rest[0] in _PLACEMENT_OWNED or len(props) < 2 or props[rest[0]] <= _BOOLS or len(props[rest[0]]) < 2:
+    if len(rest) != 1 or rest[0] in _PLACEMENT_OWNED or props[rest[0]] <= _BOOLS or len(props[rest[0]]) < 2:
+        return None
+    if len(props) == 1 and any(v.lstrip("-").isdigit() for v in props[rest[0]]):
+        # An enum drawn alone is held as it is beside a placement state; a
+        # number drawn alone (a crop's age, a pile's layers) is not: no
+        # approved rule holds a count at its start.
         return None
     if "facing" in props and not props["facing"] <= _CARDINALS:
         return None

@@ -170,6 +170,44 @@ def _random_note(name: str, entries: list) -> str:
     )
 
 
+def _undrawn_states(blockstate: dict) -> tuple[dict, list[str]] | None:
+    """(the blockstate as one stateless variant, its states) when it is a
+    ``variants`` map over named states, every combination named, and every
+    variant draws exactly the same entry (models, turns, weights): nothing
+    the states take is drawn. Else None (#296)."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or len(variants) < 2 or "" in variants:
+        return None
+    props: dict[str, set] = {}
+    cells = []
+    for key in variants:
+        pairs = [p.split("=", 1) for p in key.split(",") if p]
+        if not pairs or any(len(p) != 2 for p in pairs):
+            return None
+        cell = {a.strip(): b.strip() for a, b in pairs}
+        cells.append(cell)
+        for a, b in cell.items():
+            props.setdefault(a, set()).add(b)
+    if any(set(c) != set(props) for c in cells):
+        return None
+    combos = 1
+    for values in props.values():
+        combos *= len(values)
+    if combos != len(variants):
+        return None
+    entries = {json.dumps(v, sort_keys=True) for v in variants.values()}
+    if len(entries) != 1:
+        return None
+    entry = next(iter(variants.values()))
+    return {**blockstate, "variants": {"": entry}}, sorted(props)
+
+
+def _undrawn_note(name: str, states: list[str]) -> str:
+    return (f"{name}: every value of {', '.join(states)} draws the same model, so the block "
+            "converts with that one look and none of those states; what Java's code does "
+            "with them isn't ported")
+
+
 def _single_model(blockstate: dict) -> tuple[str | None, str]:
     """The one model a stateless block uses, or why it has more than one."""
     if "multipart" in blockstate:
@@ -1757,6 +1795,12 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             result.unhandled.append(Unhandled(rel, "block", flat_why[name]))
             continue
 
+        undrawn = _undrawn_states(blockstate)
+        if undrawn is not None:
+            # Every state draws the same look (#296): the block converts as
+            # the stateless one its look is; what the states do is code.
+            blockstate, states = undrawn
+            result.notes.append(_undrawn_note(name, states))
         model_ref, why = _single_model(blockstate)
         if model_ref is None:
             result.unhandled.append(Unhandled(rel, "block", why))
