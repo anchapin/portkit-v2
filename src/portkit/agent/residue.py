@@ -181,6 +181,12 @@ SKIP_KINDS = {
                   "is true, as for vanilla's air blocks): Java's world treats it as empty space, and what it "
                   "is for (models the mod's code draws, a light or marker its code places) is the mod's "
                   "code; a Bedrock block definition would ship a solid, placeable block instead"),
+    # #296: a blockstate the mod's code registers no block under (portkit.converters.blocks).
+    "unregistered_blockstate": ("the mod's code registers no block under the blockstate's name (an adapter "
+                                "read every registration path of the mod it knows of: a feature the Java "
+                                "source has commented out, a file left from an older version), so Java never "
+                                "loads it; there is no Java block to port, and a Bedrock block definition "
+                                "would add one"),
     # #352 (pending Alex): a shipped block a block-entity renderer also draws (count 0).
     "renderer_drawn_parts": ("the block shipped as its static blockstate model (Java's render shape is MODEL), "
                              "but a block-entity renderer of the jar also draws its block entity (moving parts "

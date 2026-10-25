@@ -1605,6 +1605,11 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     # Blocks the mod registers as air (Properties#air, #296): no block a
     # player sees or places in Java, so none in Bedrock either.
     air_blocks = _read_air(mod, stations or {}, loaded, shared)
+    # Blockstates the mod's code registers no block under (an adapter's
+    # block_registry hook, #296): Java never loads them.
+    from ..adapters import unregistered_blockstates
+    unregistered = unregistered_blockstates(
+        mod, [n for n in loaded if n not in (stations or {}) and n not in variation_sets and n not in air_blocks])
     # Blockstates whose bare variants the mod's code registers as blocks of
     # their own (an adapter's block_variations hook, #296), read above.
     variation_lang = variations.read_lang(mod) if variation_sets else {}
@@ -1635,6 +1640,9 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             for model_file in _model_chain_files(mod, _blockstate_models(loaded[name])):
                 result.claim(mod, model_file)
             result.unhandled.append(Unhandled(rel, AIR_BLOCK, _air_reason(air_blocks[name])))
+            continue
+        if name in unregistered:
+            result.unhandled.append(Unhandled(rel, UNREGISTERED_BLOCKSTATE, _unregistered_reason(unregistered[name])))
             continue
         drawn_read: list = []
         drawn_by_code = (None if name in (stations or {}) or name not in loaded
@@ -2711,6 +2719,22 @@ CODE_DRAWN = "code_drawn_block"
 # Bedrock block definition would ship a solid, placeable block. It is
 # explained residue, its models claimed with it.
 AIR_BLOCK = "air_block"
+
+# A blockstate no block of the mod is registered under (#296): an adapter's
+# ``block_registry`` hook read every registration path of the mod's code it
+# knows of and none registers a block by that name (a feature Java's source
+# has commented out, a leftover from an older version). Java never loads the
+# file, so there is no Java block to port; a Bedrock block would add one.
+# It is explained residue; its models are not claimed (they stay residue of
+# their own, as they were), so no count moves.
+UNREGISTERED_BLOCKSTATE = "unregistered_blockstate"
+
+
+def _unregistered_reason(where: str) -> str:
+    return ("the mod's code registers no block under this blockstate's name"
+            + (f" (read from {where})" if where else "")
+            + ", so Java never loads it and there is no Java block to port; a Bedrock block definition "
+            "would add a block the Java mod doesn't have")
 
 
 def _air_reason(cls: str) -> str:

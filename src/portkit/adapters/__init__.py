@@ -147,6 +147,19 @@ class VariationSet:
     source: str = ""
 
 
+@dataclass(frozen=True)
+class BlockRegistry:
+    """Every blockstate name the mod's code registers a block under (the
+    ``block_registry`` hook, #296), why the reading may have missed one
+    ("" when it read every registration path it knows of), and where it was
+    read. A blockstate is said to be one Java never loads only from a
+    reading with no ``why``."""
+
+    names: frozenset = frozenset()
+    why: str = ""
+    source: str = ""
+
+
 def _empty() -> Mapping:
     return MappingProxyType({})
 
@@ -185,6 +198,9 @@ class Adapter:
     # (SourceMod) -> {blockstate name: VariationSet} (#296), see the module
     # docstring.
     block_variations: Callable[["SourceMod"], Mapping[str, VariationSet]] | None = None
+    # (SourceMod) -> BlockRegistry, or None for a jar the adapter doesn't
+    # read (#296): the blockstate names the mod's code registers blocks under.
+    block_registry: Callable[["SourceMod"], "BlockRegistry | None"] | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -332,6 +348,21 @@ def block_variations(mod: "SourceMod") -> dict[str, VariationSet]:
             for name, vset in a.block_variations(mod).items():
                 found.setdefault(name, vset)
     return found
+
+
+def unregistered_blockstates(mod: "SourceMod", names) -> dict[str, str]:
+    """Blockstate name -> where the reading was made, for each of ``names``
+    the mod's code registers no block under: only when at least one adapter
+    reads ``mod``'s registrations and every adapter that does read them read
+    them completely (``BlockRegistry.why`` empty); a name any reading has is
+    registered. Empty otherwise (#87: never said from a partial reading)."""
+    found = [r for a in ADAPTERS if a.block_registry is not None
+             for r in [a.block_registry(mod)] if r is not None]
+    if not found or any(r.why for r in found):
+        return {}
+    known = frozenset().union(*(r.names for r in found))
+    where = "; ".join(dict.fromkeys(r.source for r in found if r.source))
+    return {n: where for n in names if n not in known}
 
 
 def station_hooks() -> list[StationHooks]:

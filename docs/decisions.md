@@ -27,6 +27,39 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-25 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #392): a blockstate the mod's code registers no block under is explained residue `unregistered_blockstate`
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). #296 sub-reason 1 (Chisel's 16), part of #277. No policy call: nothing shipped changes. #382 had already decided that blockstates for features Java never registers stay residue; this entry names that residue (an explained kind instead of "block has N blockstate variant(s)") and reads it from code instead of leaving it unexplained. No new interaction model.
+- **Root cause** (Chisel-MC1.12.2-1.0.2.45, CurseForge file 2915375, read with `portkit.bytecode`; source lines from Chisel-Team/Chisel branch 1.12/dev, the branch the adapter cites, which has no 1.0.2.45 tag). 15 of the 16 blockstates name no block Java registers:
+  - `ancient_stone`, `ender_pearl_block` and `leaves` sit in features commented out in `Features.java` (L108, L1263, L2078).
+  - `concrete` and `concrete_powder` are leftovers. `CONCRETE` registers `concrete_<colour>` folders (L939-993), and `Chisel.java` remaps both old names to vanilla's blocks on missing mappings (L124-127, L229).
+  - `thinwood-acacia`, `-birch`, `-dark`, `-jungle`, `-oak` and `-spruce`, plus `mazestone`, `mechanical2`, `marbleslab` and `testblock`, are named in no class of the jar (a byte search of `team/**`).
+  - The 16th, `auto_chisel`, is a real block: `BlockAutoChisel`, registered straight on the registry (`factory.getRegistry().register(new BlockAutoChisel().setRegistryName("auto_chisel"))`, L286-291). It is drawn with Forge's `forge:multi-layer` model (variants `normal`/`base`/`glass`) and stays generic `block` residue here.
+- **Decision (generic, no mod names in core):**
+  1. *Hook* (`adapters.BlockRegistry`, `Adapter.block_registry`, `adapters.unregistered_blockstates`). An adapter returns every blockstate name the mod's code registers a block under, and why its reading may have missed one. A name is unregistered only when at least one adapter reads the jar and every adapter that does read it read completely (`why` empty). A partial reading says nothing (#87).
+  2. *Convert* (`converters.blocks`, after `air_block`, stations and variation folders excluded). Such a blockstate becomes the new explained kind `unregistered_blockstate` (`agent.residue.SKIP_KINDS`). Its models are not claimed (they stay residue of their own, as before), so no count moves.
+  3. *Chisel adapter* (`adapters/chisel`). Every chain's folder is registered, whatever its block class or gate. So is every name registered straight on the factory's registry (`setRegistryName(String)` read on the block, then `register` on `getRegistry()`'s registry). The reading is incomplete, so nothing is claimed, when any of these hold:
+     - a feature's `addBlocks` or the enum's initializer can't be followed;
+     - a chain's folder isn't read;
+     - another call on the registry, or any other `register`/`registerAll`, isn't read;
+     - a class other than the features' enum handles `RegistryEvent.Register<Block>` (only `Features.loadBlocks` does, L3319-3335);
+     - a method calls `register` after reading `ForgeRegistries.BLOCKS` (the jar's 4 `ForgeRegistries.BLOCKS` users only call `getValue`);
+     - something calls `findRegistry` or `addGenericListener`;
+     - the factory's domain isn't the jar's namespace.
+     The reading runs once per conversion, cached between `block_variations` and `block_registry`.
+- **Lost for players:** nothing. These 15 blockstates never shipped and never load in Java. Chisel files and residue are unchanged; only the label and the explanation on 15 residue entries change.
+- **Byte diffs** (local `portkit convert --no-addon`, develop 51320e1 vs branch c9525f5 and 093c3d9, md5 of every file): Chisel 1.0.2.45 (gauntlet jar), 3734 files, only `unhandled.json` differs. Its 15 entries go from kind `block` ("block has N blockstate variant(s)") to `unregistered_blockstate`; `auto_chisel` and every other entry are unchanged. Files 3729, residue 1702, 68.7% before and after. Chisel isn't a real-mods row; real-mods (include_optional) 40236463053 on 093c3d9: 13/13 rows equal the baseline (compared by script), errors 0, no rebank; those rows were not byte-diffed.
+- **Gap-leaderboard** 40236467144 on 093c3d9 vs 40231391477: done 40/50 and mean 11.66% unchanged. Chisel 3731/1702, 68.67%, unchanged (still not done: `block`, `texture_animation` and `unowned` stay unexplained). `block` went from 10 mods/840 files to 10/825. The new `unregistered_blockstate` covers 1 mod, 15 files, explained. Sub-reason 1 by mod: Chisel 16 -> 1 (`auto_chisel`); AE2 5, IE 2, Quark 2, BoP 1 and Storage Drawers 1 unchanged. docs/gauntlet.md banked from this run.
+- **Ingame** 40236464870 on 093c3d9: 18/18 jobs pass (a content-log error fails a job), so 0 content errors.
+- **Tests:** the fixture `tests/data/chisel` gains `AUTOCHISEL` (`BlockAutoChisel` registered straight on the registry; javac 21 `--release 8`, `build.sh`) and the stubs `IForgeRegistry` and `Block#setRegistryName`. `tests/test_chisel_variations.py` checks that `ancient_stone` and `thinwood-oak` are `unregistered_blockstate`, that `auto_chisel` keeps its residue, the registry names, and that an incomplete reading (a domain other than the namespace, or no Chisel classes) claims nothing. Local: pytest 3341 passed (31 skipped); `portkit eval` at or above baseline (21/21); node 261/261. PR CI 40236438502 on 093c3d9 green (40236285702 on c9525f5 failed on the old `ancient_stone` expectation, fixed in 093c3d9).
+- **Rejected:**
+  - converting the 15 (they would be blocks Java doesn't have, #87, as #382 decided);
+  - keeping them unexplained `block`;
+  - claiming the 15 models as converted (it would inflate coverage);
+  - saying "unregistered" from a partial reading.
+- **Follow-up seen:** `auto_chisel` wants a `forge:multi-layer` reader (Forge's layered model: a solid `base` and a translucent `glass` layer in one block).
+- **Links:** #296, #277, #382, #387, #87, #220, PR #392.
+
 ## 2026-10-25 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #391): a boolean beside a pillar's `axis` is held at the start its code places on every clicked face; vanilla `RotatedPillarBlock` placement is read
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). #296 sub-reason 1 (Twilight Forest's 4 log cores), part of #277. Alex's 2026-10-25 brief asks for exactly this: a boolean the game changes during play, beside `axis` (set by the player on placement), held at its start, with the #389/#390 exclusions. No new interaction model: holding is #383 pick 1a and #215 item 6.
