@@ -22,6 +22,13 @@ when no ``half`` is beside it: the stairs reader draws ``shape`` only with
 ``half``. Booleans beside the enum (not named for a direction: those are
 connections, #221) are left in the blockstate for the boolean readers
 (#215, #384), which read their own starts.
+
+A number state (an ``IntegerProperty``: a bush's ``age``, a pile's
+``layers``) is held the same way, alone, beside placement states or beside
+booleans, and beside at most one enum; each is read and held in turn. The
+game changes such counts later (random-tick growth, a layer added on use),
+which Bedrock would need a script for, so the block stays at its code's
+start and the note names the values not drawn (#296, Alex 2026-10-25).
 """
 from __future__ import annotations
 
@@ -39,12 +46,17 @@ PLACEMENT_OWNED = {"face", "type", "half", "shape", "hinge", "part"}
 _PLACEMENT_OWNED = PLACEMENT_OWNED
 
 
-def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
-    """(state, values) when ``blockstate`` is a variants map over placement
-    states (none, for an enum whose values aren't numbers), exactly one
-    non-boolean state and any booleans not named for a direction (left to
-    the boolean readers once the enum is held), every combination named;
-    else None."""
+def _is_number(values) -> bool:
+    return all(v.lstrip("-").isdigit() for v in values)
+
+
+def held_props(blockstate: dict) -> tuple[tuple[str, tuple], ...] | None:
+    """The states to hold, in order, each as (state, values): every number
+    state (an ``IntegerProperty``: a crop's ``age``, a pile's ``layers``),
+    then at most one enum, when ``blockstate`` is a variants map over
+    placement states (``facing`` over the four horizontals, or ``axis``),
+    those and any booleans not named for a direction (left to the boolean
+    readers once the rest is held), every combination named; else None."""
     variants = blockstate.get("variants")
     if not isinstance(variants, dict) or len(variants) < 2:
         return None
@@ -66,22 +78,21 @@ def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
     # enum (a railing's short/tall/connected, set from its neighbours) is
     # held like any other enum.
     owned = _PLACEMENT_OWNED if "half" in props else _PLACEMENT_OWNED - {"shape"}
-    if len(enums) != 1 or enums[0] in owned or len(props[enums[0]]) < 2:
+    numbers = sorted(p for p in enums if _is_number(props[p]))
+    named = [p for p in enums if p not in numbers]
+    # Two enums: no approved rule holds both. Numbers are held beside one
+    # (#296, Alex 2026-10-25: a count the game changes later is held at
+    # the start its code sets, as #215 item 6 holds a boolean).
+    if not enums or len(named) > 1 or any(p in owned for p in enums) \
+            or any(len(props[p]) < 2 for p in enums):
         return None
     if any(f in _CONNECTIONS or f == "waterlogged" for f in flags):
         # A direction-named boolean is a connection (#221's multipart
         # reader); a held block keeps no water (#383 item 4).
         return None
-    alone = not any(p in PLACEMENT_STATES for p in props)
-    if alone and any(v.lstrip("-").isdigit() for v in props[enums[0]]):
-        # An enum drawn alone (or beside booleans the boolean readers take
-        # once it is held) is held as it is beside a placement state; a
-        # number drawn alone (a crop's age, a pile's layers) is not: no
-        # approved rule holds a count at its start.
-        return None
-    if len(props) == 1 and len({repr(v) for v in variants.values()}) == 1:
-        # Every value draws the same look: nothing to hold (the blocks
-        # converter takes it as that one look).
+    if (len(props) == 1 or numbers) and len({repr(v) for v in variants.values()}) == 1:
+        # Every combination draws the same look: nothing to hold (the
+        # blocks converter takes it as that one look).
         return None
     if "facing" in props and not props["facing"] <= _CARDINALS:
         return None
@@ -94,8 +105,15 @@ def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
         combos *= len(values)
     if combos != len(variants):
         return None
-    prop = enums[0]
-    return prop, tuple(sorted(props[prop]))
+    return tuple((p, tuple(sorted(props[p], key=int) if p in numbers else sorted(props[p])))
+                 for p in numbers + named)
+
+
+def held_prop(blockstate: dict) -> tuple[str, tuple] | None:
+    """(state, values) when ``blockstate`` holds exactly one state (see
+    :func:`held_props`); else None."""
+    found = held_props(blockstate)
+    return found[0] if found and len(found) == 1 else None
 
 
 def hold(blockstate: dict, prop: str, value: str) -> tuple[dict | None, list[str]]:
@@ -126,21 +144,27 @@ def hold(blockstate: dict, prop: str, value: str) -> tuple[dict | None, list[str
 
 
 def read(mod, loaded: dict, skip, shared=None) -> dict:
-    """{stem: (reading, values)} for every blockstate of ``loaded`` with a
-    held-state shape (``skip``: names another reader owns)."""
+    """{stem: [(reading, values), ...]} for every blockstate of ``loaded``
+    with a held-state shape (``skip``: names another reader owns), one
+    reading per state to hold, in :func:`held_props` order."""
     props = {}
     for stem, blockstate in loaded.items():
         if stem in skip:
             continue
-        found = held_prop(blockstate)
+        found = held_props(blockstate)
         if found is not None:
             props[stem] = found
     if not props:
         return {}
-    readings = blockcode.read_held_states(getattr(mod, "classes", None),
-                                          {n: p for n, (p, _) in props.items()},
-                                          run=shared() if shared else None)
-    return {n: (readings[n], props[n][1]) for n in props}
+    out: dict[str, list] = {n: [] for n in props}
+    run = shared() if shared else None
+    for k in range(max(len(f) for f in props.values())):
+        at = {n: f[k] for n, f in props.items() if k < len(f)}
+        readings = blockcode.read_held_states(getattr(mod, "classes", None),
+                                              {n: p for n, (p, _) in at.items()}, run=run)
+        for n, (_, values) in at.items():
+            out[n].append((readings[n], values))
+    return out
 
 
 def note(name: str, reading, values: tuple, passed_over: list[str]) -> str:

@@ -92,10 +92,11 @@ def test_stair_shape_and_connections_are_not_held():
     two = {"variants": {f"facing={f},mode={m},tone={t}": {"model": "m"}
                         for f in TURNS for m in ("a", "b") for t in ("c", "d")}}
     assert held_states.held_prop(two) is None
-    # A number beside booleans and no placement state is a count, not held.
-    pile = {"variants": {f"layers={n},lit={b}": {"model": "m"}
+    # A number beside booleans is held too (tests/test_held_numbers.py);
+    # the booleans go to #384's reader.
+    pile = {"variants": {f"layers={n},lit={b}": {"model": f"m{n}{b}"}
                          for n in range(1, 4) for b in ("false", "true")}}
-    assert held_states.held_prop(pile) is None
+    assert held_states.held_prop(pile) == ("layers", ("1", "2", "3"))
 
 
 @pytest.fixture()
