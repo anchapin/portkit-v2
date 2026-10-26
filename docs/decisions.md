@@ -27,6 +27,37 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-26 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #PRNUM): a block whose facing the mod sets after placement (Immersive Engineering's block entities) converts from that code, read from the jar
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). Part of #296 (sub-reason 1), part of #277. No policy call: nothing is approximated and no DEFAULT is added. A rule the adapter can't read in full stays a refusal with its reason.
+- **What was refused:** 17 IE blockstates were refused with "`IEBaseBlock#getStateForPlacement`: the player doesn't set facing". That is true as far as it goes: `IEBaseBlock#getStateForPlacement` (`common/blocks/IEBaseBlock.java` L210-215, tag 12.4.2-194) returns `defaultBlockState()` with `waterlogged` and nothing else. IE sets the facing once the block is in the world: `BlockItemIE#placeBlock` (L96-108) -> `IEEntityBlock#onIEBlockPlacedBy` (L189-211) -> the block entity's `IDirectionalBE#getFacingForPlacement` (`IEBlockInterfaces.java` L124-129: `getFacingLimitation().getDirectionForPlacement(context)`, turned round when `mirrorFacingOnPlacement(player)`) -> `IStateBasedDirectional#setFacing` (L170-175, `setValue(getFacingProperty(), facing)`).
+- **Decision:**
+  1. **Core (generic, no mod names; `blockcode.py`, `converters/blocks.py`, `adapters/__init__.py`):**
+     - The interpreter records which method's `new` made each object (`Obj._made_in`), and `DirReading.made_in` gives it for a registered block.
+     - `read_placed_direction` runs a mod method that takes a `BlockPlaceContext` and returns a `Direction`, once per clicked face. The context's player answers `getDirection` / `fromYRot(getYRot())` (the player's horizontal facing) and `Direction.orderedByNearest(player)[0]` (the nearest look direction). Anything else about the player is unknown, so a rule that hangs on it, such as sneaking, has no single answer and is refused.
+     - The `orientations` adapter hook gets a `sites=` question, asked only for facing-only and six-way facing blockstates refused with "doesn't set facing". An `Orientation.rule` from the adapter is then converted exactly as a rule read from `getStateForPlacement` (`minecraft:block_face`, plus `minecraft:cardinal_direction` / `minecraft:facing_direction` where the player decides). An adapter's reason is added to the refusal.
+  2. **Adapter (`adapters/immersiveengineering/`):** every step is read from the jar and checked against the form above (no tables, #220):
+     - the shared chain: `BlockItemIE#placeBlock`, no `BlockItemIE` subclass that moves or sets state, `IEEntityBlock#onIEBlockPlacedBy`, `IStateBasedDirectional#setFacing`;
+     - the block's own `getStateForPlacement`, `canIEBlockBePlaced` (true), `onIEBlockPlacedBy`, `setPlacedBy` and `onPlace`;
+     - which block entity the block makes: the one static type field its factory reads, the one block entity class whose constructor reads that field, and the registration that builds that class;
+     - that the block entity is an `IDirectionalBE` + `IStateBasedDirectional`, not `IAdvancedDirectionalBE` or `IHasDummyBlocks`, and that any `onBEPlaced` sets no state; its facing property must be `facing`;
+     - then the core runs its `getFacingForPlacement` per clicked face.
+- **Byte diff** (local `portkit convert --no-addon`, the gauntlet jar Immersive Engineering 1.21.1 12.4.2-194, develop e0501f8 vs branch 115ab65, every file compared):
+  - 27 files added, 0 removed, only `unhandled.json` changed (1387 -> 1371 entries).
+  - +11 `behavior_pack/blocks/*.json` and +11 `resource_pack/models/blocks/*.geo.json`: `connector_lv`, `connector_lv_relay`, `connector_mv`, `connector_mv_relay`, `connector_hv`, `connector_hv_relay`, `connector_bundled`, `redstone_switchboard`, `dynamo`, `electromagnet`, `machine_interface`.
+  - +5 recipes whose items are now in the pack: `dynamo`, `electromagnet`, `machine_interface`, `toolupgrade_powerpack_antenna`, `toolupgrade_shield_shock`. The 6 connector recipes are still residue, now for their own ingredients (the 18-item `connector_insulator` tag, a 2-item list).
+  - Checked against the bytecode of each block entity:
+    - Connectors: `SIDE_CLICKED` with `mirrorFacingOnPlacement` true, so facing is the opposite of the clicked face. Clicking a top face gives `facing=down`, its model unturned, with the box on the floor.
+    - `redstone_switchboard` and `machine_interface`: `HORIZONTAL_PREFER_SIDE`. A side face clicked gives its opposite; a top or bottom face gives `player.getDirection()`.
+    - `dynamo`: `HORIZONTAL`, mirrored (it faces the player).
+    - `electromagnet`: `PISTON_INVERTED` (`orderedByNearest[0].getOpposite()`), so Bedrock `facing_direction`.
+  - Still refused, 6 of the 17:
+    - `item_batcher` and `turntable` (`PISTON_LIKE`, turned round when the player sneaks; Bedrock placement can't see sneaking). They now name that.
+    - `furnace_heater` (`active`), `strip_curtain` (`ceiling_attached`), `turret_chem` and `turret_gun` (`multiblockslave`, and they are `IHasDummyBlocks`). These draw facing beside another state, a reader this PR doesn't extend. Follow-up.
+- **What players lose:** the 11 blocks place and look as in Java. Their block entities don't work, as with every converted block entity before: no wires or power on the connectors, no redstone routing on the switchboard, no dynamo power, no magnet pull, no machine-interface outputs, no menus. The Engineer's Hammer can't turn them after placement (`canHammerRotate`), because that is Java code.
+- **Rejected:** a table of IE block -> placement rule (#220). Calling every block entity's placement "piston-like" or "facing the player" (#87). Reading facing+X blockstates in this PR (a separate reader).
+- **Links:** #296, #277, PR #PRNUM.
+
 ## 2026-10-25 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #395): an OBJ block model (`neoforge:obj`/`forge:obj`) converts where its mesh is exactly boxes; Bedrock `poly_mesh` is not used
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). #296 follow-up from #394 (loader-only blockstates, 192 files in 4 mods), part of #277. No policy call: no new geometry kind (`poly_mesh` is rejected below), nothing is approximated, and a block that converts goes through the existing readers and hold rules unchanged. One judgment call is stated under Decision 2.
