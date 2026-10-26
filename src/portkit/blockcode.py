@@ -767,6 +767,19 @@ def _arg_count(desc: str) -> tuple[int, bool]:
     return n, desc[i + 1] != "V"
 
 
+def _param_types(desc: str) -> list[str]:
+    """Each argument's type descriptor in a method descriptor."""
+    out, i = [], 1
+    while desc[i] != ")":
+        j = i
+        while desc[j] == "[":
+            j += 1
+        j = desc.index(";", j) + 1 if desc[j] == "L" else j + 1
+        out.append(desc[i:j])
+        i = j
+    return out
+
+
 def _arg_kinds(desc: str) -> list[str]:
     """One descriptor letter per argument of ``desc`` (``L`` for any
     reference, ``[`` arrays included)."""
@@ -6232,6 +6245,145 @@ def read_placed_direction(classes: ClassIndex, cls: str, name: str, desc: str,
     finally:
         machine.player = False
     return rule, ""
+
+
+_LEVEL_SET_BLOCK = ("setBlockAndUpdate", "setBlock")
+_OWN_POS_FIELD = "worldPosition"  # BlockEntity#worldPosition
+_OWN_LEVEL_FIELD = "level"  # BlockEntity#level
+_BLOCK_ENTITY_CLS = "net/minecraft/world/level/block/entity/BlockEntity"
+
+
+class _OwnPos:
+    """The position of the block entity whose placement code is read
+    (``BlockEntity#worldPosition``, see read_placed_states)."""
+
+    def __repr__(self):
+        return "own pos"
+
+
+class _OwnLevel:
+    """The level of the block entity whose placement code is read."""
+
+    def __repr__(self):
+        return "own level"
+
+
+def _state_text(value) -> str | None:
+    """A block state value as a blockstate file writes it, or None."""
+    if isinstance(value, bool) or value in (0, 1) and isinstance(value, int):
+        return "true" if value else "false"
+    if isinstance(value, Dir):
+        return value.name
+    if isinstance(value, Const) and isinstance(value.name, str):
+        return value.name.lower()
+    return None
+
+
+def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, start: dict,
+                       machine: Machine | None = None) -> tuple[dict | None, str]:
+    """({clicked face: ((state, value), ...)}, "") for a method of the mod's
+    block entity class ``cls`` (slashed) that a mod calls once its block is
+    placed, with the clicked face as its first ``Direction`` argument (#296:
+    Immersive Engineering's ``onDirectionalPlacement``, read for an adapter
+    that checks how the mod calls it); or (None, why).
+
+    It runs once per clicked face on a new ``cls`` object whose constructor
+    isn't run. Its block state (``getBlockState``) is ``start`` (state name ->
+    blockstate value), and every block it sets through
+    ``Level#setBlockAndUpdate`` / ``Level#setBlock`` must be at its own
+    position (``worldPosition``) in its own level. The answer per face is the
+    states that differ from ``start`` in the last state it sets there (none
+    when it sets nothing). The player argument (a ``LivingEntity`` or
+    ``Player``) is the placing player; any other argument is unknown, so a
+    state set from it, or from anything but the clicked face, isn't one.
+    Every path must set the same states, and a call the run can't follow
+    (one that might set a block) stops the reading."""
+    machine = machine or Machine(classes)
+    where = f"{cls.replace('/', '.')}#{name}"
+    found = machine.find_method(cls, name, desc) or machine.default_method(cls, name, desc)
+    if found is None:
+        return None, f"{where} isn't found"
+    params = _param_types(desc)
+    face_at = next((k for k, t in enumerate(params) if t == "Lnet/minecraft/core/Direction;"), None)
+    if face_at is None:
+        return None, f"{where} takes no Direction"
+    players = {"Lnet/minecraft/world/entity/LivingEntity;", "Lnet/minecraft/world/entity/player/Player;"}
+    pos, level = _OwnPos(), _OwnLevel()
+    values = {}
+    for prop, text in start.items():
+        if text in ("true", "false"):
+            values[prop] = 1 if text == "true" else 0
+        elif text in DIRECTIONS:
+            values[prop] = Dir(text)
+        else:
+            return None, f"{prop}={text} isn't a start the reader holds"
+    start_state = State(tuple(sorted(values.items())))
+    out: dict = {}
+    saved_hook, saved_player = machine.call_hook, machine.player
+    current: dict = {}
+
+    def hook(owner, mname, mdesc, args, static):
+        recv = None if static or not args else args[0]
+        if recv is current.get("obj") and mname == "getBlockState" and mdesc.startswith("()"):
+            return [current["state"]]
+        if mname == "getLevel" and recv is current.get("obj") and mdesc.startswith("()"):
+            return [level]
+        if owner == "java/util/Objects" and mname == "requireNonNull" and static and args \
+                and (args[0] is level or args[0] is pos):
+            return [args[0]]
+        if mname in _LEVEL_SET_BLOCK and not static and (recv is level or isinstance(recv, (_OwnPos, _OwnLevel))
+                                                          or owner.startswith("net/minecraft/world/level/")):
+            if recv is not level or len(args) < 3 or args[1] is not pos or not isinstance(args[2], State):
+                current["why"] = "sets a block that isn't its own, or a state that isn't read"
+                return [0]
+            current["sets"].append(args[2])
+            current["state"] = args[2]
+            return [1]
+        return saved_hook(owner, mname, mdesc, args, static) if saved_hook is not None else None
+
+    machine.call_hook = hook
+    machine.player = True
+    try:
+        for c in DIRECTIONS:
+            obj = Obj(cls)
+            obj._uninit = False
+            obj._defaults = machine.is_mod(cls)
+            obj.fields[_OWN_POS_FIELD] = pos
+            obj.fields[_OWN_LEVEL_FIELD] = level
+            args = [obj] + [Dir(c) if k == face_at else PLAYER if t in players else UNKNOWN
+                            for k, t in enumerate(params)]
+            current.clear()
+            current.update(obj=obj, state=start_state, sets=[], why="")
+            havocs = len(machine.havocs)
+            machine.steps = 0
+            machine.new_epoch()
+            try:
+                machine.run(*found, args)
+            except Unreadable as exc:
+                return None, f"{where} can't be followed clicking the {c} face ({exc})"
+            if current["why"]:
+                return None, f"{where}, clicking the {c} face, {current['why']}"
+            if len(machine.havocs) > havocs:
+                return None, (f"{where}, clicking the {c} face, makes a call the reader can't follow "
+                              f"({machine.havocs[havocs]})")
+            sets = {s.values for s in current["sets"]}
+            if len(sets) > 1:
+                return None, f"{where}, clicking the {c} face, doesn't set one state on every path"
+            changed = []
+            if sets:
+                last = dict(current["sets"][-1].values)
+                for prop, value in sorted(last.items()):
+                    if prop in values and value == values[prop]:
+                        continue
+                    text = _state_text(value)
+                    if text is None or prop not in values:
+                        return None, (f"{where}, clicking the {c} face, sets {prop} to a value that isn't "
+                                      "read from the clicked face")
+                    changed.append((prop, text))
+            out[c] = tuple(changed)
+    finally:
+        machine.call_hook, machine.player = saved_hook, saved_player
+    return out, ""
 
 
 def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
