@@ -573,6 +573,15 @@ class Strm:
 
 
 @dataclass(frozen=True)
+class IntKeyOrder:
+    """A ``java.util.Comparator`` made by ``Comparator.comparingInt(keyFn)``
+    (Java SE 21): elements compare by the int ``keyFn.applyAsInt`` gives
+    each (#296: Immersive Engineering's ``DirectionUtils``)."""
+
+    key: object
+
+
+@dataclass(frozen=True)
 class Coll:
     """An immutable collection built from known elements (#280): Guava's
     ``ImmutableList.of`` / ``ImmutableSet.of`` and ``java.util.List.of`` /
@@ -3033,6 +3042,11 @@ class Machine:
             return self._player(name, recv, rest)
         if owner == _DIRECTION or isinstance(recv, (Dir, PlayerDir, LookDir)):
             return self._direction(name, recv, rest, static)
+        if isinstance(recv, Const) and recv.owner == _DIRECTION + "$Axis" and recv.name in ("X", "Y", "Z") \
+                and name in ("isHorizontal", "isVertical") and not rest:
+            # Direction.Axis#isHorizontal / #isVertical (MC 1.21.1): X and Z
+            # are horizontal, Y vertical.
+            return [int((recv.name != "Y") == (name == "isHorizontal"))]
         if isinstance(recv, _Ctx):
             if name == "getHorizontalDirection":
                 return [PlayerDir(0)]
@@ -3210,6 +3224,9 @@ class Machine:
             return [Strm(tuple(rest))]
         if owner == "java/util/Arrays" and static and name == "stream" and rest and isinstance(rest[0], Arr):
             return [Strm(tuple(rest[0].items))]
+        if owner == "java/util/Comparator" and static and name == "comparingInt" and len(rest) == 1 \
+                and desc == "(Ljava/util/function/ToIntFunction;)Ljava/util/Comparator;":
+            return [IntKeyOrder(rest[0])]
         if isinstance(recv, Strm) and name == "reduce":
             return self._reduce(recv, rest)
         if isinstance(recv, Strm):
@@ -4158,7 +4175,8 @@ class Machine:
 
     def _stream(self, strm: "Strm", name: str, desc: str, rest: list):
         """Sequential ``java.util.stream.Stream`` operations on known
-        elements (Java SE 21): ``filter``, ``map``, ``count``, ``toList``,
+        elements (Java SE 21): ``filter``, ``map``, ``sorted`` by a
+        ``Comparator.comparingInt`` order, ``count``, ``toList``,
         ``collect`` with ``Collectors.toList`` / ``toUnmodifiableList`` /
         ``toCollection``, ``anyMatch`` / ``allMatch`` / ``noneMatch``,
         ``findFirst``, ``forEach`` and ``toArray``, each in encounter order. Anything
@@ -4174,6 +4192,16 @@ class Machine:
             # One element out per element in (Stream#map, Java SE 21): an
             # element whose value isn't known is unknown, the count is not.
             return [Strm(tuple(UNKNOWN if isinstance(o, _Many) else o for o in out))]
+        if name == "sorted" and len(rest) == 1 and isinstance(rest[0], IntKeyOrder):
+            # Stream#sorted(comparator) on a sequential ordered stream is a
+            # stable sort (Java SE 21); with Comparator.comparingInt the
+            # order is Integer.compare of each element's key. A key that
+            # isn't one known int leaves the order unknown.
+            keys = [self._apply(rest[0].key, "applyAsInt", "(Ljava/lang/Object;)I", [i]) for i in items]
+            if not all(isinstance(k, int) and not isinstance(k, bool) for k in keys):
+                return [UNKNOWN]
+            return [Strm(tuple(i for _k, _n, i in sorted(zip(keys, range(len(items)), items),
+                                                         key=lambda t: (t[0], t[1]))))]
         if name == "count" and not rest:
             return [len(items)]
         if name == "toList" and not rest:
