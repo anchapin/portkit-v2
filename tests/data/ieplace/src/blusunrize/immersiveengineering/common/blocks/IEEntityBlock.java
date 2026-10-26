@@ -12,7 +12,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** IEEntityBlock cut down (L61-81, L188-211): the block entity sets facing after placement. */
+/** IEEntityBlock cut down (L61-82, L189-211): the block entity sets facing after placement. */
 public class IEEntityBlock<T extends BlockEntity> extends IEBaseBlock {
     private final BiFunction<BlockPos, BlockState, T> makeEntity;
 

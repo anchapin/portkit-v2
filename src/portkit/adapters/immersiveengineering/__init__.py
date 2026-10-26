@@ -3,19 +3,19 @@
 Immersive Engineering (BluSunrize/ImmersiveEngineering, tag ``12.4.2-194``,
 the gauntlet's 1.21.1 NeoForge jar) doesn't set a directional block's
 ``facing`` in ``getStateForPlacement``: ``IEBaseBlock#getStateForPlacement``
-(``common/blocks/IEBaseBlock.java`` L209-215) is ``defaultBlockState()`` with
+(``common/blocks/IEBaseBlock.java`` L210-215) is ``defaultBlockState()`` with
 ``waterlogged`` from the clicked position's fluid. The facing is set once the
 block is in the world:
 
-* ``BlockItemIE#placeBlock`` (``common/blocks/BlockItemIE.java`` L95-108):
+* ``BlockItemIE#placeBlock`` (``common/blocks/BlockItemIE.java`` L96-108):
   for an ``IEBaseBlock``, refuse unless ``canIEBlockBePlaced(state, context)``
   (``IEBaseBlock`` L141-144: true), then ``super.placeBlock`` (vanilla sets the
   block and makes its block entity), then ``onIEBlockPlacedBy(context,
   state)``. Every IE block's item is a ``BlockItemIE`` (``IEBlocks#init``
-  L851-874 registers each entry's item through a ``Function<Block,
+  L853-874 registers each entry's item through a ``Function<Block,
   BlockItemIE>``, ``BlockItemIE::new`` unless one of its subclasses).
 * ``IEEntityBlock#onIEBlockPlacedBy`` (``common/blocks/IEEntityBlock.java``
-  L188-211): when the block entity at the position is an ``IDirectionalBE``,
+  L189-211): when the block entity at the position is an ``IDirectionalBE``,
   ``setFacing(getFacingForPlacement(context))``; then an
   ``IAdvancedDirectionalBE`` is told the hit point, an ``IHasDummyBlocks``
   places its other blocks and an ``IPlacementInteraction`` runs ``onBEPlaced``.
@@ -24,7 +24,7 @@ block is in the world:
   when ``mirrorFacingOnPlacement(player)``; ``PlacementLimitation``
   (``common/blocks/PlacementLimitation.java``) is an enum of lambdas over the
   clicked face, the player and the point clicked.
-* ``IStateBasedDirectional#setFacing`` (L169-175):
+* ``IStateBasedDirectional#setFacing`` (L170-175):
   ``setState(getState().setValue(getFacingProperty(), facing))``.
 
 :func:`orientations` reads all of that from the jar, never from a table:
