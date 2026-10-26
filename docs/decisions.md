@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-26 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #PRNUM): a block whose facing the mod sets after placement (Immersive Engineering's block entities) converts from that code, read from the jar
+## 2026-10-26 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #396): a block whose facing the mod sets after placement (Immersive Engineering's block entities) converts from that code, read from the jar
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). Part of #296 (sub-reason 1), part of #277. No policy call: nothing is approximated and no DEFAULT is added. A rule the adapter can't read in full stays a refusal with its reason.
 - **What was refused:** 17 IE blockstates were refused with "`IEBaseBlock#getStateForPlacement`: the player doesn't set facing". That is true as far as it goes: `IEBaseBlock#getStateForPlacement` (`common/blocks/IEBaseBlock.java` L210-215, tag 12.4.2-194) returns `defaultBlockState()` with `waterlogged` and nothing else. IE sets the facing once the block is in the world: `BlockItemIE#placeBlock` (L96-108) -> `IEEntityBlock#onIEBlockPlacedBy` (L189-211) -> the block entity's `IDirectionalBE#getFacingForPlacement` (`IEBlockInterfaces.java` L124-129: `getFacingLimitation().getDirectionForPlacement(context)`, turned round when `mirrorFacingOnPlacement(player)`) -> `IStateBasedDirectional#setFacing` (L170-175, `setValue(getFacingProperty(), facing)`).
@@ -56,7 +56,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
     - `furnace_heater` (`active`), `strip_curtain` (`ceiling_attached`), `turret_chem` and `turret_gun` (`multiblockslave`, and they are `IHasDummyBlocks`). These draw facing beside another state, a reader this PR doesn't extend. Follow-up.
 - **What players lose:** the 11 blocks place and look as in Java. Their block entities don't work, as with every converted block entity before: no wires or power on the connectors, no redstone routing on the switchboard, no dynamo power, no magnet pull, no machine-interface outputs, no menus. The Engineer's Hammer can't turn them after placement (`canHammerRotate`), because that is Java code.
 - **Rejected:** a table of IE block -> placement rule (#220). Calling every block entity's placement "piston-like" or "facing the player" (#87). Reading facing+X blockstates in this PR (a separate reader).
-- **Links:** #296, #277, PR #PRNUM.
+- **Links:** #296, #277, PR #396.
 
 ## 2026-10-25 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #395): an OBJ block model (`neoforge:obj`/`forge:obj`) converts where its mesh is exactly boxes; Bedrock `poly_mesh` is not used
 
