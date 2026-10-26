@@ -3224,6 +3224,10 @@ class Machine:
             return [Strm(tuple(rest))]
         if owner == "java/util/Arrays" and static and name == "stream" and rest and isinstance(rest[0], Arr):
             return [Strm(tuple(rest[0].items))]
+        if owner == "com/mojang/math/Transformation" and static and name == "identity" and not rest:
+            # Transformation#identity() (MC 1.21.1): the one shared identity
+            # transformation (a memoized IDENTITY).
+            return [Const(owner, "IDENTITY")]
         if owner == "java/util/Comparator" and static and name == "comparingInt" and len(rest) == 1 \
                 and desc == "(Ljava/util/function/ToIntFunction;)Ljava/util/Comparator;":
             return [IntKeyOrder(rest[0])]
@@ -3492,6 +3496,9 @@ class Machine:
                 return [recv.turned(3)]
             if name == "get2DDataValue":
                 return [{"south": 0, "west": 1, "north": 2, "east": 3}.get(recv.name, -1)]
+            if name == "name" and not rest:
+                # Enum#name: the constant's name (DOWN, UP, NORTH, ...).
+                return [recv.name.upper()]
             if name == "equals" and len(rest) == 1:
                 # Direction is an enum: equals is identity.
                 other = rest[0]
@@ -4089,6 +4096,11 @@ class Machine:
                 return [int(not recv.items)]
             if name == "get" and len(rest) == 1 and isinstance(rest[0], int) and not isinstance(rest[0], bool):
                 return [recv.items[rest[0]]] if 0 <= rest[0] < len(recv.items) else []
+            if name == "contains" and len(rest) == 1:
+                # Collection#contains(o): some element e with o.equals(e)
+                # (Java SE 21; #296: IE's VisibilityList#isVisible).
+                verdicts = [_equals_known(rest[0], e) for e in recv.items]
+                return [UNKNOWN] if None in verdicts else [int(any(verdicts))]
             return _NOT_HANDLED
         if not isinstance(recv, ListV) or static:
             return _NOT_HANDLED
@@ -4562,6 +4574,20 @@ def _hashable(v) -> bool:
     except TypeError:
         return False
     return True
+
+
+def _equals_known(a, b):
+    """``a.equals(b)`` where both are Strings, ints or enum constants (a
+    String equals only a String of the same characters, an enum constant
+    only itself), else None."""
+    kinds = (str, Dir, Const)
+    if isinstance(a, bool) or isinstance(b, bool):
+        return None
+    if not (isinstance(a, (*kinds, int)) and isinstance(b, (*kinds, int))):
+        return None
+    if isinstance(a, int) != isinstance(b, int):
+        return None  # a boxed number against another type isn't modelled
+    return type(a) is type(b) and a == b
 
 
 def _same(a, b):
@@ -6450,6 +6476,161 @@ def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, star
     finally:
         machine.call_hook, machine.player = saved_hook, saved_player
     return out, ""
+
+
+# -- a key read from a block entity placed alone (#296) ------------------------
+
+# BlockEntityType.BlockEntitySupplier#create(BlockPos, BlockState): the
+# constructor a block entity type builds its block entity with (MC 1.21.1).
+_BE_CTOR_DESC = "(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)V"
+_GET_BLOCK_ENTITY = ("getBlockEntity", "(Lnet/minecraft/core/BlockPos;)Lnet/minecraft/world/level/block/entity/BlockEntity;")
+# BlockPos moves (Vec3i/BlockPos, MC 1.21.1, Mojang names): a step of one
+# block, or ``relative(direction)``, ``offset(dx, dy, dz)``.
+_POS_STEPS = {"above": (0, 1, 0), "below": (0, -1, 0), "north": (0, 0, -1), "south": (0, 0, 1),
+              "west": (-1, 0, 0), "east": (1, 0, 0)}
+_DIR_STEPS = {"down": (0, -1, 0), "up": (0, 1, 0), "north": (0, 0, -1), "south": (0, 0, 1),
+              "west": (-1, 0, 0), "east": (1, 0, 0)}
+
+
+@dataclass(frozen=True)
+class _Near:
+    """A position given as its offset from the block entity's own
+    (``worldPosition``) while :func:`read_key_alone` runs."""
+
+    dx: int = 0
+    dy: int = 0
+    dz: int = 0
+
+    def moved(self, d) -> "_Near":
+        return _Near(self.dx + d[0], self.dy + d[1], self.dz + d[2])
+
+
+class _AloneLevel:
+    """The level of the block entity :func:`read_key_alone` reads: no other
+    block entity is in it."""
+
+    def __repr__(self):
+        return "level with nothing beside the block"
+
+
+def read_key_alone(classes: ClassIndex, be_cls: str, fn_cls: str, key: tuple[str, str],
+                   then: tuple[str, str] | None = None,
+                   machine: Machine | None = None) -> tuple[list | None, str]:
+    """(values, "") or (None, why): a function of the mod's class ``fn_cls``
+    (slashed) that reads a key from a placed block, ``key`` = (name, desc)
+    taking ``(level, pos, state, blockEntity)`` (the shape a model loader's
+    callback reads its key with), run on the block entity of the mod's
+    class ``be_cls`` as it stands once placed with nothing beside it; then,
+    when ``then`` = (name, desc) is given, that method of ``fn_cls`` on each
+    key. The values are one per way the run takes (the answers of ``then``,
+    or the keys): the block state is unknown, so a branch on it is two
+    ways, and a caller takes the answer only when every way agrees.
+
+    The block entity is a new object whose ``(BlockPos, BlockState)``
+    constructor (``BlockEntityType.BlockEntitySupplier#create``, what the
+    type builds it with) runs to the end; its ``worldPosition`` and
+    ``level`` are its own position and a level in which no other block
+    entity is: ``Level#getBlockEntity`` answers it at its own position and
+    null at any other (a position reached by ``relative`` / ``offset`` /
+    ``above`` ... from its own). Its block state is unknown, so an answer
+    that depends on it isn't one; so is any other question asked of the
+    level. The ``fn_cls`` object is a new one whose constructor isn't run.
+    No value may be unknown, and no call may be one the machine can't
+    follow."""
+    machine = machine or Machine(classes)
+    where_be = be_cls.replace("/", ".")
+    ctor = machine.find_method(be_cls, "<init>", _BE_CTOR_DESC)
+    if ctor is None or ctor[0].name != be_cls:
+        return None, f"{where_be} has no (BlockPos, BlockState) constructor of its own"
+    found = machine.find_method(fn_cls, *key) or machine.default_method(fn_cls, *key)
+    if found is None:
+        return None, f"{fn_cls.replace('/', '.')}#{key[0]} isn't found"
+    pos, level = _Near(), _AloneLevel()
+    be = machine._new(be_cls)
+    be.fields[_OWN_POS_FIELD] = pos
+    current = {"why": ""}
+    saved_hook = machine.call_hook
+
+    def hook(owner, mname, mdesc, args, static):
+        recv = None if static or not args else args[0]
+        rest = args if static else args[1:]
+        if recv is be and not rest and mname in ("getBlockPos", "getLevel", "hasLevel", "getBlockState"):
+            # BlockEntity#getBlockPos / #getLevel / #hasLevel /
+            # #getBlockState: its own fields (the state isn't known).
+            return [{"getBlockPos": pos, "getLevel": level, "hasLevel": 1}.get(mname, UNKNOWN)]
+        if owner == "java/util/Objects" and mname == "requireNonNull" and static and args \
+                and isinstance(args[0], (_Near, _AloneLevel)):
+            return [args[0]]
+        if isinstance(recv, _Near):
+            if mname in _POS_STEPS and not rest:
+                return [recv.moved(_POS_STEPS[mname])]
+            if mname == "relative" and len(rest) == 1 and isinstance(rest[0], Dir):
+                return [recv.moved(_DIR_STEPS[rest[0].name])]
+            if mname == "offset" and len(rest) == 3 and all(isinstance(v, int) and not isinstance(v, bool)
+                                                             for v in rest):
+                return [recv.moved(tuple(rest))]
+            if mname == "immutable" and not rest:
+                return [recv]
+            current["why"] = current["why"] or f"moves its position with BlockPos#{mname}, which isn't read"
+            return [UNKNOWN]
+        if recv is level:
+            if (mname, mdesc) == _GET_BLOCK_ENTITY and len(rest) == 1 and isinstance(rest[0], _Near):
+                return [be if rest[0] == _Near() else None]
+            current["why"] = current["why"] or f"asks the level {mname}, which isn't read"
+            return [UNKNOWN]
+        return saved_hook(owner, mname, mdesc, args, static) if saved_hook is not None else None
+
+    machine.call_hook = hook
+    try:
+        machine.steps = 0
+        machine.new_epoch()
+        havocs = len(machine.havocs)
+        try:
+            machine.run(*ctor, [be, pos, UNKNOWN])
+        except Unreadable as exc:
+            return None, f"{where_be}'s constructor can't be followed ({exc})"
+        be._uninit = False
+        if len(machine.havocs) > havocs or "__partial" in be.fields:
+            return None, f"{where_be}'s constructor makes a call the reader can't follow"
+        be.fields[_OWN_POS_FIELD] = pos
+        be.fields[_OWN_LEVEL_FIELD] = level
+        fn = Obj(fn_cls)
+        fn._uninit = False
+        where = f"{found[0].name.replace('/', '.')}#{found[1].name}"
+        keys, why = _run_alone(machine, found, [fn, level, pos, UNKNOWN, be], where, current, havocs)
+        if keys is None:
+            return None, why
+        if then is None:
+            return keys, ""
+        method = machine.find_method(fn_cls, *then) or machine.default_method(fn_cls, *then)
+        if method is None:
+            return None, f"{fn_cls.replace('/', '.')}#{then[0]} isn't found"
+        where = f"{method[0].name.replace('/', '.')}#{method[1].name}"
+        values: list = []
+        for k in keys:
+            got, why = _run_alone(machine, method, [fn, k], where, current, havocs)
+            if got is None:
+                return None, why
+            values += got
+        return values, ""
+    finally:
+        machine.call_hook = saved_hook
+
+
+def _run_alone(machine: Machine, method, args: list, where: str, current: dict, havocs: int):
+    """(results, "") of one run :func:`read_key_alone` makes, or (None, why)."""
+    machine.steps = 0
+    try:
+        results = machine.run(*method, args)
+    except Unreadable as exc:
+        return None, f"{where} can't be followed ({exc})"
+    if current["why"]:
+        return None, f"{where} {current['why']}"
+    if len(machine.havocs) > havocs:
+        return None, f"{where} makes a call the reader can't follow ({machine.havocs[havocs]})"
+    if not results or any(r is UNKNOWN for r in results):
+        return None, f"{where} doesn't give a value the placed block entity fixes"
+    return results, ""
 
 
 def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:

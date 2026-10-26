@@ -119,6 +119,111 @@ def _overrides(classes, cls: str) -> list[str]:
     return [n for n in _DRAWING if n in names]
 
 
+_BLOCK_CALLBACK_KEY = ("extractKey", "(Lnet/minecraft/world/level/BlockAndTintGetter;Lnet/minecraft/core/BlockPos;"
+                       "Lnet/minecraft/world/level/block/state/BlockState;"
+                       "Lnet/minecraft/world/level/block/entity/BlockEntity;)Ljava/lang/Object;")
+_API = "blusunrize/immersiveengineering/api/"
+_OBJ_STATE = _API + "IEProperties$IEObjState"
+_VISIBILITY = _API + "IEProperties$VisibilityList"
+_GET_STATE = ("getIEOBJState", f"(Ljava/lang/Object;)L{_OBJ_STATE};")
+_NEW_BE = ("newBlockEntity", "(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)"
+           "Lnet/minecraft/world/level/block/entity/BlockEntity;")
+_IDENTITY = ("com/mojang/math/Transformation", "IDENTITY")
+_ALONE: dict = {}  # (id(class index), blockstate name, callback) -> (index, answer)
+
+
+def _placed_alone(mod, classes, cb: str, names: list[str]) -> tuple[dict | None, str]:
+    """({group: shown}, "") for the block being converted
+    (``models.BLOCK_DRAWN``) under callback class ``cb``, or (None, why).
+
+    ``GeneralIEOBJModel#getModelData`` keys the model with ``cb``'s
+    ``extractKey(level, pos, state, blockEntity)``; here that runs on the
+    block's block entity as it stands once placed with nothing beside it
+    (:func:`portkit.blockcode.read_key_alone`), then ``getIEOBJState`` on
+    the key, and each group is drawn when the state's
+    ``visibility().isVisible(group)`` (``SpecificIEOBJModel#addQuadsForGroup``)
+    is true. Its ``transform()`` must be ``Transformation.identity()``. The
+    block entity is the one the block's ``IEEntityBlock#newBlockEntity``
+    makes: the type the code that made the block reads, as the facing
+    reader finds it (``_type_field`` / ``_entity_of``). Every way the run
+    takes (the block state isn't known) must show the same groups."""
+    from portkit.converters import models
+    drawn = models.BLOCK_DRAWN.get()
+    if drawn is None:
+        return None, "no placed block is being drawn"
+    block, shared = drawn
+    key = (id(classes), block, cb)
+    held = _ALONE.get(key)
+    if held is not None and held[0] is classes:
+        return held[1]
+    got = _read_alone(classes, block, shared, cb, names)
+    if len(_ALONE) > 4096 or any(v[0] is not classes for v in _ALONE.values()):
+        _ALONE.clear()
+    _ALONE[key] = (classes, got)
+    return got
+
+
+_ENTITY_MEMO: list = [None, {}]  # [class index, _entity_of memo for it]
+
+
+def _entity_memo(classes) -> dict:
+    if _ENTITY_MEMO[0] is not classes:
+        _ENTITY_MEMO[:] = [classes, {}]
+    return _ENTITY_MEMO[1]
+
+
+def _read_alone(classes, block: str, shared, cb: str, names: list[str]) -> tuple[dict | None, str]:
+    from portkit import blockcode
+    from . import _ENTITY_BLOCK, _chain, _declaring, _entity_of, _type_field
+    run = shared() if callable(shared) else shared
+    if run is None or block not in run[1]:
+        return None, f"the block {block} isn't found registered"
+    objs, why = run[1][block]
+    if not objs:
+        return None, f"the block {block}: {why}"
+    if len({o.cls for o in objs}) != 1 or len({getattr(o, "_made_in", None) for o in objs}) != 1:
+        return None, f"the block {block} is registered as more than one block"
+    cls, site = objs[0].cls, getattr(objs[0], "_made_in", None)
+    if _ENTITY_BLOCK not in _chain(classes, cls):
+        return None, f"{cls.replace('/', '.')} isn't an IEEntityBlock, so its block entity isn't read"
+    cf, _m = _declaring(classes, cls, *_NEW_BE)
+    if cf is None or cf.name != _ENTITY_BLOCK:
+        return None, f"{cls.replace('/', '.')}'s newBlockEntity isn't IEEntityBlock's"
+    field, why = _type_field(classes, site, cls)
+    if field is None:
+        return None, why
+    be, why = _entity_of(classes, field, _entity_memo(classes))
+    if be is None:
+        return None, why
+    machine = blockcode.Machine(classes)
+    states, why = blockcode.read_key_alone(classes, be, cb, _BLOCK_CALLBACK_KEY, _GET_STATE, machine=machine)
+    if states is None:
+        return None, f"its key from {_short(be)} placed alone isn't read: {why}"
+    shown: dict | None = None
+    for state in states:
+        if not isinstance(state, blockcode.Obj) or state.cls != _OBJ_STATE:
+            return None, f"{_short(cb)}#getIEOBJState doesn't give an IEObjState that is read"
+        try:
+            transform = machine.call(_OBJ_STATE, "transform", "()Lcom/mojang/math/Transformation;", [state])
+            vis = machine.call(_OBJ_STATE, "visibility", f"()L{_VISIBILITY};", [state])
+            if transform != [blockcode.Const(*_IDENTITY)]:
+                return None, f"{_short(cb)}#getIEOBJState turns the model (its transform isn't the identity)"
+            if len(vis) != 1 or not isinstance(vis[0], blockcode.Obj) or vis[0].cls != _VISIBILITY:
+                return None, f"{_short(cb)}#getIEOBJState doesn't give one VisibilityList that is read"
+            these = {}
+            for n in names:
+                verdict = machine.call(_VISIBILITY, "isVisible", "(Ljava/lang/String;)Z", [vis[0], n])
+                if verdict not in ([0], [1]):
+                    return None, f"whether {_short(cb)} shows the group {n!r} isn't read"
+                these[n] = bool(verdict[0])
+        except blockcode.Unreadable as exc:
+            return None, f"{_short(cb)}'s IEObjState can't be read ({exc})"
+        if shown is not None and these != shown:
+            return None, f"what {_short(cb)} shows depends on the block's state, which isn't known"
+        shown = these
+    return shown, ""
+
+
 def _tokens(text: str):
     """OBJModel#getRelevantLines: (key, tokens) per line that isn't empty or
     a comment."""
@@ -238,10 +343,19 @@ def read(mod, model: dict) -> tuple[dict | None, list, str]:
             blocker = f"its callback {name!r} isn't found registered in the jar (IEOBJCallbacks.register)"
         elif cls != _DEFAULT:
             drawn = _overrides(classes, cls)
+            alone_why = ""
+            if drawn == ["getIEOBJState"]:
+                # Only which groups show is the callback's: read with the
+                # key of the block entity as placed with nothing beside it.
+                visible, alone_why = _placed_alone(mod, classes, cls, [g.name for g in groups])
+                if visible is not None:
+                    groups = [g for g in groups if visible[g.name]]
+                    drawn = []
             if drawn:
                 blocker = (f"its callback {name} ({_short(cls)}) overrides {', '.join(drawn)} "
                            "(IEOBJCallback): Java code IE's model runs, with the key its extractKey "
-                           "reads from the placed block, to decide what it draws, which isn't run")
+                           "reads from the placed block, to decide what it draws, which isn't run"
+                           + (f" ({alone_why})" if alone_why else ""))
     if not blocker and model.get("dynamic", False) is not False:
         blocker = f"it sets dynamic {model.get('dynamic')!r}, which isn't read"
     if not blocker and model.get("layers") is not None:

@@ -1626,10 +1626,12 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     coded_bool: list[dict] = []
     render_types: dict[str, set] = {}
     outer = models.RENDER_TYPES_SEEN.set(None)
+    outer_block = models.BLOCK_DRAWN.set(None)
     for path in sorted(src.glob("*.json")):
         rel = result.claim(mod, path)
         name = path.stem
         models.RENDER_TYPES_SEEN.set(render_types.setdefault(name, set()))
+        models.BLOCK_DRAWN.set((name, shared))
         try:
             json.loads(path.read_text())
         except json.JSONDecodeError as exc:
@@ -1860,6 +1862,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             mod.namespace, name, identifier, instances or {}
         )
     models.RENDER_TYPES_SEEN.reset(outer)
+    models.BLOCK_DRAWN.reset(outer_block)
     held_notes = _held_claims(mod, result, held)
     _one_render_method(result, render_types)
     _flag_renderer_parts(mod, result, render)

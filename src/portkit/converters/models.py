@@ -225,6 +225,15 @@ RENDER_TYPES_SEEN: contextvars.ContextVar[set | None] = contextvars.ContextVar(
     "render_types_seen", default=None)
 
 
+# The blockstate a model is drawn for (#296): while a block converts,
+# blocks.py holds (its blockstate name, a callable giving the converter's
+# shared registration run, ``blockcode._registered``'s (machine, {name:
+# (block objects, why)}) or None) here, for a model loader whose drawing
+# depends on the placed block (an adapter's, ``Adapter.model_loaders``).
+# None outside a block's conversion: such a loader then gives its reason.
+BLOCK_DRAWN: contextvars.ContextVar[tuple | None] = contextvars.ContextVar("block_drawn", default=None)
+
+
 def _note_render_type(render_type: str | None) -> None:
     seen = RENDER_TYPES_SEEN.get()
     if seen is not None:
