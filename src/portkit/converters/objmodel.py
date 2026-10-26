@@ -172,7 +172,7 @@ def _parse(mod: SourceMod, obj: Path, folder: str, mtl_override: str | None, fil
     tex: list = []
     nor: list = []
     col: list = []
-    parts: dict[str, _Part] = {}
+    parts: list[_Part] = []  # ObjModel#parts: a multimap, so a repeated name is another part
     mtllib: dict = {}
     if mtl_override is not None:
         path, why = _resource(mod, mtl_override, folder)
@@ -213,7 +213,8 @@ def _parse(mod: SourceMod, obj: Path, folder: str, mtl_override: str | None, fil
                 col.append(_vec(line, 4))
             elif key == "f":
                 if target is None:
-                    group = target = parts.setdefault("", _Part(""))
+                    group = target = _Part("")
+                    parts.append(group)
                 face = []
                 for token in line[1:]:
                     idx = [int(n) if n else 0 for n in token.split("/")]
@@ -229,18 +230,18 @@ def _parse(mod: SourceMod, obj: Path, folder: str, mtl_override: str | None, fil
                     group.children.append(target)
                 else:
                     group = target = _Part(line[1])
-                    parts[line[1]] = group
+                    parts.append(group)
             elif key == "o":
                 if obj_above or group is None:
                     obj_above = True
                     group = target = _Part(line[1])
-                    parts[line[1]] = group
+                    parts.append(group)
                 else:
                     target = _Part(f"{group.name}/{line[1]}")
                     group.children.append(target)
     except (ValueError, IndexError, UnicodeDecodeError, ZeroDivisionError) as exc:
         return None, f"{obj.name} can't be read ({exc})"
-    return (list(parts.values()), pos, tex, nor, col), ""
+    return (parts, pos, tex, nor, col), ""
 
 
 def _pieces(faces: list, pos: list) -> list[list]:
@@ -282,6 +283,7 @@ def _nearest(n) -> str | None:
 
 
 def _tidy(value: float):
+    """Positions and uvs to 1e-5 of a pixel (Java reads the file as floats)."""
     value = round(value, 5)
     return int(value) if value == int(value) else value
 
@@ -337,10 +339,17 @@ def _box(piece: list, pos, tex, nor, flip_v: bool, cull: bool) -> tuple[dict | N
             return None, "a face lies inside the piece's bounds instead of covering one side corner to corner"
         computed = _cross(_sub(ps[1], ps[0]), _sub(ps[2], ps[0]))
         wound = _nearest(computed)
-        given = all(len(v) >= 3 for v in verts) and nor
-        if given and not 0 <= verts[0][2] < len(nor):
+        given = all(len(v) >= 3 for v in verts)
+        if given and not all(0 <= v[2] < len(nor) for v in verts):
+            # makeQuad would bake a zero normal (or fail): not read.
             return None, "a face names a normal the file doesn't have"
         side = _nearest(nor[verts[0][2]]) if given else wound
+        if given and side is not None and any(
+                _nearest(nor[v[2]]) != side or any(abs(c) > _EPS for c in _cross(nor[v[2]], models._FACE_NORMAL[side]))
+                for v in verts):
+            # Lit per vertex: only normals straight out of the side light it
+            # as a box face is lit.
+            return None, "a face's normals don't all point straight out of its side"
         outward = (_NEGATIVE[axis] if value == lo[axis] and lo[axis] != hi[axis] else
                    _POSITIVE[axis] if value == hi[axis] and lo[axis] != hi[axis] else None)
         if wound is None or wound != side or _AXIS_OF[wound] != axis or (outward and wound != outward):
