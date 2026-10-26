@@ -1615,7 +1615,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     variation_lang = variations.read_lang(mod) if variation_sets else {}
     variation_terrain = variations.terrain_keys(mod) if variation_sets else frozenset()
     variation_records: list[dict] = []
-    dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared)
+    dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared, coded=readings)
     paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded, shared)
     paired_records: list[dict] = []
     directional: list[dict] = []
@@ -4535,7 +4535,7 @@ def _key_label(key: tuple, kind: str = "", second: str | None = None) -> str:
     return f"face={key[0]},{prop}={key[1]}" if key[0] else f"{prop}={key[1]}"
 
 
-def _directional_variants(blockstate: dict) -> tuple[str | None, dict | None, str]:
+def _directional_variants(blockstate: dict, coded_ok: bool = False) -> tuple[str | None, dict | None, str]:
     """(kind, {(face, facing): (model, x, y, uvlock)}, "") for a 6-way facing
     or attach-face variants blockstate; (None, None, why) when it is one but
     not in a form read here; (None, None, "") when it isn't."""
@@ -4554,7 +4554,7 @@ def _directional_variants(blockstate: dict) -> tuple[str | None, dict | None, st
     if set(props) == {"facing"} and props["facing"] == set(_SIX):
         kind = "facing6"
     elif set(props) == {"facing"} and len(props["facing"]) >= 2 and props["facing"] < set(_SIX) \
-            and _coded_facing_variants(blockstate)[0] is None:
+            and (coded_ok or _coded_facing_variants(blockstate)[0] is None):
         # #296: facing over some of the six directions, one model per value
         # (the four horizontals turning one model are the facing-only path).
         kind = "facing"
@@ -4714,7 +4714,7 @@ def _directional_bool_variants(blockstate: dict) -> tuple[str | None, tuple, dic
 
 
 def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
-                           shared: "_SharedRun | None" = None) -> tuple[dict, dict]:
+                           shared: "_SharedRun | None" = None, coded: dict | None = None) -> tuple[dict, dict]:
     specs, why, bool_specs, spin_specs = {}, {}, {}, {}
     for stem, blockstate in loaded.items():
         if stem in stations:
@@ -4743,6 +4743,7 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
         _adapter_rules(mod, readings)
         out.update({n: (specs[n][0], {(k, ()): v for k, v in specs[n][1].items()}, readings[n], ())
                     for n in specs})
+    _read_set_after_placement(mod, loaded, coded or {}, shared, out, why)
     if bool_specs:
         # On the shared run over every blockstate (#280: BetterEnd's wood
         # buttons, built by a library's material set, weren't reached by a
@@ -4764,6 +4765,36 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
 # getStateForPlacement is. Only the "doesn't set facing" refusal is asked
 # about: a rule the core read, or one it couldn't follow for another reason,
 # is never replaced.
+
+
+def _read_set_after_placement(mod: SourceMod, loaded: dict, coded: dict, shared, out: dict, why: dict) -> None:
+    """The facing-only blockstates (four horizontals turning one model, read
+    by read_blocks into ``coded``) refused because getStateForPlacement
+    doesn't set facing: when an adapter reads the mod's placement after the
+    block is set, they convert as ``facing`` blocks with that rule (it may
+    follow the clicked face, which the facing-only path's player-facing
+    trait can't give); when it can't, its reason joins theirs."""
+    from ..adapters import reads_orientations
+    asked = {n: r for n, r in coded.items() if n in loaded and r.placement_conflict
+             and "doesn't set facing" in r.placement_conflict}
+    if not asked or not reads_orientations(mod):
+        return
+    specs = {}
+    for name in asked:
+        kind, cells, _ = _directional_variants(loaded[name], coded_ok=True)
+        if kind == "facing":
+            specs[name] = cells
+    if not specs:
+        return
+    readings = blockcode.read_directional(getattr(mod, "classes", None), {n: "facing" for n in specs},
+                                          run=shared() if shared else None,
+                                          facings={n: _facings_of(c) for n, c in specs.items()})
+    _adapter_rules(mod, readings)
+    for name, r in readings.items():
+        if r.rule is not None:
+            out[name] = ("facing", {(k, ()): v for k, v in specs[name].items()}, r, ())
+        elif "isn't read (" in r.rule_conflict:
+            why[name] = f"facing: {r.rule_conflict}"
 
 
 def _adapter_rules(mod: SourceMod, readings: dict) -> None:

@@ -206,9 +206,19 @@ def _shared_checks(classes) -> str:
     if cf is None or cf.name != _ITEM or _shape(cf, m) != _PLACE_BLOCK:
         return "BlockItemIE#placeBlock isn't the form read here"
     for sub in _mod_classes(classes):
-        if sub.name != _ITEM and _ITEM in _chain(classes, sub.super_name or "") \
-                and sub.method("placeBlock", _PLACE_BLOCK_DESC) is not None:
-            return f"{sub.name.replace('/', '.')} (a BlockItemIE) overrides placeBlock"
+        own = sub.method("placeBlock", _PLACE_BLOCK_DESC)
+        if sub.name == _ITEM or own is None or own.code is None or _ITEM not in _chain(classes, sub.super_name or ""):
+            continue
+        # A subclass may move the placement (BlockItemBalloon#placeBlock:
+        # BlockPlaceContext.at(context, pos, context.getClickedFace()) a few
+        # blocks up), as long as it hands on the clicked face to
+        # BlockItemIE's and sets no state itself.
+        calls = _shape(sub, own, keep=("invoke",))
+        names = [a.rsplit(".", 1)[-1] for _, a in calls]
+        at = [k for k, (_, a) in enumerate(calls) if a == "BlockPlaceContext.at"]
+        if calls.count(("invokespecial", "BlockItemIE.placeBlock")) != 1 or set(names) & _SETS_STATE \
+                or any(k == 0 or calls[k - 1][1] != "BlockPlaceContext.getClickedFace" for k in at):
+            return f"{sub.name.replace('/', '.')}#placeBlock (a BlockItemIE) isn't read"
     cf, m = _declaring(classes, _ENTITY_BLOCK, "onIEBlockPlacedBy", _PLACED_BY_DESC)
     if cf is None or cf.name != _ENTITY_BLOCK or _shape(cf, m) != _ON_PLACED:
         return "IEEntityBlock#onIEBlockPlacedBy isn't the form read here"
