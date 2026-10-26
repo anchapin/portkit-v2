@@ -1,0 +1,9 @@
+{
+  "parent": "minecraft:block/block",
+  "loader": "immersiveengineering:ie_obj",
+  "model": "immersiveengineering:models/block/tube.obj.ie",
+  "textures": {
+    "particle": "immersiveengineering:block/tube",
+    "texture": "immersiveengineering:block/tube"
+  }
+}

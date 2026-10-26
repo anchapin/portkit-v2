@@ -1,0 +1,5 @@
+# Kd and Ka are not read by BlockModelSplitter
+newmtl tube
+Kd 0.5 0.5 0.5
+Ka 1 1 1
+map_Kd #texture

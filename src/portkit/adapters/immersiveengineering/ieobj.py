@@ -63,10 +63,23 @@ def _short(name: str) -> str:
     return name.rsplit("/", 1)[-1]
 
 
+_FOUND: dict = {}  # id(class index) -> (the index, its registrations)
+
+
 def _registered(classes) -> dict[str, str]:
     """``immersiveengineering:<name>`` -> callback class (slashed), from
     every ``IEOBJCallbacks.register(ImmersiveEngineering.rl("<name>"),
-    Foo.INSTANCE)`` in the jar's code."""
+    Foo.INSTANCE)`` in the jar's code (read once per class index)."""
+    held = _FOUND.get(id(classes))
+    if held is not None and held[0] is classes:
+        return held[1]
+    found = _read_registered(classes)
+    _FOUND.clear()
+    _FOUND[id(classes)] = (classes, found)
+    return found
+
+
+def _read_registered(classes) -> dict[str, str]:
     from portkit.bytecode import Ref, instructions
     found: dict[str, str] = {}
     for cname in classes.names():
@@ -227,13 +240,14 @@ def read(mod, model: dict) -> tuple[dict | None, list, str]:
             drawn = _overrides(classes, cls)
             if drawn:
                 blocker = (f"its callback {name} ({_short(cls)}) overrides {', '.join(drawn)} "
-                           "(IEOBJCallback), which decide what it draws from the key its extractKey "
-                           "reads in the world, and isn't run")
+                           "(IEOBJCallback): Java code IE's model runs, with the key its extractKey "
+                           "reads from the placed block, to decide what it draws, which isn't run")
     if not blocker and model.get("dynamic", False) is not False:
         blocker = f"it sets dynamic {model.get('dynamic')!r}, which isn't read"
     if not blocker and model.get("layers") is not None:
         blocker = f"it draws in the render layers {model.get('layers')!r}, which aren't read"
     out, why = boxes(groups)
     if blocker:
-        return None, files, f"{head}: {blocker}" + (f"; and {why}" if out is None else "")
+        mesh = why[len(head):].lstrip(": ") if out is None and why.startswith(head) else why
+        return None, files, f"{head}: {blocker}" + (f"; and its {mesh}" if out is None else "")
     return out, files, why
