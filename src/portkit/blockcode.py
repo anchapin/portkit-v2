@@ -6589,6 +6589,8 @@ def read_directional_states(classes: ClassIndex | None,
             continue
         obj = objs[0]
         r.cls = obj.cls.replace("/", ".")
+        sites = {getattr(o, "_made_in", None) for o in objs}
+        r.made_in = sites.pop() if len(sites) == 1 else None
         base = machine.vanilla_base(obj.cls)
         if base not in _DIR_STATE_PLAIN:
             r.vanilla_parent = base.replace("/", ".")

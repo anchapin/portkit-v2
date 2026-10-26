@@ -4751,6 +4751,10 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
         run = (shared or _SharedRun(mod, loaded))()
         readings = blockcode.read_directional_states(classes, {n: (k, b) for n, (k, b, _) in bool_specs.items()},
                                                      run=run)
+        # #296: a mod that sets facing after placement (an adapter reads it).
+        _adapter_rules(mod, readings, states={
+            n: {p: "true" if r.defaults[p][0] else "false" for p in r.bools if p in r.defaults and r.defaults[p][1] != "DEFAULT"}
+            for n, r in readings.items()})
         out.update({n: (k, c, readings[n], b) for n, (k, b, c) in bool_specs.items()})
     return out, why
 
@@ -4773,45 +4777,199 @@ def _read_set_after_placement(mod: SourceMod, loaded: dict, coded: dict, shared,
     doesn't set facing: when an adapter reads the mod's placement after the
     block is set, they convert as ``facing`` blocks with that rule (it may
     follow the clicked face, which the facing-only path's player-facing
-    trait can't give); when it can't, its reason joins theirs."""
+    trait can't give); when it can't, its reason joins theirs. A blockstate
+    drawing other states beside ``facing`` (#296) is asked with their
+    registered start: one state the mod sets from the clicked face after
+    placement converts as a facing-with-second-state block
+    (_after_placement_second), the rest held at that start."""
     from ..adapters import reads_orientations
     asked = {n: r for n, r in coded.items() if n in loaded and r.placement_conflict
              and "doesn't set facing" in r.placement_conflict}
     if not asked or not reads_orientations(mod):
         return
-    specs = {}
+    specs, multi = {}, {}
     for name in asked:
         kind, cells, _ = _directional_variants(loaded[name], coded_ok=True)
         if kind == "facing":
             specs[name] = cells
-    if not specs:
+            continue
+        got = _facing_and_others(loaded[name])
+        if got is not None:
+            multi[name] = got
+    if not specs and not multi:
         return
-    readings = blockcode.read_directional(getattr(mod, "classes", None), {n: "facing" for n in specs},
-                                          run=shared() if shared else None,
-                                          facings={n: _facings_of(c) for n, c in specs.items()})
-    _adapter_rules(mod, readings)
+    classes = getattr(mod, "classes", None)
+    run = shared() if shared else None
+    facings = {n: _facings_of(c) for n, c in specs.items()}
+    facings.update({n: f for n, (f, _) in multi.items()})
+    readings = blockcode.read_directional(classes, {n: "facing" for n in facings}, run=run, facings=facings)
+    starts: dict = {}
+    if multi:
+        defaults = blockcode.read_registered_defaults(
+            classes, {n: tuple(sorted(o)) for n, (_, o) in multi.items()}, run=run,
+            booleans=frozenset(n for n, (_, o) in multi.items() if all(set(v) <= _BOOL_VALUES for v in o.values())))
+        for name, (_, others) in multi.items():
+            d = defaults[name]
+            if d.why or any(d.values.get(p) is None for p in others):
+                why[name] = (f"facing: {asked[name].placement_conflict}; the states beside it "
+                             f"({', '.join(sorted(others))}) have no registered start that is read"
+                             + (f" ({d.why})" if d.why else ""))
+                readings.pop(name, None)
+                continue
+            starts[name] = (d, {p: d.values[p] for p in others})
+    _adapter_rules(mod, {n: r for n, r in readings.items() if n in specs})
     for name, r in readings.items():
+        if name not in specs:
+            continue
         if r.rule is not None:
             out[name] = ("facing", {(k, ()): v for k, v in specs[name].items()}, r, ())
         elif "isn't read (" in r.rule_conflict:
             why[name] = f"facing: {r.rule_conflict}"
+    if starts:
+        _after_placement_second(mod, loaded, {n: readings[n] for n in starts}, starts, out, why)
 
 
-def _adapter_rules(mod: SourceMod, readings: dict) -> None:
+def _facing_and_others(blockstate: dict) -> tuple[tuple, dict] | None:
+    """(the facing values drawn, {other state: its values}) for a variants
+    blockstate drawing ``facing`` over two or more of the six directions
+    beside other states, every combination named; else None."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or not variants:
+        return None
+    props: dict[str, set] = {}
+    for key in variants:
+        pairs = [p.split("=", 1) for p in key.split(",") if p]
+        if not pairs or any(len(p) != 2 for p in pairs):
+            return None
+        for a, b in pairs:
+            props.setdefault(a.strip(), set()).add(b.strip())
+    facing = props.pop("facing", set())
+    if len(facing) < 2 or not facing <= set(_SIX) or not props:
+        return None
+    total = len(facing)
+    for values in props.values():
+        total *= len(values)
+    if total != len(variants):
+        return None
+    return tuple(d for d in _SIX if d in facing), {p: tuple(sorted(v)) for p, v in props.items()}
+
+
+def _after_placement_second(mod: SourceMod, loaded: dict, readings: dict, starts: dict, out: dict,
+                            why: dict) -> None:
+    """Fill ``out`` / ``why`` for blockstates drawing ``facing`` beside other
+    states whose facing the mod sets after placement (#296): the adapter's
+    rule gives facing; the one other state it sets from the clicked face
+    (Orientation.placed_states) becomes the second state of a
+    facing-with-second-state block (_convert_directional's ``spin``: Bedrock
+    minecraft:block_face, with minecraft:cardinal_direction /
+    facing_direction where the player decides); every other state is held
+    at its registered start (#215 item 6, #383 pick 1a: what the code
+    changes after placement is static at its start)."""
+    from ..adapters import Orientation, orientations
+    asked = {n: r for n, r in readings.items() if r.rule is None and r.rule_conflict
+             and "doesn't set facing" in r.rule_conflict and r.cls}
+    for name, r in readings.items():
+        if name not in asked:
+            why[name] = f"facing: {r.rule_conflict or r.rule_why}"
+    if not asked:
+        return
+    placed_by = orientations(mod, {n: r.cls for n, r in asked.items()},
+                             sites={n: r.made_in for n, r in asked.items() if r.made_in},
+                             states={n: dict(starts[n][1]) for n in asked})
+    for name, r in sorted(asked.items()):
+        d, start = starts[name]
+        o = placed_by.get(name)
+        if o is None or tuple(o.states) != ("facing",):
+            why[name] = f"facing: {r.rule_conflict}"
+            continue
+        if o.why or not o.rule:
+            why[name] = f"facing: {r.rule_conflict}; the mod's placement after the block is set isn't read ({o.why})"
+            continue
+        placed = dict(o.placed_states or {})
+        set_props = sorted({p for v in placed.values() for p, _ in v})
+        others = sorted(start)
+        if len(set_props) != 1:
+            why[name] = (f"facing and {', '.join(others)}: the mod sets facing after placement and "
+                         + (f"{len(set_props)} of these states ({', '.join(set_props)})" if set_props else
+                            "none of them")
+                         + " from the clicked face; only one placement-set state beside facing is converted")
+            continue
+        second = set_props[0]
+        label = f"facing and {second}"
+        blockstate, held = loaded[name], []
+        for p in others:
+            if p == second:
+                continue
+            values = sorted({b.strip() for k in blockstate["variants"] for a, b in
+                             (q.split("=", 1) for q in k.split(",") if q) if a.strip() == p})
+            if not set(values) <= _BOOL_VALUES:
+                why[name] = f"{label}: {p} ({', '.join(values)}) isn't a boolean, so it has no start to hold"
+                break
+            reduced, passed = held_states.hold(blockstate, p, start[p])
+            if reduced is None:
+                why[name] = f"{label}: no variant has {p}={start[p]}"
+                break
+            blockstate = reduced
+            held.append({"prop": p, "value": start[p], "values": values, "source": d.source,
+                         "changed_by": list(d.changed_by.get(p, ())), "passed": passed})
+        else:
+            spin_o = Orientation(states=("facing", second), source=o.source)
+            cells, z_only, reason = _spin_cells(blockstate, spin_o, label)
+            if cells is None:
+                why[name] = reason
+                continue
+            rule = {c: (dict(placed.get(c, ())).get(second, start[second]), o.rule[c][1]) for c in _SIX}
+            bedrock = _bedrock_cells(rule)
+            stray = sorted({k for _, k in bedrock if k not in cells}, key=lambda k: (_SIX.index(k[1]), k[0]))
+            if stray or z_only:
+                why[name] = (f"{label}: placement gives "
+                             + ", ".join(f"facing={f},{second}={v}" for v, f in stray or sorted(z_only))
+                             + ", which the blockstate doesn't draw" + (" with an x/y turn" if not stray else ""))
+                continue
+            by_value: dict = {}
+            for c in _SIX:
+                by_value.setdefault(rule[c][0], []).append(c)
+            text = (_rule_text(o.rule) + "; " + "; ".join(
+                f"{second} = {v} clicking the {'/'.join(cs)} face{'s' if len(cs) > 1 else ''}"
+                for v, cs in sorted(by_value.items())))
+            spin_o = Orientation(states=("facing", second), source=o.source, text=text)
+            order = sorted({v for v, _ in cells})
+            keys = [(v, f) for f in _SIX for v in order if (v, f) in cells]
+            r.rule, r.rule_from, r.rule_why, r.rule_conflict = dict(o.rule), o.source, "", ""
+            out[name] = ("facing_spin", {(k, ()): v for k, v in cells.items()}, r, (), {
+                "orientation": spin_o, "second": second, "placed": bedrock, "keys": keys,
+                "z_only": [], "held": held})
+
+
+def _adapter_rules(mod: SourceMod, readings: dict, states: dict | None = None) -> None:
+    """Ask the adapters for the facing of the ``readings`` refused because
+    getStateForPlacement doesn't set it (the mod sets it after placement).
+    ``states`` (name -> {state: registered start}): the booleans a
+    6-way-facing-with-booleans blockstate draws (#296); they stay that
+    path's own Bedrock states, so a rule that sets one of them after
+    placement isn't taken here and its reason is given instead."""
     from ..adapters import orientations, reads_orientations
     asked = {n: r for n, r in readings.items()
              if r.kind in ("facing6", "facing") and r.rule is None and r.rule_conflict
              and "doesn't set facing" in r.rule_conflict and r.cls}
     if not asked or not reads_orientations(mod):
         return
-    placed_by = orientations(mod, {n: r.cls for n, r in asked.items()},
-                             sites={n: r.made_in for n, r in asked.items() if r.made_in})
+    sites = {n: r.made_in for n, r in asked.items() if r.made_in}
+    placed_by = orientations(mod, {n: r.cls for n, r in asked.items()}, sites=sites) if states is None else \
+        orientations(mod, {n: r.cls for n, r in asked.items()}, sites=sites,
+                     states={n: dict(states.get(n) or {}) for n in asked})
     for name, o in placed_by.items():
         r = asked[name]
         if tuple(o.states) != ("facing",):
             continue
-        if o.why or not o.rule:
-            r.rule_conflict = f"{r.rule_conflict}; the mod's placement after the block is set isn't read ({o.why})"
+        if not o.why and o.rule and o.placed_states:
+            set_props = sorted({p for v in o.placed_states.values() for p, _ in v})
+            o_why = (f"it sets {', '.join(set_props)} from the clicked face after placement, which this "
+                     "facing-with-booleans path doesn't read")
+        else:
+            o_why = o.why
+        if o_why or not o.rule:
+            r.rule_conflict = f"{r.rule_conflict}; the mod's placement after the block is set isn't read ({o_why})"
             r.rule_why = r.rule_conflict
             continue
         r.rule, r.rule_from, r.rule_why, r.rule_conflict = dict(o.rule), o.source, "", ""
