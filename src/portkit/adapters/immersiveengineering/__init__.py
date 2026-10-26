@@ -371,9 +371,20 @@ def _registered_entity(classes, field) -> tuple[str | None, str]:
     return found.pop(), ""
 
 
-def _entity_of(classes, field) -> tuple[str | None, str]:
+def _entity_of(classes, field, memo: dict | None = None) -> tuple[str | None, str]:
     """The one block entity class whose constructor gets its type from
-    ``field`` and that the field's registration builds, or (None, why)."""
+    ``field`` and that the field's registration builds, or (None, why);
+    ``memo`` keeps the answer per field across one conversion's blocks."""
+    key = (field.owner, field.name)
+    if memo is not None and key in memo:
+        return memo[key]
+    got = _entity_of_unmemoized(classes, field)
+    if memo is not None:
+        memo[key] = got
+    return got
+
+
+def _entity_of_unmemoized(classes, field) -> tuple[str | None, str]:
     from ...bytecode import Ref, instructions
     readers = set()
     for cf in _mod_classes(classes):
@@ -458,6 +469,7 @@ def orientations(mod, classes_by_name, sites=None) -> dict[str, Orientation]:
         return {}
     shared = None
     machine = None
+    memo: dict = {}
     out = {}
     for name, dotted in sorted(classes_by_name.items()):
         cls = (dotted or "").replace(".", "/")
@@ -471,7 +483,7 @@ def orientations(mod, classes_by_name, sites=None) -> dict[str, Orientation]:
         if not why:
             field, why = _type_field(classes, sites.get(name), cls)
             if field is not None:
-                be, why = _entity_of(classes, field)
+                be, why = _entity_of(classes, field, memo)
         prop = ""
         if be is not None and not why:
             why, prop = _entity_checks(classes, be, machine)
