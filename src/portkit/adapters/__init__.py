@@ -65,14 +65,19 @@ Hooks, and the core seam that asks each one:
   register it. Asked by :func:`portkit.converters.blocks.convert`, which
   converts each registered variant from the blockstate's defaults and its
   own textures.
-- ``orientations``: ``(SourceMod, {blockstate name: block class}) ->
-  {blockstate name: Orientation}``, for a mod whose blocks take ``facing``
+- ``orientations``: ``(SourceMod, {blockstate name: block class}[,
+  sites=]) -> {blockstate name: Orientation}``, for a mod whose blocks take ``facing``
   and a second orientation state (AE2's ``spin``) from a placement rule of
   the mod's own that the core's interpreter can't follow (#296): which
   Bedrock placement states give which Java orientation, read from the
   mod's code, and what the blockstate's own variant keys turn. Asked by
   :func:`portkit.converters.blocks.convert` for blockstates drawing a
-  six-way ``facing`` beside another state no reader takes.
+  six-way ``facing`` beside another state no reader takes; and, with
+  ``sites`` ({name: (class, method, descriptor) whose ``new`` made the
+  registered block}), for facing-only and six-way facing blockstates whose
+  getStateForPlacement leaves facing at its default because the mod sets it
+  after the block is placed (Immersive Engineering): an Orientation of
+  ``states`` ``("facing",)`` then gives its ``rule``.
 
 """
 from __future__ import annotations
@@ -180,7 +185,12 @@ class Orientation:
     ``(conditions, values)`` per Bedrock placement, ``conditions`` ``(state,
     value)`` pairs of ``minecraft:facing_direction`` /
     ``minecraft:cardinal_direction`` and ``values`` ``(state, value)`` pairs
-    of the Java orientation states that placement gives. Every state not in
+    of the Java orientation states that placement gives. ``rule``: for a
+    block whose only orientation state is ``facing`` (``states`` is
+    ``("facing",)``), the facing per clicked face in
+    :class:`portkit.blockcode.DirReading`'s ``rule`` form (clicked face ->
+    ("", token)), converted as a rule read from getStateForPlacement is.
+    Every state not in
     ``states`` or ``sets`` starts where the registered default has it.
     ``sets``: other states placement sets (``waterlogged``). ``text``: the
     rule in words; ``source``: where it was read; ``default``: the DEFAULT
@@ -198,6 +208,7 @@ class Orientation:
     default: str = ""
     turned_by: str = ""
     why: str = ""
+    rule: Mapping | None = None
 
 
 def _empty() -> Mapping:
@@ -414,14 +425,19 @@ def reads_orientations(mod: "SourceMod") -> bool:
     return any(a.orientations is not None and getattr(mod, "namespace", None) in a.namespaces for a in ADAPTERS)
 
 
-def orientations(mod: "SourceMod", classes_by_name: Mapping[str, str]) -> dict[str, Orientation]:
+def orientations(mod: "SourceMod", classes_by_name: Mapping[str, str],
+                 sites: Mapping[str, tuple] | None = None) -> dict[str, Orientation]:
     """Every adapter's ``orientations`` for ``mod``'s blockstates in
     ``classes_by_name`` (name -> block class); the first adapter (registry
-    order) to answer a blockstate wins."""
+    order) to answer a blockstate wins. ``sites`` (given only for the
+    facing-set-after-placement question, see the module docstring) is passed
+    on as a keyword."""
     found: dict[str, Orientation] = {}
     for a in ADAPTERS:
         if a.orientations is not None:
-            for name, orientation in a.orientations(mod, classes_by_name).items():
+            got = a.orientations(mod, classes_by_name) if sites is None else \
+                a.orientations(mod, classes_by_name, sites=sites)
+            for name, orientation in got.items():
                 if name in classes_by_name:
                     found.setdefault(name, orientation)
     return found
@@ -433,8 +449,8 @@ def station_hooks() -> list[StationHooks]:
 
 
 from . import (  # noqa: E402  (each imports Adapter above)
-    ae2, alloy_forgery, bclib, betterend, chisel, citadel, create, farmersdelight, mantle, mekanism, mythicmetals, registrate,
-    silentgear, supplementaries, tconstruct, waystones, zeta,
+    ae2, alloy_forgery, bclib, betterend, chisel, citadel, create, farmersdelight, immersiveengineering, mantle, mekanism,
+    mythicmetals, registrate, silentgear, supplementaries, tconstruct, waystones, zeta,
 )
 
 ADAPTERS = (
@@ -446,6 +462,7 @@ ADAPTERS = (
     citadel.ADAPTER,
     create.ADAPTER,
     farmersdelight.ADAPTER,
+    immersiveengineering.ADAPTER,
     mantle.ADAPTER,
     mekanism.ADAPTER,
     mythicmetals.ADAPTER,
