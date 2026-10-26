@@ -6308,9 +6308,9 @@ def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, star
     states that differ from ``start`` in the last state it sets there (none
     when it sets nothing). The player argument (a ``LivingEntity`` or
     ``Player``) is the placing player; any other argument is unknown, so a
-    state set from it, or from anything but the clicked face, isn't one.
-    Every path must set the same states, and a call the run can't follow
-    (one that might set a block) stops the reading."""
+    state set from it, or from anything but the clicked face, isn't one: the
+    run must take one way through, and a call it can't follow (one that
+    might set a block) stops the reading."""
     machine = machine or Machine(classes)
     where = f"{cls.replace('/', '.')}#{name}"
     found = machine.find_method(cls, name, desc) or machine.default_method(cls, name, desc)
@@ -6373,9 +6373,14 @@ def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, star
             machine.steps = 0
             machine.new_epoch()
             try:
-                machine.run(*found, args)
+                results = machine.run(*found, args)
             except Unreadable as exc:
                 return None, f"{where} can't be followed clicking the {c} face ({exc})"
+            if len(results) != 1:
+                # A way that sets a state and one that doesn't would read
+                # as set: only one way through is taken.
+                return None, (f"{where}, clicking the {c} face, takes {len(results)} ways through, so what it "
+                              "sets follows something besides the clicked face")
             if current["why"]:
                 return None, f"{where}, clicking the {c} face, {current['why']}"
             if len(machine.havocs) > havocs:

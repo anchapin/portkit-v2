@@ -43,12 +43,19 @@ block is in the world:
   that registers the type builds that class (``IEBlockEntities``'
   ``register(name, makeType(Foo::new, block))``, or
   ``EnergyConnectorBlockEntity#registerConnectorTEs``);
-* that block entity's interfaces (an ``IAdvancedDirectionalBE`` or
-  ``IHasDummyBlocks`` isn't read; an ``IPlacementInteraction`` only when its
-  ``onBEPlaced`` sets no state), its facing property (``facing``), and its
-  ``getFacingForPlacement`` run per clicked face by the core
-  (:func:`portkit.blockcode.read_placed_direction`), which follows the
-  limitation's lambda and the mirror.
+* that block entity's interfaces (an ``IHasDummyBlocks``, which places more
+  blocks beside its own, isn't read and is named with its ``placeDummies``;
+  an ``IPlacementInteraction`` only when its ``onBEPlaced`` sets no state),
+  its facing property (``facing``), and its ``getFacingForPlacement`` run per
+  clicked face by the core (:func:`portkit.blockcode.read_placed_direction`),
+  which follows the limitation's lambda and the mirror;
+* for an ``IAdvancedDirectionalBE`` (#296: ``StripCurtainBlockEntity``
+  L213-216, ``onDirectionalPlacement`` -> ``setCeilingAttached(side ==
+  Direction.DOWN)``, L238-242), that ``onIEBlockPlacedBy`` hands it the
+  clicked face (its instructions), then what its ``onDirectionalPlacement``
+  sets on the block per clicked face, run by the core at every facing the
+  block can hold (:func:`portkit.blockcode.read_placed_states`): given as
+  ``placed_states`` beside the rule.
 
 A jar whose code differs gets the reason it isn't read, never a guess. The
 rule given is the facing per clicked face; the core converts it as a rule read

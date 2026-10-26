@@ -4912,6 +4912,11 @@ def _after_placement_second(mod: SourceMod, loaded: dict, readings: dict, starts
             if not set(values) <= _BOOL_VALUES:
                 why[name] = f"{label}: {p} ({', '.join(values)}) isn't a boolean, so it has no start to hold"
                 break
+            if p == "waterlogged":
+                # Placement sets it from the fluid clicked into (IE's
+                # getStateForPlacement), so it has no one start.
+                why[name] = f"{label}: waterlogged is set by placement from the fluid, so it isn't held"
+                break
             if start[p] is None:
                 why[name] = (f"{label}: {p} isn't set by placement and its registered start isn't read"
                              + (f" ({d.why})" if d.why else ""))

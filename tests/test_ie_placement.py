@@ -150,7 +150,7 @@ def test_adapter_reads_the_chain_from_the_jar(tmp_path):
     assert curtain.placed_states == {c: (("ceiling_attached", "true" if c == "down" else "false"),)
                                      for c in blockcode.DIRECTIONS}
     assert "CurtainBE#onDirectionalPlacement (it sets ceiling_attached from the clicked face)" in curtain.source
-    assert got["mid"].rule is None and "doesn't set one state on every path" in got["mid"].why
+    assert got["mid"].rule is None and "follows something besides the clicked face" in got["mid"].why
     assert got["two_high"].rule is None and "IHasDummyBlocks" in got["two_high"].why
     assert "TwoHighBE#placeDummies" in got["two_high"].why
     # Asked without sites (the facing-and-spin question), or for another
@@ -211,7 +211,7 @@ def test_core_reads_the_states_a_block_entity_sets_on_its_own_block():
     # A state set from the point clicked (unknown) has no one answer.
     sets, why = blockcode.read_placed_states(classes, THINGS + "MidBE", "onDirectionalPlacement", ADVANCED_DESC,
                                              {"ceiling_attached": None, "facing": "north"})
-    assert sets is None and "doesn't set one state on every path" in why
+    assert sets is None and "takes 2 ways through" in why
     sets, why = blockcode.read_placed_states(classes, THINGS + "TwoHighBE", "placeDummies",
                                              "(Lnet/minecraft/world/item/context/BlockPlaceContext;"
                                              "Lnet/minecraft/world/level/block/state/BlockState;)V", {})
@@ -238,7 +238,7 @@ def test_curtain_converts_with_its_second_state_from_the_clicked_face(converted)
 
 
 def test_facing_beside_unread_states_stays_residue_with_its_reason(converted):
-    for stem, part in (("mid", "doesn't set one state on every path"), ("two_high", "IHasDummyBlocks")):
+    for stem, part in (("mid", "follows something besides the clicked face"), ("two_high", "IHasDummyBlocks")):
         assert f"blocks/{stem}.json" not in converted.files
         why = next(u.reason for u in converted.unhandled if u.source.endswith(f"blockstates/{stem}.json"))
         assert "doesn't set facing" in why and "the mod's placement after the block is set isn't read" in why
