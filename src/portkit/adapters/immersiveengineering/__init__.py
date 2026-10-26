@@ -255,10 +255,21 @@ def _block_checks(classes, cls: str) -> str:
     return ""
 
 
-def _type_field(classes, site) -> tuple[object, str]:
-    """(Ref of the one static field of the mod's that the code whose ``new``
-    made the block reads, its block entity type) or (None, why)."""
+def _static_reads(classes, cf, m) -> dict:
     from ...bytecode import Ref, instructions
+    reads = {}
+    for insn in instructions(cf, m.code):
+        if insn.name == "getstatic" and isinstance(insn.arg, Ref) and not classes.is_library(insn.arg.owner) \
+                and classes.get(insn.arg.owner) is not None:
+            reads[(insn.arg.owner, insn.arg.name)] = insn.arg
+    return reads
+
+
+def _type_field(classes, site, cls: str) -> tuple[object, str]:
+    """(Ref of the one static field of the mod's, its block entity type, that
+    the code whose ``new`` made the block reads; or, when that code reads
+    none (a constructor reference handed on, ``FooBlock::new``), that the
+    block class's own constructors read), or (None, why)."""
     if not site:
         return None, "where its registered block is made isn't known"
     owner, name, desc = site
@@ -266,14 +277,16 @@ def _type_field(classes, site) -> tuple[object, str]:
     m = cf.method(name, desc) if cf is not None else None
     if m is None or m.code is None:
         return None, f"{owner.replace('/', '.')}#{name} isn't found"
-    reads = {}
-    for insn in instructions(cf, m.code):
-        if insn.name == "getstatic" and isinstance(insn.arg, Ref) and not classes.is_library(insn.arg.owner) \
-                and classes.get(insn.arg.owner) is not None:
-            reads[(insn.arg.owner, insn.arg.name)] = insn.arg
+    reads = _static_reads(classes, cf, m)
+    where = f"{owner.replace('/', '.')}#{name}, which makes the block,"
+    if not reads:
+        own = classes.get(cls)
+        for ctor in (own.methods if own is not None else ()):
+            if ctor.name == "<init>" and ctor.code is not None:
+                reads.update(_static_reads(classes, own, ctor))
+        where = f"{where} reads none; {cls.replace('/', '.')}'s constructors"
     if len(reads) != 1:
-        return None, (f"{owner.replace('/', '.')}#{name}, which makes the block, reads {len(reads)} static "
-                      "fields of the mod's, not one block entity type")
+        return None, f"{where} read {len(reads)} static fields of the mod's, not one block entity type"
     return next(iter(reads.values())), ""
 
 
@@ -329,10 +342,20 @@ def _registered_entity(classes, field) -> tuple[str | None, str]:
                 if insn.name == "getstatic" and same:
                     loaded = True
                     continue
-                put = (insn.name == "putstatic" and same) or (
-                    loaded and insn.name == "invokeinterface" and isinstance(arg, Ref)
-                    and arg.owner == "java/util/Map" and arg.name == "put")
+                map_put = isinstance(arg, Ref) and insn.name == "invokeinterface" \
+                    and arg.owner == "java/util/Map" and arg.name == "put"
+                put = (insn.name == "putstatic" and same) or (loaded and map_put)
                 if not put:
+                    if insn.name == "putstatic" or map_put:
+                        # Another field's (or map's) registration ends here.
+                        start, loaded = k + 1, False
+                    continue
+                if insn.name == "putstatic" and field.desc.startswith("Ljava/util/") \
+                        and field.desc.endswith("Map;") and k >= 2 and insns[k - 1].name == "invokespecial" \
+                        and getattr(insns[k - 1].arg, "name", "") == "<init>":
+                    # The map itself made empty (``new HashMap<>()``): its
+                    # types come with its ``put``s.
+                    start = k + 1
                     continue
                 writes += 1
                 made = _made_classes(classes, cf, insns[start:k])
@@ -446,7 +469,7 @@ def orientations(mod, classes_by_name, sites=None) -> dict[str, Orientation]:
         why = shared or _block_checks(classes, cls)
         be = None
         if not why:
-            field, why = _type_field(classes, sites.get(name))
+            field, why = _type_field(classes, sites.get(name), cls)
             if field is not None:
                 be, why = _entity_of(classes, field)
         prop = ""
