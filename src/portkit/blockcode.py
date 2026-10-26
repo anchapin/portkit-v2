@@ -6375,8 +6375,10 @@ def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, star
                 for prop, value in sorted(last.items()):
                     if prop in values and value == values[prop]:
                         continue
+                    if prop not in values:
+                        return None, f"{where}, clicking the {c} face, sets {prop}, which it wasn't asked about"
                     text = _state_text(value)
-                    if text is None or prop not in values:
+                    if text is None:
                         return None, (f"{where}, clicking the {c} face, sets {prop} to a value that isn't "
                                       "read from the clicked face")
                     changed.append((prop, text))
