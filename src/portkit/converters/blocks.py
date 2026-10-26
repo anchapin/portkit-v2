@@ -1661,6 +1661,13 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
                 result.claim(mod, model_file)
             result.unhandled.append(Unhandled(rel, CODE_DRAWN, _render_shape_reason(shape)))
             continue
+        loader_why = (None if name in (stations or {}) or name in variation_sets or name not in loaded
+                      else _model_loader_reason(mod, loaded[name]))
+        if loader_why is not None:
+            # Nothing is claimed: the states path claimed none of these
+            # models either, so only the reason changes (#296).
+            result.unhandled.append(Unhandled(rel, "block", loader_why))
+            continue
         if name in water_why:
             result.unhandled.append(Unhandled(rel, "block", water_why[name]))
             continue
@@ -2959,6 +2966,73 @@ def _code_drawn_reason(mod: SourceMod, blockstate: dict,
         "this block in mod code (a block-entity renderer, the fluid renderer or a model the code "
         "swaps in), which a Bedrock block definition can't carry"
     )
+
+
+def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
+    """Why a blockstate can't be drawn when every model it names is built
+    by a Java model loader (a model's ``loader``: NeoForge's ``obj``, a
+    composite or layered model) and no JSON elements are under it (its own,
+    a parent's or a vanilla template's), else None (#296).
+
+    The loader builds the geometry from something other than the model's
+    ``elements`` (an .obj file, sub-models, code), and the converter reads
+    no loader, so none of the block's states could be drawn whatever they
+    are. Only the mod's own model files are read; a missing or unreadable
+    one says nothing."""
+    refs = list(dict.fromkeys(_blockstate_models(blockstate)))
+    if not refs:
+        return None
+    loaders: dict[str, set] = {}
+    for ref in refs:
+        path = models.model_path(mod, ref)
+        if path is None or not path.is_file():
+            return None
+        try:
+            model = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return None
+        loader = model.get("loader") if isinstance(model, dict) else None
+        if not isinstance(loader, str) or not loader or _chain_has_elements(mod, model):
+            # A loader over JSON elements (connected or retextured faces on
+            # the model's own or its parent's boxes) still has its boxes
+            # read, as before.
+            return None
+        source = model.get("model")
+        loaders.setdefault(loader, set()).add(
+            source.split("/")[-1] if isinstance(source, str) else ref.split("/")[-1])
+    shown = "; ".join(f"{k}: {', '.join(sorted(v)[:3])}{', ...' if len(v) > 3 else ''}"
+                      for k, v in sorted(loaders.items()))
+    return (f"every model the blockstate names ({len(refs)}) is built by a Java model loader "
+            f"('{shown}'), not from its JSON elements; the converter reads no model loader, so no state "
+            "of the block can be drawn")
+
+
+def _chain_has_elements(mod: SourceMod, model: dict) -> bool:
+    """Whether a model or its parent chain carries JSON elements: its own,
+    a mod parent's, or a vanilla template's (portkit's pinned set). A
+    parent this can't read (another namespace's, a missing file) counts as
+    having them, so nothing is refused on a guess; vanilla ``block/block``
+    has none."""
+    current = model
+    for _ in range(models._MAX_PARENT_DEPTH):
+        if current.get("elements"):
+            return True
+        parent = current.get("parent")
+        if not isinstance(parent, str):
+            return False
+        parent = models.normalize(parent)
+        if parent.startswith("minecraft:"):
+            return models.is_template(parent)
+        path = models.model_path(mod, parent)
+        if path is None or not path.is_file():
+            return True
+        try:
+            current = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return True
+        if not isinstance(current, dict):
+            return True
+    return True
 
 
 def _load_blockstates(src) -> dict:

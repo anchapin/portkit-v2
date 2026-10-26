@@ -27,6 +27,31 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-25 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #394): a crop's grown half is held at the lower half its code registers; a blockstate drawn only by Java model loaders is named as such
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). #296 sub-reason 1 (Immersive Engineering's last 2: `hemp` and `electric_lantern`), part of #277. No policy call: holding a state where the code's own placement leaves it follows #215 item 6, #383 pick 1a and #390; the loader part only renames residue.
+- **Root cause:**
+  1. `hemp` (IE `HempBlock`, a vanilla `CropBlock`) draws `age` x `half`, with one `half=upper` key for every age. The held-state reader didn't follow vanilla `CropBlock`: its constructor (1.21.1 client jar, `<init>` L47-49) registers `age` 0 through the block's own `getAgeProperty`, and neither it nor `BushBlock` declares `getStateForPlacement` or a placement hook, so Block's places the registered default. `DOUBLE_BLOCK_HALF` wasn't a named property, and partial variant keys (a grown half named for one state only) weren't read. The upper half is only ever placed by growth (`randomTick`/`growCrops`), never by the player.
+  2. `electric_lantern`: every model it names is a NeoForge OBJ model (`neoforge:obj`, `e_lantern.obj`). The converter reads no model loader, so it fell to the generic "block has N blockstate variant(s)".
+- **Decision (generic core, no mod names):**
+  1. `blockcode`: vanilla `CropBlock` is modelled (registered default: `age` at 0 via `getAgeProperty`, read and not assumed; an override that can't be read to one property leaves the default unread). `DOUBLE_BLOCK_HALF` is named `half`, `DoubleBlockHalf` serialises to `upper`/`lower`.
+  2. `held_states`: `half` is held at the registered lower half only when no class of the block's own chain declares `setPlacedBy` or `onPlace` (a door or tall plant places its other half there; that case gives a reason, not a guess). Partial variant keys are checked for coverage of the held value.
+  3. Vanilla `block/crop` joins the pinned templates (identical in mcmeta's 1.17.1 through 26.1 summaries; SINCE 1.17, 1.16.5 writes the east faces' uv unmirrored).
+  4. `converters.blocks`: a blockstate whose every model names a `loader` with no JSON elements under it (its own, a mod parent's or a pinned vanilla template's) gets the reason "every model the blockstate names (N) is built by a Java model loader (...)" instead of the variant count. Stations and variation sets are skipped. A loader over JSON elements (connected or retextured faces) is still read as before; an unreadable parent counts as having elements, so nothing is named on a guess. Nothing is claimed, so the models stay residue of their own.
+- **Lost (stated in the block's conversion note):** hemp is placed as its lower half at age 0 and does not grow: growth and the upper half it adds are Java code (`randomTick`/`growCrops`). Electric lantern is not converted (as before; now explained).
+- **REALMODS** (include_optional) 40257541605 on c06c648, compared by script against the baseline (`round(100*files/(files+residue),1)`); 5 rows changed and were rebanked, 8 equal, errors 0 everywhere:
+  - `farmers_delight_neoforge` 894/936 48.9% -> 902/910 49.8% (+8 files, -26 residue): consistent with the pinned crop template letting its crop models convert.
+  - `create` residue 5513 -> 5514, `supplementaries` 3479 -> 3484, `tinkers_construct` 15105 -> 15108, `mekanism` 6500 -> 6504; files and coverage unchanged. Consistent with model files of loader-only blockstates now standing as residue of their own (the same effect as on the board below). These rows were not byte-diffed.
+- **Gap-leaderboard** 40257553322 on c06c648: done 40/50 unchanged; mean 11.66% -> 11.65%. The mean dips because model files of loader-drawn blocks are no longer hidden behind their blockstate, so they now count as residue (`owned_by_residue` "used only by residue" 5682 -> 5854 files). IE 2295/6496 26.1% -> 2297/6537 26.0%; Botania 4022 -> 4090 residue (47.8% -> 47.3%); TF 6151 -> 6168 and Tinkers 13501 -> 13503 residue, files unchanged. `block` 820 -> 819 files. Sub-reason 1 by mod: IE 2 -> 0; Chisel 1 (`auto_chisel`), Quark 2, BoP 1, Storage Drawers 1 unchanged. docs/gauntlet.md banked from this run.
+- **Ingame** 40257551340 on c06c648: 18/18 pass, 0 content errors. **CI** 40257547006 on c06c648 green. Fixture `tests/data/crop` (a tall crop, and one with a placement hook) + `tests/test_held_crop_half.py` (crop half and age, placement hooks, loader-only models, loaders over JSON geometry, the pinned crop template).
+- **Rejected:**
+  - drawing hemp's upper half on placement (Java never places it there);
+  - holding `half` on a block with its own `setPlacedBy`/`onPlace`;
+  - naming any loader model as undrawable, including loaders over JSON elements (those still convert);
+  - claiming loader-only models as converted (would inflate coverage).
+- **Follow-ups:** an OBJ model reader (loader-only blocks across 4 mods, 192 files); the crop's collision box.
+- **Links:** #296, #277, #215, #383, #390, PR #394.
+
 ## 2026-10-25 (approved (Alex, 2026-10-25): pick 1a, PR #393): a six-way `facing` beside a second orientation state converts when the mod's adapter reads the placement rule from its code; AE2's machines on `facing_direction` x `cardinal_direction`
 
 - **Status:** approved (Alex, 2026-10-25), pick 1a (picks comment on #296). #296 sub-reason 1 (AE2's last 5), part of #277. The code is generic and the AE2 part is an adapter; the one call Hark isn't confident about is the Bedrock stand-in for AE2's 65-degree pitch rule, a new **DEFAULT** (pick 1). Holding `powered`/`active` follows #215 item 6, #383 pick 1a and #391.

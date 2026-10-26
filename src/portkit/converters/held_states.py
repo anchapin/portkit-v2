@@ -36,6 +36,15 @@ a pillar's axis, and the axis itself stays the player's (the pillar
 converters). Booleans named for a direction (connections, #221) and
 ``waterlogged`` (#383 item 4) are still not held. Booleans beside
 ``facing`` or drawn alone stay with #215's and #384's readers.
+
+A ``half`` beside number states alone (a crop that grows a top half,
+Immersive Engineering's hemp) is held like an enum, after the numbers: no
+other reader draws it there (doors and stairs draw it beside placement
+states, a two-tall plant alone), and the code reader refuses a block whose
+own code runs on placement (setPlacedBy, onPlace) and may place the other
+half. Its blockstate may name the upper half once for every age, as Java's
+partial variant selectors allow (:func:`_cells`); every other held shape
+names every state in every key.
 """
 from __future__ import annotations
 
@@ -46,6 +55,7 @@ _CARDINALS = {"north", "east", "south", "west"}
 _BOOLS = {"true", "false"}
 # Booleans named for a direction are connection states (#221).
 _CONNECTIONS = {"north", "east", "south", "west", "up", "down"}
+_HALVES = {"lower", "upper"}
 # States other readers own as placement or shape: attach-face blocks
 # (``face``), slabs and vertical slabs (``type``), stairs, doors, trapdoors
 # and two-tall blocks (``half``, ``shape``, ``hinge``), beds (``part``).
@@ -55,6 +65,46 @@ _PLACEMENT_OWNED = PLACEMENT_OWNED
 
 def _is_number(values) -> bool:
     return all(v.lstrip("-").isdigit() for v in values)
+
+
+def _cells(variants: dict) -> tuple[dict[str, set], list[dict]] | None:
+    """(each state's values, one cell per key) for a variants map over
+    named states, every combination named exactly once; else None. A key
+    that leaves a state out matches every value of it, as Java's variant
+    selectors do (a hemp crop's ``half=upper`` for every ``age``): it is
+    taken only where the keys that name the state give its values and no
+    combination is matched twice."""
+    props: dict[str, set] = {}
+    cells = []
+    for key in variants:
+        pairs = [p.split("=", 1) for p in key.split(",") if p]
+        if not pairs or any(len(p) != 2 for p in pairs):
+            return None
+        cell = {a.strip(): b.strip() for a, b in pairs}
+        cells.append(cell)
+        for a, b in cell.items():
+            props.setdefault(a, set()).add(b)
+    seen = set()
+    for cell in cells:
+        combos = [()]
+        for p in sorted(props):
+            combos = [c + ((p, v),) for c in combos for v in ([cell[p]] if p in cell else sorted(props[p]))]
+        for c in combos:
+            if c in seen:
+                return None
+            seen.add(c)
+    total = 1
+    for values in props.values():
+        total *= len(values)
+    if len(seen) != total:
+        return None
+    return props, cells
+
+
+def _matches(cell: dict, prop: str, value: str) -> bool:
+    """Whether a variant key's cell covers ``prop`` = ``value`` (a key
+    that leaves ``prop`` out covers every value, see _cells)."""
+    return cell.get(prop, value) == value
 
 
 def held_props(blockstate: dict) -> tuple[tuple[str, tuple], ...] | None:
@@ -67,16 +117,10 @@ def held_props(blockstate: dict) -> tuple[tuple[str, tuple], ...] | None:
     variants = blockstate.get("variants")
     if not isinstance(variants, dict) or len(variants) < 2:
         return None
-    props: dict[str, set] = {}
-    cells = []
-    for key in variants:
-        pairs = [p.split("=", 1) for p in key.split(",") if p]
-        if not pairs or any(len(p) != 2 for p in pairs):
-            return None
-        cell = {a.strip(): b.strip() for a, b in pairs}
-        cells.append(cell)
-        for a, b in cell.items():
-            props.setdefault(a, set()).add(b)
+    found = _cells(variants)
+    if found is None:
+        return None
+    props, cells = found
     rest = [p for p in props if p not in PLACEMENT_STATES]
     enums = [p for p in rest if not props[p] <= _BOOLS]
     flags = [p for p in rest if props[p] <= _BOOLS]
@@ -87,6 +131,13 @@ def held_props(blockstate: dict) -> tuple[tuple[str, tuple], ...] | None:
     owned = _PLACEMENT_OWNED if "half" in props else _PLACEMENT_OWNED - {"shape"}
     numbers = sorted(p for p in enums if _is_number(props[p]))
     named = [p for p in enums if p not in numbers]
+    if named == ["half"] and props["half"] == _HALVES and numbers and set(props) == {"half", *numbers}:
+        # A ``half`` beside numbers alone (a crop that grows a top half) is
+        # no other reader's: doors, trapdoors and stairs draw it beside
+        # placement states, a two-tall plant alone. It is held like an
+        # enum, and the code reader refuses a block whose own code runs on
+        # placement and may place the other half (#296).
+        owned = owned - {"half"}
     # Two enums: no approved rule holds both. Numbers are held beside one
     # (#296, Alex 2026-10-25: a count the game changes later is held at
     # the start its code sets, as #215 item 6 holds a boolean).
@@ -108,12 +159,9 @@ def held_props(blockstate: dict) -> tuple[tuple[str, tuple], ...] | None:
         return None
     if "axis" in props and "facing" in props:
         return None
-    if any(set(c) != set(props) for c in cells):
-        return None
-    combos = 1
-    for values in props.values():
-        combos *= len(values)
-    if combos != len(variants):
+    if any(set(c) != set(props) for c in cells) and "half" not in named:
+        # Keys that leave a state out are read only for the half a crop
+        # grows (see _cells); every other reader names every state.
         return None
     return tuple((p, tuple(sorted(props[p], key=int) if p in numbers else sorted(props[p])))
                  for p in numbers + named + held_flags)
@@ -134,7 +182,7 @@ def hold(blockstate: dict, prop: str, value: str) -> tuple[dict | None, list[str
         pairs = [tuple(x.strip() for x in p.split("=", 1)) for p in key.split(",") if p]
         cell = dict(pairs)
         rest = ",".join(f"{a}={b}" for a, b in pairs if a != prop)
-        if cell[prop] == value:
+        if _matches(cell, prop, value):
             kept[rest] = entry
         else:
             for e in entry if isinstance(entry, list) else [entry]:

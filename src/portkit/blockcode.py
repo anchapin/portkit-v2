@@ -92,6 +92,19 @@ _PLAIN_VANILLA = {
 # 1.16.5 (bzl L43). Only the held-state reader (#296) takes another state of
 # a pillar from it; the axis itself stays vanilla code.
 _PILLAR = "net/minecraft/world/level/block/RotatedPillarBlock"
+# CropBlock (1.21.1 client jar class dht + client.txt), read only by the
+# held-state reader (#296): <init> L47-49 is super(properties) (BushBlock,
+# see _PLAIN_VANILLA) then registerDefaultState(stateDefinition.any()
+# .setValue(this.getAgeProperty(), 0)), getAgeProperty L62 a virtual call
+# returning AGE (<clinit>: BlockStateProperties.AGE_7, "age"). Neither it nor
+# BushBlock declares getStateForPlacement, so Block's places the registered
+# default. It declares getShape (SHAPE_BY_AGE), so it isn't plain vanilla
+# for the shape readers.
+_CROP = "net/minecraft/world/level/block/CropBlock"
+_AGE_PROPERTY_DESC = "()Lnet/minecraft/world/level/block/state/properties/IntegerProperty;"
+# DoubleBlockHalf (1.21.1 client jar class dty): getSerializedName L28 is
+# ``this == UPPER ? "upper" : "lower"``; toString L23 returns it.
+_DOUBLE_BLOCK_HALF = "net/minecraft/world/level/block/state/properties/DoubleBlockHalf"
 _SHAPES = "net/minecraft/world/phys/shapes/Shapes"
 _DIRECTION = "net/minecraft/core/Direction"
 _PLACE_CONTEXT = "net/minecraft/world/item/context/BlockPlaceContext"
@@ -137,6 +150,10 @@ _VANILLA_PROPS = {
     # 1.21.1: the class declares only FACE).
     ("net/minecraft/world/level/block/DirectionalBlock", "FACING"): "facing6",
     (_STATE_PROPS, "ATTACH_FACE"): "face",
+    # DOUBLE_BLOCK_HALF, EnumProperty.create("half", DoubleBlockHalf.class)
+    # (1.21.1 client jar class dts <clinit>, field ae; client.txt names it):
+    # a two-tall block's half (#296: a crop whose upper half only grows).
+    (_STATE_PROPS, "DOUBLE_BLOCK_HALF"): "half",
     ("net/minecraft/world/level/block/FaceAttachedHorizontalDirectionalBlock", "FACE"): "face",
     ("net/minecraft/world/level/block/FaceAttachedHorizontalDirectionalBlock", "FACING"): "facing",
     # Every BooleanProperty field of BlockStateProperties, by the name its
@@ -2800,6 +2817,16 @@ class Machine:
             # given (a door's BlockSetType, #296): the first one called is
             # the most derived vanilla class's.
             obj.fields.setdefault("__vanilla_ctor", (ref.owner, ref.desc, tuple(args[1:])))
+        if ref.owner == _CROP and ref.desc == f"(L{_PROPERTIES};)V" and self.is_block_class(obj.cls) \
+                and "__default" not in obj.fields:
+            # CropBlock#<init> L47-49 (see _CROP): the registered default is
+            # StateDefinition#any with the age property (the block's own
+            # getAgeProperty, a virtual call) at 0.
+            age = self._crop_age(obj)
+            if age is None:
+                obj.fields["__default_unread"] = True
+            else:
+                obj.fields["__default"] = State(((_ANY, 1),)).set(age, 0)
         if ref.desc.startswith(f"(L{_PROPERTIES};") and len(args) > 1:
             obj.fields.setdefault("__props", _snapshot(args[1]))
         elif ref.owner.startswith(_VANILLA_BLOCK_PACKAGE) and len(props_at) == 1 \
@@ -2815,6 +2842,19 @@ class Machine:
         elif obj.cls == "net/minecraft/resources/ResourceLocation" and len(args) == 3 \
                 and all(isinstance(a, str) for a in args[1:]):
             obj.fields["__rl"] = f"{args[1]}:{args[2]}"
+
+    def _crop_age(self, obj: Obj) -> str | None:
+        """The name of the property a CropBlock subclass's getAgeProperty
+        returns: its own override run here, else CropBlock's AGE ("age",
+        see _CROP); None when the override can't be read to one property."""
+        if self.find_method(obj.cls, "getAgeProperty", _AGE_PROPERTY_DESC) is None:
+            return "age"
+        try:
+            got = self.call(obj.cls, "getAgeProperty", _AGE_PROPERTY_DESC, [obj])
+        except Unreadable:
+            return None
+        names = {g.name for g in got if isinstance(g, Prop)}
+        return names.pop() if len(names) == 1 and all(isinstance(g, Prop) for g in got) else None
 
     def call_lambda(self, lam: Lam, args: list) -> list:
         h = lam.handle
@@ -3040,6 +3080,12 @@ class Machine:
                 axis = (Const(_DIRECTION + "$Axis", "Y" if clicked in ("up", "down") else
                               "Z" if clicked in ("north", "south") else "X") if clicked else UNKNOWN)
                 return [recv.fields["__default"].set("axis", axis)]
+            if base == _CROP and name == "getStateForPlacement" and desc == _PLACEMENT_DESC:
+                # Block's (see _CROP): the registered default, read only
+                # where CropBlock's constructor was followed.
+                if "__default" not in recv.fields:
+                    raise Unreadable("vanilla CropBlock's registered default isn't read")
+                return [recv.fields["__default"]]
             if base == _FACE_ATTACHED and name == "getShape" and desc == _GET_SHAPE_DESC:
                 # It declares no getShape (client.txt 1.21.1): BlockBehaviour's.
                 return [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),))]
@@ -6615,6 +6661,8 @@ def _serialized(machine: Machine, value) -> str | None:
     run on the machine; None when it can't be had."""
     if isinstance(value, str):
         return value
+    if isinstance(value, Const) and value.owner == _DOUBLE_BLOCK_HALF and value.name in ("UPPER", "LOWER"):
+        return value.name.lower()  # DoubleBlockHalf#getSerializedName (see _DOUBLE_BLOCK_HALF)
     if not isinstance(value, Obj) or "__enum_name" not in value.fields:
         return None
     machine.steps = 0
@@ -6727,13 +6775,21 @@ def read_registered_defaults(classes: ClassIndex | None, props: dict[str, tuple]
 def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
     r.cls = obj.cls.replace("/", ".")
     base = machine.vanilla_base(obj.cls)
-    if base not in _PLAIN_VANILLA and not (base == _PILLAR and r.prop != "axis"):
+    if base not in _PLAIN_VANILLA and base != _CROP and not (base == _PILLAR and r.prop != "axis"):
         # As #215 item 7: a vanilla class with behaviour of its own sets its
         # states in code the jar doesn't hold. RotatedPillarBlock sets only
         # axis (see _PILLAR), so another state of a pillar is read.
         r.vanilla_parent = base.replace("/", ".")
         r.why = f"{r.cls} reaches vanilla {r.vanilla_parent}, whose states are vanilla code"
         return
+    if r.prop == "half":
+        # A half held at its start is one block where Java places one: a
+        # block whose own code runs on placement (setPlacedBy, onPlace) may
+        # place its other half there, as a door or tall plant does (#296).
+        placing = _placement_hooks(machine, obj.cls)
+        if placing:
+            r.why = f"{', '.join(placing)} runs when the block is placed and may place its other half"
+            return
     where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
     if r.boolean:
         # A boolean beside a pillar's axis (#296) is held only where
@@ -6781,6 +6837,20 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
             return
     r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
 
+
+
+def _placement_hooks(machine: Machine, cls: str) -> list[str]:
+    """``Class#method`` for each setPlacedBy or onPlace a class of the
+    block's own chain declares (vanilla Block's are empty, and neither
+    BushBlock nor CropBlock declares one: client.txt 1.21.1)."""
+    found = []
+    for cname in machine.chain(cls)[:-1]:
+        cf = machine.classes.get(cname)
+        if cf is None:
+            break
+        found += [f"{cname.replace('/', '.')}#{m.name}" for m in cf.methods
+                  if m.name in ("setPlacedBy", "onPlace") and m.code is not None]
+    return sorted(set(found))
 
 
 def _read_held_boolean(machine: Machine, obj: Obj, r: HeldReading, where: str) -> None:
