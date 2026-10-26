@@ -14,6 +14,9 @@ public class IEBlockEntities {
     public static final Supplier<BlockEntityType<BoardBE>> BOARD = reg("board", makeType(BoardBE::new));
     public static final Supplier<BlockEntityType<SneakBE>> SNEAK = reg("sneak", makeType(SneakBE::new));
     public static final Supplier<BlockEntityType<HitBE>> HIT = reg("hit", makeType(HitBE::new));
+    public static final Supplier<BlockEntityType<CurtainBE>> CURTAIN = reg("curtain", makeType(CurtainBE::new));
+    public static final Supplier<BlockEntityType<MidBE>> MID = reg("mid", makeType(MidBE::new));
+    public static final Supplier<BlockEntityType<TwoHighBE>> TWO_HIGH = reg("two_high", makeType(TwoHighBE::new));
 
     @SuppressWarnings("unchecked")
     private static <T extends BlockEntity> Supplier<BlockEntityType<T>> reg(String name, Supplier<BlockEntityType<T>> s) {

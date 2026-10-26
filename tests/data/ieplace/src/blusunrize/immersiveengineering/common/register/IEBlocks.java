@@ -12,5 +12,8 @@ public class IEBlocks {
     public static final Object BOARD = BLOCKS.register("board", () -> new IEEntityBlock<>(IEBlockEntities.BOARD, Properties.of()));
     public static final Object SNEAK = BLOCKS.register("sneak", () -> new IEEntityBlock<>(IEBlockEntities.SNEAK, Properties.of()));
     public static final Object HIT = BLOCKS.register("hit", () -> new IEEntityBlock<>(IEBlockEntities.HIT, Properties.of()));
+    public static final Object CURTAIN = BLOCKS.register("curtain", () -> new IEEntityBlock<>(IEBlockEntities.CURTAIN, Properties.of()));
+    public static final Object MID = BLOCKS.register("mid", () -> new IEEntityBlock<>(IEBlockEntities.MID, Properties.of()));
+    public static final Object TWO_HIGH = BLOCKS.register("two_high", () -> new IEEntityBlock<>(IEBlockEntities.TWO_HIGH, Properties.of()));
     public static final java.util.function.Function<net.minecraft.world.level.block.Block, BlockItemIE> ITEM = BlockItemIE::new;
 }
