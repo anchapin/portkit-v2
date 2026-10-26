@@ -1,0 +1,6 @@
+{
+  "parent": "examplemod:block/post",
+  "textures": {
+    "cap": "examplemod:block/cap_red"
+  }
+}

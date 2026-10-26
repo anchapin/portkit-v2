@@ -1,0 +1,8 @@
+# hand-written: one material by location, one through the model's textures
+newmtl post
+map_Kd examplemod:block/post
+newmtl cap
+map_Kd #cap
+newmtl glow
+Ka 1.0 1.0 1.0
+map_Kd #cap
