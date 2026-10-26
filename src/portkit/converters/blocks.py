@@ -2971,7 +2971,8 @@ def _code_drawn_reason(mod: SourceMod, blockstate: dict,
 def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
     """Why a blockstate can't be drawn when every model it names is built
     by a Java model loader (a model's ``loader``: NeoForge's ``obj``, a
-    composite or layered model), else None (#296).
+    composite or layered model) and no JSON elements are under it (its own,
+    a parent's or a vanilla template's), else None (#296).
 
     The loader builds the geometry from something other than the model's
     ``elements`` (an .obj file, sub-models, code), and the converter reads
@@ -2991,7 +2992,10 @@ def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
         except json.JSONDecodeError:
             return None
         loader = model.get("loader") if isinstance(model, dict) else None
-        if not isinstance(loader, str) or not loader:
+        if not isinstance(loader, str) or not loader or _chain_has_elements(mod, model):
+            # A loader over JSON elements (connected or retextured faces on
+            # the model's own or its parent's boxes) still has its boxes
+            # read, as before.
             return None
         source = model.get("model")
         loaders.setdefault(loader, set()).add(
@@ -3001,6 +3005,34 @@ def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
     return (f"every model the blockstate names ({len(refs)}) is built by a Java model loader "
             f"('{shown}'), not from its JSON elements; the converter reads no model loader, so no state "
             "of the block can be drawn")
+
+
+def _chain_has_elements(mod: SourceMod, model: dict) -> bool:
+    """Whether a model or its parent chain carries JSON elements: its own,
+    a mod parent's, or a vanilla template's (portkit's pinned set). A
+    parent this can't read (another namespace's, a missing file) counts as
+    having them, so nothing is refused on a guess; vanilla ``block/block``
+    has none."""
+    current = model
+    for _ in range(models._MAX_PARENT_DEPTH):
+        if current.get("elements"):
+            return True
+        parent = current.get("parent")
+        if not isinstance(parent, str):
+            return False
+        parent = models.normalize(parent)
+        if parent.startswith("minecraft:"):
+            return models.is_template(parent)
+        path = models.model_path(mod, parent)
+        if path is None or not path.is_file():
+            return True
+        try:
+            current = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            return True
+        if not isinstance(current, dict):
+            return True
+    return True
 
 
 def _load_blockstates(src) -> dict:

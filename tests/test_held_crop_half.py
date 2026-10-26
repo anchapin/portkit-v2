@@ -74,6 +74,10 @@ def _mod(tmp_path: Path) -> SourceMod:
     for name in ("tall_crop", "placed_crop"):
         (root / f"assets/{NS}/blockstates/{name}.json").write_text(json.dumps(_crop()))
     (root / f"assets/{NS}/blockstates/lamp.json").write_text(json.dumps(_lamp()))
+    # A loader over JSON elements (connected faces on the model's own box).
+    glass = {**_plane(16), "loader": "mantle:connected"}
+    (root / f"assets/{NS}/models/block/glass.json").write_text(json.dumps(glass))
+    (root / f"assets/{NS}/blockstates/glass.json").write_text(json.dumps({"variants": {"": {"model": f"{NS}:block/glass"}}}))
     return SourceMod(root=root, namespace=NS, classes=ClassIndex.from_source(CLASSES))
 
 
@@ -130,6 +134,11 @@ def test_loader_models_named(converted):
     # One leaderboard key whatever the loader and models.
     from portkit.gaps import normalize
     assert "lamp.obj" not in normalize(why)
+
+
+def test_loader_over_elements_still_read(converted):
+    assert "blocks/glass.json" in converted.files
+    assert _reason(converted, "glass") is None
 
 
 def test_crop_template_pinned():
