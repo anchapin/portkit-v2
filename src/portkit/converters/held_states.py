@@ -36,6 +36,15 @@ a pillar's axis, and the axis itself stays the player's (the pillar
 converters). Booleans named for a direction (connections, #221) and
 ``waterlogged`` (#383 item 4) are still not held. Booleans beside
 ``facing`` or drawn alone stay with #215's and #384's readers.
+
+A ``half`` beside number states alone (a crop that grows a top half,
+Immersive Engineering's hemp) is held like an enum, after the numbers: no
+other reader draws it there (doors and stairs draw it beside placement
+states, a two-tall plant alone), and the code reader refuses a block whose
+own code runs on placement (setPlacedBy, onPlace) and may place the other
+half. Its blockstate may name the upper half once for every age, as Java's
+partial variant selectors allow (:func:`_cells`); every other held shape
+names every state in every key.
 """
 from __future__ import annotations
 

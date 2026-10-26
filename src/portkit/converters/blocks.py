@@ -1661,7 +1661,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
                 result.claim(mod, model_file)
             result.unhandled.append(Unhandled(rel, CODE_DRAWN, _render_shape_reason(shape)))
             continue
-        loader_why = (None if name in (stations or {}) or name not in loaded
+        loader_why = (None if name in (stations or {}) or name in variation_sets or name not in loaded
                       else _model_loader_reason(mod, loaded[name]))
         if loader_why is not None:
             # Nothing is claimed: the states path claimed none of these
@@ -2998,9 +2998,9 @@ def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
             source.split("/")[-1] if isinstance(source, str) else ref.split("/")[-1])
     shown = "; ".join(f"{k}: {', '.join(sorted(v)[:3])}{', ...' if len(v) > 3 else ''}"
                       for k, v in sorted(loaders.items()))
-    return (f"every model the blockstate names ({len(refs)}) is built by a Java model loader ({shown}), "
-            "not from its JSON elements; the converter reads no model loader, so no state of the block "
-            "can be drawn")
+    return (f"every model the blockstate names ({len(refs)}) is built by a Java model loader "
+            f"('{shown}'), not from its JSON elements; the converter reads no model loader, so no state "
+            "of the block can be drawn")
 
 
 def _load_blockstates(src) -> dict:
