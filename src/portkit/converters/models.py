@@ -130,11 +130,27 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
     so reading only the leaf misses both the textures and the real parent.
     Returns the flattened model, the extra files read, and a refusal reason.
     """
+    from portkit.converters import objmodel  # objmodel reads this module
+
     textures: dict = {}
     seen: list[Path] = []
     current = model
     render_type = None
+    levels: list[dict] = []
     for _ in range(_MAX_PARENT_DEPTH):
+        if objmodel.is_obj(current):
+            # An OBJ loader model is drawn as elements where its mesh is
+            # boxes (#296); a parent's builds the child's geometry, with the
+            # child's textures (merged above it in the chain). Nothing is
+            # claimed for a mesh that isn't drawn.
+            if any(level.get("elements") for level in levels):
+                return {}, seen, "model sets elements and extends an OBJ loader model, which isn't read"
+            converted, read, why = objmodel.read(mod, current)
+            if converted is None:
+                return {}, seen, why
+            seen += read
+            current = converted
+        levels.append(current)
         textures = {**(current.get("textures") or {}), **textures}
         if render_type is None and isinstance(current.get("render_type"), str):
             # NeoForge/Forge render_type hint: the model's own, else its

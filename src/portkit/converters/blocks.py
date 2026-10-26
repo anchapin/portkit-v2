@@ -33,7 +33,7 @@ from portkit import png as png_reader
 
 from .. import blockcode, rendershape
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import buttons, doors, fence_gates, held_states, models, plates, trapdoors, variations
+from . import buttons, doors, fence_gates, held_states, models, objmodel, plates, trapdoors, variations
 
 _MENU_CATEGORY = "construction"
 
@@ -2983,6 +2983,7 @@ def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
     if not refs:
         return None
     loaders: dict[str, set] = {}
+    obj_why = ""
     for ref in refs:
         path = models.model_path(mod, ref)
         if path is None or not path.is_file():
@@ -2992,7 +2993,14 @@ def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
         except json.JSONDecodeError:
             return None
         loader = model.get("loader") if isinstance(model, dict) else None
-        if not isinstance(loader, str) or not loader or _chain_has_elements(mod, model):
+        if objmodel.is_obj(model):
+            # An OBJ model whose mesh is boxes is drawn as elements; one that
+            # isn't says why (#296).
+            read, _files, why = objmodel.read(mod, model)
+            if read is not None:
+                return None
+            obj_why = obj_why or why
+        elif not isinstance(loader, str) or not loader or _chain_has_elements(mod, model):
             # A loader over JSON elements (connected or retextured faces on
             # the model's own or its parent's boxes) still has its boxes
             # read, as before.
@@ -3002,6 +3010,9 @@ def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
             source.split("/")[-1] if isinstance(source, str) else ref.split("/")[-1])
     shown = "; ".join(f"{k}: {', '.join(sorted(v)[:3])}{', ...' if len(v) > 3 else ''}"
                       for k, v in sorted(loaders.items()))
+    if obj_why:
+        return (f"every model the blockstate names ({len(refs)}) is built by a Java model loader "
+                f"('{shown}'), not from its JSON elements; {obj_why}, so no state of the block can be drawn")
     return (f"every model the blockstate names ({len(refs)}) is built by a Java model loader "
             f"('{shown}'), not from its JSON elements; the converter reads no model loader, so no state "
             "of the block can be drawn")

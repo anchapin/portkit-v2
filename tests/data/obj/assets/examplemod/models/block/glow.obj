@@ -1,0 +1,8 @@
+# hand-written: one flat face lit by its material's Ka
+mtllib post.mtl
+v 0 0 0
+v 1 0 0
+v 1 0 1
+v 0 0 1
+usemtl glow
+f 4 3 2 1

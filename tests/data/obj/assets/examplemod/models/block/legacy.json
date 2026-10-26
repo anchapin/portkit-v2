@@ -1,0 +1,11 @@
+{
+  "parent": "minecraft:block/block",
+  "loader": "forge:obj",
+  "model": "examplemod:models/block/post.obj",
+  "flip_v": true,
+  "textures": {
+    "cap": "examplemod:block/cap",
+    "particle": "examplemod:block/post"
+  },
+  "flip-v": true
+}

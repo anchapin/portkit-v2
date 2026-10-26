@@ -1,0 +1,15 @@
+{
+  "parent": "minecraft:block/block",
+  "loader": "neoforge:obj",
+  "model": "examplemod:models/block/post.obj",
+  "flip_v": true,
+  "textures": {
+    "cap": "examplemod:block/cap",
+    "particle": "examplemod:block/post"
+  },
+  "visibility": {
+    "cap": false
+  },
+  "automatic_culling": false,
+  "shade_quads": false
+}
