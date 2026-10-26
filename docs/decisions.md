@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-10-26 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #395): an OBJ block model (`neoforge:obj`/`forge:obj`) converts where its mesh is exactly boxes; Bedrock `poly_mesh` is not used
+## 2026-10-25 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #395): an OBJ block model (`neoforge:obj`/`forge:obj`) converts where its mesh is exactly boxes; Bedrock `poly_mesh` is not used
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). #296 follow-up from #394 (loader-only blockstates, 192 files in 4 mods), part of #277. No policy call: no new geometry kind (`poly_mesh` is rejected below), nothing is approximated, and a block that converts goes through the existing readers and hold rules unchanged. One judgment call is stated under Decision 2.
 - **Which loaders the 192 use** (gap-leaderboard 40257553322, re-read locally from the gauntlet jars): only Immersive Engineering has OBJ models. IE 105 loader-only blockstates: 18 pure `neoforge:obj`, 36 IE's own `immersiveengineering:ie_obj` (an OBJ with Java callbacks), 35 `basic_split`, 8 `conf_sides`, 6 `models/conveyor`, 1 `neoforge:composite`, 1 `feedthrough`. Botania (`botania:floating_flower`), Tinkers (`mantle:connected` etc.) and Twilight Forest have no `.obj` files. Of the 13 real mods, Create has 43 `forge:obj` block models (blaze burner, track, bogey, water wheel parts) and Mekanism 1 item OBJ.
