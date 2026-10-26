@@ -27,6 +27,54 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-10-26 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #395): an OBJ block model (`neoforge:obj`/`forge:obj`) converts where its mesh is exactly boxes; Bedrock `poly_mesh` is not used
+
+- **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). #296 follow-up from #394 (loader-only blockstates, 192 files in 4 mods), part of #277. No policy call: no new geometry kind (`poly_mesh` is rejected below), nothing is approximated, and a block that converts goes through the existing readers and hold rules unchanged. One judgment call is stated under Decision 2.
+- **Which loaders the 192 use** (gap-leaderboard 40257553322, re-read locally from the gauntlet jars): only Immersive Engineering has OBJ models. IE 105 loader-only blockstates: 18 pure `neoforge:obj`, 36 IE's own `immersiveengineering:ie_obj` (an OBJ with Java callbacks), 35 `basic_split`, 8 `conf_sides`, 6 `models/conveyor`, 1 `neoforge:composite`, 1 `feedthrough`. Botania (`botania:floating_flower`), Tinkers (`mantle:connected` etc.) and Twilight Forest have no `.obj` files. Of the 13 real mods, Create has 43 `forge:obj` block models (blaze burner, track, bogey, water wheel parts) and Mekanism 1 item OBJ.
+- **Source read:** NeoForge branch 1.21.1 (neoforged/NeoForge 624c929), `client/model/obj/`: `ObjLoader#read` (keys `model`, `automatic_culling` default true, `shade_quads` true, `flip_v` false, `emissive_ambient` true, `mtl_override`), `ObjTokenizer#readAndSplitLine` L32-66, `ObjModel#parse` L91-258 (`mtllib`, `usemtl`, `v`/`vt`/`vn`/`vc`, `f` with negative indices, `g`/`o` parts and child objects), `ObjModel#makeQuad` L315-434 (block units, `flip_v`, default uvs, normal = `vn` or (v1-v0)x(v2-v0), `Ka` -> baked light under `emissive_ambient`, boundary-plane culling), `ModelMesh#addQuads` L541-557 (no material draws nothing; `Kd` tint; tint index; `#name` from the model's textures), `ModelGroup#addQuads` L494-499 (`visibility`), `ObjMaterialLibrary` L28-87.
+- **Bedrock `poly_mesh`:** not valid for us. The geometry 1.12.0 schema marks `poly_mesh` EXPERIMENTAL and 1.14.0+ marks it deprecated (learn.microsoft.com Visuals reference, geometry.v1.14.0). Minecraft Creator Tools fails any geometry carrying one: rule GEOFMT101 "Restricted Poly Mesh", severity Error, "may not be available on all platforms" (learn.microsoft.com/minecraft/creator/reference/content/mctoolsvalreference/geofmt). Our gap-leaderboard counts mct errors and the ingame gate fails on content errors, so `poly_mesh` is not written.
+- **Decision (generic core, `converters/objmodel.py`, no mod names):**
+  1. `models.resolve` reads an OBJ loader model (its own, or a parent's with the child's textures) into Java `elements`, so every reader downstream (variants, x/y turns, held states, cubes, material instances) treats it as a JSON model. The `.obj`/`.mtl` files are claimed only when the model is drawn.
+  2. A piece of the mesh (faces joined by shared corner positions, inside one OBJ part) becomes one element only when it is exactly a box. Every face must be a quad lying on one side of the piece's bounds, covering that side corner to corner. It must be wound outwards, with its normals straight out of the side and one face per side. Its uv must be one Java bakes for some `uv` and quarter `rotation` (checked corner by corner against `models.baked_quad`). **Judgment call:** the brief says "a cube per OBJ group"; IE writes a whole model as one group of several separate boxes, so the box test runs on each separate piece of a group. Each piece is still verified exactly, so nothing is approximated.
+  3. Read faithfully: `flip_v`; `automatic_culling` (as `cullface` on boundary faces); `shade_quads` false (as `shade: false`); `visibility`; `mtl_override`; `map_Kd` as a location (its own texture slot) or `#name`; the tint index; faces with no material (not drawn).
+  4. Given as a reason, never guessed: a face with 3 or more than 4 corners, a slanted face, a face inside the bounds, an inward or mis-lit face, two faces on one side, a uv no Java face carries, a `Ka` that bakes light (`emissive_ambient`), a `Kd` tint, vertex colours, keys of the old Forge 1.16 format (`flip-v`, `detectCullableFaces`, ...) or `transform`, and a missing or other-namespace file. The loader-only reason from #394 now carries the first such OBJ reason.
+- **Byte diffs** (local `pipeline.convert`, `emit_addon=False`, vanilla templates fetched, develop 9936cb4 vs branch 419a75d, md5 of every file):
+  - Immersive Engineering 12.4.2-194 (gauntlet jar): +`blocks/post_transformer.json`, +`models/blocks/post_transformer.geo.json` (13 cubes, the 13 boxes of `transformer_post.obj`), -`loot_tables/blocks/post_transformer.json`, and `unhandled.json`. Checked against the jar: `transformer_post.obj` is 78 quads in 13 boxes, and every face is matched corner by corner. The loot table drops `immersiveengineering:transformer` (`data/immersiveengineering/loot_table/blocks/post_transformer.json`), which this pack doesn't define, so it moves to residue. Reasons:
+    - 7 connectors (`connector_lv`/`mv`/`hv`, their relays and `connector_bundled`) and `redstone_switchboard` now read as boxes. They move from the loader-only reason to the existing placement refusal: `IEBaseBlock#getStateForPlacement`, "the player doesn't set facing".
+    - 9 OBJ blockstates name their first non-box piece: `electric_lantern`, `craftingtable`, `redstone_state_cell`, `toolbox_block` and the 3 wallmounts have a face inside a piece's bounds; `concrete_sprayed` has triangles; `coresample` and `fluid_pump` have slanted faces.
+  - Create (real-mods jar): `unhandled.json` only. `blaze_burner` (a face inside a piece) and `lit_blaze_burner` (`Ka` light on `campfire.obj`) get their OBJ reason. Files and residue are unchanged.
+- **Gap-leaderboard** 40264971641 on 419a75d vs 40257553322:
+  - Done 40/50 and mean 11.65% unchanged; mct errors 0.
+  - Only IE changed: 2297/6537 26.00% -> 2298/6534 26.02%.
+  - The loader-only reason goes from 4 mods/192 files to 4/173, plus 10 files under 3 OBJ-reason keys. The 6-way placement refusal goes 7 -> 14, the 4-way one 4 -> 5, and 1 loot entry is new.
+  - docs/gauntlet.md banked from this run.
+- **Real-mods** (include_optional) 40264967712 on 419a75d: 13/13 rows equal the baseline (files, residue, errors 0; compared by script against `fixtures/real/coverage-baseline.json` with `round(100*files/(files+residue),1)`), so nothing was rebanked. Create was byte-diffed anyway (it has `forge:obj` models): only `unhandled.json` differs, as above. Mekanism's one OBJ is an item model; the other 11 rows have no `.obj` and were not byte-diffed.
+- **Ingame** 40264969455 on 419a75d: 18/18 jobs pass (`immersive_engineering` included), so 0 content errors. No `poly_mesh` is written anywhere. **CI** 40264668950 on 419a75d green.
+- **Tests:** hand-written fixture `tests/data/obj` (not from a jar) and `tests/test_obj_models.py`:
+  - two boxes, with uv mirrored and by location or `#name`;
+  - every written face baked back as Java bakes it;
+  - `visibility`, `shade_quads`, `automatic_culling`;
+  - a child of an OBJ parent;
+  - an inward box, a triangle ramp, a `Ka` glow and old Forge keys, each named;
+  - the block conversion (2 cubes, no `poly_mesh`, nothing claimed for an undrawn mesh).
+
+  Local: pytest 3362 passed (29 skipped); `portkit eval` at or above baseline (21/21); node 261/261.
+- **Lost for players (stated per block where it converts):**
+  - IE `post_transformer` is drawn, but it does no power transfer (block entity, Java). Java places it only when a transformer is used on a post (`TransformerBlockItem`), and breaking it drops nothing, because the `transformer` item isn't in the pack.
+  - Every other OBJ block stays residue as before, now with the exact reason: IE's lantern, crafting table, toolbox, state cell, wallmounts, sprayed concrete, core sample and pump, and Create's blaze burners. The 7 connectors and the switchboard stay residue on the placement rule.
+  - Where an OBJ model converts, faces Java shades per vertex are shaded per face (only normals straight out of a side are accepted, so this is the same). Uvs are kept to 1e-5 of a pixel.
+- **Rejected:**
+  - `poly_mesh` (restricted by Minecraft's own validator, GEOFMT101);
+  - drawing the box pieces of a model and dropping the rest (an approximation, #87);
+  - a cube per piece fitted to a non-box piece's bounds;
+  - reading IE's own `immersiveengineering:ie_obj` (an adapter's job: it runs Java callbacks per part);
+  - converting `emissive_ambient` light to a whole-block light level.
+- **Follow-ups seen:**
+  - IE's connectors want a placement reader for `IEBaseBlock` (the facing is set from the clicked face in IE's code);
+  - an `ie_obj` adapter (36 IE blockstates);
+  - a two-box piece splitter (pieces that are two boxes sharing an edge, such as IE's wallmounts), if exact.
+- **Links:** #296, #277, #394, #87, #220, PR #395.
+
 ## 2026-10-25 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-10-25 brief), PR #394): a crop's grown half is held at the lower half its code registers; a blockstate drawn only by Java model loaders is named as such
 
 - **Status:** approved (Hark, high confidence under Alex's 2026-10-14 campaign order). #296 sub-reason 1 (Immersive Engineering's last 2: `hemp` and `electric_lantern`), part of #277. No policy call: holding a state where the code's own placement leaves it follows #215 item 6, #383 pick 1a and #390; the loader part only renames residue.
