@@ -3504,6 +3504,20 @@ class Machine:
         new VerticalSlabBlock(slab, ..))``). ``Iterable#forEach(Consumer)``
         runs the consumer on each element in iteration order (Java SE 21);
         anything else is not handled here."""
+        if static and name == "copyOf" and owner in _GUAVA_IMMUTABLE and len(rest) == 1 \
+                and desc.startswith(("(Ljava/util/Collection;)", "(Ljava/lang/Iterable;)")):
+            # Guava ImmutableList/ImmutableSet.copyOf(collection) (#296: IE's
+            # VisibilityList): the elements in the collection's iteration
+            # order, read as of(...) over them; a list a call may have
+            # changed, or one other runs add to, isn't known.
+            src = rest[0]
+            if isinstance(src, Coll):
+                items = list(src.items)
+            elif isinstance(src, ListV) and not src.havoc and src.shared is None:
+                items = list(src.items)
+            else:
+                return [UNKNOWN]
+            return self._collections(owner, "of", "([Ljava/lang/Object;)", None, [Arr(items)], True)
         if static and name == "of" and owner in _IMMUTABLE_OF:
             items = list(rest)
             if items and desc.split(")", 1)[0].endswith("[Ljava/lang/Object;"):
@@ -4295,6 +4309,7 @@ _RESERVED_PROPERTIES = ("java.", "javax.", "jdk.", "sun.", "com.sun.", "os.", "f
 # equal elements in the order given).
 _SET_OF = frozenset({"com/google/common/collect/ImmutableSet", "java/util/Set"})
 _IMMUTABLE_OF = _SET_OF | {"com/google/common/collect/ImmutableList", "java/util/List"}
+_GUAVA_IMMUTABLE = frozenset({"com/google/common/collect/ImmutableSet", "com/google/common/collect/ImmutableList"})
 # DeferredRegister#register(String, Supplier)'s parameters (NeoForge 1.21.1;
 # Forge's RegistryObject register keeps them), a subclass's covariant return
 # aside.

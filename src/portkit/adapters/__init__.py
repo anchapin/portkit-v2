@@ -262,6 +262,11 @@ class Adapter:
     # (SourceMod, {blockstate name: block class}) -> {blockstate name:
     # Orientation} (#296), see the module docstring.
     orientations: Callable[["SourceMod", Mapping[str, str]], Mapping[str, Orientation]] | None = None
+    # Model ``loader`` id -> (SourceMod, model dict) -> (model with Java
+    # ``elements`` | None, files read, reason) (#296): a mod's own mesh
+    # loader, read by its adapter, which hands the mesh to
+    # ``portkit.converters.objmodel.as_model`` (one box rule for every OBJ).
+    model_loaders: Mapping[str, Callable] = field(default_factory=_empty)
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -283,7 +288,8 @@ def check(adapters: tuple[Adapter, ...] | None = None) -> list[str]:
         if a.name in names:
             problems.append(f"adapter name {a.name!r} registered twice")
         names.add(a.name)
-        for hook, keys in (("condition", a.conditions), ("recipe type", a.recipe_reasons)):
+        for hook, keys in (("condition", a.conditions), ("recipe type", a.recipe_reasons),
+                           ("model loader", a.model_loaders)):
             for key in keys:
                 if (hook, key) in owners:
                     problems.append(f"{hook} {key!r} claimed by {owners[(hook, key)]!r} and {a.name!r}")
@@ -452,6 +458,14 @@ def orientations(mod: "SourceMod", classes_by_name: Mapping[str, str],
                 if name in classes_by_name:
                     found.setdefault(name, orientation)
     return found
+
+
+def model_loader(loader: str) -> Callable | None:
+    """The adapter reader for a model ``loader`` id, if one claims it."""
+    for a in ADAPTERS:
+        if loader in a.model_loaders:
+            return a.model_loaders[loader]
+    return None
 
 
 def station_hooks() -> list[StationHooks]:

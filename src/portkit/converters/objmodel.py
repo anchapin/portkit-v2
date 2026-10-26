@@ -393,6 +393,20 @@ def is_obj(model: object) -> bool:
     return isinstance(model, dict) and model.get("loader") in OBJ_LOADERS
 
 
+def reader(model: object):
+    """The reader for a model built by a mesh loader: NeoForge's OBJ loader
+    (:func:`read`) or a loader a mod adapter reads (``Adapter.model_loaders``,
+    which hands its mesh to :func:`as_model`), else None. Each takes
+    ``(mod, model)`` and gives ``(model with elements | None, files read,
+    reason)``."""
+    if is_obj(model):
+        return read
+    if isinstance(model, dict) and isinstance(model.get("loader"), str):
+        from portkit import adapters  # adapters import the converters
+        return adapters.model_loader(model["loader"])
+    return None
+
+
 def read(mod: SourceMod, model: dict) -> tuple[dict | None, list[Path], str]:
     """An OBJ loader model as a JSON model with ``elements``: the model
     with its loader keys replaced, the .obj/.mtl files read, and a reason
@@ -430,42 +444,58 @@ def read(mod: SourceMod, model: dict) -> tuple[dict | None, list[Path], str]:
     if parsed is None:
         return None, files, f"{head}: {why}"
     parts, pos, tex, nor, _col = parsed
+    shown = [sub for part in parts if visibility.get(part.name, True) is not False
+             for sub in [part] + [c for c in part.children if visibility.get(c.name, True) is not False]]
+    out, why = as_model(model, shown, pos, tex, nor, head=head, flip_v=flags["flip_v"],
+                        cull=flags["automatic_culling"], shade=flags["shade_quads"],
+                        ambient_light=flags["emissive_ambient"])
+    return out, files, why
+
+
+def as_model(model: dict, parts: list, pos: list, tex: list, nor: list, *, head: str, flip_v: bool,
+             cull: bool, shade: bool, ambient_light: bool) -> tuple[dict | None, str]:
+    """The drawn ``parts`` of a parsed OBJ mesh as a JSON model with
+    ``elements`` (``model``'s plain keys kept, its textures joined by each
+    material's own texture), or None and why a piece isn't exactly a box.
+
+    The settings are the loader's: ``flip_v`` (v read as 1 - v), ``cull``
+    (a face on the block's boundary culled by its neighbour), ``shade`` (a
+    false bakes unshaded quads) and ``ambient_light`` (a material's ``Ka``
+    bakes light). A loader that parses the file its own way (an adapter's)
+    gives its own parts and materials here, so the box rule is one rule."""
     elements: list[dict] = []
     materials: list = []
-    for part in parts:
-        if visibility.get(part.name, True) is False:
-            continue
-        for sub in [part] + [c for c in part.children if visibility.get(c.name, True) is not False]:
-            pieces = _pieces(sub.faces, pos)
-            for n, piece in enumerate(pieces, 1):
-                if flags["emissive_ambient"] and any(
-                        m is not None and int((m.ambient[0] + m.ambient[1] + m.ambient[2]) * 15 / 3.0) != 0
-                        for m, _ in piece):
-                    return None, files, (f"{head} part {sub.name!r}: its material's Ka bakes light into the "
-                                         "faces (emissive_ambient), which a Bedrock box can't carry")
-                element, why = _box(piece, pos, tex, nor, flags["flip_v"], flags["automatic_culling"])
-                if element is None:
-                    return None, files, (f"{head} part {sub.name!r} piece {n} of {len(pieces)} is not an "
-                                         f"axis-aligned box: {why}; {WHY_NO_MESH}")
-                if element:
-                    for m, _ in piece:
-                        if m is not None and m not in materials:
-                            materials.append(m)
-                    if not flags["shade_quads"]:
-                        element["shade"] = False
-                    elements.append(element)
+    for sub in parts:
+        pieces = _pieces(sub.faces, pos)
+        for n, piece in enumerate(pieces, 1):
+            if ambient_light and any(
+                    m is not None and int((m.ambient[0] + m.ambient[1] + m.ambient[2]) * 15 / 3.0) != 0
+                    for m, _ in piece):
+                return None, (f"{head} part {sub.name!r}: its material's Ka bakes light into the "
+                              "faces (emissive_ambient), which a Bedrock box can't carry")
+            element, why = _box(piece, pos, tex, nor, flip_v, cull)
+            if element is None:
+                return None, (f"{head} part {sub.name!r} piece {n} of {len(pieces)} is not an "
+                              f"axis-aligned box: {why}; {WHY_NO_MESH}")
+            if element:
+                for m, _ in piece:
+                    if m is not None and m not in materials:
+                        materials.append(m)
+                if not shade:
+                    element["shade"] = False
+                elements.append(element)
     if not elements:
-        return None, files, f"{head} draws no face"
+        return None, f"{head} draws no face"
     out = {k: v for k, v in model.items() if k in _MODEL_KEYS and k not in ("loader", "visibility")}
     textures = dict(out.get("textures") or {})
     for material in materials:
         if material.texture is not None and not material.texture.startswith("#"):
             slot = _slot(material.name)
             if textures.get(slot, models.normalize(material.texture)) != models.normalize(material.texture):
-                return None, files, f"{head}: the model already has a texture named {slot!r}"
+                return None, f"{head}: the model already has a texture named {slot!r}"
             # UnbakedGeometryHelper#resolveDirtyMaterial: a location, vanilla's
             # namespace when it names none.
             textures[slot] = models.normalize(material.texture)
     out["textures"] = textures
     out["elements"] = elements
-    return out, files, ""
+    return out, ""
