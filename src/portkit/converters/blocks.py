@@ -4740,6 +4740,7 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
         facings = {n: _facings_of(c) for n, (k, c) in specs.items() if k == "facing"}
         readings = blockcode.read_directional(classes, {n: k for n, (k, _) in specs.items()},
                                               run=shared() if shared else None, facings=facings)
+        _adapter_rules(mod, readings)
         out.update({n: (specs[n][0], {(k, ()): v for k, v in specs[n][1].items()}, readings[n], ())
                     for n in specs})
     if bool_specs:
@@ -4751,6 +4752,38 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
                                                      run=run)
         out.update({n: (k, c, readings[n], b) for n, (k, b, c) in bool_specs.items()})
     return out, why
+
+
+# Facing set after placement (#296): a facing-only or six-way facing block
+# whose own getStateForPlacement leaves facing where the registered default
+# has it, because the mod sets it once the block is in the world (Immersive
+# Engineering's block item hands the placement to the block entity). An
+# adapter with the ``orientations`` hook that reads that code from the jar
+# gives the rule per clicked face (Orientation.rule, read_directional's
+# form); it is then converted exactly as a rule read from
+# getStateForPlacement is. Only the "doesn't set facing" refusal is asked
+# about: a rule the core read, or one it couldn't follow for another reason,
+# is never replaced.
+
+
+def _adapter_rules(mod: SourceMod, readings: dict) -> None:
+    from ..adapters import orientations, reads_orientations
+    asked = {n: r for n, r in readings.items()
+             if r.kind in ("facing6", "facing") and r.rule is None and r.rule_conflict
+             and "doesn't set facing" in r.rule_conflict and r.cls}
+    if not asked or not reads_orientations(mod):
+        return
+    placed_by = orientations(mod, {n: r.cls for n, r in asked.items()},
+                             sites={n: r.made_in for n, r in asked.items() if r.made_in})
+    for name, o in placed_by.items():
+        r = asked[name]
+        if tuple(o.states) != ("facing",):
+            continue
+        if o.why or not o.rule:
+            r.rule_conflict = f"{r.rule_conflict}; the mod's placement after the block is set isn't read ({o.why})"
+            r.rule_why = r.rule_conflict
+            continue
+        r.rule, r.rule_from, r.rule_why, r.rule_conflict = dict(o.rule), o.source, "", ""
 
 
 # Facing with a second orientation state (#296): a blockstate drawing a

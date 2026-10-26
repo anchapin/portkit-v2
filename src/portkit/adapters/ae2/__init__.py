@@ -242,11 +242,14 @@ def _sets_up(classes) -> bool:
             and _shape(mapping, lookup) == _SPIN_FROM_UP)
 
 
-def orientations(mod, classes_by_name) -> dict[str, Orientation]:
+def orientations(mod, classes_by_name, sites=None) -> dict[str, Orientation]:
     """{blockstate name: Orientation} for the names of ``classes_by_name``
     (blockstate name -> its block class, dotted) whose class AE2's
-    FacingWithSpinStrategy places."""
+    FacingWithSpinStrategy places. Not asked about facing set after
+    placement (``sites``): AE2 places in getStateForPlacement."""
     classes = getattr(mod, "classes", None)
+    if sites is not None:
+        return {}
     if getattr(mod, "namespace", "") != NAMESPACE or classes is None or classes.get(_FULL) is None:
         return {}
     rule = None
