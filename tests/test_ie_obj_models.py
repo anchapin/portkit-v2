@@ -104,6 +104,40 @@ def test_callback_reason_adds_the_mesh(mod, monkeypatch):
     assert "; and its part 'ramp' piece 1 of 1 is not an axis-aligned box" in why
 
 
+def test_a_callback_that_only_picks_groups_draws_what_the_placed_key_shows(mod, monkeypatch):
+    # Pick 1a: a callback whose only drawing method is getIEOBJState draws the
+    # groups its key from the block entity placed alone shows.
+    monkeypatch.setattr(ieobj, "_registered", lambda classes: {"immersiveengineering:tube": "x/TubeCallbacks"})
+    monkeypatch.setattr(ieobj, "_overrides", lambda classes, cls: ["getIEOBJState"])
+    asked = []
+
+    def placed(mod_, classes, cb, names):
+        asked.append((cb, names))
+        return {"frame": True, "post": False}, ""
+
+    monkeypatch.setattr(ieobj, "_placed_alone", placed)
+    mod.classes = object()
+    out, _files, why = ieobj.read(mod, _model(mod, "tube_cb"))
+    assert why == "" and out is not None
+    assert asked == [("x/TubeCallbacks", ["frame", "post"])]
+    assert [(e["from"], e["to"]) for e in out["elements"]] == [([0, 0, 0], [16, 4, 16])]
+    # Unread, the callback is named with why.
+    monkeypatch.setattr(ieobj, "_placed_alone", lambda *a: (None, "no placed block is being drawn"))
+    out, _files, why = ieobj.read(mod, _model(mod, "tube_cb"))
+    assert out is None and "overrides getIEOBJState" in why and "(no placed block is being drawn)" in why
+
+
+def test_the_placed_key_needs_a_block_being_drawn(mod):
+    assert models.BLOCK_DRAWN.get() is None
+    assert ieobj._placed_alone(mod, object(), "x/Cb", ["a"]) == (None, "no placed block is being drawn")
+    token = models.BLOCK_DRAWN.set(("tube_cb", lambda: None))
+    try:
+        got, why = ieobj._placed_alone(mod, object(), "x/Cb", ["a"])
+    finally:
+        models.BLOCK_DRAWN.reset(token)
+    assert got is None and "the block tube_cb isn't found registered" in why
+
+
 def test_overrides_read_from_the_class_chain():
     m = lambda name, code=b"\0": SimpleNamespace(name=name, code=code)
     classes = {
