@@ -707,6 +707,28 @@ class _Ctx:
 PLACE_CTX = _Ctx()
 
 
+class _Player:
+    """The player placing a block, given by ``BlockPlaceContext#getPlayer``
+    only while an adapter's placement is read (Machine.player): its
+    horizontal facing is PlayerDir(0), its nearest looking direction
+    LookDir(False)."""
+
+    def __repr__(self):
+        return "player"
+
+
+class _YRot:
+    """The placing player's yaw (Entity#getYRot): only
+    ``Direction.fromYRot`` of it is known (the player's horizontal facing)."""
+
+    def __repr__(self):
+        return "yrot"
+
+
+PLAYER = _Player()
+_YROT = _YRot()
+
+
 @dataclass
 class Frame:
     pc: int
@@ -916,6 +938,12 @@ class Machine:
         self._code: list = []
         # The class of each method being run, innermost last.
         self._running: list = []
+        # The method each running frame is in, innermost last: a new object
+        # of the mod's records where it was made (Obj._made_in, #296).
+        self._methods: list = []
+        # While a placement is read for an adapter (read_placed_direction):
+        # the context's player answers for its facing (_Player).
+        self.player = False
         self.depth = 0
         # Whether the instruction being run sits after an undecided branch.
         self._forked = False
@@ -2058,11 +2086,13 @@ class Machine:
         code, at = indexed_instructions(cf, m.code)
         self._code.append((self.depth, code, at))
         self._running.append(cf.name)
+        self._methods.append((cf.name, m.name, m.desc))
         try:
             return self._run_code(cf, m, args, code, at)
         finally:
             self._code.pop()
             self._running.pop()
+            self._methods.pop()
 
     def _run_code(self, cf: ClassFile, m: Method, args: list, code: list, at: dict) -> list:
         # Longs and doubles take two local slots (JVMS 2.6.1).
@@ -2619,6 +2649,10 @@ class Machine:
         if self._allocating is not None:
             self._allocating.append(obj)
         obj._uninit = True  # until its constructor is called (see _invoke)
+        # The method whose ``new`` made it (#296: an adapter pairs a block
+        # with the block entity type its factory reads); not a field, so it
+        # takes no part in comparing objects.
+        obj._made_in = self._methods[-1] if self._methods else None
         # A new object's fields hold their default values (null, 0, false)
         # until written (JVMS 2.3, 2.4, 6.5 new); the fields the mod's and
         # libraries' classes declare are read so (see _field_default).
@@ -2982,11 +3016,15 @@ class Machine:
         if isinstance(recv, Const) and recv.owner == _ATTACH_FACE and name == "ordinal" \
                 and recv.name in _ATTACH_ORDER:
             return [_ATTACH_ORDER.index(recv.name)]
+        if isinstance(recv, (_Player, _YRot)):
+            return self._player(name, recv, rest)
         if owner == _DIRECTION or isinstance(recv, (Dir, PlayerDir, LookDir)):
             return self._direction(name, recv, rest, static)
         if isinstance(recv, _Ctx):
             if name == "getHorizontalDirection":
                 return [PlayerDir(0)]
+            if recv.clicked is not None and self.player and name == "getPlayer":
+                return [PLAYER]
             if recv.clicked is not None:
                 if name == "getClickedFace":
                     return [Dir(recv.clicked)]
@@ -3390,9 +3428,29 @@ class Machine:
         recv.has_collision, recv.light, recv.air = collision, light, air
         return [recv]
 
+    def _player(self, name: str, recv, rest: list):
+        """The placing player (_Player, only while Machine.player): its
+        horizontal facing and look, as BlockPlaceContext reads them (1.21.1:
+        getHorizontalDirection L64 is ``player.getDirection()``,
+        getNearestLookingDirection L68 ``Direction.orderedByNearest(player)[0]``).
+        Entity#getDirection is ``Direction.fromYRot(getYRot())``."""
+        if isinstance(recv, _Player) and not rest:
+            if name == "getDirection":
+                return [PlayerDir(0)]
+            if name == "getYRot":
+                return [_YROT]
+        return [UNKNOWN]
+
     def _direction(self, name: str, recv, rest: list, static: bool):
         if static and name == "values":
             return [Arr([Dir(d) for d in DIRECTIONS])]
+        if static and name == "fromYRot" and len(rest) == 1 and isinstance(rest[0], _YRot):
+            return [PlayerDir(0)]
+        if static and name == "orderedByNearest" and len(rest) == 1 and isinstance(rest[0], _Player):
+            # Direction#orderedByNearest(entity): the nearest of the six
+            # first (what getNearestLookingDirection returns); the rest
+            # aren't known.
+            return [Arr([LookDir(False)] + [UNKNOWN] * 5)]
         if isinstance(recv, Dir):
             if name == "ordinal":
                 return [DIRECTIONS.index(recv.name)]
@@ -6017,6 +6075,10 @@ class DirReading(Reading):
     shapes_by: dict | None = None
     # ``facing`` kind: the facing values the blockstate draws (DIRECTIONS order).
     facings: tuple = ()
+    # (class, method, descriptor) of the code whose ``new`` made the
+    # registered block (Obj._made_in), for an adapter that pairs the block
+    # with what its factory reads (#296); None when not one place.
+    made_in: tuple | None = None
 
 
 def directional_keys(kind: str, facings: tuple = ()) -> list[tuple[str, str]]:
@@ -6108,6 +6170,8 @@ def read_directional(classes: ClassIndex | None, kinds: dict[str, str], run=None
             continue
         obj = objs[0]
         r.cls = obj.cls.replace("/", ".")
+        sites = {getattr(o, "_made_in", None) for o in objs}
+        r.made_in = sites.pop() if len(sites) == 1 else None
         _read_states(machine, obj, r)
         r.behaviour = _behaviour(machine, obj.cls)
         if r.kind == "vslab":
@@ -6126,6 +6190,48 @@ def read_directional(classes: ClassIndex | None, kinds: dict[str, str], run=None
                 r.rule, r.shapes_by = None, None
                 r.rule_why = r.shape_why = "registered twice with different settings"
     return readings
+
+
+def read_placed_direction(classes: ClassIndex, cls: str, name: str, desc: str,
+                          machine: Machine | None = None) -> tuple[dict | None, str]:
+    """({clicked face: token}, "") for a method of the mod's class ``cls``
+    (slashed) taking a BlockPlaceContext and returning the Direction a
+    placement gives, run once per clicked face on a new ``cls`` object
+    whose constructor isn't run; or (None, why). Tokens are
+    :class:`DirReading`'s: ("dir", direction), ("player", quarters) or
+    ("look", opposite). The context answers as read_directional's does, and
+    its player (``getPlayer``) answers for its horizontal facing and look
+    (Machine._player), so a mod's own placement code that reads them is
+    followed (#296: a block entity placing its block's facing after the
+    block is set, read for an adapter that checks how the mod calls it).
+    Every path must give the same token; a direction read from anything
+    else (the point clicked, the world) isn't one."""
+    machine = machine or Machine(classes)
+    where = f"{cls.replace('/', '.')}#{name}"
+    found = machine.find_method(cls, name, desc) or machine.default_method(cls, name, desc)
+    if found is None:
+        return None, f"{where} isn't found"
+    obj = Obj(cls)
+    obj._uninit = False
+    obj._defaults = machine.is_mod(cls)
+    rule = {}
+    machine.player = True
+    try:
+        for c in DIRECTIONS:
+            machine.steps = 0
+            machine.new_epoch()
+            try:
+                results = machine.run(*found, [obj, _Ctx(c)])
+            except Unreadable as exc:
+                return None, f"{where} can't be followed clicking the {c} face ({exc})"
+            tokens = {_token(v) for v in results}
+            if len(tokens) != 1 or None in tokens:
+                return None, (f"{where}, clicking the {c} face, doesn't give one direction set from the "
+                              "clicked face or the player")
+            rule[c] = tokens.pop()
+    finally:
+        machine.player = False
+    return rule, ""
 
 
 def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
