@@ -38,7 +38,11 @@ the OBJ parser it bundles, malte0811/BlockModelSplitter (jar-in-jar
 :func:`read` reads the JSON and the mesh that way and hands the drawn groups
 to the generic reader (:func:`portkit.converters.objmodel.as_model`), whose
 rule is the same as for NeoForge's loader: a piece becomes an element only
-when it is exactly a box (#395). A callback that overrides any method that
+when it is exactly a box (#395). A callback whose only drawing method is
+``getIEOBJState`` (it only picks the groups drawn, as ``ChuteCallbacks``
+does) is run, with the key ``extractKey`` reads from the block's block entity
+as placed with nothing beside it (pick 1a, approved by Alex 2026-10-26; see
+:func:`_placed_alone`). A callback that overrides any other method that
 decides what is drawn is read from the jar (its class and the methods it
 declares) and named; it isn't run, so its model is a reason, never a guess.
 """
@@ -129,7 +133,7 @@ _GET_STATE = ("getIEOBJState", f"(Ljava/lang/Object;)L{_OBJ_STATE};")
 _NEW_BE = ("newBlockEntity", "(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)"
            "Lnet/minecraft/world/level/block/entity/BlockEntity;")
 _IDENTITY = ("com/mojang/math/Transformation", "IDENTITY")
-_ALONE: dict = {}  # (id(class index), blockstate name, callback) -> (index, answer)
+_ALONE: dict = {}  # (id(class index), blockstate name, callback, groups) -> (index, answer)
 
 
 def _placed_alone(mod, classes, cb: str, names: list[str]) -> tuple[dict | None, str]:
@@ -152,7 +156,7 @@ def _placed_alone(mod, classes, cb: str, names: list[str]) -> tuple[dict | None,
     if drawn is None:
         return None, "no placed block is being drawn"
     block, shared = drawn
-    key = (id(classes), block, cb)
+    key = (id(classes), block, cb, tuple(names))
     held = _ALONE.get(key)
     if held is not None and held[0] is classes:
         return held[1]
