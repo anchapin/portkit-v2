@@ -54,6 +54,12 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   - Still refused, 6 of the 17:
     - `item_batcher` and `turntable` (`PISTON_LIKE`, turned round when the player sneaks; Bedrock placement can't see sneaking). They now name that.
     - `furnace_heater` (`active`), `strip_curtain` (`ceiling_attached`), `turret_chem` and `turret_gun` (`multiblockslave`, and they are `IHasDummyBlocks`). These draw facing beside another state, a reader this PR doesn't extend. Follow-up.
+- **Gap-leaderboard** 40332515411 (gauntlet, mct) on 2db701e vs the banked board:
+  - Done 40/50 unchanged; mean 11.65% -> 11.66%. Only the IE row changed: 2298/6534 26.0% -> 2325/6495 26.4% (+27 files, as in the byte diff), and mct is clean (0/1584).
+  - `block` 818 -> 807, `recipe` 238 -> 244 (the connector recipes now refused for their own ingredients), `owned_by_residue` 5850 -> 5816.
+  - docs/gauntlet.md banked from this run.
+- **Ingame** 40332511560 on 2db701e: 18/18 jobs pass (`immersive_engineering` included), so 0 content errors. **CI** 40332503031 on 2db701e green.
+- **Real-mods** (include_optional) 40332507347 on 2db701e: green; 13/13 rows equal `fixtures/real/coverage-baseline.json` (files, residue, errors 0; compared by script with `round(100*files/(files+residue),1)`), so nothing was rebanked. No real-mods row is Immersive Engineering, and the core reader is asked only after an adapter answers for the namespace.
 - **What players lose:** the 11 blocks place and look as in Java. Their block entities don't work, as with every converted block entity before: no wires or power on the connectors, no redstone routing on the switchboard, no dynamo power, no magnet pull, no machine-interface outputs, no menus. The Engineer's Hammer can't turn them after placement (`canHammerRotate`), because that is Java code.
 - **Rejected:** a table of IE block -> placement rule (#220). Calling every block entity's placement "piston-like" or "facing the player" (#87). Reading facing+X blockstates in this PR (a separate reader).
 - **Links:** #296, #277, PR #396.
