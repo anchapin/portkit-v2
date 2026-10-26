@@ -15,7 +15,7 @@
     "create": {
       "coverage": 42.8,
       "files": 4127,
-      "residue": 5513,
+      "residue": 5514,
       "errors": 0
     },
     "farmers_delight_fabric": {
@@ -25,15 +25,15 @@
       "errors": 0
     },
     "farmers_delight_neoforge": {
-      "coverage": 48.9,
-      "files": 894,
-      "residue": 936,
+      "coverage": 49.8,
+      "files": 902,
+      "residue": 910,
       "errors": 0
     },
     "mekanism": {
       "coverage": 16.2,
       "files": 1257,
-      "residue": 6500,
+      "residue": 6504,
       "errors": 0
     },
     "mythicmetals": {
@@ -63,13 +63,13 @@
     "supplementaries": {
       "coverage": 31.1,
       "files": 1574,
-      "residue": 3479,
+      "residue": 3484,
       "errors": 0
     },
     "tinkers_construct": {
       "coverage": 52.5,
       "files": 16690,
-      "residue": 15105,
+      "residue": 15108,
       "errors": 0
     },
     "waystones": {
