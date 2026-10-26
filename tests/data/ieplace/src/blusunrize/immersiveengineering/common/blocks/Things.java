@@ -12,7 +12,7 @@ import net.minecraft.world.level.block.state.properties.Property;
 
 /** The fixture's block entities (IE's EnergyConnectorBlockEntity L136-152, RedstoneSwitchboardBlockEntity
  * L163-173, TurntableBlockEntity's mirror while sneaking, one told the point clicked that sets nothing,
- * StripCurtainBlockEntity L173-243 (ceiling_attached from the clicked face), TurretBlockEntity's
+ * StripCurtainBlockEntity L172-194/L238-242 (ceiling_attached from the clicked face), TurretBlockEntity's
  * IHasDummyBlocks L470-474, and one setting a state from the point clicked). */
 public class Things {
     public static final DirectionProperty FACING_ALL = DirectionProperty.create("facing", Direction.values());

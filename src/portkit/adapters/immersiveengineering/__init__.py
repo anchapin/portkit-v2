@@ -50,7 +50,7 @@ block is in the world:
   clicked face by the core (:func:`portkit.blockcode.read_placed_direction`),
   which follows the limitation's lambda and the mirror;
 * for an ``IAdvancedDirectionalBE`` (#296: ``StripCurtainBlockEntity``
-  L213-216, ``onDirectionalPlacement`` -> ``setCeilingAttached(side ==
+  L190-194, ``onDirectionalPlacement`` -> ``setCeilingAttached(side ==
   Direction.DOWN)``, L238-242), that ``onIEBlockPlacedBy`` hands it the
   clicked face (its instructions), then what its ``onDirectionalPlacement``
   sets on the block per clicked face, run by the core at every facing the
