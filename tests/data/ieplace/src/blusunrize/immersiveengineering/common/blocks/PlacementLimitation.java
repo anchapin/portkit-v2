@@ -7,10 +7,11 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.phys.Vec3;
 
-/** PlacementLimitation cut down (12.4.2-194): three of its rules. */
+/** PlacementLimitation cut down (12.4.2-194): four of its rules. */
 public enum PlacementLimitation {
     SIDE_CLICKED((side, placer, hitPos) -> side),
     PISTON_LIKE((side, placer, hitPos) -> Direction.orderedByNearest(placer)[0]),
+    HORIZONTAL((side, placer, hitPos) -> Direction.fromYRot(placer.getYRot())),
     HORIZONTAL_PREFER_SIDE((side, placer, hitPos) -> side.getAxis() != Axis.Y ? side.getOpposite() : placer.getDirection());
 
     private final DirectionGetter dirGetter;

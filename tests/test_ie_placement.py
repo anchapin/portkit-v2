@@ -9,7 +9,12 @@ The immersiveengineering adapter checks that chain's instructions, pairs each
 block with the block entity type its factory reads, and has the core run the
 block entity's ``getFacingForPlacement`` per clicked face
 (``blockcode.read_placed_direction``); the core converts the rule as one read
-from getStateForPlacement.
+from getStateForPlacement. A block entity told the clicked face after its
+facing (``IAdvancedDirectionalBE#onDirectionalPlacement``) may set another
+state of its block from it (IE's strip curtain: ``ceiling_attached``);
+``blockcode.read_placed_states`` reads what it sets per clicked face, and the
+core converts that state as the second state of a facing-with-second-state
+block. A block entity placing more blocks (``IHasDummyBlocks``) is named.
 
 The class files under tests/data/ieplace/classes are javac 21 output of
 tests/data/ieplace/src (rebuild with build.sh) against
@@ -34,7 +39,10 @@ from portkit.model import SourceMod
 CLASSES = Path(__file__).parent / "data" / "ieplace" / "classes"
 NS = "immersiveengineering"
 BLOCK = "blusunrize.immersiveengineering.common.blocks.IEEntityBlock"
-NAMES = ("connector", "board", "sneak", "hit")
+NAMES = ("connector", "board", "sneak", "hit", "curtain", "mid", "two_high")
+# Facing beside another state (#296): the second state each blockstate draws.
+SECOND = {"curtain": "ceiling_attached", "mid": "ceiling_attached", "two_high": "multiblockslave"}
+ADVANCED_DESC = "(Lnet/minecraft/core/Direction;FFFLnet/minecraft/world/entity/LivingEntity;)V"
 FACING_DESC = "(Lnet/minecraft/world/item/context/BlockPlaceContext;)Lnet/minecraft/core/Direction;"
 THINGS = "blusunrize/immersiveengineering/common/blocks/Things$"
 # A model's y turn per horizontal facing, as IE's datagen writes them.
@@ -58,6 +66,11 @@ def _model(tex: str) -> dict:
 
 
 def _blockstate(stem: str) -> dict:
+    if stem in SECOND:
+        # IE's strip curtain: a model per second state, turned by facing.
+        return {"variants": {f"{SECOND[stem]}={b},facing={f}": {
+            "model": f"{NS}:block/{stem}" + ("_top" if b == "true" else ""), **({"y": y} if y else {})}
+            for b in ("false", "true") for f, y in Y.items()}}
     if stem == "board":
         return {"variants": {f"facing={f}": {"model": f"{NS}:block/{stem}", **({"y": y} if y else {})}
                              for f, y in Y.items()}}
@@ -72,6 +85,10 @@ def _mod(tmp_path: Path, ns: str = NS) -> SourceMod:
     for stem in NAMES:
         (root / f"assets/{ns}/textures/block/{stem}.png").write_bytes(_png())
         (root / f"assets/{ns}/models/block/{stem}.json").write_text(json.dumps(_model(stem)).replace(f"{NS}:", f"{ns}:"))
+        if stem in SECOND:
+            top = _model(stem)
+            top["elements"][0].update({"from": [0, 13, 7], "to": [16, 16, 9]})
+            (root / f"assets/{ns}/models/block/{stem}_top.json").write_text(json.dumps(top).replace(f"{NS}:", f"{ns}:"))
         (root / f"assets/{ns}/blockstates/{stem}.json").write_text(
             json.dumps(_blockstate(stem)).replace(f"{NS}:block", f"{ns}:block"))
     return SourceMod(root=root, namespace=ns, classes=ClassIndex.from_source(CLASSES))
@@ -91,7 +108,7 @@ def test_registration_records_where_each_block_is_made():
     sites = _sites(ClassIndex.from_source(CLASSES))
     assert sites["connector"][0] == "blusunrize/immersiveengineering/common/register/IEBlocks"
     assert sites["connector"][1].startswith("lambda$static$")
-    assert len(set(sites.values())) == 4
+    assert len(set(sites.values())) == len(NAMES)
 
 
 def test_core_runs_a_block_entitys_placement_per_clicked_face():
@@ -121,8 +138,21 @@ def test_adapter_reads_the_chain_from_the_jar(tmp_path):
     assert got["connector"].rule["up"] == ("", ("dir", "down"))
     assert "ConnectorBE#getFacingForPlacement" in got["connector"].source
     assert got["board"].rule["north"] == ("", ("dir", "south")) and got["board"].rule["up"] == ("", ("player", 0))
-    assert "IAdvancedDirectionalBE" in got["hit"].why and got["hit"].rule is None
+    # Told the point clicked, but onDirectionalPlacement sets nothing: the
+    # facing rule stands alone.
+    assert got["hit"].why == "" and got["hit"].rule["up"] == ("", ("dir", "up")) and got["hit"].placed_states is None
     assert "SneakBE#getFacingForPlacement" in got["sneak"].why
+    # Asked about the states beside facing (their registered start unknown).
+    got = ie.orientations(mod, {n: BLOCK for n in SECOND}, sites=_sites(mod.classes),
+                          states={n: {SECOND[n]: None} for n in SECOND})
+    curtain = got["curtain"]
+    assert curtain.why == "" and curtain.rule["down"] == ("", ("player", 0))
+    assert curtain.placed_states == {c: (("ceiling_attached", "true" if c == "down" else "false"),)
+                                     for c in blockcode.DIRECTIONS}
+    assert "CurtainBE#onDirectionalPlacement (it sets ceiling_attached from the clicked face)" in curtain.source
+    assert got["mid"].rule is None and "follows something besides the clicked face" in got["mid"].why
+    assert got["two_high"].rule is None and "IHasDummyBlocks" in got["two_high"].why
+    assert "TwoHighBE#placeDummies" in got["two_high"].why
     # Asked without sites (the facing-and-spin question), or for another
     # namespace, the adapter gives nothing.
     assert ie.orientations(mod, {n: BLOCK for n in NAMES}) == {}
@@ -157,7 +187,58 @@ def test_horizontal_board_follows_the_side_clicked_or_the_player(converted):
 
 
 def test_unread_placements_stay_residue_with_their_reason(converted):
-    for stem, part in (("hit", "IAdvancedDirectionalBE"), ("sneak", "doesn't give one direction")):
+    assert "blocks/hit.json" in converted.files
+    for stem, part in (("sneak", "doesn't give one direction"),):
+        assert f"blocks/{stem}.json" not in converted.files
+        why = next(u.reason for u in converted.unhandled if u.source.endswith(f"blockstates/{stem}.json"))
+        assert "doesn't set facing" in why and "the mod's placement after the block is set isn't read" in why
+        assert part in why
+
+
+def test_core_reads_the_states_a_block_entity_sets_on_its_own_block():
+    classes = ClassIndex.from_source(CLASSES)
+    sets, why = blockcode.read_placed_states(classes, THINGS + "CurtainBE", "onDirectionalPlacement", ADVANCED_DESC,
+                                             {"ceiling_attached": None, "facing": "north"})
+    assert why == "" and sets["down"] == (("ceiling_attached", "true"),) and sets["up"] == (("ceiling_attached", "false"),)
+    # With a known start, a state set to it is the start (nothing changes).
+    sets, _ = blockcode.read_placed_states(classes, THINGS + "CurtainBE", "onDirectionalPlacement", ADVANCED_DESC,
+                                           {"ceiling_attached": "false", "facing": "east"})
+    assert sets["up"] == () and sets["down"] == (("ceiling_attached", "true"),)
+    # A state it wasn't asked about isn't taken.
+    sets, why = blockcode.read_placed_states(classes, THINGS + "CurtainBE", "onDirectionalPlacement", ADVANCED_DESC,
+                                             {"facing": "north"})
+    assert sets is None and "wasn't asked about" in why
+    # A state set from the point clicked (unknown) has no one answer.
+    sets, why = blockcode.read_placed_states(classes, THINGS + "MidBE", "onDirectionalPlacement", ADVANCED_DESC,
+                                             {"ceiling_attached": None, "facing": "north"})
+    assert sets is None and "takes 2 ways through" in why
+    sets, why = blockcode.read_placed_states(classes, THINGS + "TwoHighBE", "placeDummies",
+                                             "(Lnet/minecraft/world/item/context/BlockPlaceContext;"
+                                             "Lnet/minecraft/world/level/block/state/BlockState;)V", {})
+    assert sets is None and "takes no Direction" in why
+
+
+def test_curtain_converts_with_its_second_state_from_the_clicked_face(converted):
+    assert "blocks/curtain.json" in converted.files
+    assert not [u for u in converted.unhandled if u.source.endswith("blockstates/curtain.json")]
+    block = converted.files["blocks/curtain.json"]["minecraft:block"]
+    traits = block["description"]["traits"]
+    assert traits["minecraft:placement_position"]["enabled_states"] == ["minecraft:block_face"]
+    assert traits["minecraft:placement_direction"]["enabled_states"] == ["minecraft:cardinal_direction"]
+    # No Bedrock state of its own: ceiling_attached follows the clicked face.
+    assert "states" not in block["description"]
+    vis = block["components"]["minecraft:geometry"]["bone_visibility"]
+    assert len(vis) == 2
+    top = [b for b, c in vis.items() if c == "q.block_state('minecraft:block_face') == 'down'"]
+    assert len(top) == 1
+    # facing = the player's facing: south turns the model 180 on either half.
+    south = [p for p in block["permutations"]
+             if p["components"].get("minecraft:transformation", {}).get("rotation") == [0, 180, 0]]
+    assert south and all("'minecraft:cardinal_direction') == 'south'" in p["condition"] for p in south)
+
+
+def test_facing_beside_unread_states_stays_residue_with_its_reason(converted):
+    for stem, part in (("mid", "follows something besides the clicked face"), ("two_high", "IHasDummyBlocks")):
         assert f"blocks/{stem}.json" not in converted.files
         why = next(u.reason for u in converted.unhandled if u.source.endswith(f"blockstates/{stem}.json"))
         assert "doesn't set facing" in why and "the mod's placement after the block is set isn't read" in why

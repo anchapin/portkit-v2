@@ -66,7 +66,7 @@ Hooks, and the core seam that asks each one:
   converts each registered variant from the blockstate's defaults and its
   own textures.
 - ``orientations``: ``(SourceMod, {blockstate name: block class}[,
-  sites=]) -> {blockstate name: Orientation}``, for a mod whose blocks take ``facing``
+  sites=[, states=]]) -> {blockstate name: Orientation}``, for a mod whose blocks take ``facing``
   and a second orientation state (AE2's ``spin``) from a placement rule of
   the mod's own that the core's interpreter can't follow (#296): which
   Bedrock placement states give which Java orientation, read from the
@@ -77,7 +77,10 @@ Hooks, and the core seam that asks each one:
   registered block}), for facing-only and six-way facing blockstates whose
   getStateForPlacement leaves facing at its default because the mod sets it
   after the block is placed (Immersive Engineering): an Orientation of
-  ``states`` ``("facing",)`` then gives its ``rule``.
+  ``states`` ``("facing",)`` then gives its ``rule``. Such a blockstate
+  drawing other states beside ``facing`` is asked with ``states`` too
+  ({name: {state: registered start}}): the Orientation's ``placed_states``
+  then gives what the mod sets of them after placement, per clicked face.
 
 """
 from __future__ import annotations
@@ -196,7 +199,10 @@ class Orientation:
     rule in words; ``source``: where it was read; ``default``: the DEFAULT
     the Bedrock mapping leans on ("" when none); ``turned_by``: what turns
     the block to the orientations placement never gives; ``why``: why the
-    rule isn't read ("" when it is).
+    rule isn't read ("" when it is). ``placed_states``: with ``rule``, the
+    states besides ``facing`` the mod sets after placement, per clicked face
+    (clicked face -> ((state, value), ...); a state not named keeps its
+    start), read from its code; None when it sets none.
     """
 
     states: tuple = ()
@@ -209,6 +215,7 @@ class Orientation:
     turned_by: str = ""
     why: str = ""
     rule: Mapping | None = None
+    placed_states: Mapping | None = None
 
 
 def _empty() -> Mapping:
@@ -426,17 +433,21 @@ def reads_orientations(mod: "SourceMod") -> bool:
 
 
 def orientations(mod: "SourceMod", classes_by_name: Mapping[str, str],
-                 sites: Mapping[str, tuple] | None = None) -> dict[str, Orientation]:
+                 sites: Mapping[str, tuple] | None = None,
+                 states: Mapping[str, Mapping[str, str]] | None = None) -> dict[str, Orientation]:
     """Every adapter's ``orientations`` for ``mod``'s blockstates in
     ``classes_by_name`` (name -> block class); the first adapter (registry
     order) to answer a blockstate wins. ``sites`` (given only for the
     facing-set-after-placement question, see the module docstring) is passed
-    on as a keyword."""
+    on as a keyword, and with it ``states`` when given: per blockstate, the
+    states it draws besides ``facing`` with their registered start (name ->
+    {state: value}), which the mod may set after placement too."""
     found: dict[str, Orientation] = {}
     for a in ADAPTERS:
         if a.orientations is not None:
             got = a.orientations(mod, classes_by_name) if sites is None else \
-                a.orientations(mod, classes_by_name, sites=sites)
+                a.orientations(mod, classes_by_name, sites=sites) if states is None else \
+                a.orientations(mod, classes_by_name, sites=sites, states=states)
             for name, orientation in got.items():
                 if name in classes_by_name:
                     found.setdefault(name, orientation)

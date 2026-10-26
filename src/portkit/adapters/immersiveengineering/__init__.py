@@ -43,12 +43,19 @@ block is in the world:
   that registers the type builds that class (``IEBlockEntities``'
   ``register(name, makeType(Foo::new, block))``, or
   ``EnergyConnectorBlockEntity#registerConnectorTEs``);
-* that block entity's interfaces (an ``IAdvancedDirectionalBE`` or
-  ``IHasDummyBlocks`` isn't read; an ``IPlacementInteraction`` only when its
-  ``onBEPlaced`` sets no state), its facing property (``facing``), and its
-  ``getFacingForPlacement`` run per clicked face by the core
-  (:func:`portkit.blockcode.read_placed_direction`), which follows the
-  limitation's lambda and the mirror.
+* that block entity's interfaces (an ``IHasDummyBlocks``, which places more
+  blocks beside its own, isn't read and is named with its ``placeDummies``;
+  an ``IPlacementInteraction`` only when its ``onBEPlaced`` sets no state),
+  its facing property (``facing``), and its ``getFacingForPlacement`` run per
+  clicked face by the core (:func:`portkit.blockcode.read_placed_direction`),
+  which follows the limitation's lambda and the mirror;
+* for an ``IAdvancedDirectionalBE`` (#296: ``StripCurtainBlockEntity``
+  L190-194, ``onDirectionalPlacement`` -> ``setCeilingAttached(side ==
+  Direction.DOWN)``, L238-242), that ``onIEBlockPlacedBy`` hands it the
+  clicked face (its instructions), then what its ``onDirectionalPlacement``
+  sets on the block per clicked face, run by the core at every facing the
+  block can hold (:func:`portkit.blockcode.read_placed_states`): given as
+  ``placed_states`` beside the rule.
 
 A jar whose code differs gets the reason it isn't read, never a guess. The
 rule given is the facing per clicked face; the core converts it as a rule read
@@ -408,6 +415,68 @@ def _entity_of_unmemoized(classes, field) -> tuple[str | None, str]:
     return be, ""
 
 
+_ADVANCED_DESC = "(Lnet/minecraft/core/Direction;FFFLnet/minecraft/world/entity/LivingEntity;)V"
+
+
+def _local(insn):
+    """The local an ``aload``/``astore`` names, else None."""
+    if insn.name in ("aload", "astore"):
+        return insn.arg
+    if insn.name[:-1] in ("aload_", "astore_") and insn.name[-1].isdigit():
+        return int(insn.name[-1])
+    return None
+
+
+def _side_is_clicked_face(classes) -> bool:
+    """Whether IEEntityBlock#onIEBlockPlacedBy hands
+    ``context.getClickedFace()`` to onDirectionalPlacement as its ``side``
+    (L195 and L205: ``Direction side = context.getClickedFace()``,
+    ``onDirectionalPlacement(side, hitX, hitY, hitZ, placer)``)."""
+    from ...bytecode import Ref, instructions
+    cf, m = _declaring(classes, _ENTITY_BLOCK, "onIEBlockPlacedBy", _PLACED_BY_DESC)
+    if cf is None:
+        return False
+    insns = instructions(cf, m.code)
+    side = None
+    for k, insn in enumerate(insns):
+        if isinstance(insn.arg, Ref) and insn.arg.name == "getClickedFace" and k + 1 < len(insns):
+            side = _local(insns[k + 1]) if insns[k + 1].name.startswith("astore") else None
+        if isinstance(insn.arg, Ref) and insn.arg.name == "onDirectionalPlacement":
+            return side is not None and k >= 5 and _local(insns[k - 5]) == side \
+                and insns[k - 5].name.startswith("aload")
+    return False
+
+
+def _advanced_states(classes, be: str, prop: str, start: dict, machine) -> tuple[dict | None, str]:
+    """({clicked face: ((state, value), ...)}, "") that an
+    IAdvancedDirectionalBE's ``onDirectionalPlacement`` sets on its block
+    after its facing (IEEntityBlock#onIEBlockPlacedBy L203-206), read by the
+    core per clicked face with the block at every facing it can hold and the
+    other states at their registered start; or (None, why)."""
+    from ... import blockcode
+    dotted = be.replace("/", ".")
+    if not _side_is_clicked_face(classes):
+        return None, "IEEntityBlock#onIEBlockPlacedBy doesn't hand onDirectionalPlacement the clicked face"
+    found = machine.find_method(be, "onDirectionalPlacement", _ADVANCED_DESC)
+    if found is None:
+        return None, f"its block entity {dotted}'s onDirectionalPlacement isn't found"
+    owner = found[0].name
+    facings = blockcode.DIRECTIONS if prop == "facing6" else blockcode.HORIZONTAL
+    got = None
+    for f in facings:
+        sets, why = blockcode.read_placed_states(classes, owner, "onDirectionalPlacement", _ADVANCED_DESC,
+                                                 {**start, "facing": f}, machine=machine)
+        if sets is None:
+            return None, why
+        if any(p in ("facing", "facing6") for v in sets.values() for p, _ in v):
+            return None, f"{owner.replace('/', '.')}#onDirectionalPlacement sets facing again"
+        if got is not None and sets != got:
+            return None, (f"{owner.replace('/', '.')}#onDirectionalPlacement sets other states at "
+                          "different facings")
+        got = sets
+    return got, ""
+
+
 def _entity_checks(classes, be: str, machine) -> tuple[str, str]:
     """(why the block entity's placement isn't read, its facing property's
     name)."""
@@ -419,10 +488,11 @@ def _entity_checks(classes, be: str, machine) -> tuple[str, str]:
         return f"its block entity {dotted} isn't an IDirectionalBE, so placement leaves facing at its default", ""
     if _STATE_BASED not in ifaces:
         return f"its block entity {dotted} isn't an IStateBasedDirectional (its facing isn't a block state)", ""
-    for iface, what in ((_ADVANCED, "is told the point clicked (IAdvancedDirectionalBE)"),
-                        (_DUMMIES, "places more blocks (IHasDummyBlocks)")):
-        if iface in ifaces:
-            return f"its block entity {dotted} {what}, which isn't read", ""
+    if _DUMMIES in ifaces:
+        found = machine.find_method(be, "placeDummies", f"({_CTX}{_STATE})V")
+        where = f"{found[0].name.replace('/', '.')}#placeDummies" if found is not None else "placeDummies"
+        return (f"its block entity {dotted} places more blocks beside its own once it is placed "
+                f"(IHasDummyBlocks, {where}): a block of several blocks, which isn't read"), ""
     if _PLACEMENT_INTERACTION in ifaces:
         found = machine.find_method(be, "onBEPlaced", f"({_CTX})V") or machine.default_method(
             be, "onBEPlaced", f"({_CTX})V")
@@ -457,11 +527,15 @@ def _entity_checks(classes, be: str, machine) -> tuple[str, str]:
     return "", prop
 
 
-def orientations(mod, classes_by_name, sites=None) -> dict[str, Orientation]:
+def orientations(mod, classes_by_name, sites=None, states=None) -> dict[str, Orientation]:
     """{blockstate name: Orientation} (``states`` ``("facing",)`` with its
     ``rule``, or its ``why``) for the names of ``classes_by_name`` whose IE
     block entity sets the facing after placement. Asked only with ``sites``
-    (facing set after placement); nothing for any other question."""
+    (facing set after placement); nothing for any other question.
+    ``states`` (name -> {state: registered start}) names the states a
+    blockstate draws besides ``facing``: what an IAdvancedDirectionalBE's
+    onDirectionalPlacement sets of them is ``placed_states``; a state it
+    doesn't name was never asked about, so setting one is a reason."""
     from ... import blockcode
     classes = getattr(mod, "classes", None)
     if sites is None or getattr(mod, "namespace", "") != NAMESPACE or classes is None \
@@ -493,12 +567,24 @@ def orientations(mod, classes_by_name, sites=None) -> dict[str, Orientation]:
                                                           machine=machine)
             if tokens is not None:
                 rule = {c: ("", t) for c, t in tokens.items()}
+        placed = None
+        start = dict((states or {}).get(name) or {})
+        if rule is not None and _ADVANCED in _interfaces(classes, be):
+            placed, why = _advanced_states(classes, be, prop, start, machine)
+            if placed is None:
+                rule = None
+            elif not any(placed.values()):
+                placed = None
         source = ""
         if rule is not None:
             source = (f"Immersive Engineering BlockItemIE#placeBlock -> IEEntityBlock#onIEBlockPlacedBy -> "
                       f"{be.replace('/', '.')}#getFacingForPlacement -> IStateBasedDirectional#setFacing "
-                      "(the block entity sets facing once the block is placed), read from the jar")
-        out[name] = Orientation(states=("facing",), rule=rule, source=source, why=why if rule is None else "")
+                      "(the block entity sets facing once the block is placed)"
+                      + (f", then {be.replace('/', '.')}#onDirectionalPlacement (it sets "
+                         + ", ".join(sorted({p for v in placed.values() for p, _ in v}))
+                         + " from the clicked face)" if placed else "") + ", read from the jar")
+        out[name] = Orientation(states=("facing",), rule=rule, source=source, why=why if rule is None else "",
+                                placed_states=placed)
     return out
 
 
