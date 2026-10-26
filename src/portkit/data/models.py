@@ -103,6 +103,11 @@ TEMPLATES = (
     # Identical (parent, textures, elements) in mcmeta's 1.16.5, 1.18.2,
     # 1.19.2, 1.20.1, 1.21.1, 1.21.8 and 26.1 summaries (2026-10-17).
     "block/pressure_plate_up", "block/pressure_plate_down",
+    # #296 crops: vanilla's crop template (four planes at 4 and 12, one
+    # pixel sunk). Identical (parent, textures, elements) in mcmeta's
+    # 1.17.1, 1.18.2, 1.19.2, 1.20.1, 1.21.1, 1.21.8 and 26.1 summaries
+    # (2026-10-25); 1.16.5 writes the east faces' uv unmirrored (SINCE).
+    "block/crop",
 )
 
 # Templates whose boxes changed between game versions: the first version whose
@@ -112,11 +117,12 @@ SINCE = {
     "minecraft:block/button": "1.20",
     "minecraft:block/button_pressed": "1.20",
     "minecraft:block/ladder": "1.17",
+    "minecraft:block/crop": "1.17",
 }
 
 # sha256 of the derived JSON (see derive). `python -m portkit.data.models --pin`
 # prints it; bump it together with COMMIT.
-SHA256 = "6d2059e956a16902e02709ca76d5c44dda527e2b701198b25b12a4b871599e18"
+SHA256 = "8416ed31901491af94ca433c253732efa94ed83ef8d337d5f02d08e3eb54a4e8"
 
 
 def derive(summary: bytes) -> bytes:
