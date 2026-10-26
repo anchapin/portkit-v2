@@ -1615,7 +1615,8 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     variation_lang = variations.read_lang(mod) if variation_sets else {}
     variation_terrain = variations.terrain_keys(mod) if variation_sets else frozenset()
     variation_records: list[dict] = []
-    dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared, coded=readings)
+    dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared, coded=readings,
+                                                   coded_bool=bool_readings)
     paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded, shared)
     paired_records: list[dict] = []
     directional: list[dict] = []
@@ -4714,7 +4715,12 @@ def _directional_bool_variants(blockstate: dict) -> tuple[str | None, tuple, dic
 
 
 def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
-                           shared: "_SharedRun | None" = None, coded: dict | None = None) -> tuple[dict, dict]:
+                           shared: "_SharedRun | None" = None, coded: dict | None = None,
+                           coded_bool: dict | None = None) -> tuple[dict, dict]:
+    """``coded`` / ``coded_bool``: the facing-only and facing-with-booleans
+    readings (read_blocks); a facing-with-booleans blockstate the mod sets
+    facing on after placement that this answers for (in either returned
+    dict) is taken out of ``coded_bool``."""
     specs, why, bool_specs, spin_specs = {}, {}, {}, {}
     for stem, blockstate in loaded.items():
         if stem in stations:
@@ -4743,7 +4749,11 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
         _adapter_rules(mod, readings)
         out.update({n: (specs[n][0], {(k, ()): v for k, v in specs[n][1].items()}, readings[n], ())
                     for n in specs})
-    _read_set_after_placement(mod, loaded, coded or {}, shared, out, why)
+    _read_set_after_placement(mod, loaded, coded or {}, shared, out, why,
+                              {n: r for n, (_, r) in (coded_bool or {}).items()})
+    for name in list(coded_bool or {}):
+        if name in out or (name in why and why[name].startswith(("facing:", "facing and "))):
+            coded_bool.pop(name)
     if bool_specs:
         # On the shared run over every blockstate (#280: BetterEnd's wood
         # buttons, built by a library's material set, weren't reached by a
@@ -4771,7 +4781,8 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
 # is never replaced.
 
 
-def _read_set_after_placement(mod: SourceMod, loaded: dict, coded: dict, shared, out: dict, why: dict) -> None:
+def _read_set_after_placement(mod: SourceMod, loaded: dict, coded: dict, shared, out: dict, why: dict,
+                              coded_bool: dict | None = None) -> None:
     """The facing-only blockstates (four horizontals turning one model, read
     by read_blocks into ``coded``) refused because getStateForPlacement
     doesn't set facing: when an adapter reads the mod's placement after the
@@ -4783,8 +4794,8 @@ def _read_set_after_placement(mod: SourceMod, loaded: dict, coded: dict, shared,
     placement converts as a facing-with-second-state block
     (_after_placement_second), the rest held at that start."""
     from ..adapters import reads_orientations
-    asked = {n: r for n, r in coded.items() if n in loaded and r.placement_conflict
-             and "doesn't set facing" in r.placement_conflict}
+    asked = {n: r for n, r in {**(coded_bool or {}), **coded}.items() if n in loaded
+             and getattr(r, "placement_conflict", "") and "doesn't set facing" in r.placement_conflict}
     if not asked or not reads_orientations(mod):
         return
     specs, multi = {}, {}
@@ -4810,13 +4821,9 @@ def _read_set_after_placement(mod: SourceMod, loaded: dict, coded: dict, shared,
             booleans=frozenset(n for n, (_, o) in multi.items() if all(set(v) <= _BOOL_VALUES for v in o.values())))
         for name, (_, others) in multi.items():
             d = defaults[name]
-            if d.why or any(d.values.get(p) is None for p in others):
-                why[name] = (f"facing: {asked[name].placement_conflict}; the states beside it "
-                             f"({', '.join(sorted(others))}) have no registered start that is read"
-                             + (f" ({d.why})" if d.why else ""))
-                readings.pop(name, None)
-                continue
-            starts[name] = (d, {p: d.values[p] for p in others})
+            # A start that isn't read stays None: the adapter reads what
+            # placement sets without it, and a state held at it is refused.
+            starts[name] = (d, {p: None if d.why else d.values.get(p) for p in others})
     _adapter_rules(mod, {n: r for n, r in readings.items() if n in specs})
     for name, r in readings.items():
         if name not in specs:
@@ -4905,6 +4912,10 @@ def _after_placement_second(mod: SourceMod, loaded: dict, readings: dict, starts
             if not set(values) <= _BOOL_VALUES:
                 why[name] = f"{label}: {p} ({', '.join(values)}) isn't a boolean, so it has no start to hold"
                 break
+            if start[p] is None:
+                why[name] = (f"{label}: {p} isn't set by placement and its registered start isn't read"
+                             + (f" ({d.why})" if d.why else ""))
+                break
             reduced, passed = held_states.hold(blockstate, p, start[p])
             if reduced is None:
                 why[name] = f"{label}: no variant has {p}={start[p]}"
@@ -4919,6 +4930,10 @@ def _after_placement_second(mod: SourceMod, loaded: dict, readings: dict, starts
                 why[name] = reason
                 continue
             rule = {c: (dict(placed.get(c, ())).get(second, start[second]), o.rule[c][1]) for c in _SIX}
+            if any(v is None for v, _ in rule.values()):
+                why[name] = (f"{label}: placement sets {second} from some clicked faces only, and its "
+                             "registered start isn't read")
+                continue
             bedrock = _bedrock_cells(rule)
             stray = sorted({k for _, k in bedrock if k not in cells}, key=lambda k: (_SIX.index(k[1]), k[0]))
             if stray or z_only:

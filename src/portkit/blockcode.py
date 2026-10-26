@@ -6261,6 +6261,17 @@ class _OwnPos:
         return "own pos"
 
 
+class _Unset:
+    """A state whose start isn't known while a block entity's placement code
+    is read (read_placed_states): left as it is, the code didn't set it."""
+
+    def __init__(self, prop: str):
+        self.prop = prop
+
+    def __repr__(self):
+        return f"start of {self.prop}"
+
+
 class _OwnLevel:
     """The level of the block entity whose placement code is read."""
 
@@ -6289,7 +6300,9 @@ def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, star
 
     It runs once per clicked face on a new ``cls`` object whose constructor
     isn't run. Its block state (``getBlockState``) is ``start`` (state name ->
-    blockstate value), and every block it sets through
+    blockstate value, or None where the start isn't known: reading it then
+    gives no value, and the state counts as set only where the code sets
+    it), and every block it sets through
     ``Level#setBlockAndUpdate`` / ``Level#setBlock`` must be at its own
     position (``worldPosition``) in its own level. The answer per face is the
     states that differ from ``start`` in the last state it sets there (none
@@ -6311,7 +6324,9 @@ def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, star
     pos, level = _OwnPos(), _OwnLevel()
     values = {}
     for prop, text in start.items():
-        if text in ("true", "false"):
+        if text is None:
+            values[prop] = _Unset(prop)
+        elif text in ("true", "false"):
             values[prop] = 1 if text == "true" else 0
         elif text in DIRECTIONS:
             values[prop] = Dir(text)
@@ -6373,7 +6388,8 @@ def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, star
             if sets:
                 last = dict(current["sets"][-1].values)
                 for prop, value in sorted(last.items()):
-                    if prop in values and value == values[prop]:
+                    if prop in values and value is values[prop] or value == values.get(prop) \
+                            and not isinstance(values.get(prop), _Unset):
                         continue
                     if prop not in values:
                         return None, f"{where}, clicking the {c} face, sets {prop}, which it wasn't asked about"
