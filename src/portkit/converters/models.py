@@ -138,14 +138,16 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
     render_type = None
     levels: list[dict] = []
     for _ in range(_MAX_PARENT_DEPTH):
-        if objmodel.is_obj(current):
-            # An OBJ loader model is drawn as elements where its mesh is
-            # boxes (#296); a parent's builds the child's geometry, with the
-            # child's textures (merged above it in the chain). Nothing is
-            # claimed for a mesh that isn't drawn.
+        mesh = objmodel.reader(current)
+        if mesh is not None:
+            # An OBJ loader model (NeoForge's, or a mod's an adapter reads)
+            # is drawn as elements where its mesh is boxes (#296); a parent's
+            # builds the child's geometry, with the child's textures (merged
+            # above it in the chain). Nothing is claimed for a mesh that
+            # isn't drawn.
             if any(level.get("elements") for level in levels):
                 return {}, seen, "model sets elements and extends an OBJ loader model, which isn't read"
-            converted, read, why = objmodel.read(mod, current)
+            converted, read, why = mesh(mod, current)
             if converted is None:
                 return {}, seen, why
             seen += read
@@ -221,6 +223,15 @@ def resolve_variables(textures: dict) -> dict:
 # adds its render type (None when it names none).
 RENDER_TYPES_SEEN: contextvars.ContextVar[set | None] = contextvars.ContextVar(
     "render_types_seen", default=None)
+
+
+# The blockstate a model is drawn for (#296): while a block converts,
+# blocks.py holds (its blockstate name, a callable giving the converter's
+# shared registration run, ``blockcode._registered``'s (machine, {name:
+# (block objects, why)}) or None) here, for a model loader whose drawing
+# depends on the placed block (an adapter's, ``Adapter.model_loaders``).
+# None outside a block's conversion: such a loader then gives its reason.
+BLOCK_DRAWN: contextvars.ContextVar[tuple | None] = contextvars.ContextVar("block_drawn", default=None)
 
 
 def _note_render_type(render_type: str | None) -> None:

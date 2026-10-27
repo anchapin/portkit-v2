@@ -588,4 +588,7 @@ def orientations(mod, classes_by_name, sites=None, states=None) -> dict[str, Ori
     return out
 
 
-ADAPTER = Adapter(name="immersiveengineering", namespaces=frozenset({NAMESPACE}), orientations=orientations)
+from . import ieobj  # noqa: E402  (imports Adapter's package too)
+
+ADAPTER = Adapter(name="immersiveengineering", namespaces=frozenset({NAMESPACE}), orientations=orientations,
+                  model_loaders={ieobj.LOADER: ieobj.read})
