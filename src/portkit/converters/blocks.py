@@ -5410,6 +5410,11 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
     combos = blockcode.combinations(bools)
     facings = _facings_of(cells) if kind == "facing" else ()
     rule = reading.rule if reading.rule is not None or spin else blockcode.default_rule(kind, facings)
+    if rule is None and not spin and kind == "vine":
+        # #296: a vine converts only on vanilla VineBlock's placement.
+        result.unhandled.append(Unhandled(rel, "block", (
+            f"{label}: placement isn't read ({reading.rule_why}), and no DEFAULT covers a vine's faces")))
+        return None
     if rule is None and not spin:
         # #296: no DEFAULT is approved for a facing over these values.
         result.unhandled.append(Unhandled(rel, "block", (
