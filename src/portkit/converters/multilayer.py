@@ -303,7 +303,11 @@ def merge(mod: SourceMod, layers: list[Layer]) -> tuple[dict | None, list[Path],
             for face in (element.get("faces") or {}).values():
                 ref = face.get("texture") if isinstance(face, dict) else None
                 if isinstance(ref, str) and ref.startswith("#"):
-                    face["texture"] = "#" + rename.get(ref[1:], ref[1:])
+                    if ref[1:] not in rename:
+                        # Java draws the missing texture there; merged, the
+                        # face would wear another layer's texture of that name.
+                        return None, files, set(), f"layer {layer.label!r} has a face naming {ref}, which it doesn't set"
+                    face["texture"] = "#" + rename[ref[1:]]
                     keys.add(face["texture"][1:])
             elements.append(element)
     merged = {"textures": textures, "elements": elements}
@@ -351,7 +355,9 @@ def shared_type(types: set) -> tuple[str | None, str]:
     if len(names) == 1:
         return next(iter(names)), ""
     cut = names & _CUTOUT
-    if names == cut | {_SOLID} and cut:
+    if cut and names <= cut | {_SOLID}:
+        if _SOLID not in names:
+            return min(cut), ""  # every cutout type draws alpha_test
         return (min(cut), "its solid layer's textures have no transparent pixel, so they draw the same as "
                           "alpha_test, the method its cutout layer needs")
     return None, ""

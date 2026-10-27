@@ -159,3 +159,19 @@ def test_composite_with_translucent_child_or_extended_is_a_reason(mod):
     result = blocks.convert(mod)
     reason = next(u.reason for u in result.unhandled if u.source.endswith("blockstates/jar.json"))
     assert "composite" in reason and "translucent" in reason
+
+
+def test_face_naming_a_texture_its_layer_lacks_is_a_reason(mod):
+    lacking = {"parent": "block/block", "elements": [
+        {"from": [0, 0, 0], "to": [16, 1, 16], "faces": {"up": {"texture": "#frame"}}}]}
+    layers = [multilayer.Layer("SOLID", "minecraft:solid", {"parent": "examplemod:block/layered/frame"}),
+              multilayer.Layer("CUTOUT", "minecraft:cutout", lacking)]
+    merged, _files, _kinds, why = multilayer.merge(mod, layers)
+    assert merged is None and "#frame, which it doesn't set" in why
+
+
+def test_shared_type():
+    assert multilayer.shared_type({"minecraft:cutout", "minecraft:cutout_mipped"}) == ("minecraft:cutout", "")
+    assert multilayer.shared_type({"minecraft:solid", "minecraft:cutout_mipped"})[0] == "minecraft:cutout_mipped"
+    assert multilayer.shared_type({"minecraft:solid", "minecraft:translucent"}) == (None, "")
+    assert multilayer.shared_type({None}) == (None, "")
