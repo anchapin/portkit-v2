@@ -56,7 +56,10 @@ _CUTOUT = frozenset({"minecraft:cutout", "minecraft:cutout_mipped", "minecraft:c
 # (ForgeBlockStateV1 L935-971: no TransformType.NONE entry), so the block in
 # the world is untouched.
 _PERSPECTIVE_ONLY = frozenset({"identity", "forge:default-block"})
-_COMPOSITE_KEYS = frozenset({"loader", "children", "item_render_order", "visibility", "textures",
+# A composite's own parent lends it only display, AO and particle: its own
+# geometry replaces any parent elements (BlockGeometryBakingContext
+# #getCustomGeometry: the model's own loader first).
+_COMPOSITE_KEYS = frozenset({"loader", "parent", "children", "item_render_order", "visibility", "textures",
                              "display", "gui_light", "ambientocclusion", "render_type", "credit"})
 
 
