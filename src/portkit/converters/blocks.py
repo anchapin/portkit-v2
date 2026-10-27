@@ -33,7 +33,7 @@ from portkit import png as png_reader
 
 from .. import blockcode, rendershape
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import buttons, doors, fence_gates, held_states, models, objmodel, plates, trapdoors, variations
+from . import buttons, doors, fence_gates, held_states, models, multilayer, objmodel, plates, trapdoors, variations
 
 _MENU_CATEGORY = "construction"
 
@@ -1829,6 +1829,15 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             result.unhandled.append(Unhandled(rel, "block", flat_why[name]))
             continue
 
+        if multilayer.is_forge_multilayer(blockstate) and name not in (stations or {}):
+            # Forge 1.12's forge:multi-layer (#296): the layers the block's
+            # code renders in, merged into one model.
+            why = _convert_forge_multilayer(mod, result, name, blockstate, render(),
+                                            render_types.setdefault(name, set()), shared())
+            if why:
+                result.unhandled.append(Unhandled(rel, "block", why))
+            continue
+
         undrawn = _undrawn_states(blockstate)
         if undrawn is not None:
             # Every state draws the same look (#296): the block converts as
@@ -2972,6 +2981,78 @@ def _code_drawn_reason(mod: SourceMod, blockstate: dict,
     )
 
 
+def _convert_forge_multilayer(mod: SourceMod, result: ConversionResult, name: str, blockstate: dict,
+                              readings: dict, render_types: set, run=None) -> str:
+    """Convert a Forge 1.12 multi-layer blockstate (portkit.converters.multilayer):
+    the layer models of the render layers the block's code renders in, merged
+    into one geometry. Returns why not, or "" when it converted. Nothing is
+    claimed unless it converts."""
+    layers, base, why = multilayer.forge_layers(mod, name, blockstate)
+    if layers is None:
+        return f"multi-layer model (forge:multi-layer): {why}"
+    reading = readings.get(name)
+    cls = reading.cls.replace(".", "/") if reading is not None and reading.cls else None
+    if cls is None and run is not None:
+        # A 1.12 block class (MCP-named vanilla base) the registration run
+        # built but doesn't run as a block (blockcode Machine.outside).
+        cls = (getattr(run[0], "outside", None) or {}).get(name)
+    if cls is None:
+        return ("multi-layer model (forge:multi-layer): which render layers the block draws in is its code's, "
+                f"and its class isn't read: {getattr(reading, 'why', '') or 'the block is not registered'}")
+    drawn, source, why = rendershape.read_layers_112(getattr(mod, "classes", None), cls)
+    if drawn is None:
+        return f"multi-layer model (forge:multi-layer): the render layers the block draws in aren't read: {why}"
+    have = {layer.label for layer in layers}
+    lacking = sorted(drawn - have)
+    if lacking:
+        return (f"multi-layer model (forge:multi-layer): the block renders in {', '.join(lacking)} ({source}), "
+                "a layer the model doesn't name, where Java draws the missing model")
+    shown = [layer for layer in layers if layer.label in drawn]
+    if not shown:
+        return f"multi-layer model (forge:multi-layer): the block renders in none of its model's layers ({source})"
+    merged, files, types, why = multilayer.merge(mod, shown)
+    if merged is None:
+        return f"multi-layer model (forge:multi-layer): {why}"
+    merged.pop("ambientocclusion", None)
+    if base is not None:
+        # The block's ambient occlusion is base's (MultiLayerBakedModel
+        # #isAmbientOcclusion, L160-170).
+        seen: set = set()
+        token = models.RENDER_TYPES_SEEN.set(seen)
+        try:
+            flat, _read, _why = models.resolve(mod, base)
+        finally:
+            models.RENDER_TYPES_SEEN.reset(token)
+        if isinstance(flat, dict) and "ambientocclusion" in flat:
+            merged["ambientocclusion"] = flat["ambientocclusion"]
+    kind, kind_why = multilayer.shared_type(types)
+    claimed = set(result.consumed)
+    token = models.RENDER_TYPES_SEEN.set(set())
+    try:
+        identifier, instances, geo, why = _model_dict_block(mod, result, merged, f"{name} layers", name)
+    finally:
+        models.RENDER_TYPES_SEEN.reset(token)
+    if identifier is None:
+        result.consumed = claimed
+        return f"multi-layer model (forge:multi-layer): {why}"
+    for path in files:
+        result.claim(mod, path)
+    render_types.add(kind)
+    if geo is not None:
+        result.files[f"models/blocks/{name}.geo.json"] = geo
+    result.files[f"blocks/{name}.json"] = _block_definition(mod.namespace, name, identifier, instances or {})
+    named = ", ".join(f"{layer.label} {multilayer.RENDER_TYPE_112[layer.label]}" for layer in shown)
+    skipped = sorted(have - drawn)
+    result.notes.append(
+        f"{name}: drawn from its forge:multi-layer model's {named} layer models merged into one geometry "
+        f"(the layers its code renders in: {source})"
+        + (f"; its {', '.join(skipped)} layer model isn't drawn, as Java never renders the block in that layer"
+           if skipped else "")
+        + (f"; every face draws {_JAVA_RENDER_METHOD.get(kind, kind)}: {kind_why}" if kind_why else "")
+        + ".")
+    return ""
+
+
 def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
     """Why a blockstate can't be drawn when every model it names is built
     by a Java model loader (a model's ``loader``: NeoForge's ``obj``, a
@@ -3004,6 +3085,13 @@ def _model_loader_reason(mod: SourceMod, blockstate: dict) -> str | None:
             # adapter (Adapter.model_loaders).
             read, _files, why = mesh(mod, model)
             if read is not None:
+                return None
+            obj_why = obj_why or why
+        elif multilayer.is_composite(model):
+            # A composite's children are read and merged (#296); one that
+            # can't be says why.
+            merged, _files, _types, why = multilayer.composite(mod, model)
+            if merged is not None:
                 return None
             obj_why = obj_why or why
         elif not isinstance(loader, str) or not loader or _chain_has_elements(mod, model):

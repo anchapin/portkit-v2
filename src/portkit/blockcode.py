@@ -5011,6 +5011,12 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
     machine.registrations = []
     machine._allocating = []
     machine.renamed = {}
+    # name -> the one class a registration builds whose superclasses leave
+    # the jar at a vanilla class outside the Mojang-named block package (a
+    # 1.12 MCP-named ``net/minecraft/block/Block``): not a block object the
+    # machine runs, but a reader that finds methods by descriptor can read
+    # the class (portkit.rendershape.read_layers_112, #296).
+    machine.outside = {}
     wanted = _wanted_classes(classes, set(names))
     for cname in wanted:
         machine.steps = 0
@@ -5095,6 +5101,8 @@ def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[st
             outside = machine.vanilla_base(others[0])
             why = why or (f"registered as {others[0].replace('/', '.')}, whose superclasses leave the jar at "
                           f"{outside.replace('/', '.')} rather than reach a vanilla block class")
+            if len(set(others)) == 1:
+                machine.outside[name] = others[0]
         if not objs:
             why = why or unread.get(name) or "no registration of this block was found in the mod's classes"
         elif len({o.cls for o in objs}) != 1:
