@@ -1,0 +1,9 @@
+{
+  "parent": "block/block",
+  "textures": {"side": "examplemod:blocks/pane"},
+  "elements": [
+    {"from": [1, 10, 1], "to": [15, 15, 15], "shade": false,
+     "faces": {"north": {"texture": "#side"}, "south": {"texture": "#side"},
+               "west": {"texture": "#side"}, "east": {"texture": "#side"}}}
+  ]
+}
