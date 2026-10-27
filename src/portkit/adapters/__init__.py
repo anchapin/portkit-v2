@@ -65,6 +65,12 @@ Hooks, and the core seam that asks each one:
   register it. Asked by :func:`portkit.converters.blocks.convert`, which
   converts each registered variant from the blockstate's defaults and its
   own textures.
+- ``block_aliases``: ``SourceMod -> {blockstate name: BlockAlias}``, for a
+  mod whose code aliases block ids of its own to another namespace's block
+  (Quark's ids for blocks vanilla now has, #296). Asked by
+  :func:`portkit.converters.blocks.convert`: a blockstate under an aliased
+  id that no registration of the mod's names is residue with a reason
+  naming the alias, not a block of the mod's own.
 - ``orientations``: ``(SourceMod, {blockstate name: block class}[,
   sites=[, states=]]) -> {blockstate name: Orientation}``, for a mod whose blocks take ``facing``
   and a second orientation state (AE2's ``spin``) from a placement rule of
@@ -177,6 +183,17 @@ class BlockRegistry:
 
 
 @dataclass(frozen=True)
+class BlockAlias:
+    """A registry alias the mod's code adds for one of its own block ids (the
+    ``block_aliases`` hook, #296): ``target`` is the id Java resolves the
+    mod's id to while no block is registered under it (NeoForge
+    ``BaseMappedRegistry#resolve``), ``source`` where the alias was read."""
+
+    target: str
+    source: str
+
+
+@dataclass(frozen=True)
 class Orientation:
     """How a block's code places its orientation states (the
     ``orientations`` hook, #296).
@@ -259,6 +276,9 @@ class Adapter:
     # (SourceMod) -> BlockRegistry, or None for a jar the adapter doesn't
     # read (#296): the blockstate names the mod's code registers blocks under.
     block_registry: Callable[["SourceMod"], "BlockRegistry | None"] | None = None
+    # (SourceMod) -> {blockstate name: BlockAlias} (#296): block ids of the
+    # mod's own that its code aliases to another namespace's block.
+    block_aliases: Callable[["SourceMod"], Mapping[str, BlockAlias]] | None = None
     # (SourceMod, {blockstate name: block class}) -> {blockstate name:
     # Orientation} (#296), see the module docstring.
     orientations: Callable[["SourceMod", Mapping[str, str]], Mapping[str, Orientation]] | None = None
@@ -417,6 +437,20 @@ def block_variations(mod: "SourceMod") -> dict[str, VariationSet]:
     return found
 
 
+def block_aliases(mod: "SourceMod") -> dict[str, BlockAlias]:
+    """Every adapter's ``block_aliases`` for ``mod``; the first adapter
+    (registry order) to answer a blockstate wins. Only aliases to another
+    namespace are kept."""
+    found: dict[str, BlockAlias] = {}
+    ns = getattr(mod, "namespace", None)
+    for a in ADAPTERS:
+        if a.block_aliases is not None:
+            for name, alias in a.block_aliases(mod).items():
+                if alias.target.partition(":")[0] != ns:
+                    found.setdefault(name, alias)
+    return found
+
+
 def unregistered_blockstates(mod: "SourceMod", names) -> dict[str, str]:
     """Blockstate name -> where the reading was made, for each of ``names``
     the mod's code registers no block under: only when at least one adapter
@@ -475,7 +509,7 @@ def station_hooks() -> list[StationHooks]:
 
 from . import (  # noqa: E402  (each imports Adapter above)
     ae2, alloy_forgery, bclib, betterend, chisel, citadel, create, farmersdelight, immersiveengineering, mantle, mekanism,
-    mythicmetals, registrate, silentgear, supplementaries, tconstruct, waystones, zeta,
+    mythicmetals, quark, registrate, silentgear, supplementaries, tconstruct, waystones, zeta,
 )
 
 ADAPTERS = (
@@ -491,6 +525,7 @@ ADAPTERS = (
     mantle.ADAPTER,
     mekanism.ADAPTER,
     mythicmetals.ADAPTER,
+    quark.ADAPTER,
     registrate.ADAPTER,
     silentgear.ADAPTER,
     supplementaries.ADAPTER,

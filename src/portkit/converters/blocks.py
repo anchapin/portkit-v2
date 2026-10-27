@@ -212,6 +212,25 @@ def _undrawn_note(name: str, states: list[str]) -> str:
             "with them isn't ported")
 
 
+def _aliased_reason(mod: SourceMod, name: str, alias, why: str, shared) -> str:
+    """The residue reason for a blockstate under a block id the mod's code
+    aliases to another namespace's block (#296), when the shared
+    registration run finds no block registered under the name; ``why``
+    (the reason it had) otherwise."""
+    classes = getattr(mod, "classes", None)
+    if classes is None or not len(classes):
+        return why
+    _machine, registered = blockcode._from_run(shared() if shared else None, classes, [name])
+    objs, _ = registered.get(name, ((), ""))
+    if objs:
+        return why
+    ns = mod.namespace
+    return (f"the mod's code aliases {ns}:{name} to {alias.target} ({alias.source}): Java resolves the id to "
+            f"{alias.target} while no block is registered under it (NeoForge BaseMappedRegistry#resolve), and no "
+            f"registration of {name} was found in the mod's classes; the blockstate stays residue rather than "
+            f"converting as a block of the mod's own, which would be a second {alias.target}")
+
+
 def _single_model(blockstate: dict) -> tuple[str | None, str]:
     """The one model a stateless block uses, or why it has more than one."""
     if "multipart" in blockstate:
@@ -1610,6 +1629,15 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     from ..adapters import unregistered_blockstates
     unregistered = unregistered_blockstates(
         mod, [n for n in loaded if n not in (stations or {}) and n not in variation_sets and n not in air_blocks])
+    # Block ids of the mod's own its code aliases to another namespace's
+    # block (an adapter's block_aliases hook, #296): a blockstate under one
+    # that no other reader converts is named for the alias.
+    from ..adapters import block_aliases
+    aliased = block_aliases(mod)
+
+    def aliased_reason(name: str, why: str) -> str:
+        return _aliased_reason(mod, name, aliased[name], why, shared)
+
     # Blockstates whose bare variants the mod's code registers as blocks of
     # their own (an adapter's block_variations hook, #296), read above.
     variation_lang = variations.read_lang(mod) if variation_sets else {}
@@ -1713,6 +1741,15 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
                 for held_state in record["spin"]["held"]:
                     for model_file in _model_chain_files(mod, held_state["passed"]):
                         result.claim(mod, model_file)
+            if record is not None and record["kind"] == "vine":
+                # The models only the held-out variants draw (two or more
+                # faces, or none) were read and passed over on purpose, as a
+                # held state's other values' are (_held_claims).
+                drawn_models = {v[0] for v in dir_readings[name][1].values()}
+                passed = [m for m in _blockstate_models(loaded[name]) if m not in drawn_models]
+                for model_file in _model_chain_files(mod, passed):
+                    result.claim(mod, model_file)
+                record["held_out"] = len(loaded[name].get("variants") or {}) - len(dir_readings[name][1])
             if record is not None:
                 if name in water_dropped:
                     record["states"] = [x for x in record["states"] if x != "waterlogged"]
@@ -1847,6 +1884,8 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             result.notes.append(_undrawn_note(name, states))
         model_ref, why = _single_model(blockstate)
         if model_ref is None:
+            if why.startswith("block has ") and name in aliased:
+                why = aliased_reason(name, why)
             result.unhandled.append(Unhandled(rel, "block", why))
             continue
         random_entry = (blockstate.get("variants") or {}).get("")
@@ -4640,13 +4679,15 @@ _ATTACH_FACES = ("floor", "wall", "ceiling")
 _SIX = ("down", "up", "north", "south", "west", "east")
 _OPPOSITE = {"down": "up", "up": "down", "north": "south", "south": "north", "west": "east", "east": "west"}
 _DIR_LABEL = {"facing6": "6-way facing", "attach": "attach face", "vslab": "vertical slab", "facing": "facing",
-              "facing_spin": "facing with a second orientation state"}
+              "facing_spin": "facing with a second orientation state", "vine": "vine faces"}
 # The blockstate property a kind's second key is drawn on (``facing`` unless
 # named here).
 _DIR_PROP = {"vslab": "type"}
 
 
 def _key_label(key: tuple, kind: str = "", second: str | None = None) -> str:
+    if kind == "vine":
+        return f"{key[1]}=true"
     if second:
         return f"facing={key[1]},{second}={key[0]}"
     prop = _DIR_PROP.get(kind, "facing")
@@ -4683,6 +4724,14 @@ def _directional_variants(blockstate: dict, coded_ok: bool = False) -> tuple[str
     elif set(props) == {"face", "facing"} and props["face"] == set(_ATTACH_FACES) \
             and props["facing"] == set(_CARDINALS):
         kind = "attach"
+    elif set(props) == set(blockcode.VINE_FACES) and all(v == _BOOL_VALUES for v in props.values()):
+        # A vine (#296): vanilla VineBlock's five faces, every combination
+        # named. Placement sets one face (blockcode._VINE); the variants
+        # with one face set are drawn, the rest are held out (_vine_notes).
+        if len(parsed) != 2 ** len(blockcode.VINE_FACES):
+            return None, None, f"{_DIR_LABEL['vine']}: not every combination has a variant"
+        kind = "vine"
+        parsed = {k: c for k, c in parsed.items() if sum(v == "true" for v in c.values()) == 1}
     else:
         return None, None, ""
     label = _DIR_LABEL[kind]
@@ -4696,6 +4745,10 @@ def _directional_variants(blockstate: dict, coded_ok: bool = False) -> tuple[str
         x, y = entry.get("x") or 0, entry.get("y") or 0
         if any(not isinstance(v, int) or isinstance(v, bool) or v % 90 for v in (x, y)):
             return None, None, f"{label}: {key} turns a model by other than a quarter turn"
+        if kind == "vine":
+            cells[("", next(d for d, v in cell.items() if v == "true"))] = (
+                entry["model"], x % 360, y % 360, bool(entry.get("uvlock")))
+            continue
         cells[(cell.get("face", ""), cell[_DIR_PROP.get(kind, "facing")])] = (
             entry["model"], x % 360, y % 360, bool(entry.get("uvlock")))
     facings = tuple(d for d in _SIX if ("", d) in cells) if kind == "facing" else ()
@@ -5624,7 +5677,8 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         double_path = models.model_path(mod, cells[(("", "double"), ())][0])
         if double_path is not None and double_path.is_file():
             result.claim(mod, double_path)
-    drawn = {"facing"} if kind in ("facing6", "facing") else {"type"} if kind == "vslab" else {"face", "facing"}
+    drawn = ({"facing"} if kind in ("facing6", "facing") else {"type"} if kind == "vslab"
+             else set(blockcode.VINE_FACES) if kind == "vine" else {"face", "facing"})
     if spin:
         drawn = {"facing", spin["second"]} | {h["prop"] for h in spin["held"]}
     record = {
@@ -5632,7 +5686,8 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         "kind": kind,
         "rule": spin["orientation"].source if spin else reading.rule_from if reading.rule is not None else None,
         "rule_why": "" if spin else reading.rule_why,
-        "rule_text": spin["orientation"].text if spin else _rule_text(rule, _DIR_PROP.get(kind, "facing")),
+        "rule_text": spin["orientation"].text if spin else _rule_text(
+            rule, "the face set is" if kind == "vine" else _DIR_PROP.get(kind, "facing")),
         "support": not spin and (reading.support_assumed or reading.rule is None and kind == "attach"),
         "box": reading.shape_from if shapes_by is not None else None,
         "box_why": (f"the box isn't read per {spin['second']}" if spin else reading.shape_why),
@@ -5652,6 +5707,9 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
                           "held": spin["held"]}
     if kind == "facing":
         record["facings"] = list(facings)
+    if kind == "vine":
+        record["tinted"] = any(_tinted(e) for c in live for e in model_elements[cells[c][0]])
+        record["climbable"] = _climbable(mod, name)
     if button is not None:
         record["button"] = button
     if bools:
@@ -5669,6 +5727,40 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
             "light_copied": reading.light_copied,
         })
     return record
+
+
+def _climbable(mod: SourceMod, name: str) -> bool:
+    """Whether the jar's own ``minecraft:climbable`` block tag lists the
+    block (vanilla's tag lists vanilla blocks only)."""
+    from ..datatags import _BLOCK_DIRS, jar_members
+    members = jar_members(mod.root, "minecraft:climbable", _BLOCK_DIRS, getattr(mod, "loader", None)) or []
+    return f"{mod.namespace}:{name}" in members
+
+
+def _vine_notes(records: list[dict]) -> list[str]:
+    """Notes for vines (#296): what a placed vine shows and what Java does
+    with it that the converted block doesn't."""
+    if not records:
+        return []
+    notes = [
+        "Vines (#296), vanilla VineBlock's five faces: a placed vine has the one face its placement sets "
+        "(VineBlock#getStateForPlacement, followed through the vanilla code the class inherits: the clicked "
+        "face's opposite; a clicked top face gives the player's facing), drawn by the variant with that face "
+        "alone. Faces Java sets after placement are held out, not drawn: more vine placed into the block "
+        "(VineBlock#canBeReplaced L304-309, whose placement keeps the faces already there), growth on random "
+        "tick (VineBlock#randomTick L174-265, where the block's classes don't replace it) and a face dropped "
+        "when its support goes (updateShape L159-169); the variants with two or more faces, or none, are not "
+        "ported - " + _grouped([(f"{r['held_out']} variant(s)", r["name"]) for r in records]) + "."]
+    climb = [r["name"] for r in records if r["climbable"]]
+    if climb:
+        notes.append("Not climbable: the jar's minecraft:climbable block tag lists these, and Java lets an entity "
+                     "climb a block that tag lists; Bedrock custom blocks have no climbing - " + ", ".join(climb)
+                     + ".")
+    tinted = [r["name"] for r in records if r["tinted"]]
+    if tinted:
+        notes.append("The model's faces carry a tintindex, a colour the mod's client code computes; it isn't "
+                     "applied, so the texture shows as the jar has it (untinted) - " + ", ".join(tinted) + ".")
+    return notes
 
 
 def _rule_text(rule: dict, prop: str = "facing") -> str:
@@ -5800,6 +5892,7 @@ def _directional_notes(records: list[dict]) -> list[str]:
     if read:
         notes.append("Placement rule read from bytecode - " + _grouped(read) + ".")
     notes += _spin_notes([r for r in records if r.get("spin")])
+    notes += _vine_notes([r for r in records if r["kind"] == "vine"])
     for kind in ("facing6", "attach", "vslab", "facing"):
         default = [(r["rule_why"], r["name"]) for r in records if not r["rule"] and r["kind"] == kind]
         if default:

@@ -254,6 +254,37 @@ _FACE_ATTACHED_KIN = {
     "net/minecraft/world/level/block/GrindstoneBlock",
 }
 _ATTACH_FACE = "net/minecraft/world/level/block/state/properties/AttachFace"
+# VineBlock (1.21.1 client jar class dov + client.txt, Mojang mappings), read
+# only by the vine kind of read_directional (#296):
+# - <init> L53-57 registers stateDefinition.any() with UP, NORTH, EAST, SOUTH
+#   and WEST all false.
+# - getStateForPlacement L315-329: the state already at the clicked position
+#   if it is this block, else defaultBlockState(); then, for each of
+#   context.getNearestLookingDirections() but DOWN, the first whose boolean
+#   isn't already set there and canSupportAtFace(level, pos, direction)
+#   holds gets that boolean set true; else that state if it was this block,
+#   else null (nothing placed).
+# - getShape L81 is shapesCache.get(state), the cache built by
+#   calculateShape L60-76: the union of UP_AABB, NORTH_AABB, SOUTH_AABB,
+#   EAST_AABB, WEST_AABB for the booleans set (<clinit> L28-48:
+#   Block.box(0,15,0,16,16,16), (0,0,0,16,16,1), (0,0,15,16,16,16),
+#   (15,0,0,16,16,16), (0,0,0,1,16,16)), Shapes.empty() with none.
+# The 1.20.1 client jar (class cyh) has the same methods (getStateForPlacement
+# L308-322, calculateShape L52-68). BlockPlaceContext#getNearestLookingDirections
+# (L76-96) puts the clicked face's opposite first, so a side or bottom face
+# clicked gives the boolean facing back into the clicked block; a top face
+# clicked gives DOWN first, which is skipped, and the rest are
+# Direction#orderedByNearest(player) without DOWN. A top face is hit only by
+# a ray going down, so DOWN is one of that order's first three, and the first
+# of the others is the larger horizontal part of the look, which is
+# getHorizontalDirection (both round the yaw to the nearest axis). Support
+# (canSupportAtFace, which a mod may widen to public and override) is not
+# emulated, as for every directional block: the first direction is taken.
+_VINE = "net/minecraft/world/level/block/VineBlock"
+VINE_FACES = ("up", "north", "south", "west", "east")
+_VINE_BOXES = {"up": (0.0, 15.0, 0.0, 16.0, 16.0, 16.0), "north": (0.0, 0.0, 0.0, 16.0, 16.0, 1.0),
+               "south": (0.0, 0.0, 15.0, 16.0, 16.0, 16.0), "east": (15.0, 0.0, 0.0, 16.0, 16.0, 16.0),
+               "west": (0.0, 0.0, 0.0, 1.0, 16.0, 16.0)}
 _CAN_SURVIVE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/LevelReader;"
                      "Lnet/minecraft/core/BlockPos;)Z")
 _ATTACH_ORDER = ("FLOOR", "WALL", "CEILING")  # AttachFace declaration order (dtn a, b, c)
@@ -989,6 +1020,9 @@ class Machine:
         # BlockState#canSurvive answers true, and support_assumed records it.
         self.assume_support = False
         self.support_assumed = False
+        # While reading a vine's placement (read_directional, kind "vine"):
+        # vanilla VineBlock#getStateForPlacement is followed (see _VINE).
+        self.vine = False
         # While reading a block entity (read_containers): registry holders,
         # BlockEntityType builders and BlockEntityType#create are followed
         # (see _holder_call) instead of being unknown calls.
@@ -3151,6 +3185,29 @@ class Machine:
                 if "__default" not in recv.fields:
                     raise Unreadable("vanilla CropBlock's registered default isn't read")
                 return [recv.fields["__default"]]
+            if base == _VINE and self.vine and name == "getStateForPlacement" and desc == _PLACEMENT_DESC \
+                    and rest and isinstance(rest[0], _Ctx) and rest[0].clicked is not None:
+                # VineBlock#getStateForPlacement L315-329 (see _VINE), on a
+                # fresh position: the registered default with one face set.
+                # ``facing`` carries that face for _read_rule (Dir, or the
+                # player's facing for a clicked top face).
+                first = Dir(rest[0].clicked).opposite()
+                face = PlayerDir(0) if first.name == "down" else first
+                state = recv.fields.get("__default")
+                if not isinstance(state, State):
+                    state = State(tuple(sorted((d, 0) for d in VINE_FACES)))
+                if isinstance(face, Dir):
+                    for d in VINE_FACES:
+                        state = state.set(d, 1 if d == face.name else 0)
+                self.support_assumed = True
+                return [state.set("facing", face)]
+            if base == _VINE and name == "getShape" and desc == _GET_SHAPE_DESC and rest \
+                    and isinstance(rest[0], State):
+                # VineBlock#getShape L81 / calculateShape L60-76 (see _VINE).
+                values = [rest[0].get(d) for d in VINE_FACES]
+                if all(v in (0, 1) for v in values):
+                    return [Shape(tuple(_VINE_BOXES[d] for d, v in zip(VINE_FACES, values) if v))]
+                raise Unreadable("vanilla VineBlock's shape at a state whose faces aren't known")
             if base == _FACE_ATTACHED and name == "getShape" and desc == _GET_SHAPE_DESC:
                 # It declares no getShape (client.txt 1.21.1): BlockBehaviour's.
                 return [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),))]
@@ -6130,7 +6187,7 @@ def _read_water(machine: Machine, obj: Obj, r: WaterReading) -> None:
 # block up; Java would try the next looking direction or refuse to place. The
 # reading says when it leaned on this (support_assumed).
 
-DIRECTIONAL_KINDS = ("facing6", "attach", "vslab", "facing")
+DIRECTIONAL_KINDS = ("facing6", "attach", "vslab", "facing", "vine")
 # ``facing`` (#296): a blockstate whose only state is ``facing`` over some of
 # the six directions (not all six), one model per value: a hopper-like
 # down-or-horizontal facing (vanilla BlockStateProperties.FACING_HOPPER and
@@ -6180,6 +6237,9 @@ def directional_keys(kind: str, facings: tuple = ()) -> list[tuple[str, str]]:
         return [("", d) for d in DIRECTIONS if d in facings]
     if kind == "vslab":
         return [("", t) for t in VSLAB_TYPES]
+    if kind == "vine":
+        # One face set, as a vine is placed (see _VINE); key ("", face).
+        return [("", d) for d in DIRECTIONS if d in VINE_FACES]
     return [(f, d) for f in ("floor", "wall", "ceiling") for d in HORIZONTAL]
 
 
@@ -6199,6 +6259,10 @@ def default_rule(kind: str, facings: tuple = ()) -> dict | None:
     DEFAULT (#212, blocks.DEFAULT_PLACEMENT: the block faces the player,
     facing = the player's horizontal direction turned round); over any other
     set of values no DEFAULT is approved, so there is none (None)."""
+    if kind == "vine":
+        # No DEFAULT is approved for a vine's faces: placement is read from
+        # vanilla VineBlock's code, or the block isn't converted.
+        return None
     if kind == "facing":
         if set(facings) == set(HORIZONTAL):
             return {c: ("", ("player", 2)) for c in DIRECTIONS}
@@ -6236,6 +6300,10 @@ def _face_value(value):
 
 def _with_key(state: State, kind: str, key: tuple) -> State:
     face, facing = key
+    if kind == "vine":
+        for d in VINE_FACES:
+            state = state.set(d, 1 if d == facing else 0)
+        return state
     state = state.set("facing", Dir(facing))
     if kind in ("facing6", "facing"):
         return state.set("facing6", Dir(facing))
@@ -6646,8 +6714,17 @@ def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
     if machine.vanilla_base(obj.cls) in _FACE_ATTACHED_KIN and not machine.find_method(
             obj.cls, "getStateForPlacement", _PLACEMENT_DESC):
         where = f"{_FACE_ATTACHED.replace('/', '.')}#getStateForPlacement L39-52 (vanilla, inherited)"
+    if r.kind == "vine":
+        if machine.vanilla_base(obj.cls) != _VINE:
+            r.rule_why = (f"{obj.cls.replace('/', '.')}: the blockstate draws a vine's five faces, but the class "
+                          "isn't a vanilla VineBlock, whose placement is the only vine placement read")
+            return
+        if not machine.find_method(obj.cls, "getStateForPlacement", _PLACEMENT_DESC):
+            where = (f"{_VINE.replace('/', '.')}#getStateForPlacement L315-329 (vanilla 1.21.1; 1.20.1 "
+                     "L308-322; inherited)")
     rule = {}
     machine.assume_support, machine.support_assumed = True, False
+    machine.vine = r.kind == "vine"
     try:
         for c in DIRECTIONS:
             machine.steps = 0
@@ -6658,6 +6735,9 @@ def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
                     outs.add(None)
                     continue
                 values = dict(res.values)
+                if r.kind == "vine" and "facing" not in values:
+                    raise Unreadable("the class's own getStateForPlacement replaces vanilla VineBlock's, and "
+                                     "only VineBlock's is read for a vine")
                 if "facing6" in values or "facing" in values:
                     facing = res.get("facing6") if "facing6" in values else res.get("facing")
                 else:
@@ -6668,7 +6748,7 @@ def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
                     r.rule_conflict = (f"{where}: the player doesn't set face (the block keeps its "
                                        "default face), which Bedrock's placement traits can't give")
                     raise Unreadable(r.rule_conflict)
-                face = "" if r.kind in ("facing6", "facing") else _face_value(res.get("face"))
+                face = "" if r.kind in ("facing6", "facing", "vine") else _face_value(res.get("face"))
                 token = _token(facing)
                 if face is None or token is None:
                     outs.add(None)
@@ -6690,6 +6770,7 @@ def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
         return
     finally:
         machine.assume_support = False
+        machine.vine = False
     r.rule = rule
     r.rule_from = where
     r.support_assumed = machine.support_assumed
@@ -6706,7 +6787,8 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
         for key in directional_keys(r.kind, r.facings):
             state = _with_key(default if isinstance(default, State) else State(), r.kind, key)
             results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
-            label = f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}"
+            label = (f"{key[1]}=true" if r.kind == "vine" else
+                     f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}")
             if not results or any(not isinstance(x, Shape) for x in results):
                 raise Unreadable(f"the shape at {label} is not built from boxes it can read")
             if len({x for x in results}) != 1:
