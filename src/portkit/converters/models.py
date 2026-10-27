@@ -130,14 +130,33 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
     so reading only the leaf misses both the textures and the real parent.
     Returns the flattened model, the extra files read, and a refusal reason.
     """
-    from portkit.converters import objmodel  # objmodel reads this module
+    from portkit.converters import multilayer, objmodel  # both read this module
 
     textures: dict = {}
     seen: list[Path] = []
     current = model
     render_type = None
+    layered = False
     levels: list[dict] = []
     for _ in range(_MAX_PARENT_DEPTH):
+        if multilayer.is_composite(current):
+            # A composite model (NeoForge/Forge) is its children merged
+            # (#296); each child's render type is noted, not the merged one.
+            if levels:
+                # A child's textures don't reach the composite's children
+                # (each is a model of its own), so a child of one isn't read.
+                return {}, seen, "model extends a composite model, which isn't read"
+            converted, read, types, why = multilayer.composite(mod, current)
+            seen += [p for p in read if p not in seen]
+            if converted is None:
+                return {}, seen, why
+            # merge refused any mix but solid beside cutout over opaque
+            # textures (drawn as the cutout type) and solid beside
+            # translucent (the labelled blend DEFAULT, pick 1a).
+            kind, _ = multilayer.shared_type(types)
+            _note_render_type(kind)
+            layered = True
+            current = converted
         mesh = objmodel.reader(current)
         if mesh is not None:
             # An OBJ loader model (NeoForge's, or a mod's an adapter reads)
@@ -161,7 +180,8 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
         parent = current.get("parent")
         extra = {"render_type": render_type} if render_type is not None else {}
         if not isinstance(parent, str):
-            _note_render_type(render_type)
+            if not layered or render_type is not None:
+                _note_render_type(render_type)
             return _unfolded({**current, **extra, "textures": resolve_variables(textures)}, seen)
         parent = normalize(parent)
         if parent.startswith("minecraft:"):

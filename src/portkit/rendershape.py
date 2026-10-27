@@ -236,6 +236,127 @@ def read_shape(classes: ClassIndex, cls: str, vanilla: VanillaShapes | None, mac
     return None, "", f"{_dotted(cls)}'s superclasses don't reach a vanilla class"
 
 
+# -- 1.12 block render layers (#296) ----------------------------------------
+#
+# A 1.12 Forge block draws its model once per render layer it renders in:
+# the client asks Forge's ``Block#canRenderInLayer(IBlockState,
+# BlockRenderLayer)`` for each layer, whose own body (Forge 1.12.x
+# patches/minecraft/net/minecraft/block/Block.java.patch, L1430-1433) is
+# ``getBlockLayer() == layer``; vanilla ``Block#getBlockLayer`` returns SOLID
+# (1.12.2 client jar: ``aow#f`` is ``getstatic amm.a`` / ``areturn``, and
+# ``amm``'s initializer names ``a`` SOLID). A model that draws each layer
+# from its own sub-model (Forge's ``forge:multi-layer``) shows the sub-models
+# of exactly those layers. Read here by instruction shape: the methods are
+# found by descriptor, so SRG and MCP names read the same.
+LAYERS_112 = ("SOLID", "CUTOUT_MIPPED", "CUTOUT", "TRANSLUCENT")
+_LAYER_ENUM_112 = "net/minecraft/util/BlockRenderLayer"
+_CAN_RENDER_112 = "(Lnet/minecraft/block/state/IBlockState;Lnet/minecraft/util/BlockRenderLayer;)Z"
+_GET_LAYER_112 = "()Lnet/minecraft/util/BlockRenderLayer;"
+_BLOCK_112 = "net/minecraft/block/Block"
+
+
+class _NoRead(Exception):
+    pass
+
+
+def _own(classes: ClassIndex, cls: str, desc: str, name: str | None = None):
+    """(class file, method) of the first class from ``cls`` up that declares
+    a non-static ``desc`` (``name`` when given), or (None, the first class
+    outside the index)."""
+    seen: set[str] = set()
+    while cls and cls not in seen:
+        seen.add(cls)
+        cf = classes.get(cls)
+        if cf is None:
+            return None, cls
+        m = next((m for m in cf.methods if m.desc == desc and (name is None or m.name == name)
+                  and m.code is not None and not m.access & 0x0008), None)
+        if m is not None:
+            return cf, m
+        cls = cf.super_name
+    raise _NoRead(f"{_dotted(cls or '?')}'s superclasses don't reach a vanilla class")
+
+
+def _block_layer_112(classes: ClassIndex, cls: str, start: str | None = None) -> str:
+    """The layer ``getBlockLayer`` returns on a ``cls`` object (looked up
+    from ``start``, a superclass for an ``invokespecial``)."""
+    cf, m = _own(classes, start or cls, _GET_LAYER_112)
+    if cf is None:
+        if m != _BLOCK_112:
+            raise _NoRead(f"inherits {_dotted(m)}#getBlockLayer, which isn't read")
+        return "SOLID"
+    code = instructions(cf, m.code)
+    if (len(code) == 2 and code[0].name == "getstatic" and code[0].arg.owner == _LAYER_ENUM_112
+            and code[0].arg.name in LAYERS_112 and code[1].name == "areturn"):
+        return code[0].arg.name
+    raise _NoRead(f"{_dotted(cf.name)}#{m.name} returns a layer it computes")
+
+
+def _can_render_112(classes: ClassIndex, cls: str, layer: str) -> bool:
+    cf, m = _own(classes, cls, _CAN_RENDER_112, "canRenderInLayer")
+    if cf is None:
+        if m != _BLOCK_112:
+            raise _NoRead(f"inherits {_dotted(m)}#canRenderInLayer, which isn't read")
+        return _block_layer_112(classes, cls) == layer
+    from .bytecode import indexed_instructions
+    code, at = indexed_instructions(cf, m.code)
+    stack: list = []
+    k, steps = 0, 0
+    while k < len(code) and steps < 200:
+        steps += 1
+        i = code[k]
+        op = i.name
+        if op == "aload_0":
+            stack.append(("this",))
+        elif op == "aload_2":
+            stack.append(layer)
+        elif op == "aload_1":
+            stack.append(("state",))
+        elif op == "getstatic" and i.arg.owner == _LAYER_ENUM_112 and i.arg.name in LAYERS_112:
+            stack.append(i.arg.name)
+        elif (op in ("invokevirtual", "invokespecial") and i.arg.desc == _GET_LAYER_112
+              and stack and stack[-1] == ("this",)):
+            stack.pop()
+            stack.append(_block_layer_112(classes, cls, i.arg.owner if op == "invokespecial" else None))
+        elif op in ("iconst_0", "iconst_1"):
+            stack.append(int(op[-1]))
+        elif op in ("if_acmpeq", "if_acmpne") and len(stack) >= 2 and all(
+                isinstance(v, str) for v in stack[-2:]):
+            b, a = stack.pop(), stack.pop()
+            if (a == b) == (op == "if_acmpeq"):
+                k = at[i.arg]
+                continue
+        elif op in ("ifeq", "ifne") and stack and isinstance(stack[-1], int):
+            v = stack.pop()
+            if (v == 0) == (op == "ifeq"):
+                k = at[i.arg]
+                continue
+        elif op == "goto":
+            k = at[i.arg]
+            continue
+        elif op == "ireturn" and stack and isinstance(stack[-1], int):
+            return bool(stack[-1])
+        else:
+            raise _NoRead(f"{_dotted(cf.name)}#canRenderInLayer does more than compare the layer "
+                          f"({op} at {i.offset})")
+        k += 1
+    raise _NoRead(f"{_dotted(cf.name)}#canRenderInLayer doesn't return")
+
+
+def read_layers_112(classes: ClassIndex | None, cls: str) -> tuple[frozenset | None, str, str]:
+    """(the 1.12 render layers a ``cls`` block renders in, source, why)."""
+    if classes is None:
+        return None, "", "the mod ships no class files"
+    try:
+        got = frozenset(layer for layer in LAYERS_112 if _can_render_112(classes, cls, layer))
+    except _NoRead as exc:
+        return None, "", str(exc)
+    cf, m = _own(classes, cls, _CAN_RENDER_112, "canRenderInLayer")
+    where = (f"{_dotted(cf.name)}#canRenderInLayer" if cf is not None
+             else "Block#canRenderInLayer = getBlockLayer() == layer")
+    return got, f"{where}: {', '.join(x for x in LAYERS_112 if x in got) or 'no layer'}", ""
+
+
 # -- block-entity renderers -------------------------------------------------
 
 def _supertypes(classes: ClassIndex, name: str, memo: dict) -> frozenset:

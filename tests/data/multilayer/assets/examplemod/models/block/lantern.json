@@ -1,0 +1,15 @@
+{
+  "loader": "neoforge:composite",
+  "parent": "minecraft:block/block",
+  "textures": {"particle": "examplemod:blocks/side"},
+  "visibility": {"hidden": false},
+  "children": {
+    "body": {"render_type": "minecraft:solid", "parent": "examplemod:block/lantern_body"},
+    "glass": {"render_type": "minecraft:cutout", "textures": {"side": "examplemod:blocks/pane"},
+              "elements": [{"from": [4, 6, 4], "to": [12, 12, 12],
+                            "faces": {"north": {"texture": "#side"}, "south": {"texture": "#side"},
+                                      "west": {"texture": "#side"}, "east": {"texture": "#side"}}}]},
+    "hidden": {"render_type": "minecraft:translucent", "textures": {"side": "examplemod:blocks/pane"},
+               "elements": [{"from": [0, 0, 0], "to": [16, 16, 16], "faces": {"up": {"texture": "#side"}}}]}
+  }
+}
