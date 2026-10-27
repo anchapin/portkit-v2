@@ -354,9 +354,13 @@ def merge(mod: SourceMod, layers: list[Layer]) -> tuple[dict | None, list[Path],
                                                 "the solid layer the same")
             return merged, files, kinds, ""
         if kinds - _CUTOUT - {_SOLID}:
+            # The blend DEFAULT (pick 1a) is for solid beside translucent
+            # only: blend would draw a cutout layer's partly transparent
+            # pixels see-through, which Java's cutout layer draws opaque.
             return None, files, kinds, (f"its layers draw in {', '.join(sorted(kinds))}; Bedrock gives a block one "
                                         "render method (#262), and no one method draws a translucent layer and "
-                                        "another layer the same as Java")
+                                        "another layer the same as Java (the blend DEFAULT covers a solid layer "
+                                        "beside a translucent one only)")
         for key in sorted(worn.get(_SOLID, ())):
             why = _opaque(mod, textures.get(key))
             if why:
@@ -388,8 +392,9 @@ def _opaque(mod: SourceMod, reference: object, uv: list | None = None) -> str:
             x0, x1 = sorted((uv[0], uv[2]))
             y0, y1 = sorted((uv[1], uv[3]))
             scale = width / 16
-            cols = range(max(0, int(x0 * scale)), min(width, math.ceil(x1 * scale)))
-            rows = range(max(0, int(y0 * scale)), min(height, math.ceil(y1 * scale)))
+            # A zero-width uv still samples the pixel it sits on.
+            cols = range(max(0, int(x0 * scale)), min(width, max(int(x0 * scale) + 1, math.ceil(x1 * scale))))
+            rows = range(max(0, int(y0 * scale)), min(height, max(int(y0 * scale) + 1, math.ceil(y1 * scale))))
             if any(rgba[(y * width + x) * 4 + 3] < 255 for y in rows for x in cols):
                 return "has transparent pixels where a face samples it"
             return ""
