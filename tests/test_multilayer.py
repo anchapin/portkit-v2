@@ -216,3 +216,13 @@ def test_shared_type():
     assert blocks._JAVA_RENDER_METHOD[kind] == "blend"
     assert multilayer.shared_type({"minecraft:cutout", "minecraft:translucent"}) == (None, "")
     assert multilayer.shared_type({None}) == (None, "")
+
+
+def test_blend_default_beside_other_render_types_is_not_forced():
+    result = ConversionResult()
+    instances = {"*": {"texture": f"{NS}:core"}, "up": {"texture": f"{NS}:shell", "render_method": "blend"}}
+    result.files["blocks/mixed.json"] = {"minecraft:block": {"components": {
+        "minecraft:material_instances": instances}}}
+    blocks._one_render_method(result, {"mixed": {multilayer.BLEND_DEFAULT, "minecraft:solid"}})
+    assert any("isn't applied" in n for n in result.notes if n.startswith("mixed:"))
+    assert not any("labelled DEFAULT" in n for n in result.notes)

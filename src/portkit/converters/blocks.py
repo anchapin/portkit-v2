@@ -2185,6 +2185,11 @@ def _one_render_method(result: ConversionResult, render_types: dict[str, set]) -
         if forced is not None:
             result.notes.append(f"{name}: every face draws blend, a labelled {multilayer.BLEND_DEFAULT_WHY}.")
             changed = set()
+        elif multilayer.BLEND_DEFAULT in seen:
+            result.notes.append(
+                f"{name}: one of its models is a solid + translucent layered model, but its other models name "
+                "other render types, so the blend DEFAULT (pick 1a) isn't applied; its faces keep the render "
+                "method read for them.")
         if changed:
             method, source = sorted(changed)[0]
             result.notes.append(
