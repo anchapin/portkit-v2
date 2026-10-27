@@ -1,0 +1,133 @@
+{
+  "loader": "neoforge:composite",
+  "parent": "minecraft:block/block",
+  "textures": {
+    "particle": "examplemod:blocks/shell"
+  },
+  "children": {
+    "core": {
+      "render_type": "minecraft:solid",
+      "parent": "minecraft:block/block",
+      "textures": {
+        "all": "examplemod:blocks/core"
+      },
+      "elements": [
+        {
+          "from": [
+            1,
+            1,
+            1
+          ],
+          "to": [
+            15,
+            15,
+            15
+          ],
+          "faces": {
+            "down": {
+              "uv": [
+                1,
+                1,
+                15,
+                15
+              ],
+              "texture": "#all"
+            },
+            "up": {
+              "uv": [
+                1,
+                1,
+                15,
+                15
+              ],
+              "texture": "#all"
+            },
+            "north": {
+              "uv": [
+                1,
+                1,
+                15,
+                15
+              ],
+              "texture": "#all"
+            },
+            "south": {
+              "uv": [
+                1,
+                1,
+                15,
+                15
+              ],
+              "texture": "#all"
+            },
+            "west": {
+              "uv": [
+                1,
+                1,
+                15,
+                15
+              ],
+              "texture": "#all"
+            },
+            "east": {
+              "uv": [
+                1,
+                1,
+                15,
+                15
+              ],
+              "texture": "#all"
+            }
+          }
+        }
+      ]
+    },
+    "shell": {
+      "render_type": "minecraft:translucent",
+      "parent": "minecraft:block/block",
+      "textures": {
+        "all": "examplemod:blocks/shell"
+      },
+      "elements": [
+        {
+          "from": [
+            0,
+            0,
+            0
+          ],
+          "to": [
+            16,
+            16,
+            16
+          ],
+          "faces": {
+            "down": {
+              "texture": "#all",
+              "cullface": "down"
+            },
+            "up": {
+              "texture": "#all",
+              "cullface": "up"
+            },
+            "north": {
+              "texture": "#all",
+              "cullface": "north"
+            },
+            "south": {
+              "texture": "#all",
+              "cullface": "south"
+            },
+            "west": {
+              "texture": "#all",
+              "cullface": "west"
+            },
+            "east": {
+              "texture": "#all",
+              "cullface": "east"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

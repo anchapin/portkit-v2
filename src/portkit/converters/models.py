@@ -151,7 +151,8 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
             if converted is None:
                 return {}, seen, why
             # merge refused any mix but solid beside cutout over opaque
-            # textures, which draws as the cutout type.
+            # textures (drawn as the cutout type) and solid beside
+            # translucent (the labelled blend DEFAULT, pick 1a).
             kind, _ = multilayer.shared_type(types)
             _note_render_type(kind)
             layered = True

@@ -6,7 +6,9 @@ tests/data/multilayer is written for these tests (not taken from any jar):
 chisel, ``holey`` the same with a solid texture that has holes, ``stained`` a
 Solid beside a Translucent layer, ``stateful`` a variant no layer names;
 ``lantern`` a composite with a hidden translucent child and ``jar`` the same
-child shown. classes/ (``build.sh``) holds blocks answering Forge 1.12's
+child shown; ``shelled`` a composite with a solid core (its ``core.png`` has a
+transparent border ring its faces' uv never samples) inside a translucent
+shell, which draws wholly blend as the labelled DEFAULT (pick 1a). classes/ (``build.sh``) holds blocks answering Forge 1.12's
 ``canRenderInLayer``/``getBlockLayer`` in each shape the reader takes, and one
 it doesn't.
 """
@@ -125,12 +127,48 @@ def test_unread_layers_and_unreadable_mixes_give_reasons(mod):
     assert "its class isn't read" in why
 
 
-def test_solid_beside_translucent_is_a_reason(mod):
+def test_solid_beside_translucent_merges_as_blend_default(mod):
+    # Forge 1.12 layers: opaque frame (Solid) beside pane (Translucent).
     layers = [multilayer.Layer("SOLID", "minecraft:solid", {"parent": "examplemod:block/layered/frame"}),
               multilayer.Layer("TRANSLUCENT", "minecraft:translucent", {"parent": "examplemod:block/layered/pane"})]
     merged, _files, kinds, why = multilayer.merge(mod, layers)
-    assert merged is None and kinds == {"minecraft:solid", "minecraft:translucent"}
-    assert "one render method" in why
+    assert why == "" and kinds == {"minecraft:solid", "minecraft:translucent"}
+    assert len(merged["elements"]) == 3
+    assert multilayer.shared_type(kinds)[0] == multilayer.BLEND_DEFAULT
+
+
+def test_solid_core_sampling_transparent_pixels_is_a_reason(mod):
+    # core.png's border ring is transparent: a face with no uv samples the
+    # whole texture, so blend would show pixels Java's solid layer draws.
+    bare = {"parent": "block/block", "textures": {"all": "examplemod:blocks/core"}, "elements": [
+        {"from": [1, 1, 1], "to": [15, 15, 15], "faces": {"up": {"texture": "#all"}}}]}
+    edge = {"parent": "block/block", "textures": {"all": "examplemod:blocks/core"}, "elements": [
+        {"from": [0, 0, 0], "to": [16, 16, 16], "faces": {"up": {"uv": [0, 0, 16, 16], "texture": "#all"}}}]}
+    shell = json.loads((mod.assets / "models/block/shelled.json").read_text())["children"]["shell"]
+    for core, words in ((bare, "has transparent pixels"), (edge, "where a face samples it")):
+        layers = [multilayer.Layer("core", "minecraft:solid", core),
+                  multilayer.Layer("shell", "minecraft:translucent", shell)]
+        merged, _files, _kinds, why = multilayer.merge(mod, layers)
+        assert merged is None and words in why and "blend" in why
+
+
+def test_composite_translucent_shell_over_solid_core_draws_blend(mod):
+    seen: set = set()
+    token = models.RENDER_TYPES_SEEN.set(seen)
+    try:
+        flat, _files, why = models.resolve(mod, json.loads((mod.assets / "models/block/shelled.json").read_text()))
+    finally:
+        models.RENDER_TYPES_SEEN.reset(token)
+    assert why == "" and len(flat["elements"]) == 2
+    assert seen == {multilayer.BLEND_DEFAULT}
+    result = blocks.convert(mod)
+    instances = result.files["blocks/shelled.json"]["minecraft:block"]["components"]["minecraft:material_instances"]
+    # Forced: each face's own texture alpha would give opaque/blend, and
+    # agreement among faces would otherwise leave them as they are.
+    assert {spec.get("render_method") for spec in instances.values()} == {"blend"}
+    assert {spec["texture"] for spec in instances.values()} == {f"{NS}:core", f"{NS}:shell"}
+    note = next(n for n in result.notes if n.startswith("shelled: every face draws blend"))
+    assert "DEFAULT (pick 1a" in note
 
 
 def test_composite_merges_visible_children(mod):
@@ -173,5 +211,8 @@ def test_face_naming_a_texture_its_layer_lacks_is_a_reason(mod):
 def test_shared_type():
     assert multilayer.shared_type({"minecraft:cutout", "minecraft:cutout_mipped"}) == ("minecraft:cutout", "")
     assert multilayer.shared_type({"minecraft:solid", "minecraft:cutout_mipped"})[0] == "minecraft:cutout_mipped"
-    assert multilayer.shared_type({"minecraft:solid", "minecraft:translucent"}) == (None, "")
+    kind, why = multilayer.shared_type({"minecraft:solid", "minecraft:translucent"})
+    assert kind == multilayer.BLEND_DEFAULT and why.startswith("DEFAULT (pick 1a")
+    assert blocks._JAVA_RENDER_METHOD[kind] == "blend"
+    assert multilayer.shared_type({"minecraft:cutout", "minecraft:translucent"}) == (None, "")
     assert multilayer.shared_type({None}) == (None, "")

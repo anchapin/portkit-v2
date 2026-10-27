@@ -28,13 +28,16 @@ Every drawn layer is merged exactly into one model (its elements, its
 textures under names that don't collide). Bedrock gives a block one render
 method (#262): layers in ``solid`` and ``cutout*`` draw as ``alpha_test`` when
 every texture the solid layers wear is the mod's own and has no transparent
-pixel (``alpha_test`` then draws those faces the same); anything else
-(``translucent`` beside another type, an unread solid texture) is a reason,
-never a guess. No mod is named here (#220).
+pixel (``alpha_test`` then draws those faces the same); ``solid`` beside
+``translucent`` draws wholly ``blend`` as a labelled DEFAULT (pick 1a,
+:data:`BLEND_DEFAULT`) when every solid face samples only opaque pixels;
+anything else (``translucent`` beside a cutout type, an unread solid texture)
+is a reason, never a guess. No mod is named here (#220).
 """
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 from .. import png as png_reader
@@ -51,6 +54,22 @@ LAYER_NAMES_112 = {"Solid": "SOLID", "Mipped Cutout": "CUTOUT_MIPPED", "Cutout":
 RENDER_TYPE_112 = {"SOLID": "minecraft:solid", "CUTOUT_MIPPED": "minecraft:cutout_mipped",
                    "CUTOUT": "minecraft:cutout", "TRANSLUCENT": "minecraft:translucent"}
 _SOLID = "minecraft:solid"
+_TRANSLUCENT = "minecraft:translucent"
+# DEFAULT (Alex pick 1a, #296, 2026-10-26): a block whose layers are solid
+# beside translucent (a translucent shell over a solid core) is drawn wholly
+# with Bedrock ``blend``. Bedrock gives a block one render method (#262) and
+# no method draws a solid and a translucent layer the same as Java; blend
+# draws the translucent layer's partial alpha and, where the solid faces
+# sample only opaque pixels, the solid layer's pixels opaque. What differs
+# from Java (the solid core sorted in the translucent pass) is a choice, not
+# a reading, so it is labelled DEFAULT wherever it is written. This marker is
+# the render type such a merged block notes; blocks.py forces every face of
+# it to blend.
+BLEND_DEFAULT = "portkit:default_blend_translucent_over_solid"
+BLEND_DEFAULT_WHY = ("DEFAULT (pick 1a, #296): its layers draw in minecraft:solid and minecraft:translucent; "
+                     "Bedrock gives a block one render method (#262), so the whole block draws blend, which "
+                     "draws the translucent layer's partial alpha and the solid layer's faces (each samples only "
+                     "opaque pixels) opaque, but sorted with the translucent pass")
 _CUTOUT = frozenset({"minecraft:cutout", "minecraft:cutout_mipped", "minecraft:cutout_mipped_all"})
 # Forge v1 named transforms that set only the held/GUI perspectives
 # (ForgeBlockStateV1 L935-971: no TransformType.NONE entry), so the block in
@@ -264,6 +283,7 @@ def merge(mod: SourceMod, layers: list[Layer]) -> tuple[dict | None, list[Path],
     textures: dict[str, str] = {}
     elements: list[dict] = []
     worn: dict[str, set] = {}
+    sampled: dict[str, list] = {}  # render type -> (texture key, face uv or None)
     types: list[str | None] = []
     ao = None
     for index, layer in enumerate(layers):
@@ -309,6 +329,8 @@ def merge(mod: SourceMod, layers: list[Layer]) -> tuple[dict | None, list[Path],
                         return None, files, set(), f"layer {layer.label!r} has a face naming {ref}, which it doesn't set"
                     face["texture"] = "#" + rename[ref[1:]]
                     keys.add(face["texture"][1:])
+                    uv = face.get("uv")
+                    sampled.setdefault(rtype, []).append((face["texture"][1:], uv if isinstance(uv, list) else None))
             elements.append(element)
     merged = {"textures": textures, "elements": elements}
     if ao is not None:
@@ -318,6 +340,19 @@ def merge(mod: SourceMod, layers: list[Layer]) -> tuple[dict | None, list[Path],
         if None in kinds:
             return None, files, kinds, ("one layer names its render type and another doesn't (the block's code "
                                         "decides that one), so the shared render method isn't read")
+        if kinds == {_SOLID, _TRANSLUCENT}:
+            # DEFAULT (pick 1a): drawn wholly blend (shared_type). Exact for
+            # the solid layer only where each of its faces samples opaque
+            # pixels (blend would show a transparent pixel Java's solid
+            # layer draws opaque).
+            for key, uv in sampled.get(_SOLID, ()):
+                why = _opaque(mod, textures.get(key), uv)
+                if why:
+                    return None, files, kinds, (f"its layers draw in minecraft:solid and minecraft:translucent, and "
+                                                f"its solid layer's texture {textures.get(key)!r} {why}, so blend "
+                                                "(the one method its translucent layer needs) isn't shown to draw "
+                                                "the solid layer the same")
+            return merged, files, kinds, ""
         if kinds - _CUTOUT - {_SOLID}:
             return None, files, kinds, (f"its layers draw in {', '.join(sorted(kinds))}; Bedrock gives a block one "
                                         "render method (#262), and no one method draws a translucent layer and "
@@ -330,9 +365,11 @@ def merge(mod: SourceMod, layers: list[Layer]) -> tuple[dict | None, list[Path],
     return merged, files, kinds, ""
 
 
-def _opaque(mod: SourceMod, reference: object) -> str:
+def _opaque(mod: SourceMod, reference: object, uv: list | None = None) -> str:
     """Why a texture isn't shown fully opaque, or "" when it is (the mod's
-    own PNG with no transparent pixel)."""
+    own PNG with no transparent pixel). With a face ``uv`` (Java's 0-16
+    texture units) only the pixels that face samples are checked; a face
+    without one, or a texture that isn't one square frame, is checked whole."""
     if not isinstance(reference, str) or reference.startswith("#"):
         return "isn't set"
     ns, _, path = reference.rpartition(":")
@@ -341,7 +378,22 @@ def _opaque(mod: SourceMod, reference: object) -> str:
     file = mod.assets / "textures" / f"{path}.png"
     if not file.is_file():
         return "isn't in the mod"
-    clear = png_reader.has_transparency(file.read_bytes())
+    data = file.read_bytes()
+    if uv is not None and len(uv) == 4 and all(isinstance(v, (int, float)) for v in uv):
+        decoded = png_reader.decode_rgba(data)
+        if decoded is None:
+            return "can't be read"
+        width, height, rgba = decoded
+        if width == height:
+            x0, x1 = sorted((uv[0], uv[2]))
+            y0, y1 = sorted((uv[1], uv[3]))
+            scale = width / 16
+            cols = range(max(0, int(x0 * scale)), min(width, math.ceil(x1 * scale)))
+            rows = range(max(0, int(y0 * scale)), min(height, math.ceil(y1 * scale)))
+            if any(rgba[(y * width + x) * 4 + 3] < 255 for y in rows for x in cols):
+                return "has transparent pixels where a face samples it"
+            return ""
+    clear = png_reader.has_transparency(data)
     if clear is None:
         return "can't be read"
     return "has transparent pixels" if clear else ""
@@ -354,6 +406,8 @@ def shared_type(types: set) -> tuple[str | None, str]:
     names = {t for t in types if t is not None}
     if len(names) == 1:
         return next(iter(names)), ""
+    if names == {_SOLID, _TRANSLUCENT}:
+        return BLEND_DEFAULT, BLEND_DEFAULT_WHY  # merge checked the solid faces sample opaque pixels
     cut = names & _CUTOUT
     if cut and names <= cut | {_SOLID}:
         if _SOLID not in names:

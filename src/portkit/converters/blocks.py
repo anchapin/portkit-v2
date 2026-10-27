@@ -2087,6 +2087,11 @@ _JAVA_RENDER_METHOD = {
     "minecraft:cutout_mipped": "alpha_test",
     "minecraft:cutout_mipped_all": "alpha_test",
     "minecraft:translucent": "blend",
+    # DEFAULT (pick 1a, #296): a merged solid + translucent layered model
+    # (multilayer.BLEND_DEFAULT) draws wholly blend; _one_render_method
+    # forces it even where every face's own texture alpha agrees on another
+    # method.
+    multilayer.BLEND_DEFAULT: "blend",
 }
 
 
@@ -2122,12 +2127,20 @@ def _shared_method(instances: dict, render_types: set) -> tuple[str | None, str]
     return None, f"render methods {sorted(methods)} have no shared reading"
 
 
-def _unify_instances(instances, render_types: set) -> tuple[str | None, str]:
+def _unify_instances(instances, render_types: set, forced: str | None = None) -> tuple[str | None, str]:
     """Give every instance of one material_instances object the same render
-    method, in place. Returns (method, source) when it changed anything."""
+    method, in place. Returns (method, source) when it changed anything.
+    ``forced`` is a method set by a labelled DEFAULT, applied even where the
+    faces already agree."""
     if not isinstance(instances, dict):
         return None, ""
     specs = [spec for spec in instances.values() if isinstance(spec, dict)]
+    if forced is not None:
+        if all(spec.get("render_method", "opaque") == forced for spec in specs):
+            return None, ""
+        for spec in specs:
+            spec["render_method"] = forced
+        return forced, "DEFAULT"
     if len({spec.get("render_method", "opaque") for spec in specs}) <= 1:
         return None, ""
     method, source = _shared_method(instances, render_types)
@@ -2152,6 +2165,9 @@ def _one_render_method(result: ConversionResult, render_types: dict[str, set]) -
             continue
         name = key[len("blocks/"):-len(".json")]
         seen = render_types.get(name, set())
+        # DEFAULT (pick 1a): a block drawn only from a merged solid +
+        # translucent layered model draws every face blend.
+        forced = "blend" if seen == {multilayer.BLEND_DEFAULT} else None
         objects = [block.get("components") or {}]
         objects += [p.get("components") or {} for p in block.get("permutations") or []
                     if isinstance(p, dict)]
@@ -2161,11 +2177,14 @@ def _one_render_method(result: ConversionResult, render_types: dict[str, set]) -
             visual = components.get("minecraft:item_visual")
             for instances in (components.get("minecraft:material_instances"),
                               visual.get("material_instances") if isinstance(visual, dict) else None):
-                method, source = _unify_instances(instances, seen)
+                method, source = _unify_instances(instances, seen, forced)
                 if method is not None:
                     changed.add((method, source))
                 elif source:
                     refused = source
+        if forced is not None:
+            result.notes.append(f"{name}: every face draws blend, a labelled {multilayer.BLEND_DEFAULT_WHY}.")
+            changed = set()
         if changed:
             method, source = sorted(changed)[0]
             result.notes.append(
