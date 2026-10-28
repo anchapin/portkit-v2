@@ -2943,6 +2943,8 @@ class Machine:
                         # to store is not known.
                         obj.fields.setdefault("__partial", str(exc))
                     return None
+            if self._vec_math(ref.owner, "<init>", ref.desc, obj, args[1:], False) is not _NOT_HANDLED:
+                return None  # a Vec3 or MutableObject (see _vec_math)
             self._vanilla_init(ref, args, f)
             return None
         self._forked = f.forked
