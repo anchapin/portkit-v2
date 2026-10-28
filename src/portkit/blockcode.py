@@ -107,6 +107,66 @@ _AGE_PROPERTY_DESC = "()Lnet/minecraft/world/level/block/state/properties/Intege
 _DOUBLE_BLOCK_HALF = "net/minecraft/world/level/block/state/properties/DoubleBlockHalf"
 _SHAPES = "net/minecraft/world/phys/shapes/Shapes"
 _DIRECTION = "net/minecraft/core/Direction"
+# Vec3 (MC 1.20.1 / 1.21.1 net.minecraft.world.phys.Vec3, Mojang names), as
+# far as a shape rotation reads it (#296): public final double fields x, y,
+# z; ZERO = new Vec3(0, 0, 0); add(Vec3) / add(DDD) / subtract(Vec3) /
+# scale(D) / reverse() (= scale(-1)) make new vectors of the sums, products
+# and negation of the doubles; equals(Object) compares the three fields with
+# Double.compare. A Vec3 on the machine is an Obj of this class with x, y, z.
+_VEC3 = "net/minecraft/world/phys/Vec3"
+# net.minecraft.util.Mth (1.20.1 / 1.21.1 client jars): SIN is
+# ``(float) Math.sin((double) i * Math.PI * 2.0 / 65536.0)`` for i in
+# 0..65535; sin(f) = SIN[(int) (f * 10430.378F) & 65535], cos(f) =
+# SIN[(int) (f * 10430.378F + 16384.0F) & 65535], float arithmetic.
+_MTH = "net/minecraft/util/Mth"
+# org.apache.commons.lang3.mutable.MutableObject (commons-lang3 3.x, which
+# Minecraft ships): a holder, value set by the constructor, getValue /
+# setValue read and write it.
+_MUTABLE_OBJECT = "org/apache/commons/lang3/mutable/MutableObject"
+# Direction.Plane.HORIZONTAL's faces in iteration order (Direction$Plane
+# <clinit>: HORIZONTAL = new Plane(new Direction[]{NORTH, EAST, SOUTH, WEST},
+# ...); iterator() is Iterators.forArray(faces)).
+_PLANE_HORIZONTAL = ("north", "east", "south", "west")
+
+
+def _f32(v):
+    """A Java float: ``v`` rounded to IEEE single precision (JLS 4.2.4, round
+    to nearest), as fadd / fmul / i2f / d2f give it."""
+    import struct
+    try:
+        return struct.unpack("f", struct.pack("f", v))[0]
+    except (OverflowError, struct.error):
+        return float("inf") if v > 0 else float("-inf")
+
+
+@functools.lru_cache(maxsize=1)
+def _mth_sin_table() -> tuple:
+    import math
+    return tuple(_f32(math.sin(i * math.pi * 2.0 / 65536.0)) for i in range(65536))
+
+
+def _f2i(v) -> int:
+    """Java's f2i / d2i (JVMS 6.5): NaN -> 0, toward zero, saturating."""
+    if v != v:
+        return 0
+    if v >= 2 ** 31 - 1:
+        return 2 ** 31 - 1
+    if v <= -(2 ** 31):
+        return -(2 ** 31)
+    return int(v)
+
+
+def _vec3(x, y, z) -> "Obj":
+    v = Obj(_VEC3)
+    v.fields.update({"x": float(x), "y": float(y), "z": float(z)})
+    return v
+
+
+def _is_vec3(v) -> bool:
+    return isinstance(v, Obj) and v.cls == _VEC3 and all(
+        isinstance(v.fields.get(k), float) for k in ("x", "y", "z"))
+
+
 _PLACE_CONTEXT = "net/minecraft/world/item/context/BlockPlaceContext"
 _STATE_PROPS = "net/minecraft/world/level/block/state/properties/BlockStateProperties"
 _PROPERTIES = "net/minecraft/world/level/block/state/BlockBehaviour$Properties"
@@ -1039,6 +1099,7 @@ class Machine:
         # (owner, name, desc, args, static) for every call; a list is the
         # call's results, None lets the call run as usual.
         self.call_hook = None
+        self._vec3_zero = None  # Vec3.ZERO, one object (identity tests read it)
         # (class, static field) -> whether it reads as null until written
         # (see _lazy_null).
         self._lazy: dict = {}
@@ -1562,6 +1623,10 @@ class Machine:
             return Prop(prop)
         if owner == _DIRECTION and ref.name.lower() in DIRECTIONS:
             return Dir(ref.name.lower())
+        if owner == _VEC3 and ref.name == "ZERO":
+            if self._vec3_zero is None:
+                self._vec3_zero = _vec3(0.0, 0.0, 0.0)
+            return self._vec3_zero
         return Const(owner, ref.name)
 
     def _lazy_guard(self, insn: Insn) -> bool:
@@ -2395,7 +2460,10 @@ class Machine:
         elif 0x85 <= op <= 0x93:  # conversions
             v = s.pop()
             if isinstance(v, (int, float)) and not isinstance(v, bool):
-                v = float(v) if op in (0x86, 0x87, 0x89, 0x8A, 0x8D, 0x90) else int(v)
+                # i2f, l2f, d2f round to a Java float (#296); f2i, f2l, d2i,
+                # d2l truncate toward zero, NaN to 0 (JVMS 6.5).
+                v = (_f32(float(v)) if op in (0x86, 0x89, 0x90) else float(v) if op in (0x87, 0x8A, 0x8D)
+                     else _f2i(v) if op in (0x8B, 0x8C, 0x8E, 0x8F) else int(v))
             s.append(v)
         elif 0x94 <= op <= 0x98:
             b, a = s.pop(), s.pop()
@@ -2526,6 +2594,8 @@ class Machine:
                 r = UNKNOWN
         except ZeroDivisionError:
             r = UNKNOWN
+        if (op - 0x60) % 4 == 2 and isinstance(r, float):
+            r = _f32(r)  # fadd / fsub / fmul / fdiv / frem: a Java float (#296)
         s.append(r)
 
     def _throws_only(self, offset: int) -> bool:
@@ -2980,6 +3050,76 @@ class Machine:
         names = {g.name for g in got if isinstance(g, Prop)}
         return names.pop() if len(names) == 1 and all(isinstance(g, Prop) for g in got) else None
 
+    def _vec_math(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
+        """Vec3, Mth.sin / cos, MutableObject, Direction.Plane.HORIZONTAL and
+        VoxelShape#forAllBoxes, evaluated exactly (see _VEC3, _MTH,
+        _MUTABLE_OBJECT, _PLANE_HORIZONTAL; #296: a library's shape rotation,
+        Create's catnip VoxelShaper#rotatedCopy, is run on them)."""
+        nums = all(isinstance(a, (int, float)) and not isinstance(a, bool) for a in rest)
+        if owner == _VEC3 and name == "<init>" and desc == "(DDD)V" and isinstance(recv, Obj) and nums:
+            recv.fields.update({"x": float(rest[0]), "y": float(rest[1]), "z": float(rest[2])})
+            return [None]
+        if _is_vec3(recv) and owner == _VEC3:
+            x, y, z = (recv.fields[k] for k in ("x", "y", "z"))
+            if name in ("x", "y", "z") and desc == "()D" and not rest:
+                return [recv.fields[name]]
+            if name == "reverse" and not rest:
+                return [_vec3(x * -1.0, y * -1.0, z * -1.0)]
+            if name == "scale" and len(rest) == 1 and nums:
+                return [_vec3(x * rest[0], y * rest[0], z * rest[0])]
+            if name in ("add", "subtract") and len(rest) == 3 and nums:
+                if name == "add":
+                    return [_vec3(x + rest[0], y + rest[1], z + rest[2])]
+                return [_vec3(x - rest[0], y - rest[1], z - rest[2])]
+            if name in ("add", "subtract") and len(rest) == 1 and _is_vec3(rest[0]):
+                o = rest[0].fields
+                if name == "add":
+                    return [_vec3(x + o["x"], y + o["y"], z + o["z"])]
+                return [_vec3(x - o["x"], y - o["y"], z - o["z"])]
+            if name == "equals" and len(rest) == 1:
+                if not _is_vec3(rest[0]):
+                    return [UNKNOWN]
+                o = rest[0].fields
+                # Double.compare: equal values with the same sign (-0.0 and
+                # 0.0 differ), NaN equal to NaN.
+                import math
+                same = all((a != a and b != b) or (a == b and math.copysign(1.0, a) == math.copysign(1.0, b))
+                           for a, b in ((x, o["x"]), (y, o["y"]), (z, o["z"])))
+                return [int(same)]
+        if owner == _MTH and static and name in ("sin", "cos") and desc == "(F)F" and len(rest) == 1 and nums:
+            k = _f32(rest[0] * _f32(10430.378))
+            if name == "cos":
+                k = _f32(k + 16384.0)
+            return [_mth_sin_table()[_f2i(k) & 65535]]
+        if owner == _MUTABLE_OBJECT and isinstance(recv, Obj) and recv.cls == _MUTABLE_OBJECT:
+            if name == "<init>" and desc == "(Ljava/lang/Object;)V" and len(rest) == 1:
+                recv.fields["value"] = rest[0]
+                return [None]
+            if name == "getValue" and not rest and "value" in recv.fields:
+                return [recv.fields["value"]]
+            if name == "setValue" and len(rest) == 1:
+                recv.fields["value"] = rest[0]
+                return [None]
+        if recv == Const(_DIRECTION + "$Plane", "HORIZONTAL") and name == "iterator" and not rest:
+            return [IterV(Coll(tuple(Dir(d) for d in _PLANE_HORIZONTAL)))]
+        if owner == _DIRECTION and static and name == "get" and len(rest) == 2 \
+                and isinstance(rest[0], Const) and rest[0].owner == _DIRECTION + "$AxisDirection" \
+                and isinstance(rest[1], Const) and rest[1].owner == _DIRECTION + "$Axis":
+            # Direction#get(AxisDirection, Axis): the face along the axis
+            # with that sign (EAST / UP / SOUTH positive).
+            got = {"X": ("east", "west"), "Y": ("up", "down"), "Z": ("south", "north")}.get(rest[1].name)
+            if got is not None and rest[0].name in ("POSITIVE", "NEGATIVE"):
+                return [Dir(got[0] if rest[0].name == "POSITIVE" else got[1])]
+        if isinstance(recv, Shape) and name == "forAllBoxes" and len(rest) == 1 and isinstance(rest[0], Lam):
+            # VoxelShape#forAllBoxes: the action once per box, in block
+            # units (the machine keeps pixels). Each call must go one way.
+            for box in recv.boxes:
+                got = self.call_lambda(rest[0], [c / 16.0 for c in box])
+                if len(got) != 1:
+                    raise Unreadable("a shape's box action goes more than one way")
+            return [None]
+        return _NOT_HANDLED
+
     def call_lambda(self, lam: Lam, args: list) -> list:
         h = lam.handle
         full = list(lam.captured) + list(args)
@@ -3068,6 +3208,9 @@ class Machine:
                 owner.startswith(_VANILLA_BLOCK_PACKAGE) and name == "box" and static):
             if name == "box" and static and len(rest) == 6:
                 return [_box(rest, 1.0)]
+        handled = self._vec_math(owner, name, desc, recv, rest, static)
+        if handled is not _NOT_HANDLED:
+            return handled
         if owner == _SHAPES:
             if name == "box" and len(rest) == 6:
                 return [_box(rest, 16.0)]
