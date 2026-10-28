@@ -336,6 +336,10 @@ def _registered_entity(classes, field) -> tuple[str | None, str]:
     from ...bytecode import Ref, instructions
     found: set[str] = set()
     writes = 0
+    # A ``Map.put`` writes the field only when the field holds a map; a type
+    # field read in code that goes on to fill some other map (a block
+    # entity's own constructor) isn't written there.
+    is_map = field.desc.startswith("Ljava/util/") and field.desc.endswith("Map;")
     for cf in _mod_classes(classes):
         for m in cf.methods:
             if m.code is None:
@@ -351,7 +355,7 @@ def _registered_entity(classes, field) -> tuple[str | None, str]:
                     continue
                 map_put = isinstance(arg, Ref) and insn.name == "invokeinterface" \
                     and arg.owner == "java/util/Map" and arg.name == "put"
-                put = (insn.name == "putstatic" and same) or (loaded and map_put)
+                put = (insn.name == "putstatic" and same) or (loaded and map_put and is_map)
                 if not put:
                     if insn.name == "putstatic" or map_put:
                         # Another field's (or map's) registration ends here.

@@ -2375,6 +2375,15 @@ class Machine:
             s += [a, c, b, a]
         elif op == 0x5C:  # dup2 (category-1 pair only; we keep wide values in one slot)
             s += [s[-1]] if isinstance(s[-1], float) else [s[-2], s[-1]]
+        elif op == 0x5D:  # dup2_x1; a wide value is one slot here (as dup2 reads it)
+            if not isinstance(s[-1], float):
+                # Form 1 (two one-word values) or a long on top: which, the
+                # stack held here doesn't say, so nothing is guessed.
+                raise Unreadable("dup2_x1 on a value whose width isn't known")
+            # Form 2 (JVMS 6.5): a double under a one-word value, as javac
+            # writes ``a.x = a.y = 1.0`` for double fields.
+            a, b = s.pop(), s.pop()
+            s += [a, b, a]
         elif op == 0x5F:
             s[-1], s[-2] = s[-2], s[-1]
         elif 0x60 <= op <= 0x83:
@@ -2497,6 +2506,9 @@ class Machine:
         b, a = s.pop(), s.pop()
         if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (a, b)):
             s.append(UNKNOWN)
+            return
+        if op >= 0x78:
+            s.append(_bitwise(op, a, b))
             return
         kind = (op - 0x60) // 4
         try:
@@ -2696,7 +2708,8 @@ class Machine:
     def _new(self, cls: str):
         if cls in ("java/util/EnumMap", "java/util/HashMap", "java/util/LinkedHashMap",
                    "java/util/TreeMap"):
-            return MapV({}, kind="linked" if cls == "java/util/LinkedHashMap" else None, run=self._top)
+            return MapV({}, kind="linked" if cls == "java/util/LinkedHashMap" else
+                        "enum" if cls == "java/util/EnumMap" else None, run=self._top)
         if cls == "java/lang/StringBuilder":
             return Builder([])
         if cls in _MUTABLE_LISTS:
@@ -2815,6 +2828,12 @@ class Machine:
                 # LinkedHashMap so built keeps insertion order (Java SE 21);
                 # any other constructor (a copy, a comparator, access order)
                 # leaves what it holds, or its order, not modelled.
+                if obj.kind == "enum":
+                    # new EnumMap(Class) starts empty (Java SE 21); its
+                    # iteration is by the keys' ordinals (see _map_view).
+                    if ref.desc != "(Ljava/lang/Class;)V":
+                        obj.items, obj.havoc, obj.exact, obj.kind = {}, True, False, None
+                    return None
                 if ref.desc not in ("()V", "(I)V", "(IF)V"):
                     obj.items, obj.havoc, obj.exact, obj.kind = {}, True, False, None
                 return None
@@ -2894,6 +2913,21 @@ class Machine:
     def _vanilla_init(self, ref: Ref, args: list, f: Frame) -> None:
         obj = args[0]
         if not isinstance(obj, Obj):
+            return
+        if ref.owner == _JOML_MATRIX4F and ref.desc == "(" + "F" * 16 + ")V":
+            # JOML Matrix4f(m00, m01, ..., m33): the sixteen entries, column
+            # by column, when each is a known number.
+            if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in args[1:]):
+                obj.fields["__matrix"] = tuple(float(v) for v in args[1:])
+            return
+        if ref.owner == _TRANSFORMATION and ref.desc == f"(L{_JOML_MATRIX4F};)V" and len(args) == 2:
+            # Transformation(Matrix4f) (MC 1.21.1) keeps the matrix it was
+            # given; a null one is the identity.
+            m = args[1]
+            if m is None:
+                obj.fields["__matrix"] = _IDENTITY_MATRIX
+            elif isinstance(m, Obj) and m.cls == _JOML_MATRIX4F and "__matrix" in m.fields:
+                obj.fields["__matrix"] = m.fields["__matrix"]
             return
         # The vanilla Block constructor keeps the Properties it was given, and
         # vanilla block classes taking more (DoorBlock(BlockSetType,
@@ -3553,6 +3587,10 @@ class Machine:
                 return [recv.turned(3)]
             if name == "get2DDataValue":
                 return [{"south": 0, "west": 1, "north": 2, "east": 3}.get(recv.name, -1)]
+            if name == "get3DDataValue" and not rest:
+                # Direction#get3DDataValue (MC 1.21.1): data3d, declared
+                # DOWN 0, UP 1, NORTH 2, SOUTH 3, WEST 4, EAST 5.
+                return [{"down": 0, "up": 1, "north": 2, "south": 3, "west": 4, "east": 5}[recv.name]]
             if name == "name" and not rest:
                 # Enum#name: the constant's name (DOWN, UP, NORTH, ...).
                 return [recv.name.upper()]
@@ -3926,6 +3964,17 @@ class Machine:
         if m.shared is not None and not m.havoc:
             # A per-class map (see _site_map): the elements surely put in
             # some object's map, in the order the runs put them.
+            return MapView(m, kind)
+        if m.kind == "enum" and not m.havoc and m.exact and m.clean:
+            # An EnumMap iterates "in the natural order of its keys (the
+            # order in which the enum constants are declared)" (EnumMap,
+            # Java SE 21): known when every key's ordinal is. The order
+            # doesn't depend on when the keys were put, so a map an earlier
+            # run built (a key read, then asked of) iterates the same.
+            order = [_enum_ordinal(k) for k in m.items]
+            if any(o is None for o in order):
+                return None
+            m.items = dict(sorted(m.items.items(), key=lambda kv: _enum_ordinal(kv[0])))
             return MapView(m, kind)
         if m.kind != "linked" or m.havoc or not m.exact or not m.clean or m.run != self._top:
             return None
@@ -6709,6 +6758,24 @@ def _run_alone(machine: Machine, method, args: list, where: str, current: dict, 
     return results, ""
 
 
+def ask_key(machine: Machine, fn_cls: str, method: tuple[str, str], args: list) -> tuple[list | None, str]:
+    """(results, "") or (None, why): a method ``method`` = (name, desc) of
+    the mod's class ``fn_cls`` asked of a key :func:`read_key_alone` read
+    (``args`` after the receiver: the key, then anything else the method
+    takes), one result per way the run takes. The receiver is a new
+    ``fn_cls`` object whose constructor isn't run, as for the key. A value
+    the caller hands in that the method only passes back (a marker object)
+    comes back as itself. Any call the machine can't follow, or an unknown
+    answer, is a reason."""
+    found = machine.find_method(fn_cls, *method) or machine.default_method(fn_cls, *method)
+    if found is None:
+        return None, f"{fn_cls.replace('/', '.')}#{method[0]} isn't found"
+    fn = Obj(fn_cls)
+    fn._uninit = False
+    where = f"{found[0].name.replace('/', '.')}#{found[1].name}"
+    return _run_alone(machine, found, [fn, *args], where, {"why": ""}, len(machine.havocs))
+
+
 def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
     where = _declaring(machine, obj.cls, "getStateForPlacement", _PLACEMENT_DESC)
     if machine.vanilla_base(obj.cls) in _FACE_ATTACHED_KIN and not machine.find_method(
@@ -7556,3 +7623,61 @@ def _read_axis(machine: Machine, obj: Obj, r: AxisReading) -> None:
         r.rule, r.turned, r.source = "player", next(iter(players)).turned, where
         return
     r.why = f"{where}: axis is set neither from the clicked face nor from the player's facing"
+
+
+def _bitwise(op: int, a, b):
+    """JVMS 6.5 ishl/lshl/ishr/lshr/iushr/lushr/iand/land/ior/lor/ixor/lxor
+    (0x78-0x83) on known integers, with Java's widths: an int shift uses the
+    low 5 bits of its distance and a long one the low 6, and the result wraps
+    to a signed 32- or 64-bit value. A float operand (not a JVM integer) is
+    unknown."""
+    if isinstance(a, float) or isinstance(b, float):
+        return UNKNOWN
+    wide = op in (0x79, 0x7B, 0x7D, 0x7F, 0x81, 0x83)
+    bits = 64 if wide else 32
+    mask = (1 << bits) - 1
+
+    def signed(v: int) -> int:
+        v &= mask
+        return v - (1 << bits) if v >> (bits - 1) else v
+
+    a = signed(a)
+    if op in (0x78, 0x79):
+        return signed(a << (b & (bits - 1)))
+    if op in (0x7A, 0x7B):
+        return a >> (b & (bits - 1))
+    if op in (0x7C, 0x7D):
+        return signed((a & mask) >> (b & (bits - 1)))
+    b = signed(b)
+    if op in (0x7E, 0x7F):
+        return signed(a & b)
+    if op in (0x80, 0x81):
+        return signed(a | b)
+    return signed(a ^ b)
+
+
+def _enum_ordinal(key) -> int | None:
+    """The declaration ordinal of an enum constant the machine holds: a
+    :class:`Dir` (Direction is declared DOWN, UP, NORTH, SOUTH, WEST, EAST)
+    or an enum object read with its ``__ordinal``; None otherwise."""
+    if isinstance(key, Dir):
+        return DIRECTIONS.index(key.name)
+    if isinstance(key, Obj) and isinstance(key.fields.get("__ordinal"), int):
+        return key.fields["__ordinal"]
+    return None
+
+
+_JOML_MATRIX4F = "org/joml/Matrix4f"
+_TRANSFORMATION = "com/mojang/math/Transformation"
+_IDENTITY_MATRIX = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+
+
+def is_identity_transform(value) -> bool:
+    """Whether a value the machine holds is surely the identity
+    ``com.mojang.math.Transformation``: ``Transformation#identity()``, or one
+    made from a ``Matrix4f`` (or null) whose sixteen entries were read and
+    are the identity's (exact comparison, no tolerance)."""
+    if value == Const("com/mojang/math/Transformation", "IDENTITY"):
+        return True
+    return isinstance(value, Obj) and value.cls == _TRANSFORMATION \
+        and value.fields.get("__matrix") == _IDENTITY_MATRIX
