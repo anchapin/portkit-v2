@@ -2376,14 +2376,14 @@ class Machine:
         elif op == 0x5C:  # dup2 (category-1 pair only; we keep wide values in one slot)
             s += [s[-1]] if isinstance(s[-1], float) else [s[-2], s[-1]]
         elif op == 0x5D:  # dup2_x1; a wide value is one slot here (as dup2 reads it)
-            if isinstance(s[-1], float):
-                # Form 2 (JVMS 6.5): a double under a one-word value, as
-                # javac writes ``a.x = a.y = 1.0`` for double fields.
-                a, b = s.pop(), s.pop()
-                s += [a, b, a]
-            else:
-                a, b, c = s.pop(), s.pop(), s.pop()
-                s += [b, a, c, b, a]
+            if not isinstance(s[-1], float):
+                # Form 1 (two one-word values) or a long on top: which, the
+                # stack held here doesn't say, so nothing is guessed.
+                raise Unreadable("dup2_x1 on a value whose width isn't known")
+            # Form 2 (JVMS 6.5): a double under a one-word value, as javac
+            # writes ``a.x = a.y = 1.0`` for double fields.
+            a, b = s.pop(), s.pop()
+            s += [a, b, a]
         elif op == 0x5F:
             s[-1], s[-2] = s[-2], s[-1]
         elif 0x60 <= op <= 0x83:

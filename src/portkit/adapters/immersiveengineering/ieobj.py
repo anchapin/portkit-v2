@@ -42,7 +42,12 @@ when it is exactly a box (#395). A callback whose only drawing method is
 ``getIEOBJState`` (it only picks the groups drawn, as ``ChuteCallbacks``
 does) is run, with the key ``extractKey`` reads from the block's block entity
 as placed with nothing beside it (pick 1a, approved by Alex 2026-10-26; see
-:func:`_placed_alone`). A callback that overrides any other method that
+:func:`_placed_alone`). So is one that also overrides ``getRenderColor`` or
+``modifyQuads`` (#296, ``PipeCallbacks``): on that key, ``getRenderColor``
+must hand back the colour it is given for every drawn group (whatever the
+material and shader) and ``modifyQuads`` the list it is given, else it is a
+reason. A single ``layers`` name is the model's ``render_type`` hint of that
+name (``IEOBJModel#bake`` L47-60). A callback that overrides any other method that
 decides what is drawn is read from the jar (its class and the methods it
 declares) and named; it isn't run, so its model is a reason, never a guess.
 """
@@ -152,7 +157,13 @@ def _placed_alone(mod, classes, cb: str, names: list[str], also: tuple = ()) -> 
     (:func:`portkit.blockcode.read_key_alone`), then ``getIEOBJState`` on
     the key, and each group is drawn when the state's
     ``visibility().isVisible(group)`` (``SpecificIEOBJModel#addQuadsForGroup``)
-    is true. Its ``transform()`` must be ``Transformation.identity()``. The
+    is true. Its ``transform()`` must surely be the identity
+    (``Transformation.identity()``, or made from a ``Matrix4f`` whose
+    entries read as the identity's: ``PipeCallbacks`` turns about the
+    block's centre by nothing for a lone pipe). ``also`` names the other
+    drawing methods the callback overrides (``getRenderColor``,
+    ``modifyQuads``), each asked on the key and required to leave the drawn
+    groups as they are. The
     block entity is the one the block's ``IEEntityBlock#newBlockEntity``
     makes: the type the code that made the block reads, as the facing
     reader finds it (``_type_field`` / ``_entity_of``). Every way the run
