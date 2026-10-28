@@ -237,6 +237,53 @@ def is_composite(model: object) -> bool:
     return isinstance(model, dict) and model.get("loader") in COMPOSITE_LOADERS
 
 
+# What a model without a loader may set when it extends a composite. Its
+# elements would be ignored (the inherited composite geometry is baked
+# instead), but a model that sets them is refused rather than read as
+# something Java throws away; a loader or render type of its own is refused
+# too. `display` and `gui_light` only change hand and GUI views.
+_EXTENDING_KEYS = frozenset({"parent", "textures", "visibility", "display", "gui_light", "ambientocclusion", "credit"})
+
+
+def extended_composite(model: dict, extending: list[dict]) -> tuple[dict | None, str]:
+    """The composite `model` as drawn by the models that extend it
+    (`extending`, the leaf first): (the composite with their visibility and
+    particle applied, why not).
+
+    Forge 1.20.1 and NeoForge 1.21.1 ``BlockGeometryBakingContext``:
+    ``getCustomGeometry`` falls back to the parent's when a model has none,
+    ``isComponentVisible`` takes the nearest model that names a part, and
+    ``getMaterial`` resolves through the leaf's own chain, which the
+    composite reads only for ``particle`` (``CompositeModel#bake`` L73).
+    """
+    for level in extending:
+        unread = sorted(set(level) - _EXTENDING_KEYS)
+        if unread:
+            return None, f"model extends a composite model and sets {', '.join(unread)}, which isn't read"
+        if not isinstance(level.get("visibility") or {}, dict):
+            return None, "model extends a composite model with a visibility that isn't a map"
+        if not isinstance(level.get("textures") or {}, dict):
+            return None, "model extends a composite model with textures that aren't a map"
+    out = dict(model)
+    visibility = dict(model.get("visibility") or {}) if isinstance(model.get("visibility") or {}, dict) else model.get("visibility")
+    textures = dict(model.get("textures") or {}) if isinstance(model.get("textures") or {}, dict) else model.get("textures")
+    for level in reversed(extending):  # nearest the composite first, the leaf last
+        if isinstance(visibility, dict):
+            visibility.update(level.get("visibility") or {})
+        if isinstance(textures, dict):
+            textures.update(level.get("textures") or {})
+        if "ambientocclusion" in level:
+            out["ambientocclusion"] = level["ambientocclusion"]
+    if visibility:
+        out["visibility"] = visibility
+    if textures:
+        from portkit.converters.models import resolve_variables
+        particle = resolve_variables(textures).get("particle")
+        if isinstance(particle, str):
+            out["textures"] = {**(model.get("textures") or {}), "particle": particle}
+    return out, ""
+
+
 def composite(mod: SourceMod, model: dict) -> tuple[dict | None, list[Path], set, str]:
     """A composite model as one model with elements: (the merged model, the
     files read, the children's render types, why not)."""

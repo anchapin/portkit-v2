@@ -143,9 +143,18 @@ def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
             # A composite model (NeoForge/Forge) is its children merged
             # (#296); each child's render type is noted, not the merged one.
             if levels:
-                # A child's textures don't reach the composite's children
-                # (each is a model of its own), so a child of one isn't read.
-                return {}, seen, "model extends a composite model, which isn't read"
+                # A model without a loader that extends a composite draws the
+                # composite (#296): Forge 1.20.1 / NeoForge 1.21.1
+                # BlockGeometryBakingContext#getCustomGeometry takes the
+                # parent's geometry when the model has none, and
+                # #isComponentVisible takes the model's own visibility of a
+                # part before its parent's. Each child is baked as a model of
+                # its own (CompositeModel#bake L81-87), so the extending
+                # models' textures reach only the composite's particle.
+                current, why = multilayer.extended_composite(current, levels)
+                if current is None:
+                    return {}, seen, why
+                textures = {}
             converted, read, types, why = multilayer.composite(mod, current)
             seen += [p for p in read if p not in seen]
             if converted is None:
