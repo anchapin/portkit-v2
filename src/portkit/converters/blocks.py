@@ -233,7 +233,8 @@ def _aliased_reason(mod: SourceMod, name: str, alias, why: str, shared) -> str:
 
 def _vanilla_alias_reason(mod: SourceMod, name: str, alias, shared) -> str | None:
     """The residue reason for a blockstate under a block id the mod's code
-    aliases to a vanilla block (#296: Quark 4.1's ``polished_tuff``), or None.
+    aliases to a vanilla block (#296: a block the mod once added that vanilla now
+    has), or None.
 
     Said only when both are read, never guessed (#87): the alias target is a
     ``minecraft:`` id that Mojang's ``Blocks`` table for the game version the

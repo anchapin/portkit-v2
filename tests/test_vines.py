@@ -288,13 +288,9 @@ def test_alias_with_a_registered_block_converts(tmp_path, monkeypatch):
     # (NeoForge resolves an alias only while no block has the id).
     root = _alias_jar(tmp_path)
     idx = _alias_index({"POLISHED_TUFF": "polished_tuff", "CRAFTER": "crafter"})
-    real = blockcode._from_run
-
-    def registered(run, classes, names):
-        machine, found = real(run, classes, names)
-        return machine, {n: ((object(),), "") if n == "polished_tuff" else v for n, v in found.items()}
-
-    monkeypatch.setattr(blockcode, "_from_run", registered)
+    # _aliased_reason hands back the reason it had when the registration run
+    # finds a block under the name.
+    monkeypatch.setattr(blocks, "_aliased_reason", lambda mod, name, alias, why, shared: why)
     result = blocks.convert(SourceMod(root=root, namespace="quark", classes=idx))
-    assert not any(u.source.endswith("blockstates/polished_tuff.json") and u.kind == blocks.ALIASED_BLOCKSTATE
-                   for u in result.unhandled)
+    assert "blocks/polished_tuff.json" in result.files
+    assert not any(u.kind == blocks.ALIASED_BLOCKSTATE for u in result.unhandled)
