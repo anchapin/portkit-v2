@@ -29,7 +29,7 @@ import pytest
 from portkit import blockcode
 from portkit.adapters import quark
 from portkit.bytecode import ClassIndex
-from portkit.converters import blocks
+from portkit.converters import blocks, recipes
 from portkit.model import SourceMod
 
 DATA = Path(__file__).parent / "data"
@@ -294,3 +294,88 @@ def test_alias_with_a_registered_block_converts(tmp_path, monkeypatch):
     result = blocks.convert(SourceMod(root=root, namespace="quark", classes=idx))
     assert "blocks/polished_tuff.json" in result.files
     assert not any(u.kind == blocks.ALIASED_BLOCKSTATE for u in result.unhandled)
+
+
+def test_quark_handler_aliases_items_too():
+    # Quark 4.1's onRemapBlocks calls BuiltInRegistries.ITEM.addAlias over the
+    # same pairs as BLOCK's, so each BlockAlias says the item is aliased.
+    idx = ClassIndex.from_source(ALIAS)
+    assert quark.items_aliased(idx) is True
+    got = quark.block_aliases(SourceMod(root=Path("."), namespace="quark", classes=idx))
+    assert got["polished_tuff"].item and got["crafter"].item
+    raw = {n: idx.raw(n) for n in idx.names() if not n.endswith("CommonProxy")}
+    assert quark.items_aliased(ClassIndex(raw)) is False
+
+
+def test_alias_items_rewrites_item_ids_only():
+    recipe = {"type": "quark:polished_tuff", "group": "quark:polished_tuff",
+              "neoforge:conditions": [{"type": "neoforge:item_exists", "item": "quark:polished_tuff"}],
+              "key": {"#": {"item": "quark:polished_tuff"}, "T": {"tag": "quark:polished_tuff"}},
+              "ingredients": ["quark:polished_tuff", {"item": "quark:other"}],
+              "result": {"id": "quark:polished_tuff", "count": 2}}
+    done = recipes.alias_items(recipe, {"quark:polished_tuff": "minecraft:polished_tuff"})
+    assert done == ["quark:polished_tuff -> minecraft:polished_tuff"] * 3
+    assert recipe["key"] == {"#": {"item": "minecraft:polished_tuff"}, "T": {"tag": "quark:polished_tuff"}}
+    assert recipe["ingredients"] == ["minecraft:polished_tuff", {"item": "quark:other"}]
+    assert recipe["result"] == {"id": "minecraft:polished_tuff", "count": 2}
+    # The type, the group and the load condition are kept as written.
+    assert recipe["type"] == recipe["group"] == "quark:polished_tuff"
+    assert recipe["neoforge:conditions"][0]["item"] == "quark:polished_tuff"
+    assert recipes.alias_items({"ingredient": {"item": "quark:polished_tuff"}}, {}) == []
+
+
+def test_aliased_blockstate_records_its_vanilla_item(tmp_path, monkeypatch):
+    root = _alias_jar(tmp_path)
+    idx = _alias_index({"POLISHED_TUFF": "polished_tuff", "CRAFTER": "crafter"})
+    result = blocks.convert(SourceMod(root=root, namespace="quark", classes=idx))
+    assert result.vanilla_aliases == {"quark:polished_tuff": "minecraft:polished_tuff",
+                                      "quark:crafter": "minecraft:crafter"}
+    # Without the table nothing is aliased_blockstate, so nothing is recorded.
+    plain = blocks.convert(SourceMod(root=root, namespace="quark", classes=_alias_index(None)))
+    assert plain.vanilla_aliases == {}
+    # A block-only alias (the item registry not aliased): residue, no rewrite.
+    from portkit import adapters
+    monkeypatch.setattr(adapters, "block_aliases", lambda mod: {
+        "polished_tuff": adapters.BlockAlias("minecraft:polished_tuff", "test")})
+    block_only = blocks.convert(SourceMod(root=root, namespace="quark", classes=idx))
+    assert _kind(block_only, "polished_tuff") == blocks.ALIASED_BLOCKSTATE
+    assert block_only.vanilla_aliases == {}
+
+
+def _stonecutting(root: Path, stem: str, ingredient: str, made: str) -> None:
+    lane = root / "data/quark/recipe"
+    lane.mkdir(parents=True, exist_ok=True)
+    (lane / f"{stem}.json").write_text(json.dumps({
+        "type": "minecraft:stonecutting", "ingredient": {"item": ingredient},
+        "result": {"id": made, "count": 2}}))
+
+
+def test_recipe_naming_an_aliased_id_takes_the_vanilla_item(tmp_path):
+    # Quark's polished_tuff_vertical_slab_stonecutter: the ingredient
+    # quark:polished_tuff is minecraft:polished_tuff in Java (ITEM.addAlias).
+    root = _alias_jar(tmp_path)
+    _stonecutting(root, "slab_from_polished", "quark:polished_tuff", "quark:crafter_slab")
+    idx = _alias_index({"POLISHED_TUFF": "polished_tuff", "CRAFTER": "crafter"})
+    mod = SourceMod(root=root, namespace="quark", classes=idx)
+    got = recipes.convert(mod, emitted={}, aliases={"quark:polished_tuff": "minecraft:polished_tuff"})
+    body = got.files["recipes/slab_from_polished.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "minecraft:polished_tuff"}]
+    assert any("names quark:polished_tuff -> minecraft:polished_tuff: the mod's code aliases" in n
+               for n in got.notes)
+    # Without the aliases the recipe names the mod's id as before.
+    before = recipes.convert(mod, emitted={})
+    body = before.files["recipes/slab_from_polished.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "quark:polished_tuff"}]
+
+
+def test_convert_all_hands_the_aliases_to_the_recipes(tmp_path):
+    # The block converter's aliased_blockstate reaches the recipe converter:
+    # the recipe ships naming the vanilla item, not withdrawn as residue.
+    from portkit.converters import convert_all
+    root = _alias_jar(tmp_path)
+    _stonecutting(root, "tuff_from_crafter", "quark:polished_tuff", "minecraft:polished_tuff_slab")
+    idx = _alias_index({"POLISHED_TUFF": "polished_tuff", "CRAFTER": "crafter"})
+    result = convert_all(SourceMod(root=root, namespace="quark", classes=idx))
+    body = result.files["recipes/tuff_from_crafter.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "minecraft:polished_tuff"}]
+    assert not [u for u in result.unhandled if u.source.endswith("tuff_from_crafter.json")]

@@ -1497,9 +1497,10 @@ def with_namespaced_type(recipe: dict) -> dict:
 _BARE_PATH = re.compile(r"[a-z0-9_.\-/]+")
 
 
-# Recipe keys whose strings are not item ids: a tag's id, the recipe type, and
-# load conditions (decided as written, before any alias, #183).
-_NOT_ITEM_KEYS = frozenset({"tag", "type", "conditions", "neoforge:conditions", "forge:conditions",
+# Recipe keys whose strings are not item ids: a tag's id, the recipe type, the
+# recipe book group, and load conditions (decided as written, before any
+# alias, #183).
+_NOT_ITEM_KEYS = frozenset({"tag", "type", "group", "conditions", "neoforge:conditions", "forge:conditions",
                             "fabric:load_conditions"})
 
 
@@ -1516,7 +1517,7 @@ def alias_items(recipe, aliases: dict[str, str]) -> list[str]:
     so the recipe makes or takes the vanilla item there; writing the vanilla
     id keeps that recipe instead of withdrawing it for an item the pack
     doesn't ship. Only whole string values are compared, never a tag's id
-    (``{"tag": ..}``), the recipe type or a load condition.
+    (``{"tag": ..}``), the recipe type, its group or a load condition.
     """
     done: list[str] = []
     if not aliases:
