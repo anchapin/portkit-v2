@@ -3116,6 +3116,11 @@ class Machine:
             if name == "setValue" and len(rest) == 1:
                 recv.fields["value"] = rest[0]
                 return [None]
+        if owner == "java/util/Arrays" and static and name == "asList" and len(rest) == 1 \
+                and isinstance(rest[0], Arr) and all(v is not UNKNOWN for v in rest[0].items):
+            # Arrays#asList (Java SE 21): a fixed-size list over the array,
+            # its elements in index order; read here only to be iterated.
+            return [Coll(tuple(rest[0].items))]
         if recv == Const(_DIRECTION + "$Plane", "HORIZONTAL") and name == "iterator" and not rest:
             return [IterV(Coll(tuple(Dir(d) for d in _PLANE_HORIZONTAL)))]
         if owner == _DIRECTION and static and name == "get" and len(rest) == 2 \
