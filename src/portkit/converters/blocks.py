@@ -231,6 +231,31 @@ def _aliased_reason(mod: SourceMod, name: str, alias, why: str, shared) -> str:
             f"converting as a block of the mod's own, which would be a second {alias.target}")
 
 
+def _vanilla_alias_reason(mod: SourceMod, name: str, alias, shared) -> str | None:
+    """The residue reason for a blockstate under a block id the mod's code
+    aliases to a vanilla block (#296: a block the mod once added that vanilla now
+    has), or None.
+
+    Said only when both are read, never guessed (#87): the alias target is a
+    ``minecraft:`` id that Mojang's ``Blocks`` table for the game version the
+    mod declares (:mod:`portkit.data.vanilla_blocks`) registers, and the
+    shared registration run finds no block of the mod's own under the name.
+    Java then resolves the mod's id to the vanilla block, so a Bedrock block
+    of the mod's own would be a second copy of a vanilla block. Without the
+    table, or for a target outside it, None (the blockstate goes on as
+    before)."""
+    target_ns, _, target = alias.target.partition(":")
+    classes = getattr(mod, "classes", None)
+    table = getattr(classes, "vanilla_blocks", None) if classes is not None else None
+    if target_ns != "minecraft" or not table or target not in set(table.values()):
+        return None
+    why = _aliased_reason(mod, name, alias, "", shared)
+    if not why:
+        return None
+    return (f"{why}; {alias.target} is a vanilla block (Mojang's Blocks table for the game version the mod "
+            "declares), so the id loads vanilla's block and no block of the mod's own")
+
+
 def _single_model(blockstate: dict) -> tuple[str | None, str]:
     """The one model a stateless block uses, or why it has more than one."""
     if "multipart" in blockstate:
@@ -1675,6 +1700,13 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
         if name in unregistered:
             result.unhandled.append(Unhandled(rel, UNREGISTERED_BLOCKSTATE, _unregistered_reason(unregistered[name])))
             continue
+        vanilla_alias = (_vanilla_alias_reason(mod, name, aliased[name], shared)
+                         if name in aliased and name not in (stations or {}) else None)
+        if vanilla_alias is not None:
+            # Nothing is claimed, as for unregistered_blockstate: the models
+            # stay residue of their own (#296).
+            result.unhandled.append(Unhandled(rel, ALIASED_BLOCKSTATE, vanilla_alias))
+            continue
         drawn_read: list = []
         drawn_by_code = (None if name in (stations or {}) or name not in loaded
                          else _code_drawn_reason(mod, loaded[name], drawn_read))
@@ -2817,6 +2849,7 @@ AIR_BLOCK = "air_block"
 # It is explained residue; its models are not claimed (they stay residue of
 # their own, as they were), so no count moves.
 UNREGISTERED_BLOCKSTATE = "unregistered_blockstate"
+ALIASED_BLOCKSTATE = "aliased_blockstate"
 
 
 def _unregistered_reason(where: str) -> str:

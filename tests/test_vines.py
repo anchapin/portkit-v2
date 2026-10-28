@@ -220,3 +220,77 @@ def test_aliased_blockstate_named_for_its_alias(tmp_path):
     assert "no registration of crafter was found in the mod's classes" in why
     # A blockstate another path converts is left as it was.
     assert "blocks/polished_tuff.json" in result.files
+
+
+def _alias_jar(tmp_path):
+    root = tmp_path / "quark"
+    _dirs(root, "quark")
+    cube = {"textures": {"all": "quark:block/polished_tuff", "particle": "quark:block/polished_tuff"},
+            "elements": [{"from": [0, 0, 0], "to": [16, 16, 16],
+                          "faces": {f: {"texture": "#all", "uv": [0, 0, 16, 16]}
+                                    for f in ("north", "south", "east", "west", "up", "down")}}]}
+    (root / "assets/quark/models/block/polished_tuff.json").write_text(json.dumps(cube))
+    (root / "assets/quark/models/block/crafter.json").write_text(json.dumps(cube))
+    (root / "assets/quark/textures/block/polished_tuff.png").write_bytes(_png())
+    (root / "assets/quark/blockstates/polished_tuff.json").write_text(json.dumps(
+        {"variants": {"": {"model": "quark:block/polished_tuff"}}}))
+    (root / "assets/quark/blockstates/crafter.json").write_text(json.dumps({"variants": {
+        f"facing={d}": {"model": "quark:block/crafter"} for d in ("north", "south")}}))
+    return root
+
+
+def _alias_index(table):
+    idx = ClassIndex.from_source(ALIAS)
+    idx.vanilla_blocks = table
+    return idx
+
+
+def _kind(result, stem: str) -> str:
+    return next(u.kind for u in result.unhandled if u.source.endswith(f"blockstates/{stem}.json"))
+
+
+def test_id_aliased_to_a_vanilla_block_is_residue(tmp_path):
+    # Quark 4.1: quark:polished_tuff -> minecraft:polished_tuff, which Mojang's
+    # Blocks table registers, and no block of Quark's own under the name.
+    root = _alias_jar(tmp_path)
+    idx = _alias_index({"POLISHED_TUFF": "polished_tuff", "CRAFTER": "crafter"})
+    result = blocks.convert(SourceMod(root=root, namespace="quark", classes=idx))
+    assert "blocks/polished_tuff.json" not in result.files
+    assert _kind(result, "polished_tuff") == blocks.ALIASED_BLOCKSTATE
+    why = _reason(result, "polished_tuff")
+    assert why.startswith("the mod's code aliases quark:polished_tuff to minecraft:polished_tuff "
+                          "(org.violetmoon.quark.base.handler.QuarkRemapHandler#onRemapBlocks")
+    assert "no registration of polished_tuff was found in the mod's classes" in why
+    assert why.endswith("minecraft:polished_tuff is a vanilla block (Mojang's Blocks table for the game "
+                        "version the mod declares), so the id loads vanilla's block and no block of the mod's own")
+    # The crafter, residue before for its states, now says the same up front.
+    assert _kind(result, "crafter") == blocks.ALIASED_BLOCKSTATE
+    from portkit.agent.residue import SKIP_KINDS
+    assert blocks.ALIASED_BLOCKSTATE in SKIP_KINDS
+
+
+def test_alias_needs_the_vanilla_table_and_a_vanilla_target(tmp_path):
+    root = _alias_jar(tmp_path)
+    # No table (reference not fetched): nothing is said, polished_tuff converts.
+    plain = blocks.convert(SourceMod(root=root, namespace="quark", classes=_alias_index(None)))
+    assert "blocks/polished_tuff.json" in plain.files
+    assert _kind(plain, "crafter") == "block"
+    # A target the table doesn't register is no vanilla block: polished_tuff
+    # converts and the crafter keeps its reason from the states path.
+    other = blocks.convert(SourceMod(root=root, namespace="quark",
+                                     classes=_alias_index({"STONE": "stone"})))
+    assert "blocks/polished_tuff.json" in other.files
+    assert _kind(other, "crafter") == "block"
+
+
+def test_alias_with_a_registered_block_converts(tmp_path, monkeypatch):
+    # A block the mod's code registers under the name wins over the alias
+    # (NeoForge resolves an alias only while no block has the id).
+    root = _alias_jar(tmp_path)
+    idx = _alias_index({"POLISHED_TUFF": "polished_tuff", "CRAFTER": "crafter"})
+    # _aliased_reason hands back the reason it had when the registration run
+    # finds a block under the name.
+    monkeypatch.setattr(blocks, "_aliased_reason", lambda mod, name, alias, why, shared: why)
+    result = blocks.convert(SourceMod(root=root, namespace="quark", classes=idx))
+    assert "blocks/polished_tuff.json" in result.files
+    assert not any(u.kind == blocks.ALIASED_BLOCKSTATE for u in result.unhandled)
