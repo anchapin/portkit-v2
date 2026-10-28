@@ -3295,7 +3295,10 @@ def _bedrock_box(box: tuple) -> dict:
 
 
 def _num(v: float):
-    return int(v) if float(v).is_integer() else round(v, 4)
+    # Rounded first, so a pixel a rotation leaves a hair off whole
+    # (6.000000000000001, #296) is written as the whole number.
+    r = round(float(v), 4)
+    return int(r) if r.is_integer() else r
 
 
 def _bbox(boxes) -> tuple | None:
