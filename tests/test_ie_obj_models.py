@@ -82,7 +82,7 @@ def test_boxes_read_as_ie_reads_them(mod):
 
 @pytest.mark.parametrize("name, words", [
     ("tube_cb", "its callback 'immersiveengineering:tube' isn't found registered"),
-    ("tube_layers", "render layers ['cutout'], which aren't read"),
+    ("tube_two_layers", "render layers ['cutout', 'translucent'], which aren't read"),
     ("tube_extra", "sets flip_v, which the IE OBJ reader doesn't read"),
     ("ramp", "part 'ramp' piece 1 of 1 is not an axis-aligned box: a face has 3 corners"),
 ])
@@ -111,7 +111,7 @@ def test_a_callback_that_only_picks_groups_draws_what_the_placed_key_shows(mod, 
     monkeypatch.setattr(ieobj, "_overrides", lambda classes, cls: ["getIEOBJState"])
     asked = []
 
-    def placed(mod_, classes, cb, names):
+    def placed(mod_, classes, cb, names, also=()):
         asked.append((cb, names))
         return {"frame": True, "post": False}, ""
 
