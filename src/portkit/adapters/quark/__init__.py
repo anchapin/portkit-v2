@@ -14,7 +14,9 @@ shape: every write to ``REMAP`` is a ``Map.put`` of two string constants in
 ``<clinit>``, ``onRemapBlocks`` carries ``@LoadEvent``, reads ``REMAP`` and
 calls ``addAlias`` after reading ``BuiltInRegistries.BLOCK``, and another of
 the mod's classes names the handler class (its subscription). Anything else
-reads nothing (#87). Which blocks Quark does register is not read here; the
+reads nothing (#87). Whether the same method also calls ``addAlias`` after
+reading ``BuiltInRegistries.ITEM`` is read too (``BlockAlias.item``): only
+then does a recipe naming the old item id take the vanilla item in Java. Which blocks Quark does register is not read here; the
 core says an aliased blockstate is residue only where its own registration
 reader found no block under the name.
 """
@@ -39,11 +41,22 @@ _READ: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 def read_aliases(classes) -> dict[str, str]:
     """``{"quark:<name>": "<target id>"}`` the handler aliases, or {} when the
     class isn't there or isn't in the shape the module docstring gives."""
+    return _read_handler(classes)[0]
+
+
+def items_aliased(classes) -> bool:
+    """Whether the handler read by :func:`read_aliases` also aliases each
+    pair in the item registry (``BuiltInRegistries.ITEM.addAlias``); False
+    when nothing is read."""
+    return _read_handler(classes)[1]
+
+
+def _read_handler(classes) -> tuple[dict[str, str], bool]:
     if classes is None:
-        return {}
+        return {}, False
     cf = classes.get(HANDLER)
     if cf is None:
-        return {}
+        return {}, False
     pairs: dict[str, str] = {}
     handler_ok = False
     for m in cf.methods:
@@ -55,33 +68,34 @@ def read_aliases(classes) -> dict[str, str]:
             if ref is None or ref.owner != HANDLER or ref.name != _FIELD:
                 continue
             if ins.op == _PUTSTATIC and m.name != "<clinit>":
-                return {}
+                return {}, False
             if ins.op != _GETSTATIC or m.name == _METHOD:
                 continue
             if m.name != "<clinit>":
-                return {}  # REMAP read anywhere else might be changed there
+                return {}, False  # REMAP read anywhere else might be changed there
             nxt = insns[k + 1:k + 4]
             if len(nxt) == 3 and all(x.op in _LDC and isinstance(x.arg, str) for x in nxt[:2]) \
                     and nxt[2].op in _INVOKES and isinstance(nxt[2].arg, bytecode.Ref) \
                     and nxt[2].arg.name == "put":
                 pairs[nxt[0].arg] = nxt[1].arg
             elif not (len(nxt) >= 1 and nxt[0].op == _PUTSTATIC):
-                return {}
+                return {}, False
         if m.name == _METHOD:
             reads = any(isinstance(i.arg, bytecode.Ref) and i.op == _GETSTATIC
                         and i.arg.owner == HANDLER and i.arg.name == _FIELD for i in insns)
-            block_alias = False
-            seen_block = False
+            block_alias = item_alias = False
+            seen = None
             for i in insns:
                 if isinstance(i.arg, bytecode.Ref) and i.op == _GETSTATIC and i.arg.owner == _REGISTRIES:
-                    seen_block = i.arg.name == "BLOCK"
-                elif seen_block and isinstance(i.arg, bytecode.Ref) and i.op in _INVOKES \
+                    seen = i.arg.name
+                elif seen is not None and isinstance(i.arg, bytecode.Ref) and i.op in _INVOKES \
                         and i.arg.name == "addAlias":
-                    block_alias = True
+                    block_alias = block_alias or seen == "BLOCK"
+                    item_alias = item_alias or seen == "ITEM"
             handler_ok = reads and block_alias and _LOAD_EVENT in (m.annotations or {})
     if not handler_ok or not _subscribed(classes):
-        return {}
-    return pairs
+        return {}, False
+    return pairs, item_alias
 
 
 def _subscribed(classes) -> bool:
@@ -110,10 +124,11 @@ def block_aliases(mod) -> dict[str, BlockAlias]:
         return {}
     found = _READ.get(classes)
     if found is None:
-        found = _READ[classes] = read_aliases(classes)
+        found = _READ[classes] = _read_handler(classes)
+    pairs, item = found
     where = (f"{HANDLER.replace('/', '.')}#{_METHOD} (BuiltInRegistries.BLOCK.addAlias over the pairs "
              f"<clinit> puts in {_FIELD})")
-    return {k.partition(":")[2]: BlockAlias(v, where) for k, v in found.items() if k.startswith("quark:")}
+    return {k.partition(":")[2]: BlockAlias(v, where, item=item) for k, v in pairs.items() if k.startswith("quark:")}
 
 
 ADAPTER = Adapter(
