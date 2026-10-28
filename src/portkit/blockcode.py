@@ -3086,6 +3086,20 @@ class Machine:
                 same = all((a != a and b != b) or (a == b and math.copysign(1.0, a) == math.copysign(1.0, b))
                            for a, b in ((x, o["x"]), (y, o["y"]), (z, o["z"])))
                 return [int(same)]
+        if owner == "java/lang/Math" and static and name in ("max", "min") and len(rest) == 2 and nums \
+                and desc in ("(II)I", "(JJ)J", "(FF)F", "(DD)D"):
+            # Math#max / #min (Java SE 21): NaN if either is NaN; -0.0 below
+            # 0.0 for the floating kinds.
+            a, b = rest
+            if desc in ("(FF)F", "(DD)D"):
+                import math
+                if a != a or b != b:
+                    return [float("nan")]
+                if a == b == 0.0:
+                    neg = math.copysign(1.0, a) < 0 or math.copysign(1.0, b) < 0
+                    pos = math.copysign(1.0, a) > 0 or math.copysign(1.0, b) > 0
+                    return [0.0 if (name == "max" and pos) or (name == "min" and not neg) else -0.0]
+            return [max(a, b) if name == "max" else min(a, b)]
         if owner == _MTH and static and name in ("sin", "cos") and desc == "(F)F" and len(rest) == 1 and nums:
             k = _f32(rest[0] * _f32(10430.378))
             if name == "cos":
