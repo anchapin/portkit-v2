@@ -6439,6 +6439,15 @@ class DirReading(Reading):
     # registered block (Obj._made_in), for an adapter that pairs the block
     # with what its factory reads (#296); None when not one place.
     made_in: tuple | None = None
+    # ``attach`` kind: the state holding floor / wall / ceiling ("face" for
+    # vanilla AttachFace), and (#296) a mod's own enum state in its place:
+    # ``face_fold`` maps each other value it has to the one of floor / wall
+    # / ceiling that draws the same model and turn at every facing (#388's
+    # same-look rule), ``face_objects`` each serialized value to the enum
+    # constant on the machine.
+    face_prop: str = "face"
+    face_fold: dict = field(default_factory=dict)
+    face_objects: dict = field(default_factory=dict)
 
 
 def directional_keys(kind: str, facings: tuple = ()) -> list[tuple[str, str]]:
@@ -6505,13 +6514,40 @@ def _token(value):
     return None
 
 
-def _face_value(value):
+def _face_value(value, r: "DirReading | None" = None):
     if isinstance(value, Const) and value.owner == _ATTACH_FACE and value.name in ("FLOOR", "WALL", "CEILING"):
         return value.name.lower()
+    if r is not None and r.face_objects and isinstance(value, Obj):
+        # The mod's own face enum (#296): the constant's serialized name,
+        # a folded value as the one it draws like.
+        name = next((n for n, o in r.face_objects.items() if o is value), None)
+        name = r.face_fold.get(name, name)
+        if name in ("floor", "wall", "ceiling"):
+            return name
     return None
 
 
-def _with_key(state: State, kind: str, key: tuple) -> State:
+def _face_objects(machine: "Machine", obj: "Obj", prop: str) -> dict:
+    """{serialized name: enum constant} of the mod enum ``prop`` holds in the
+    block's registered default (#296), or {} when that isn't read: the
+    constants are the enum class's static fields once its initializer ran,
+    each named by its getSerializedName."""
+    default = obj.fields.get("__default")
+    value = default.get(prop) if isinstance(default, State) else None
+    if not isinstance(value, Obj) or "__enum_name" not in value.fields:
+        return {}
+    machine.init_class(value.cls)
+    out = {}
+    for (owner, _f), const in list(machine.statics.items()):
+        if owner == value.cls and isinstance(const, Obj) and const.cls == value.cls and "__enum_name" in const.fields:
+            name = _serialized(machine, const)
+            if name is None or name in out:
+                return {}
+            out[name] = const
+    return out
+
+
+def _with_key(state: State, kind: str, key: tuple, r: "DirReading | None" = None) -> State:
     face, facing = key
     if kind == "vine":
         for d in VINE_FACES:
@@ -6520,15 +6556,24 @@ def _with_key(state: State, kind: str, key: tuple) -> State:
     state = state.set("facing", Dir(facing))
     if kind in ("facing6", "facing"):
         return state.set("facing6", Dir(facing))
+    if r is not None and r.face_prop != "face":
+        return state.set(r.face_prop, r.face_objects.get(face, UNKNOWN))
     return state.set("face", Const(_ATTACH_FACE, face.upper()))
 
 
 def read_directional(classes: ClassIndex | None, kinds: dict[str, str], run=None,
-                     facings: dict[str, tuple] | None = None) -> dict[str, DirReading]:
+                     facings: dict[str, tuple] | None = None,
+                     faces: dict[str, tuple] | None = None) -> dict[str, DirReading]:
     """A :class:`DirReading` per blockstate name in ``kinds`` (name -> kind);
-    ``facings`` gives a ``facing`` blockstate's drawn values (name -> values)."""
+    ``facings`` gives a ``facing`` blockstate's drawn values (name -> values);
+    ``faces`` an ``attach`` blockstate's face state when it isn't vanilla
+    ``face`` (name -> (state, {value: the face it draws like}), #296)."""
     facings = facings or {}
+    faces = faces or {}
     readings = {n: DirReading(n, kind=k, facings=tuple(facings.get(n, ()))) for n, k in kinds.items()}
+    for n, (prop, fold) in faces.items():
+        if n in readings:
+            readings[n].face_prop, readings[n].face_fold = prop, dict(fold)
     if classes is None or not len(classes):
         for r in readings.values():
             r.rule_why = r.shape_why = r.collision_why = "the mod ships no class files"
@@ -6550,6 +6595,14 @@ def read_directional(classes: ClassIndex | None, kinds: dict[str, str], run=None
                 f"{r.cls}: type is the mod's own enum, whose serialized names the reader doesn't evaluate")
             _read_shape_collision(machine, obj, r)
             continue
+        if r.kind == "attach" and r.face_prop != "face":
+            r.face_objects = _face_objects(machine, obj, r.face_prop)
+            if not {"floor", "wall", "ceiling"} | set(r.face_fold) <= set(r.face_objects):
+                r.rule_why = r.shape_why = (
+                    f"{r.cls}: {r.face_prop} is the mod's own enum, and its constants' serialized names "
+                    "aren't read from the registered default's class")
+                _read_shape_collision(machine, obj, r)
+                continue
         _read_rule(machine, obj, r)
         _read_dir_shapes(machine, obj, r)
         _read_shape_collision(machine, obj, r)
@@ -6980,11 +7033,11 @@ def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
                     r.rule_conflict = (f"{where}: the player doesn't set facing (the block keeps its "
                                        "default facing), which Bedrock's placement traits can't give")
                     raise Unreadable(r.rule_conflict)
-                if r.kind == "attach" and "face" not in values:
+                if r.kind == "attach" and r.face_prop not in values:
                     r.rule_conflict = (f"{where}: the player doesn't set face (the block keeps its "
                                        "default face), which Bedrock's placement traits can't give")
                     raise Unreadable(r.rule_conflict)
-                face = "" if r.kind in ("facing6", "facing", "vine") else _face_value(res.get("face"))
+                face = "" if r.kind in ("facing6", "facing", "vine") else _face_value(res.get(r.face_prop), r)
                 token = _token(facing)
                 if face is None or token is None:
                     outs.add(None)
@@ -7021,7 +7074,7 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
         for key in directional_keys(r.kind, r.facings):
-            state = _with_key(default if isinstance(default, State) else State(), r.kind, key)
+            state = _with_key(default if isinstance(default, State) else State(), r.kind, key, r)
             results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
             label = (f"{key[1]}=true" if r.kind == "vine" else
                      f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}")
