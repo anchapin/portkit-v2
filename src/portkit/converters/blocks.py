@@ -1618,7 +1618,10 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     # run is over every blockstate's name, which holding doesn't change.
     from ..adapters import block_variations
     variation_sets = block_variations(mod)
-    held_read = held_states.read(mod, loaded, set(stations or {}) | set(variation_sets), shared)
+    # A face state of the mod's own is placed by the attach-face reader
+    # (_face_state, #296), so it isn't held.
+    own_faces = {stem for stem, bs in loaded.items() if _face_state(bs) is not None}
+    held_read = held_states.read(mod, loaded, set(stations or {}) | set(variation_sets) | own_faces, shared)
     held: dict[str, tuple] = {}
     held_why: dict[str, str] = {}
     for stem, found in held_read.items():
@@ -3292,7 +3295,10 @@ def _bedrock_box(box: tuple) -> dict:
 
 
 def _num(v: float):
-    return int(v) if float(v).is_integer() else round(v, 4)
+    # Rounded first, so a pixel a rotation leaves a hair off whole
+    # (6.000000000000001, #296) is written as the whole number.
+    r = round(float(v), 4)
+    return int(r) if r.is_integer() else r
 
 
 def _bbox(boxes) -> tuple | None:
@@ -4731,13 +4737,66 @@ def _key_label(key: tuple, kind: str = "", second: str | None = None) -> str:
     return f"face={key[0]},{prop}={key[1]}" if key[0] else f"{prop}={key[1]}"
 
 
+def _face_state(blockstate: dict) -> tuple[str, dict] | None:
+    """(state, {value: face}) when ``blockstate`` is a variants blockstate of
+    exactly a horizontal ``facing`` and a face state of the mod's own (#296):
+    a state other than vanilla's ``face`` whose values are floor, wall and
+    ceiling plus others that each draw, at every facing, the same model and
+    turn as exactly one of those three (#388's same-look rule: Create's
+    DoubleAttachFace wall_reversed draws as wall). ``{value: face}`` folds
+    those others; None otherwise."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or not variants:
+        return None
+    cells, props = {}, {}
+    for key, entry in variants.items():
+        pairs = [p.split("=", 1) for p in key.split(",") if p]
+        if not pairs or any(len(p) != 2 for p in pairs):
+            return None
+        cell = {a.strip(): b.strip() for a, b in pairs}
+        for a, b in cell.items():
+            props.setdefault(a, set()).add(b)
+        cells[tuple(sorted(cell.items()))] = entry
+    others = [p for p in props if p != "facing"]
+    if len(others) != 1 or others[0] == "face" or props.get("facing") != set(_CARDINALS):
+        return None
+    prop = others[0]
+    if not set(_ATTACH_FACES) <= props[prop]:
+        return None
+    if len(cells) != len(props[prop]) * len(_CARDINALS):
+        return None
+
+    def at(value, facing):
+        return cells.get(tuple(sorted({prop: value, "facing": facing}.items())))
+
+    fold = {}
+    for value in sorted(props[prop] - set(_ATTACH_FACES)):
+        like = [f for f in _ATTACH_FACES if all(at(value, d) == at(f, d) for d in _CARDINALS)]
+        if len(like) != 1:
+            return None
+        fold[value] = like[0]
+    return prop, fold
+
+
 def _directional_variants(blockstate: dict, coded_ok: bool = False) -> tuple[str | None, dict | None, str]:
     """(kind, {(face, facing): (model, x, y, uvlock)}, "") for a 6-way facing
     or attach-face variants blockstate; (None, None, why) when it is one but
-    not in a form read here; (None, None, "") when it isn't."""
+    not in a form read here; (None, None, "") when it isn't. A face state of
+    the mod's own (_face_state) reads as ``face``, its folded values left
+    out (they draw as the face they fold to)."""
     variants = blockstate.get("variants")
     if not isinstance(variants, dict) or not variants:
         return None, None, ""
+    own_face = _face_state(blockstate)
+    if own_face is not None:
+        prop, fold = own_face
+        renamed = {}
+        for key, entry in variants.items():
+            cell = dict(p.strip().split("=", 1) for p in key.split(",") if p)
+            if cell[prop] in fold:
+                continue
+            renamed[f"face={cell[prop]},facing={cell['facing']}"] = entry
+        return _directional_variants({"variants": renamed}, coded_ok)
     parsed, props = {}, {}
     for key in variants:
         pairs = [p.split("=", 1) for p in key.split(",") if p]
@@ -4951,8 +5010,10 @@ def _read_directional_code(mod: SourceMod, stations: dict, loaded: dict,
         _read_spin_code(mod, spin_specs, shared, out, why)
     if specs:
         facings = {n: _facings_of(c) for n, (k, c) in specs.items() if k == "facing"}
+        faces = {n: _face_state(loaded[n]) for n, (k, _) in specs.items() if k == "attach"}
         readings = blockcode.read_directional(classes, {n: k for n, (k, _) in specs.items()},
-                                              run=shared() if shared else None, facings=facings)
+                                              run=shared() if shared else None, facings=facings,
+                                              faces={n: f for n, f in faces.items() if f is not None})
         _adapter_rules(mod, readings)
         out.update({n: (specs[n][0], {(k, ()): v for k, v in specs[n][1].items()}, readings[n], ())
                     for n in specs})
