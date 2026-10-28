@@ -132,11 +132,17 @@ _VISIBILITY = _API + "IEProperties$VisibilityList"
 _GET_STATE = ("getIEOBJState", f"(Ljava/lang/Object;)L{_OBJ_STATE};")
 _NEW_BE = ("newBlockEntity", "(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)"
            "Lnet/minecraft/world/level/block/entity/BlockEntity;")
-_IDENTITY = ("com/mojang/math/Transformation", "IDENTITY")
+_COLOR4 = _API + "utils/Color4"
+_RENDER_COLOR = ("getRenderColor", f"(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;L{_API}shader/ShaderCase;"
+                 f"L{_COLOR4};)L{_COLOR4};")
+_MODIFY_QUADS = ("modifyQuads", "(Ljava/lang/Object;Ljava/util/List;)Ljava/util/List;")
+# Drawing methods run on the placed key (getIEOBJState picks the groups and
+# their turn; these two must leave what it picks as it is).
+_RUN = ("getIEOBJState", "getRenderColor", "modifyQuads")
 _ALONE: dict = {}  # (id(class index), blockstate name, callback, groups) -> (index, answer)
 
 
-def _placed_alone(mod, classes, cb: str, names: list[str]) -> tuple[dict | None, str]:
+def _placed_alone(mod, classes, cb: str, names: list[str], also: tuple = ()) -> tuple[dict | None, str]:
     """({group: shown}, "") for the block being converted
     (``models.BLOCK_DRAWN``) under callback class ``cb``, or (None, why).
 
@@ -156,11 +162,11 @@ def _placed_alone(mod, classes, cb: str, names: list[str]) -> tuple[dict | None,
     if drawn is None:
         return None, "no placed block is being drawn"
     block, shared = drawn
-    key = (id(classes), block, cb, tuple(names))
+    key = (id(classes), block, cb, tuple(names), also)
     held = _ALONE.get(key)
     if held is not None and held[0] is classes:
         return held[1]
-    got = _read_alone(classes, block, shared, cb, names)
+    got = _read_alone(classes, block, shared, cb, names, also)
     if len(_ALONE) > 4096 or any(v[0] is not classes for v in _ALONE.values()):
         _ALONE.clear()
     _ALONE[key] = (classes, got)
@@ -176,7 +182,7 @@ def _entity_memo(classes) -> dict:
     return _ENTITY_MEMO[1]
 
 
-def _read_alone(classes, block: str, shared, cb: str, names: list[str]) -> tuple[dict | None, str]:
+def _read_alone(classes, block: str, shared, cb: str, names: list[str], also: tuple = ()) -> tuple[dict | None, str]:
     from portkit import blockcode
     from . import _ENTITY_BLOCK, _chain, _declaring, _entity_of, _type_field
     run = shared() if callable(shared) else shared
@@ -200,17 +206,23 @@ def _read_alone(classes, block: str, shared, cb: str, names: list[str]) -> tuple
     if be is None:
         return None, why
     machine = blockcode.Machine(classes)
-    states, why = blockcode.read_key_alone(classes, be, cb, _BLOCK_CALLBACK_KEY, _GET_STATE, machine=machine)
-    if states is None:
+    keys, why = blockcode.read_key_alone(classes, be, cb, _BLOCK_CALLBACK_KEY, machine=machine)
+    if keys is None:
         return None, f"its key from {_short(be)} placed alone isn't read: {why}"
+    states: list = []
+    for k in keys:
+        got, why = blockcode.ask_key(machine, cb, _GET_STATE, [k])
+        if got is None:
+            return None, f"its key from {_short(be)} placed alone isn't read: {why}"
+        states += [(k, st) for st in got]
     shown: dict | None = None
-    for state in states:
+    for k, state in states:
         if not isinstance(state, blockcode.Obj) or state.cls != _OBJ_STATE:
             return None, f"{_short(cb)}#getIEOBJState doesn't give an IEObjState that is read"
         try:
             transform = machine.call(_OBJ_STATE, "transform", "()Lcom/mojang/math/Transformation;", [state])
             vis = machine.call(_OBJ_STATE, "visibility", f"()L{_VISIBILITY};", [state])
-            if transform != [blockcode.Const(*_IDENTITY)]:
+            if len(transform) != 1 or not blockcode.is_identity_transform(transform[0]):
                 return None, f"{_short(cb)}#getIEOBJState turns the model (its transform isn't the identity)"
             if len(vis) != 1 or not isinstance(vis[0], blockcode.Obj) or vis[0].cls != _VISIBILITY:
                 return None, f"{_short(cb)}#getIEOBJState doesn't give one VisibilityList that is read"
@@ -220,6 +232,28 @@ def _read_alone(classes, block: str, shared, cb: str, names: list[str]) -> tuple
                 if verdict not in ([0], [1]):
                     return None, f"whether {_short(cb)} shows the group {n!r} isn't read"
                 these[n] = bool(verdict[0])
+            for n in names:
+                if these[n] and "getRenderColor" in also:
+                    # SpecificIEOBJModel#addGroupQuads: the colour is
+                    # getRenderColor(key, group, material, shader, white);
+                    # it must hand back the colour it was given, whatever
+                    # the material and shader.
+                    white = blockcode.Obj(_COLOR4)
+                    white._uninit = False
+                    got, why = blockcode.ask_key(machine, cb, _RENDER_COLOR,
+                                                 [k, n, blockcode.UNKNOWN, blockcode.UNKNOWN, white])
+                    if got is None or any(c is not white for c in got):
+                        return None, (f"{_short(cb)}#getRenderColor recolours the group {n!r}"
+                                      + (f" ({why})" if why else ""))
+            if "modifyQuads" in also:
+                # ... then modifyQuads(key, quads): it must hand back the
+                # list it was given, untouched.
+                quads = blockcode.Obj("java/util/List")
+                quads._uninit = False
+                got, why = blockcode.ask_key(machine, cb, _MODIFY_QUADS, [k, quads])
+                if got is None or any(q is not quads for q in got):
+                    return None, (f"{_short(cb)}#modifyQuads changes the quads"
+                                  + (f" ({why})" if why else ""))
         except blockcode.Unreadable as exc:
             return None, f"{_short(cb)}'s IEObjState can't be read ({exc})"
         if shown is not None and these != shown:
@@ -317,6 +351,22 @@ def _mesh(mod, source: str, files: list):
     return (list(groups.values()), pos, tex, nor), ""
 
 
+# NeoForge's named render types for blocks (NamedRenderTypeManager#preRegisterVanillaRenderTypes,
+# 1.21.1): ``minecraft:`` + these, a name with no namespace being ``minecraft:``'s.
+_LAYERS = ("solid", "cutout", "cutout_mipped", "cutout_mipped_all", "translucent", "tripwire")
+
+
+def _one_layer(layers) -> str | None:
+    """``minecraft:<type>`` when ``layers`` names exactly one vanilla named
+    render type, else None (more than one layer isn't read)."""
+    if not isinstance(layers, list) or len(layers) != 1 or not isinstance(layers[0], str):
+        return None
+    ns, _, name = layers[0].rpartition(":")
+    if ns not in ("", "minecraft") or name not in _LAYERS:
+        return None
+    return f"minecraft:{name}"
+
+
 def read(mod, model: dict) -> tuple[dict | None, list, str]:
     """An ``ie_obj`` model as a JSON model with ``elements``, the files read,
     and the reason when it can't be one."""
@@ -348,10 +398,12 @@ def read(mod, model: dict) -> tuple[dict | None, list, str]:
         elif cls != _DEFAULT:
             drawn = _overrides(classes, cls)
             alone_why = ""
-            if drawn == ["getIEOBJState"]:
-                # Only which groups show is the callback's: read with the
-                # key of the block entity as placed with nothing beside it.
-                visible, alone_why = _placed_alone(mod, classes, cls, [g.name for g in groups])
+            if drawn and set(drawn) <= set(_RUN):
+                # Which groups show, and whether they keep their colour and
+                # quads, is the callback's: read with the key of the block
+                # entity as placed with nothing beside it.
+                visible, alone_why = _placed_alone(mod, classes, cls, [g.name for g in groups],
+                                                   tuple(d for d in drawn if d != "getIEOBJState"))
                 if visible is not None:
                     groups = [g for g in groups if visible[g.name]]
                     drawn = []
@@ -362,9 +414,17 @@ def read(mod, model: dict) -> tuple[dict | None, list, str]:
                            + (f" ({alone_why})" if alone_why else ""))
     if not blocker and model.get("dynamic", False) is not False:
         blocker = f"it sets dynamic {model.get('dynamic')!r}, which isn't read"
+    layer = None
     if not blocker and model.get("layers") is not None:
-        blocker = f"it draws in the render layers {model.get('layers')!r}, which aren't read"
+        layer = _one_layer(model["layers"])
+        if layer is None:
+            blocker = f"it draws in the render layers {model.get('layers')!r}, which aren't read"
     out, why = boxes(groups)
+    if out is not None and layer is not None:
+        # IEOBJModel#bake (L47-60): each ``layers`` name is a NeoForge named
+        # render type (``context.getRenderType``), the block drawn in it;
+        # one name is the JSON model's ``render_type`` hint of that name.
+        out = {**out, "render_type": layer}
     if blocker:
         mesh = why[len(head):].lstrip(": ") if out is None and why.startswith(head) else why
         return None, files, f"{head}: {blocker}" + (f"; and its {mesh}" if out is None else "")
