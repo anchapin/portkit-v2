@@ -1706,6 +1706,10 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             # Nothing is claimed, as for unregistered_blockstate: the models
             # stay residue of their own (#296).
             result.unhandled.append(Unhandled(rel, ALIASED_BLOCKSTATE, vanilla_alias))
+            if aliased[name].item:
+                # The item id is aliased too: Java's recipes naming it take
+                # the vanilla item, and so do the converted ones (#296).
+                result.vanilla_aliases[f"{mod.namespace}:{name}"] = aliased[name].target
             continue
         drawn_read: list = []
         drawn_by_code = (None if name in (stations or {}) or name not in loaded

@@ -87,8 +87,10 @@ def convert_all(mod: SourceMod, overrides: dict[tuple[str, str], bool | float] |
         elif fn is recipes.convert:
             # Recipes run after blocks and items so a multi-member tag can be
             # checked against what this conversion actually emits (#160).
+            # An item id the mod aliases to a vanilla item (blocks filed
+            # its blockstate aliased_blockstate) is written as the vanilla id.
             converted = fn(mod, emitted=recipes.emitted_definitions(result.files), context=context,
-                           deferred=deferred)
+                           deferred=deferred, aliases=result.vanilla_aliases)
         elif fn is loot.convert:
             # A feast's loot table is read per serving count by its station
             # (#177 feasts), so it waits like a station recipe.

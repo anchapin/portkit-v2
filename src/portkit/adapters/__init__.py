@@ -70,7 +70,10 @@ Hooks, and the core seam that asks each one:
   (Quark's ids for blocks vanilla now has, #296). Asked by
   :func:`portkit.converters.blocks.convert`: a blockstate under an aliased
   id that no registration of the mod's names is residue with a reason
-  naming the alias, not a block of the mod's own.
+  naming the alias, not a block of the mod's own. When the alias target is
+  a vanilla block and the code aliases the item id too (``BlockAlias.item``),
+  the mod's recipes naming the old id take the vanilla item instead
+  (:func:`portkit.converters.recipes.convert`, ``aliases``).
 - ``orientations``: ``(SourceMod, {blockstate name: block class}[,
   sites=[, states=]]) -> {blockstate name: Orientation}``, for a mod whose blocks take ``facing``
   and a second orientation state (AE2's ``spin``) from a placement rule of
@@ -187,10 +190,14 @@ class BlockAlias:
     """A registry alias the mod's code adds for one of its own block ids (the
     ``block_aliases`` hook, #296): ``target`` is the id Java resolves the
     mod's id to while no block is registered under it (NeoForge
-    ``BaseMappedRegistry#resolve``), ``source`` where the alias was read."""
+    ``BaseMappedRegistry#resolve``), ``source`` where the alias was read.
+    ``item``: the code aliases the same pair in the item registry as well, so
+    an item id the mod's data names (a recipe ingredient or result) resolves
+    to ``target``'s item in Java too."""
 
     target: str
     source: str
+    item: bool = False
 
 
 @dataclass(frozen=True)

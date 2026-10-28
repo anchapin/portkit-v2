@@ -1497,9 +1497,57 @@ def with_namespaced_type(recipe: dict) -> dict:
 _BARE_PATH = re.compile(r"[a-z0-9_.\-/]+")
 
 
+# Recipe keys whose strings are not item ids: a tag's id, the recipe type, and
+# load conditions (decided as written, before any alias, #183).
+_NOT_ITEM_KEYS = frozenset({"tag", "type", "conditions", "neoforge:conditions", "forge:conditions",
+                            "fabric:load_conditions"})
+
+
+def alias_items(recipe, aliases: dict[str, str]) -> list[str]:
+    """Rewrite, in place, every item id in ``recipe`` that ``aliases`` maps to a
+    vanilla id (#296), and return ``"<old> -> <new>"`` for each id rewritten.
+
+    ``aliases`` holds a mod's item ids whose block and item its code aliases
+    to a vanilla block's (an adapter's ``block_aliases`` hook, filled by the
+    block converter only for a blockstate it filed ``aliased_blockstate``:
+    the vanilla ``Blocks`` table registers the target and no block of the
+    mod's own is registered under the name). Java resolves such an id to the
+    vanilla item when the recipe loads (NeoForge ``BaseMappedRegistry#resolve``),
+    so the recipe makes or takes the vanilla item there; writing the vanilla
+    id keeps that recipe instead of withdrawing it for an item the pack
+    doesn't ship. Only whole string values are compared, never a tag's id
+    (``{"tag": ..}``), the recipe type or a load condition.
+    """
+    done: list[str] = []
+    if not aliases:
+        return done
+
+    def walk(value):
+        if isinstance(value, dict):
+            for k, v in value.items():
+                if k in _NOT_ITEM_KEYS:
+                    continue
+                if isinstance(v, str) and v in aliases:
+                    value[k] = aliases[v]
+                    done.append(f"{v} -> {aliases[v]}")
+                else:
+                    walk(v)
+        elif isinstance(value, list):
+            for i, v in enumerate(value):
+                if isinstance(v, str) and v in aliases:
+                    value[i] = aliases[v]
+                    done.append(f"{v} -> {aliases[v]}")
+                else:
+                    walk(v)
+
+    walk(recipe)
+    return done
+
+
 def convert(mod: SourceMod, emitted: dict | None = None,
             context: LoadContext | None = None,
-            deferred: list | None = None) -> ConversionResult:
+            deferred: list | None = None,
+            aliases: dict[str, str] | None = None) -> ConversionResult:
     """Convert the mod's recipes.
 
     ``emitted`` maps identifier -> (kind, path, body) for the blocks and items the
@@ -1518,6 +1566,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
     instead of being refused: the station converter writes it into its data
     table (#177). A recipe of a shared station type (the Farmer's Delight
     stove's campfire recipes) is appended too, and still converts.
+
+    ``aliases`` (mod item id -> vanilla id, :attr:`ConversionResult.vanilla_aliases`)
+    rewrites the ids a recipe Java loads names, as :func:`alias_items` says,
+    with a note naming each rewrite (#296).
     """
     result = ConversionResult()
     from .stations import station_recipe_types
@@ -1604,6 +1656,12 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 f"mod ({verdict.why})"
             )
             recipe = with_namespaced_type(chosen)
+        rewritten = alias_items(recipe, aliases or {})
+        if rewritten:
+            result.notes.append(
+                f"{rel}: names {', '.join(sorted(set(rewritten)))}: the mod's code aliases the id's block and "
+                "item to the vanilla one, so Java's recipe takes the vanilla item and the converted recipe "
+                "names it (#296)")
 
         java_type = recipe.get("type")
         produced = _result_id(recipe)

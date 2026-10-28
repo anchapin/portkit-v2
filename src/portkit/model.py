@@ -136,6 +136,11 @@ class ConversionResult:
     # drops the broken part's loot only, so the loot converter reads a
     # ``half=lower`` loot condition on it as holding.
     paired_halves: dict[str, str] = field(default_factory=dict)
+    # Mod item id -> the vanilla id the mod's code aliases it to, block and
+    # item both, for a blockstate the block converter filed
+    # aliased_blockstate (#296): Java resolves the id to the vanilla item, so
+    # the recipe converter writes a recipe naming it with the vanilla id.
+    vanilla_aliases: dict[str, str] = field(default_factory=dict)
 
     def claim(self, mod: "SourceMod", path: Path) -> str:
         """Record a source file as looked at and return its relative path."""
@@ -202,6 +207,7 @@ class ConversionResult:
         merged.unshipped_names = {**self.unshipped_names, **other.unshipped_names}
         merged.recipe_results = {**other.recipe_results, **self.recipe_results}
         merged.paired_halves = {**self.paired_halves, **other.paired_halves}
+        merged.vanilla_aliases = {**self.vanilla_aliases, **other.vanilla_aliases}
         return merged
 
     @property
