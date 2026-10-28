@@ -6719,9 +6719,14 @@ def _read_rule(machine: Machine, obj: Obj, r: DirReading) -> None:
             r.rule_why = (f"{obj.cls.replace('/', '.')}: the blockstate draws a vine's five faces, but the class "
                           "isn't a vanilla VineBlock, whose placement is the only vine placement read")
             return
-        if not machine.find_method(obj.cls, "getStateForPlacement", _PLACEMENT_DESC):
-            where = (f"{_VINE.replace('/', '.')}#getStateForPlacement L315-329 (vanilla 1.21.1; 1.20.1 "
-                     "L308-322; inherited)")
+        if machine.find_method(obj.cls, "getStateForPlacement", _PLACEMENT_DESC):
+            # An override may call VineBlock's and then change the faces it
+            # set; only the inherited placement is read for a vine.
+            r.rule_why = (f"{obj.cls.replace('/', '.')}: the class's own getStateForPlacement replaces vanilla "
+                          "VineBlock's, and only VineBlock's is read for a vine")
+            return
+        where = (f"{_VINE.replace('/', '.')}#getStateForPlacement L315-329 (vanilla 1.21.1; 1.20.1 "
+                 "L308-322; inherited)")
     rule = {}
     machine.assume_support, machine.support_assumed = True, False
     machine.vine = r.kind == "vine"
