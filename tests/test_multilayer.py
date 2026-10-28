@@ -191,9 +191,11 @@ def test_composite_merges_visible_children(mod):
 def test_composite_with_translucent_child_or_extended_is_a_reason(mod):
     flat, _files, why = models.resolve(mod, json.loads((mod.assets / "models/block/jar.json").read_text()))
     assert flat == {} and "translucent" in why
+    # A model extending a composite draws it (#296); its textures reach only
+    # the particle (tests/test_composite_extended.py).
     child = {"parent": "examplemod:block/lantern", "textures": {"side": "examplemod:blocks/frame"}}
-    _flat, _files, why = models.resolve(mod, child)
-    assert "extends a composite model" in why
+    flat, _files, why = models.resolve(mod, child)
+    assert why == "" and len(flat["elements"]) == 2
     result = blocks.convert(mod)
     reason = next(u.reason for u in result.unhandled if u.source.endswith("blockstates/jar.json"))
     assert "composite" in reason and "translucent" in reason
