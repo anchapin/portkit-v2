@@ -187,6 +187,11 @@ SKIP_KINDS = {
                                 "source has commented out, a file left from an older version), so Java never "
                                 "loads it; there is no Java block to port, and a Bedrock block definition "
                                 "would add one"),
+    # #296: a blockstate under an id the mod's code aliases to a vanilla block (portkit.converters.blocks).
+    "aliased_blockstate": ("the mod's code aliases the blockstate's block id to a vanilla block (an adapter read "
+                           "the registry alias) and registers no block of its own under it: Java loads the "
+                           "vanilla block for the id (a block the mod once added that vanilla now has), so a "
+                           "Bedrock block definition would be a second copy of the vanilla block"),
     # #352 (pending Alex): a shipped block a block-entity renderer also draws (count 0).
     "renderer_drawn_parts": ("the block shipped as its static blockstate model (Java's render shape is MODEL), "
                              "but a block-entity renderer of the jar also draws its block entity (moving parts "
