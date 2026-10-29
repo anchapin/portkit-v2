@@ -46,6 +46,8 @@ jobs:
           - { name: quark, manifest: fixtures/real/gauntlet.toml }
           # The gauntlet's NeoForge Waystones build, converted by the same adapter as the Fabric one (#296).
           - { name: waystones, manifest: fixtures/real/gauntlet.toml, label: waystones-neoforge }
+          # A horizontal two-block pair on multi_block (#296 two-block: the framing table): setblock with cardinal_direction east places part 1 one block east.
+          - { name: storage_drawers, manifest: fixtures/real/gauntlet.toml }
           # Ores from Forge biome modifiers (#281): each ore feature placed by script, and the nether checked for the ore it generates.
           - { name: tinkers_construct, manifest: fixtures/real/gauntlet.toml, label: tinkers-gauntlet }
           # Fabric ores attached in code (#281 pick 5a), read from the bytecode: a generated world (ore checks only), so the Overworld's ores are counted in fresh chunks as well as the Nether's and the End's.

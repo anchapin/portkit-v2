@@ -449,10 +449,12 @@ def _java_silk_drop(data: dict, block_id: str) -> str | None:
 
 
 def _paired_test(condition, block: str, prop: str) -> bool:
-    """The condition is ``block_state_property`` ``{prop: "lower"}`` on ``block``."""
+    """The condition is ``block_state_property`` ``{prop: "lower"}`` on ``block``;
+    ``prop`` may name its value (``part=right``, a two-block pair, #296)."""
+    name, _, value = prop.partition("=")
     return (isinstance(condition, dict) and condition.get("condition") in _BLOCK_STATE
             and condition.get("block") in (None, block)
-            and condition.get("properties") == {prop: "lower"})
+            and condition.get("properties") == {name: value or "lower"})
 
 
 def fold_paired_half(data: dict, block: str, prop: str) -> dict:
