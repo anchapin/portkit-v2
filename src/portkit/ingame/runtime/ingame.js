@@ -76,7 +76,7 @@ import { world, system, BlockPermutation, ItemStack } from "@minecraft/server";
 import {
   AREA, CONNECTION_STATES, DROP_BATCH, ITEM_Y, PAIRED_PART, Tally, connectionVerdict,
   connectionSlot, containerVerdict, describe, doorVerdict, dropSlot, dropVerdict, line,
-  pairedSlot, pairedVerdict, plateSlot, plateVerdict, slot, trapdoorSlot, trapdoorVerdict, buttonSlot,
+  PAIRED_CARDINAL, pairedSlot, pairedVerdict, plateSlot, plateVerdict, slot, trapdoorSlot, trapdoorVerdict, buttonSlot,
   gateSlot, gateVerdict, OPPOSITE,
   GEN_ORIGIN, GEN_SIZE, ORE_CUBE, generateVerdict, oreSlot, oreVerdict, scanRange,
 } from "./ingame_core.js";
@@ -272,9 +272,13 @@ async function run() {
     return { open: perm.getState(states.open), powered: perm.getState(states.powered) };
   };
   for (let i = 0; i < PAIRED.length; i++) {
-    const { id, expect, door } = PAIRED[i];
+    const { id, expect, door, cardinal } = PAIRED[i];
     const at = pairedSlot(i);
-    const up = { x: at.x, y: at.y + 1, z: at.z };
+    // A horizontal pair is set with cardinal_direction east: its second part
+    // is expected one block east (#296 two-block).
+    const up = cardinal ? { x: at.x + 1, y: at.y, z: at.z } : { x: at.x, y: at.y + 1, z: at.z };
+    const facing = cardinal ? { [PAIRED_CARDINAL]: "east" } : {};
+    const stateArg = cardinal ? ` ["${PAIRED_CARDINAL}"="east"]` : "";
     const seen = { id };
     try {
       dim.getBlock({ x: at.x, y: at.y - 1, z: at.z }).setPermutation(BlockPermutation.resolve("minecraft:stone"));
@@ -286,16 +290,21 @@ async function run() {
       // 2. the setblock command
       await clear(at);
       try {
-        dim.runCommand(`setblock ${at.x} ${at.y} ${at.z} ${id}`);
+        dim.runCommand(`setblock ${at.x} ${at.y} ${at.z} ${id}${stateArg}`);
         await system.waitTicks(2);
         seen.setblock = { lower: read(at), upper: read(up) };
+        if (cardinal) {
+          const set = pairedVerdict(id, seen.setblock.lower, seen.setblock.upper);
+          if (set.ok) tally.record("paired_setblock", id, true);
+          else fail("paired_setblock", id, set.problems.join("; "));
+        }
       } catch (err) {
         seen.setblock = { error: describe(err) };
       }
       // 3. every part set by script: the check
       await clear(at);
-      dim.getBlock(at).setPermutation(BlockPermutation.resolve(id, { [PAIRED_PART]: 0 }));
-      dim.getBlock(up).setPermutation(BlockPermutation.resolve(id, { [PAIRED_PART]: 1 }));
+      dim.getBlock(at).setPermutation(BlockPermutation.resolve(id, { ...facing, [PAIRED_PART]: 0 }));
+      dim.getBlock(up).setPermutation(BlockPermutation.resolve(id, { ...facing, [PAIRED_PART]: 1 }));
       await system.waitTicks(2);
       seen.both = { lower: read(at), upper: read(up) };
       const placed = pairedVerdict(id, seen.both.lower, seen.both.upper);

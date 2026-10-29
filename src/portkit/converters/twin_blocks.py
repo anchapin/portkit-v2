@@ -77,7 +77,7 @@ def twin_variants(blockstate: dict) -> tuple[dict | None, str]:
     if len(values) != 1:
         return None, ""
     (prop, vals), = values.items()
-    if len(vals) != 2 or prop in ("half", "open", "powered", "hinge"):
+    if len(vals) != 2 or prop == "half":
         return None, ""
     return {"prop": prop, "values": tuple(sorted(vals)), "cells": cells}, ""
 
@@ -116,6 +116,9 @@ class TwinReading:
     cls: str | None = None
     # None: the code places no second block (not a pair); "" read; else why not.
     why: str | None = None
+    # Set once setPlacedBy is seen setting a block beside the placed one: only
+    # then is the blockstate claimed (a reason replaces the other readers').
+    pair: bool = False
     prop: str = ""
     placed: str = ""          # the clicked position's value of ``prop``
     other: str = ""           # the second half's value
@@ -147,8 +150,9 @@ def read(classes, names: dict[str, str], run) -> dict[str, TwinReading]:
         try:
             _read_one(machine, obj, r)
         except bc.Unreadable as exc:
-            if r.why is not None:
-                r.why = r.why or str(exc)
+            r.why = str(exc)
+        if r.why and not r.pair:
+            r.why = None
     return out
 
 
@@ -239,7 +243,7 @@ def _read_one(machine, obj, r: TwinReading) -> None:
         if not static and not machine.is_mod(owner) and mname == "playerWillDestroy":
             # Block#playerWillDestroy: particles, piglins, a game event; the
             # state handed back (MC 1.21.1 L337-345).
-            return [args[2]] if len(args) > 2 else [bc.UNKNOWN]
+            return [args[3]] if len(args) > 3 else [bc.UNKNOWN]
         return None
 
     saved = machine.call_hook
@@ -311,6 +315,7 @@ def _read_with(machine, obj, r, level, world, asked, where_placer) -> None:
         if len(steps) != 1:
             r.why = f"{where_placer} sets a block that isn't beside the placed one"
             return
+        r.pair = True
         if not isinstance(twin, bc.State) or set(dict(twin.values)) != set(dict(state.values)) \
                 or any(twin.get(k) != state.get(k) for k, _v in state.values if k != r.prop):
             r.why = f"{where_placer} sets a state that differs in more than {r.prop}"

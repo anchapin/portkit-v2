@@ -29,7 +29,10 @@ converter wrote, so the checks test the pack as shipped.
   @minecraft/server 2.2.0, MicrosoftDocs/minecraft-creator ScriptAPI
   changelog) what the block drops for that tool.
 - ``paired``: blocks on Bedrock's ``minecraft:multi_block`` trait (#296:
-  doors and two-tall plants). Each is ``{"id", "parts", "expect", "door"}``;
+  doors and two-tall plants; two blocks side by side). Each is
+  ``{"id", "parts", "expect", "door", "cardinal"}``; ``cardinal`` marks a
+  horizontal pair, placed with ``cardinal_direction`` east, whose second
+  part is expected one block east (and the ``setblock`` result is a check);
   the check places the block three ways (the lower part alone, the
   ``setblock`` command, every part set by script), reports what each leaves
   above it, breaks the upper part and counts the drop against ``expect``
@@ -292,8 +295,17 @@ DOOR_COMPONENT = ":portkit_door"
 def _paired_check(behavior_pack: Path, ident: str, block: dict) -> dict | None:
     desc = block.get("description") or {}
     trait = (desc.get("traits") or {}).get("minecraft:multi_block")
-    if not isinstance(trait, dict) or trait.get("direction", "up") != "up":
+    if not isinstance(trait, dict):
         return None
+    # A horizontal pair (#296 two-block, twin_blocks) is checked placed facing
+    # east: its parts go the way cardinal_direction names.
+    cardinal = False
+    if trait.get("direction", "up") != "up":
+        placement = (desc.get("traits") or {}).get("minecraft:placement_direction") or {}
+        if trait.get("direction") not in ("north", "south", "east", "west") \
+                or "minecraft:cardinal_direction" not in (placement.get("enabled_states") or []):
+            return None
+        cardinal = True
     parts = trait.get("parts")
     if not isinstance(parts, int) or parts < 2:
         return None
@@ -313,7 +325,7 @@ def _paired_check(behavior_pack: Path, ident: str, block: dict) -> dict | None:
     else:
         drop = _drop_check(behavior_pack, ident, block)
         expect = drop["expect"] if drop else None
-    return {"id": ident, "parts": parts, "expect": expect, "door": door}
+    return {"id": ident, "parts": parts, "expect": expect, "door": door, "cardinal": cardinal}
 
 
 TRAPDOOR_COMPONENT = ":portkit_trapdoor"

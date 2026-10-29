@@ -110,6 +110,7 @@ export function dropVerdict(expect, got) {
 // a new layer four up every 64.
 export const PAIRED_Y = 40;
 export const PAIRED_PART = "minecraft:multi_block_part";
+export const PAIRED_CARDINAL = "minecraft:cardinal_direction";
 
 /** Where the i-th paired block's lower part goes. */
 export function pairedSlot(i) {
