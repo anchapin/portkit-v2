@@ -30,9 +30,9 @@ converter wrote, so the checks test the pack as shipped.
   changelog) what the block drops for that tool.
 - ``paired``: blocks on Bedrock's ``minecraft:multi_block`` trait (#296:
   doors and two-tall plants; two blocks side by side). Each is
-  ``{"id", "parts", "expect", "door", "cardinal"}``; ``cardinal`` marks a
+  ``{"id", "parts", "expect", "door"}`` (and ``"cardinal": true``, marking a
   horizontal pair, placed with ``cardinal_direction`` east, whose second
-  part is expected one block east (and the ``setblock`` result is a check);
+  part is expected one block east, and the ``setblock`` result is a check);
   the check places the block three ways (the lower part alone, the
   ``setblock`` command, every part set by script), reports what each leaves
   above it, breaks the upper part and counts the drop against ``expect``
@@ -325,7 +325,10 @@ def _paired_check(behavior_pack: Path, ident: str, block: dict) -> dict | None:
     else:
         drop = _drop_check(behavior_pack, ident, block)
         expect = drop["expect"] if drop else None
-    return {"id": ident, "parts": parts, "expect": expect, "door": door, "cardinal": cardinal}
+    check = {"id": ident, "parts": parts, "expect": expect, "door": door}
+    if cardinal:
+        check["cardinal"] = True
+    return check
 
 
 TRAPDOOR_COMPONENT = ":portkit_trapdoor"
