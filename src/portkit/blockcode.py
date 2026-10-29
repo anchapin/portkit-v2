@@ -447,6 +447,11 @@ class Prop:
 @dataclass(frozen=True)
 class State:
     values: tuple = ()  # sorted (property name, value) pairs
+    # The block object whose state this is, when it was taken from that
+    # block's own defaultBlockState() (#296). Not part of what the state is:
+    # it is left out of equality and hashing, and only answers what Java's
+    # BlockStateBase holds per block rather than per state (canOcclude).
+    block: object = field(default=None, compare=False, hash=False, repr=False)
 
     def get(self, name):
         return dict(self.values).get(name, UNKNOWN)
@@ -454,7 +459,7 @@ class State:
     def set(self, name, value) -> "State":
         d = dict(self.values)
         d[name] = value
-        return State(tuple(sorted(d.items(), key=lambda kv: kv[0])))
+        return State(tuple(sorted(d.items(), key=lambda kv: kv[0])), self.block)
 
 
 @dataclass(frozen=True)
@@ -740,6 +745,14 @@ class Props:
     # blocks are built with): True once called, False if never called,
     # UNKNOWN when a call can't be told apart from it (#296).
     air: object = False
+    # BlockBehaviour$Properties.canOcclude (MC 1.21.1 client jar dtb$d.n +
+    # client.txt): true unless noOcclusion (dtb$d#c, L585-586) or
+    # noCollission (dtb$d#b, L579-581, which clears hasCollision and
+    # canOcclude) was called; ofLegacyCopy / ofFullCopy copy it (dtb$d#b(dtb)
+    # bytecode 95-98). Every state of the block takes it when the state is
+    # built (BlockStateBase#<init>, dtb$a bytecode 128-134) and
+    # BlockStateBase#canOcclude returns it (L1046). True, False or UNKNOWN.
+    can_occlude: object = True
 
 
 @dataclass(frozen=True)
@@ -966,7 +979,8 @@ def _format(rest: list):
 def _snapshot(props):
     if not isinstance(props, Props):
         return props
-    return Props(props.has_collision, props.light, props.epoch, origin=props.origin or props, air=props.air)
+    return Props(props.has_collision, props.light, props.epoch, origin=props.origin or props, air=props.air,
+                 can_occlude=props.can_occlude)
 
 
 def _shared_changed(props) -> bool:
@@ -3324,6 +3338,15 @@ class Machine:
                 return [recv.get(prop.name) if isinstance(prop, Prop) else UNKNOWN]
             if name == "hasProperty" and len(rest) == 1 and isinstance(rest[0], Prop):
                 return [int(rest[0].name in dict(recv.values))]
+            if name == "canOcclude" and not rest and isinstance(recv.block, Obj):
+                # BlockStateBase#canOcclude: the block's Properties'
+                # canOcclude (see Props.can_occlude), when those are the
+                # block's own as it was built and not changed elsewhere.
+                props = recv.block.fields.get("__props")
+                if isinstance(props, Props) and isinstance(props.can_occlude, bool) \
+                        and not _shared_changed(props):
+                    return [int(props.can_occlude)]
+                return [UNKNOWN]
             if name == "getBlock" and "__block" in dict(recv.values):
                 return [dict(recv.values)["__block"]]
         # Fluids (see read_water): Fluids.WATER.getSource(false) is a still
@@ -3339,7 +3362,10 @@ class Machine:
             if name == "getFluidState" and desc == _FLUID_STATE_DESC and base in _PLAIN_VANILLA:
                 return [NO_FLUID]
             if name == "defaultBlockState":
-                return [recv.fields.get("__default", self._unregistered_default(recv))]
+                state = recv.fields.get("__default", self._unregistered_default(recv))
+                if isinstance(state, State):
+                    state = State(state.values, recv)
+                return [state]
             if name == "registerDefaultState" and rest:
                 if isinstance(rest[0], State):
                     recv.fields["__default"] = rest[0]
@@ -3675,7 +3701,7 @@ class Machine:
             # the same once an SRG / intermediary jar is remapped (#235).
             if name in ("ofFullCopy", "ofLegacyCopy", "copy") and rest:
                 src = rest[0]
-                collision = UNKNOWN
+                collision = occlude = UNKNOWN
                 if isinstance(src, Obj) and isinstance(src.fields.get("__props"), Props):
                     light = src.fields["__props"].light  # a mod block's own Properties
                     # It copies hasCollision too (1.20.1 Properties#copy,
@@ -3683,6 +3709,7 @@ class Machine:
                     # is shared and changed elsewhere (#296).
                     if not _shared_changed(src.fields["__props"]):
                         collision = src.fields["__props"].has_collision
+                        occlude = src.fields["__props"].can_occlude
                 elif isinstance(src, Const):
                     light = CopiedLight(f"{src.owner.rsplit('/', 1)[-1]}.{src.name}")
                 else:
@@ -3690,13 +3717,15 @@ class Machine:
                 # Whether a vanilla block (or one it can't read) collides is
                 # that block's, not read here. Whether a copy is air isn't
                 # read (#296), so a copy is never taken for an air block.
-                return [Props(collision, light, self.epoch, air=UNKNOWN)]
-            return [Props(UNKNOWN, UNKNOWN, self.epoch, air=UNKNOWN)]
+                return [Props(collision, light, self.epoch, air=UNKNOWN, can_occlude=occlude)]
+            return [Props(UNKNOWN, UNKNOWN, self.epoch, air=UNKNOWN, can_occlude=UNKNOWN)]
         if not isinstance(recv, Props):
             return [UNKNOWN]
-        air = recv.air
+        air, occlude = recv.air, recv.can_occlude
         if name in _NO_COLLISION:
-            collision, light = False, recv.light
+            collision, light, occlude = False, recv.light, False
+        elif name == "noOcclusion" and not rest:
+            collision, light, occlude = recv.has_collision, recv.light, False
         elif name == "lightLevel" and len(rest) == 1:
             fn = rest[0]
             ok = isinstance(fn, Lam) or (isinstance(fn, Obj) and self.is_mod(fn.cls))
@@ -3707,14 +3736,14 @@ class Machine:
         elif _OBFUSCATED.match(name):
             # A Forge SRG / Fabric intermediary name: which setting it is
             # can't be told, so neither collision, light nor air is known.
-            collision, light, air = UNKNOWN, UNKNOWN, UNKNOWN
+            collision, light, air, occlude = UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN
         else:
             return [recv]
         if self._forked:
-            return [Props(collision, light, self.epoch, air=air)]
+            return [Props(collision, light, self.epoch, air=air, can_occlude=occlude)]
         if recv.epoch != self.epoch:
             recv.shared_changed = True
-        recv.has_collision, recv.light, recv.air = collision, light, air
+        recv.has_collision, recv.light, recv.air, recv.can_occlude = collision, light, air, occlude
         return [recv]
 
     def _player(self, name: str, recv, rest: list):
