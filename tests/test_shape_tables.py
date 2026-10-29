@@ -5,7 +5,7 @@ Immersive Engineering keeps its boxes in caches keyed by DataFixerUpper
 ``Pair``s (``CachedShapesWithTransform``: a ``ConcurrentHashMap`` filled by
 ``computeIfAbsent`` from a list of ``AABB``s, each ``Shapes.create``-d and
 ``Shapes.joinUnoptimized``-ed), in Guava ``ImmutableMap.Builder`` tables
-(``HatchBlock``) and behind a ``Direction.Axis`` switch (``WindowBlock``).
+(``HatchBlock``).
 Its base constructor reads ``defaultBlockState().canOcclude()``. Each JVM
 shape is pinned here on its own, read exactly or left unknown.
 """
@@ -24,7 +24,6 @@ AABB = "net/minecraft/world/phys/AABB"
 SHAPES = "net/minecraft/world/phys/shapes/Shapes"
 VS = "Lnet/minecraft/world/phys/shapes/VoxelShape;"
 PROPS = "net/minecraft/world/level/block/state/BlockBehaviour$Properties"
-AXIS = "net/minecraft/core/Direction$Axis"
 IMAP = "com/google/common/collect/ImmutableMap"
 BUILDER = "com/google/common/collect/ImmutableMap$Builder"
 PUT = "(Ljava/lang/Object;Ljava/lang/Object;)Lcom/google/common/collect/ImmutableMap$Builder;"
@@ -142,15 +141,6 @@ def test_immutable_map_builder_touched_otherwise_builds_unknown():
     [b] = _static(m, IMAP, "builder", f"()L{BUILDER};", [])
     _call(m, BUILDER, "putAll", f"(Ljava/util/Map;)L{BUILDER};", [b, UNKNOWN])
     assert _call(m, BUILDER, "build", f"()L{IMAP};", [b]) == [UNKNOWN]
-
-
-# -- Direction.Axis ---------------------------------------------------------------
-
-def test_axis_values_and_ordinal():
-    m = _machine()
-    [arr] = _static(m, AXIS, "values", f"()[L{AXIS};", [])
-    assert isinstance(arr, Arr) and arr.items == [Const(AXIS, n) for n in ("X", "Y", "Z")]
-    assert [_call(m, AXIS, "ordinal", "()I", [Const(AXIS, n)]) for n in ("X", "Y", "Z")] == [[0], [1], [2]]
 
 
 # -- Properties#canOcclude --------------------------------------------------------

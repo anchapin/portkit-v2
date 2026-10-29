@@ -3353,12 +3353,6 @@ class Machine:
             return self._player(name, recv, rest)
         if owner == _DIRECTION or isinstance(recv, (Dir, PlayerDir, LookDir)):
             return self._direction(name, recv, rest, static)
-        if owner == _DIRECTION + "$Axis" and static and name == "values" and not rest:
-            # Direction$Axis: X, Y, Z in declaration order (MC 1.21.1).
-            return [Arr([Const(_DIRECTION + "$Axis", n) for n in ("X", "Y", "Z")])]
-        if isinstance(recv, Const) and recv.owner == _DIRECTION + "$Axis" and recv.name in ("X", "Y", "Z") \
-                and name == "ordinal" and not rest:
-            return [("X", "Y", "Z").index(recv.name)]
         if isinstance(recv, Const) and recv.owner == _DIRECTION + "$Axis" and recv.name in ("X", "Y", "Z") \
                 and name in ("isHorizontal", "isVertical") and not rest:
             # Direction.Axis#isHorizontal / #isVertical (MC 1.21.1): X and Z
