@@ -162,6 +162,17 @@ def _vec3(x, y, z) -> "Obj":
     return v
 
 
+_AABB = "net/minecraft/world/phys/AABB"
+_AABB_FIELDS = ("minX", "minY", "minZ", "maxX", "maxY", "maxZ")
+_VOXEL_SHAPE_T = "Lnet/minecraft/world/phys/shapes/VoxelShape;"
+
+
+def _is_aabb(v) -> bool:
+    """An AABB built here with its six-number constructor (see _vec_math)."""
+    return isinstance(v, Obj) and v.cls == _AABB and all(
+        isinstance(v.fields.get(k), float) for k in _AABB_FIELDS)
+
+
 def _is_vec3(v) -> bool:
     return isinstance(v, Obj) and v.cls == _VEC3 and all(
         isinstance(v.fields.get(k), float) for k in ("x", "y", "z"))
@@ -447,6 +458,11 @@ class Prop:
 @dataclass(frozen=True)
 class State:
     values: tuple = ()  # sorted (property name, value) pairs
+    # The block object whose state this is, when it was taken from that
+    # block's own defaultBlockState() (#296). Not part of what the state is:
+    # it is left out of equality and hashing, and only answers what Java's
+    # BlockStateBase holds per block rather than per state (canOcclude).
+    block: object = field(default=None, compare=False, hash=False, repr=False)
 
     def get(self, name):
         return dict(self.values).get(name, UNKNOWN)
@@ -454,7 +470,7 @@ class State:
     def set(self, name, value) -> "State":
         d = dict(self.values)
         d[name] = value
-        return State(tuple(sorted(d.items(), key=lambda kv: kv[0])))
+        return State(tuple(sorted(d.items(), key=lambda kv: kv[0])), self.block)
 
 
 @dataclass(frozen=True)
@@ -599,6 +615,18 @@ class Builder:
 
 
 @dataclass(eq=False)
+class MapBuilder:
+    """A Guava ``ImmutableMap.Builder`` made by ``ImmutableMap.builder()``
+    (#296): the pairs put so far in order, or None once something the
+    machine can't follow may have touched it (then build() is unknown)."""
+
+    pairs: list | None
+
+    def __post_init__(self):
+        self._serial = _next_serial()
+
+
+@dataclass(eq=False)
 class ListV:
     """A mutable ``java.util.ArrayList`` / ``LinkedList`` (#280 pick 2):
     its elements in order, how often it was structurally changed
@@ -696,6 +724,21 @@ class PairV:
 
 
 @dataclass(frozen=True)
+class DfuPair:
+    """A DataFixerUpper ``com.mojang.datafixers.util.Pair`` (#296, the pair
+    Minecraft's own code keys caches with): ``Pair.of(first, second)``
+    returns ``new Pair<>(first, second)``, ``getFirst`` / ``getSecond``
+    return them, and ``equals`` holds only for another DFU Pair whose two
+    elements are ``Objects.equals`` to these (DataFixerUpper 8.0.16,
+    shipped with Minecraft 1.21.1: Pair.java L18-20, L23-29, L52-64; it
+    implements no ``Map.Entry``, so it never equals a commons-lang3 pair or
+    a map entry, which is why it isn't a :class:`PairV`)."""
+
+    first: object
+    second: object
+
+
+@dataclass(frozen=True)
 class Opt:
     value: object
 
@@ -740,6 +783,14 @@ class Props:
     # blocks are built with): True once called, False if never called,
     # UNKNOWN when a call can't be told apart from it (#296).
     air: object = False
+    # BlockBehaviour$Properties.canOcclude (MC 1.21.1 client jar dtb$d.n +
+    # client.txt): true unless noOcclusion (dtb$d#c, L585-586) or
+    # noCollission (dtb$d#b, L579-581, which clears hasCollision and
+    # canOcclude) was called; ofLegacyCopy / ofFullCopy copy it (dtb$d#b(dtb)
+    # bytecode 95-98). Every state of the block takes it when the state is
+    # built (BlockStateBase#<init>, dtb$a bytecode 128-134) and
+    # BlockStateBase#canOcclude returns it (L1046). True, False or UNKNOWN.
+    can_occlude: object = True
 
 
 @dataclass(frozen=True)
@@ -966,7 +1017,8 @@ def _format(rest: list):
 def _snapshot(props):
     if not isinstance(props, Props):
         return props
-    return Props(props.has_collision, props.light, props.epoch, origin=props.origin or props, air=props.air)
+    return Props(props.has_collision, props.light, props.epoch, origin=props.origin or props, air=props.air,
+                 can_occlude=props.can_occlude)
 
 
 def _shared_changed(props) -> bool:
@@ -2026,7 +2078,7 @@ class Machine:
         seen: set = set()
         while todo:
             v = todo.pop()
-            if id(v) in seen or not isinstance(v, (Obj, Arr, MapV, Builder, Props, Coll, PairV, Opt, Strm,
+            if id(v) in seen or not isinstance(v, (Obj, Arr, MapV, Builder, MapBuilder, Props, Coll, PairV, DfuPair, Opt, Strm,
                                                    ListV, IterV, RKey, MapView)):
                 continue
             seen.add(id(v))
@@ -2062,11 +2114,17 @@ class Machine:
             elif isinstance(v, RKey):
                 todo.append(v.location)
             elif isinstance(v, Props):
-                v.has_collision, v.light = UNKNOWN, UNKNOWN
+                v.has_collision, v.light, v.can_occlude = UNKNOWN, UNKNOWN, UNKNOWN
             elif isinstance(v, (Coll, Strm)):
                 todo.extend(v.items)
             elif isinstance(v, PairV):
                 todo += [v.left, v.right]
+            elif isinstance(v, DfuPair):
+                todo += [v.first, v.second]
+            elif isinstance(v, MapBuilder):
+                for pair in v.pairs or ():
+                    todo.extend(pair)
+                v.pairs = None
             elif isinstance(v, Opt):
                 todo.append(v.value)
 
@@ -2777,9 +2835,10 @@ class Machine:
 
     def _new(self, cls: str):
         if cls in ("java/util/EnumMap", "java/util/HashMap", "java/util/LinkedHashMap",
-                   "java/util/TreeMap"):
+                   "java/util/TreeMap", "java/util/concurrent/ConcurrentHashMap"):
             return MapV({}, kind="linked" if cls == "java/util/LinkedHashMap" else
-                        "enum" if cls == "java/util/EnumMap" else None, run=self._top)
+                        "enum" if cls == "java/util/EnumMap" else
+                        "concurrent" if cls == "java/util/concurrent/ConcurrentHashMap" else None, run=self._top)
         if cls == "java/lang/StringBuilder":
             return Builder([])
         if cls in _MUTABLE_LISTS:
@@ -3058,6 +3117,15 @@ class Machine:
         _MUTABLE_OBJECT, _PLANE_HORIZONTAL; #296: a library's shape rotation,
         Create's catnip VoxelShaper#rotatedCopy, is run on them)."""
         nums = all(isinstance(a, (int, float)) and not isinstance(a, bool) for a in rest)
+        if owner == _AABB and name == "<init>" and desc == "(DDDDDD)V" and isinstance(recv, Obj) \
+                and recv.cls == _AABB and nums:
+            # AABB(x1, y1, z1, x2, y2, z2) (MC 1.21.1 client jar ewx#<init>
+            # bytecode 0-66 + client.txt): minX = Math.min(x1, x2), ...,
+            # maxZ = Math.max(z1, z2), the final fields minX..maxZ.
+            a = [float(v) for v in rest]
+            recv.fields.update({"minX": min(a[0], a[3]), "minY": min(a[1], a[4]), "minZ": min(a[2], a[5]),
+                                "maxX": max(a[0], a[3]), "maxY": max(a[1], a[4]), "maxZ": max(a[2], a[5])})
+            return [None]
         if owner == _VEC3 and name == "<init>" and desc == "(DDD)V" and isinstance(recv, Obj) and nums:
             recv.fields.update({"x": float(rest[0]), "y": float(rest[1]), "z": float(rest[2])})
             return [None]
@@ -3241,7 +3309,18 @@ class Machine:
                 return [Shape(())]
             if name == "or":
                 return [_union(rest)]
-            if name == "join" and len(rest) == 3:
+            if name == "create" and desc == f"(L{_AABB};){_VOXEL_SHAPE_T}" and len(rest) == 1:
+                # Shapes#create(AABB) (L94) is create(minX, .., maxZ) (L54-90):
+                # empty when an extent is under 1.0E-7, else the box.
+                bounds = [rest[0].fields.get(k) for k in _AABB_FIELDS] if _is_aabb(rest[0]) else None
+                if bounds is None:
+                    return [UNKNOWN]
+                if any(bounds[k + 3] - bounds[k] < 1.0e-7 for k in range(3)):
+                    return [Shape(())]
+                return [_box(bounds, 16.0)]
+            if name in ("join", "joinUnoptimized") and len(rest) == 3:
+                # joinUnoptimized (L132-156) is join without the final
+                # optimize(), which changes no box the shape covers.
                 op = rest[2]
                 if isinstance(op, Const) and op.name == "OR":
                     return [_union(rest[:2])]
@@ -3324,6 +3403,15 @@ class Machine:
                 return [recv.get(prop.name) if isinstance(prop, Prop) else UNKNOWN]
             if name == "hasProperty" and len(rest) == 1 and isinstance(rest[0], Prop):
                 return [int(rest[0].name in dict(recv.values))]
+            if name == "canOcclude" and not rest and isinstance(recv.block, Obj):
+                # BlockStateBase#canOcclude: the block's Properties'
+                # canOcclude (see Props.can_occlude), when those are the
+                # block's own as it was built and not changed elsewhere.
+                props = recv.block.fields.get("__props")
+                if isinstance(props, Props) and isinstance(props.can_occlude, bool) \
+                        and not _shared_changed(props):
+                    return [int(props.can_occlude)]
+                return [UNKNOWN]
             if name == "getBlock" and "__block" in dict(recv.values):
                 return [dict(recv.values)["__block"]]
         # Fluids (see read_water): Fluids.WATER.getSource(false) is a still
@@ -3339,7 +3427,10 @@ class Machine:
             if name == "getFluidState" and desc == _FLUID_STATE_DESC and base in _PLAIN_VANILLA:
                 return [NO_FLUID]
             if name == "defaultBlockState":
-                return [recv.fields.get("__default", self._unregistered_default(recv))]
+                state = recv.fields.get("__default", self._unregistered_default(recv))
+                if isinstance(state, State):
+                    state = State(state.values, recv)
+                return [state]
             if name == "registerDefaultState" and rest:
                 if isinstance(rest[0], State):
                     recv.fields["__default"] = rest[0]
@@ -3445,6 +3536,29 @@ class Machine:
             if rest[0] is None or rest[1] is None:
                 return []
             return [PairV(rest[0], rest[1])]
+        if owner == "com/google/common/collect/ImmutableMap" and static and name == "builder" and not rest:
+            # ImmutableMap.builder() (Guava 32.1.2, shipped with MC 1.21.1):
+            # a new empty Builder.
+            return [MapBuilder([])]
+        if isinstance(recv, MapBuilder) and not static:
+            # Builder#put(k, v) adds the pair in order and returns the
+            # builder (a null key or value throws NullPointerException);
+            # build() is buildOrThrow(): ImmutableMap.of's map of the pairs
+            # (a duplicate key throws IllegalArgumentException, see
+            # _fixed_map). A put on a way of an undecided branch, or any
+            # other call, leaves what it builds unknown.
+            if name == "put" and len(rest) == 2 and desc.startswith("(Ljava/lang/Object;Ljava/lang/Object;)"):
+                if rest[0] is None or rest[1] is None:
+                    return []
+                if self._forked or recv.pairs is None:
+                    recv.pairs = None
+                else:
+                    recv.pairs.append((rest[0], rest[1]))
+                return [recv]
+            if name in ("build", "buildOrThrow") and not rest:
+                return [UNKNOWN] if recv.pairs is None else self._fixed_map(list(recv.pairs))
+            recv.pairs = None
+            return [UNKNOWN] if _arg_count(desc)[1] else [None]
         if owner in ("com/google/common/collect/ImmutableMap", "java/util/Map") and static \
                 and name in ("of", "ofEntries"):
             if name == "of" and len(rest) % 2 == 0:
@@ -3675,7 +3789,7 @@ class Machine:
             # the same once an SRG / intermediary jar is remapped (#235).
             if name in ("ofFullCopy", "ofLegacyCopy", "copy") and rest:
                 src = rest[0]
-                collision = UNKNOWN
+                collision = occlude = UNKNOWN
                 if isinstance(src, Obj) and isinstance(src.fields.get("__props"), Props):
                     light = src.fields["__props"].light  # a mod block's own Properties
                     # It copies hasCollision too (1.20.1 Properties#copy,
@@ -3683,6 +3797,7 @@ class Machine:
                     # is shared and changed elsewhere (#296).
                     if not _shared_changed(src.fields["__props"]):
                         collision = src.fields["__props"].has_collision
+                        occlude = src.fields["__props"].can_occlude
                 elif isinstance(src, Const):
                     light = CopiedLight(f"{src.owner.rsplit('/', 1)[-1]}.{src.name}")
                 else:
@@ -3690,13 +3805,15 @@ class Machine:
                 # Whether a vanilla block (or one it can't read) collides is
                 # that block's, not read here. Whether a copy is air isn't
                 # read (#296), so a copy is never taken for an air block.
-                return [Props(collision, light, self.epoch, air=UNKNOWN)]
-            return [Props(UNKNOWN, UNKNOWN, self.epoch, air=UNKNOWN)]
+                return [Props(collision, light, self.epoch, air=UNKNOWN, can_occlude=occlude)]
+            return [Props(UNKNOWN, UNKNOWN, self.epoch, air=UNKNOWN, can_occlude=UNKNOWN)]
         if not isinstance(recv, Props):
             return [UNKNOWN]
-        air = recv.air
+        air, occlude = recv.air, recv.can_occlude
         if name in _NO_COLLISION:
-            collision, light = False, recv.light
+            collision, light, occlude = False, recv.light, False
+        elif name == "noOcclusion" and not rest:
+            collision, light, occlude = recv.has_collision, recv.light, False
         elif name == "lightLevel" and len(rest) == 1:
             fn = rest[0]
             ok = isinstance(fn, Lam) or (isinstance(fn, Obj) and self.is_mod(fn.cls))
@@ -3707,14 +3824,14 @@ class Machine:
         elif _OBFUSCATED.match(name):
             # A Forge SRG / Fabric intermediary name: which setting it is
             # can't be told, so neither collision, light nor air is known.
-            collision, light, air = UNKNOWN, UNKNOWN, UNKNOWN
+            collision, light, air, occlude = UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN
         else:
             return [recv]
         if self._forked:
-            return [Props(collision, light, self.epoch, air=air)]
+            return [Props(collision, light, self.epoch, air=air, can_occlude=occlude)]
         if recv.epoch != self.epoch:
             recv.shared_changed = True
-        recv.has_collision, recv.light, recv.air = collision, light, air
+        recv.has_collision, recv.light, recv.air, recv.can_occlude = collision, light, air, occlude
         return [recv]
 
     def _player(self, name: str, recv, rest: list):
@@ -3823,6 +3940,14 @@ class Machine:
             return [Coll(tuple(items))]
         if static and name == "of" and owner in _PAIR_OF and desc == _PAIR_OF_DESC.get(owner) and len(rest) == 2:
             return [PairV(rest[0], rest[1])]
+        if static and owner == _DFU_PAIR and name == "of" and desc == _DFU_PAIR_OF_DESC and len(rest) == 2:
+            return [DfuPair(rest[0], rest[1])]
+        if isinstance(recv, DfuPair) and not static and not rest and owner == _DFU_PAIR:
+            if name == "getFirst":
+                return [recv.first]
+            if name == "getSecond":
+                return [recv.second]
+            return [UNKNOWN] if _arg_count(desc)[1] else [None]
         if isinstance(recv, PairV) and not static and not rest:
             if name in ("getLeft", "getKey"):
                 return [recv.left]
@@ -3976,6 +4101,12 @@ class Machine:
             return [UNKNOWN] if returns else [None]
         if recv.kind == "fixed" and name in _MAP_CHANGES:
             return []  # UnsupportedOperationException (ImmutableCollections)
+        if recv.kind == "concurrent" and (None in rest or name not in _CONCURRENT_MAP_CALLS):
+            # ConcurrentHashMap (Java SE 21) throws NullPointerException for
+            # a null key or value, and keeps its own iteration order: only
+            # the calls below, without a null, read as a HashMap's do.
+            recv.items, recv.havoc, recv.exact = {}, True, False
+            return [UNKNOWN] if returns else [None]
         if name in ("get", "getOrDefault", "containsKey") and rest:
             key = rest[0]
             if key is UNKNOWN or not _hashable(key):
@@ -4216,8 +4347,11 @@ class Machine:
         so Object#equals (identity) decides."""
         if key is UNKNOWN or not _hashable(key):
             return False
-        if isinstance(key, (ListV, IterV, MapV, Arr, Builder, Props, Part)):
+        if isinstance(key, (ListV, IterV, MapV, Arr, Builder, MapBuilder, Props, Part)):
             return False
+        if isinstance(key, DfuPair):
+            # DFU Pair#equals compares both elements with Objects.equals.
+            return all(e is None or self._key_ok(e) for e in (key.first, key.second))
         if isinstance(key, Obj):
             chain = self.chain(key.cls)
             if chain[-1] not in ("java/lang/Object", "java/lang/Enum"):
@@ -4565,6 +4699,13 @@ _NOKEY = object()  # a map key whose equality isn't known (Machine._map_key)
 # UnsupportedOperationException for each (ImmutableCollections, Java SE 21).
 _MAP_CHANGES = frozenset({"put", "putAll", "putIfAbsent", "remove", "clear", "compute", "computeIfAbsent",
                           "computeIfPresent", "merge", "replace", "replaceAll"})
+# The calls on a ConcurrentHashMap that, given no null, do what HashMap's do
+# (java.util.concurrent.ConcurrentHashMap, Java SE 21: get/containsKey,
+# put/putIfAbsent, and computeIfAbsent, which keeps the function's value
+# unless it is null and otherwise returns the value held); iteration order
+# is its own, so nothing iterates it here.
+_CONCURRENT_MAP_CALLS = frozenset({"get", "containsKey", "put", "putIfAbsent", "computeIfAbsent",
+                                   "isEmpty", "size"})
 # Map methods that change nothing (java.util.Map, Java SE 21).
 _MAP_READS = frozenset({"containsValue", "equals", "hashCode", "toString", "getClass", "forEach"})
 _JAVA_MAPS = frozenset({"java/util/Map", "java/util/HashMap", "java/util/LinkedHashMap", "java/util/TreeMap",
@@ -4573,6 +4714,8 @@ _JAVA_MAPS = frozenset({"java/util/Map", "java/util/HashMap", "java/util/LinkedH
                         "java/util/concurrent/ConcurrentHashMap", "java/util/concurrent/ConcurrentMap"})
 # How many levels of callers of a name-building method _piece_methods runs.
 _CALLER_LEVELS = 4
+_DFU_PAIR = "com/mojang/datafixers/util/Pair"
+_DFU_PAIR_OF_DESC = "(Ljava/lang/Object;Ljava/lang/Object;)Lcom/mojang/datafixers/util/Pair;"
 _PAIR_OF = ("org/apache/commons/lang3/tuple/Pair", "org/apache/commons/lang3/tuple/ImmutablePair")
 _PAIR_OF_DESC = {
     "org/apache/commons/lang3/tuple/Pair": "(Ljava/lang/Object;Ljava/lang/Object;)Lorg/apache/commons/lang3/tuple/Pair;",
