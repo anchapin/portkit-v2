@@ -33,7 +33,8 @@ from portkit import png as png_reader
 
 from .. import blockcode, rendershape
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import buttons, doors, fence_gates, held_states, models, multilayer, objmodel, plates, trapdoors, variations
+from . import buttons, doors, fence_gates, held_states, models, multilayer, objmodel, plates, trapdoors, twin_blocks, \
+    variations
 
 _MENU_CATEGORY = "construction"
 
@@ -1986,6 +1987,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(trapdoors.notes([r for r in paired_records if r["kind"] == "trapdoor"]))
     result.notes.extend(plates.notes([r for r in paired_records if r["kind"] == "plate"]))
     result.notes.extend(fence_gates.notes([r for r in paired_records if r["kind"] == "gate"]))
+    result.notes.extend(r["note"] for r in paired_records if r["kind"] == "twin")
     result.notes.extend(buttons.notes([r for r in directional_bool if r.get("button")]))
     result.notes.extend(later)
     result.notes.extend(containers.pop("", []))
@@ -4393,8 +4395,13 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
         pressed, reason = plates.plate_variants(blockstate)
         if pressed is not None and plates.is_plate_shaped(mod, pressed):
             specs[stem] = ("plate", pressed)
+            continue
         elif reason:
             why[stem] = reason
+            continue
+        twin, _reason = twin_blocks.twin_variants(blockstate)
+        if twin is not None:
+            specs[stem] = ("twin", twin)
     if not specs:
         return {}, {}, why
     classes = getattr(mod, "classes", None)
@@ -4407,12 +4414,25 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
         names = sorted(n for n, s in specs.items() if s[0] == kind)
         if names:
             readings.update(doors.read_code(classes, names, kind, run=run))
+    twins = {n: s[1]["prop"] for n, s in specs.items() if s[0] == "twin"}
+    if twins:
+        for stem, r in twin_blocks.read(classes, twins, run).items():
+            if r.why is None:
+                # Not a pair by its code: left to the other readers.
+                del specs[stem]
+            elif r.why:
+                why[stem] = f"two-block: {r.why} (#296)"
+                del specs[stem]
+            else:
+                readings[stem] = r
     tags = {"door": "wooden_doors", "trapdoor": "wooden_trapdoors", "plate": "wooden_pressure_plates",
             "gate": "fence_gates"}
     wooden = {kind: doors.wooden_doors(mod, tag) for kind, tag in tags.items()}
     for stem in list(specs):
-        r = readings[stem]
         kind = specs[stem][0]
+        if kind == "twin":
+            continue
+        r = readings[stem]
         if r.verdict == "refused":
             what = {"door": "door", "trapdoor": "trapdoor", "plate": "pressure plate",
                     "gate": "fence gate"}.get(kind, "two-tall block")
@@ -4456,6 +4476,10 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
 def _convert_paired(mod: SourceMod, result: ConversionResult, rel: str, name: str,
                     spec: tuple, reading) -> dict | None:
     kind, data = spec
+    if kind == "twin":
+        if not twin_blocks.convert(mod, result, rel, name, data, reading):
+            return None
+        return {"kind": "twin", "name": name, "note": twin_blocks.note(name, reading, data)}
     if kind == "gate":
         family = reading.door if reading.door is not None else fence_gates.DEFAULT_FAMILY
         if not fence_gates.convert(mod, result, rel, name, data):
