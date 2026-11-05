@@ -7219,8 +7219,6 @@ class _EntityWorld:
             if recv is self.level:
                 if (mname, mdesc) == _GET_BLOCK_ENTITY and len(rest) == 1 and isinstance(rest[0], _Near):
                     return [self.entity if rest[0] == _Near() else None]
-                if mname == "isClientSide" and not rest:
-                    return [0]
                 self.asked = self.asked or f"asks the level {mname}, which isn't read"
                 return [UNKNOWN]
             if isinstance(recv, _Near):
@@ -7254,7 +7252,10 @@ class _EntityWorld:
             return
         own = objs[0]
         found = machine.find_method(own.cls, *_NEW_BE)
-        where = f"{found[0].name.replace('/', '.')}#newBlockEntity" if found else "newBlockEntity"
+        if found is None:
+            self.why = "the block's newBlockEntity isn't found"
+            return
+        where = f"{found[0].name.replace('/', '.')}#newBlockEntity"
         saved = machine.call_hook
         machine.call_hook = self.hook(saved)
         self.asked = ""
