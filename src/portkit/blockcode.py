@@ -185,6 +185,8 @@ _GET_SHAPE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/mine
                    "Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/phys/shapes/CollisionContext;)"
                    "Lnet/minecraft/world/phys/shapes/VoxelShape;")
 _BE_BUILDER = "net/minecraft/world/level/block/entity/BlockEntityType$Builder"
+_BE_TYPE = "net/minecraft/world/level/block/entity/BlockEntityType"
+_BE_TYPE_CTOR = "(Lnet/minecraft/world/level/block/entity/BlockEntityType$BlockEntitySupplier;"
 # Static builders that take a block entity type's factory first and whose
 # ``build`` makes the type (see Machine._holder_call): vanilla 1.17+
 # ``BlockEntityType$Builder.of(factory, blocks...)``; 1.14-1.16 under MCP
@@ -2780,7 +2782,8 @@ class Machine:
             return [Obj("__betype_builder", {"factory": rest[0]})]
         if isinstance(recv, Obj) and recv.cls == "__betype_builder" and name == "build":
             return [Obj("__betype", {"factory": recv.fields["factory"]})]
-        if isinstance(recv, Obj) and recv.cls == "__betype" and name == "create" and len(rest) == 2:
+        if isinstance(recv, Obj) and (recv.cls == "__betype" or (recv.cls == _BE_TYPE and "factory" in recv.fields)) \
+                and name == "create" and len(rest) == 2:
             return self.call_lambda(recv.fields["factory"], list(rest))
         return _NOT_HANDLED
 
@@ -3002,6 +3005,13 @@ class Machine:
                         # to store is not known.
                         obj.fields.setdefault("__partial", str(exc))
                     return None
+            if self.holders and ref.owner == _BE_TYPE and ref.desc.startswith(_BE_TYPE_CTOR) \
+                    and isinstance(obj, Obj) and len(args) == 4 and isinstance(args[1], Lam):
+                # new BlockEntityType(factory, validBlocks, dataType) keeps
+                # the factory (BlockEntityType#<init>, MC 1.21.1), as
+                # Builder#build does (see _holder_call).
+                obj.fields["factory"] = args[1]
+                return None
             if self._vec_math(ref.owner, "<init>", ref.desc, obj, args[1:], False) is not _NOT_HANDLED:
                 return None  # a Vec3 or MutableObject (see _vec_math)
             self._vanilla_init(ref, args, f)
