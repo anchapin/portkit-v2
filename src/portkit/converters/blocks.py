@@ -4345,6 +4345,12 @@ class _SharedRun:
             self.made = True
             classes = getattr(self.mod, "classes", None)
             if classes is not None and len(classes):
+                from ..adapters import entity_placement
+                # How the mod's own placement code leaves the block entity a
+                # placed block makes, when an adapter reads it (#296; see
+                # blockcode._EntityWorld).
+                classes.entity_placement = entity_placement(self.mod, classes)
+                classes.entity_names, classes.entity_run = sorted(self.loaded), None
                 self.run = blockcode._registered(classes, sorted(self.loaded))
         return self.run
 

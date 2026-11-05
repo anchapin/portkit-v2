@@ -294,6 +294,13 @@ class Adapter:
     # loader, read by its adapter, which hands the mesh to
     # ``portkit.converters.objmodel.as_model`` (one box rule for every OBJ).
     model_loaders: Mapping[str, Callable] = field(default_factory=_empty)
+    # How the mod's own placement code (beyond the block's setPlacedBy /
+    # onPlace, which the core runs) leaves the block entity a placed block
+    # makes (#296): ``entity_placement(classes)`` returns a function
+    # ``(block_class, block_entity_class) -> reason`` ("" when that code
+    # changes nothing of the block entity but the block's state), or None
+    # when it can't be read for this jar.
+    entity_placement: Callable[[object], Callable[[str, str], str] | None] | None = None
 
 
 # The registry: explicit and ordered (alphabetical by name unless an order
@@ -471,6 +478,15 @@ def unregistered_blockstates(mod: "SourceMod", names) -> dict[str, str]:
     known = frozenset().union(*(r.names for r in found))
     where = "; ".join(dict.fromkeys(r.source for r in found if r.source))
     return {n: where for n in names if n not in known}
+
+
+def entity_placement(mod: "SourceMod", classes) -> Callable[[str, str], str] | None:
+    """The ``entity_placement`` check of the first adapter serving ``mod``'s
+    namespace that has one (None when none does, or it can't read the jar)."""
+    for a in ADAPTERS:
+        if a.entity_placement is not None and getattr(mod, "namespace", None) in a.namespaces:
+            return a.entity_placement(classes)
+    return None
 
 
 def reads_orientations(mod: "SourceMod") -> bool:

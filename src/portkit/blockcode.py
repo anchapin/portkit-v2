@@ -185,6 +185,8 @@ _GET_SHAPE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/mine
                    "Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/phys/shapes/CollisionContext;)"
                    "Lnet/minecraft/world/phys/shapes/VoxelShape;")
 _BE_BUILDER = "net/minecraft/world/level/block/entity/BlockEntityType$Builder"
+_BE_TYPE = "net/minecraft/world/level/block/entity/BlockEntityType"
+_BE_TYPE_CTOR = "(Lnet/minecraft/world/level/block/entity/BlockEntityType$BlockEntitySupplier;"
 # Static builders that take a block entity type's factory first and whose
 # ``build`` makes the type (see Machine._holder_call): vanilla 1.17+
 # ``BlockEntityType$Builder.of(factory, blocks...)``; 1.14-1.16 under MCP
@@ -1139,6 +1141,11 @@ class Machine:
         # BlockEntityType builders and BlockEntityType#create are followed
         # (see _holder_call) instead of being unknown calls.
         self.holders = False
+        # With holders, while a registration runs (_registered(holders=True),
+        # #296): only a ``register`` whose supplier builds a block entity
+        # type makes a holder; every other registration (the block's own)
+        # is read as without holders.
+        self.entity_types = False
         # While reading the client's renderer registrations
         # (portkit.rendershape.bindings, #355): a call whose (owner, name) is
         # in bind_calls is recorded as (its arguments, the method it was
@@ -2759,6 +2766,8 @@ class Machine:
         if name == "register" and not static and not desc.endswith(")V"):
             ids = [a for a in rest if isinstance(a, (str, RL))]
             lams = [a for a in rest if isinstance(a, Lam)]
+            if self.entity_types and not (len(lams) == 1 and lams[0].handle.ref.desc.endswith(")L" + _BE_TYPE + ";")):
+                return _NOT_HANDLED
             if len(ids) == 1 and len(lams) == 1 and len(rest) == 2:
                 return [Obj("__holder", {"supplier": lams[0]})]
             if len(lams) == 1 and len(rest) == 2 and rest[0] is UNKNOWN and rest[1] is lams[0] \
@@ -2782,6 +2791,15 @@ class Machine:
             return [Obj("__betype", {"factory": recv.fields["factory"]})]
         if isinstance(recv, Obj) and recv.cls == "__betype" and name == "create" and len(rest) == 2:
             return self.call_lambda(recv.fields["factory"], list(rest))
+        if isinstance(recv, Obj) and recv.cls == _BE_TYPE and name == "create" and len(rest) == 2:
+            # ``new BlockEntityType(factory, validBlocks, dataType)``
+            # (BlockEntityType#<init>, MC 1.21.1: the type keeps the
+            # factory, as Builder#build does): its constructor's arguments
+            # are kept as __vanilla_ctor (see _vanilla_init).
+            ctor = recv.fields.get("__vanilla_ctor")
+            if ctor and ctor[0] == _BE_TYPE and str(ctor[1]).startswith(_BE_TYPE_CTOR) and ctor[2] \
+                    and isinstance(ctor[2][0], Lam):
+                return self.call_lambda(ctor[2][0], list(rest))
         return _NOT_HANDLED
 
     def _service_call(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
@@ -4939,12 +4957,12 @@ def _join_fields(ends: list) -> dict:
     if partial:
         out["__partial"] = partial[0]
     elif differ:
-        out["__partial"] = ("its constructor's ways after a branch it can't decide leave "
-                            + ", ".join(differ) + " different")
+        out["__partial"] = _JOINED + ", ".join(differ) + " different"
     return out
 
 
 _MISSING = object()
+_JOINED = "its constructor's ways after a branch it can't decide leave "
 
 
 def _equal(a, b) -> bool:
@@ -5416,11 +5434,16 @@ def _census(machine: Machine) -> None:
     machine.census_done = frozenset(machine._finished_methods - machine._stopped_methods)
 
 
-def _registered(classes: ClassIndex, names: list[str]) -> tuple[Machine, dict[str, tuple[list, str]]]:
+def _registered(classes: ClassIndex, names: list[str],
+                holders: bool = False) -> tuple[Machine, dict[str, tuple[list, str]]]:
     """Run the registration code that names each blockstate in ``names`` and
     return, per name, the block objects built for it (``[]`` with the reason
-    when none was found or it can't be followed)."""
+    when none was found or it can't be followed). With ``holders`` the
+    block entity types registered beside them are followed too
+    (Machine.entity_types), so a block keeps the type it makes its block
+    entity with (see _EntityWorld)."""
     machine = Machine(classes)
+    machine.holders = machine.entity_types = holders
     machine.registrations = []
     machine._allocating = []
     machine.renamed = {}
@@ -5734,7 +5757,7 @@ def _read_shape(machine: Machine, obj: Obj, r: Reading) -> None:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
         for d in HORIZONTAL:
             state = (default if isinstance(default, State) else State()).set("facing", Dir(d))
-            results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
+            results = _shape_call(machine, obj, r.name, "getShape", state)
             if not results or any(not isinstance(x, Shape) for x in results):
                 raise Unreadable(f"the shape at facing={d} is not built from boxes it can read")
             if len({x for x in results}) != 1:
@@ -6137,7 +6160,7 @@ def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading, flat: bool =
                     state = state.set("facing", Dir(d))
                 at = f"facing={d}" if d is not None else ",".join(
                     f"{p}={'true' if v else 'false'}" for p, v in zip(r.bools, combo))
-                results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
+                results = _shape_call(machine, obj, r.name, "getShape", state)
                 if not results or any(not isinstance(x, Shape) for x in results):
                     raise Unreadable(f"the shape at {at} is not built from boxes it can read")
                 if len({x for x in results}) != 1:
@@ -6174,8 +6197,7 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
     try:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
-        results = machine.call(obj.cls, "getCollisionShape", _GET_SHAPE_DESC,
-                               [obj, _every_state(obj, r), UNKNOWN, UNKNOWN, COLLIDER_CONTEXT])
+        results = _shape_call(machine, obj, r.name, "getCollisionShape", _every_state(obj, r), COLLIDER_CONTEXT)
     except Unreadable as exc:
         r.collision_why = f"{where} overrides the collision shape and can't be followed ({exc})"
         return
@@ -7118,6 +7140,229 @@ def _run_alone(machine: Machine, method, args: list, where: str, current: dict, 
     return results, ""
 
 
+# -- a shape read from the block entity the placed block makes (#296) ---------
+#
+# A block whose getShape / getCollisionShape asks the world for its block
+# entity (``BlockGetter#getBlockEntity(pos)``) is read with the block entity
+# the placed block makes standing at its position. That block entity is
+# exactly what Java puts there:
+#
+# * the block's own ``newBlockEntity(pos, state)`` (EntityBlock), run with the
+#   block as a second registration run builds it with block entity types
+#   followed (_registered(holders=True): a ``DeferredRegister#register`` of a
+#   type supplier is a holder whose ``get`` runs the supplier;
+#   ``BlockEntityType$Builder.of(factory, ..).build`` and
+#   ``new BlockEntityType(factory, blocks, type)`` keep the factory and
+#   ``BlockEntityType#create(pos, state)`` calls it, MC 1.21.1), its state
+#   unknown (``Level#setBlock`` builds the block entity with the state
+#   getStateForPlacement gave, which the placement may then change): a
+#   constructor that reads its state leaves what it stores unknown;
+# * then the block's own ``setPlacedBy`` and ``onPlace`` when its classes
+#   override them (vanilla Block's do nothing), run on that block entity; one
+#   that asks the level anything but that block entity, or that can't be
+#   followed, is a reason;
+# * placement code of the mod's own beyond those (a BlockItem subclass that
+#   writes the block entity) is read by the mod's adapter
+#   (``Adapter.entity_placement``, set on the classes as ``entity_placement``):
+#   without one, the shape isn't read from the block entity.
+#
+# The block entity's ``getBlockState`` is the state the shape is read at, its
+# ``getBlockPos`` / ``getLevel`` its own; the level answers ``getBlockEntity``
+# at the block's own position and nothing else (a question it can't answer
+# is unknown). Any call the machine can't follow while the block entity is
+# built leaves the shape unread, with the reason.
+
+_NEW_BE = ("newBlockEntity", "(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)"
+           "Lnet/minecraft/world/level/block/entity/BlockEntity;")
+_PLACED_BY = ("setPlacedBy", "(Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;"
+              "Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/entity/LivingEntity;"
+              "Lnet/minecraft/world/item/ItemStack;)V")
+_ON_PLACE = ("onPlace", "(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;"
+             "Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Z)V")
+_BE_GETTERS = frozenset({"getBlockPos", "getLevel", "hasLevel", "getBlockState"})
+
+
+class _PlacedLevel:
+    """The level a shape is read in: the placed block's own block entity at
+    its position, nothing else known."""
+
+    def __repr__(self):
+        return "level with the placed block alone"
+
+
+def _entity_run(classes: ClassIndex, name: str):
+    """The registration run that follows block entity types, one per mod:
+    over every blockstate the converter's shared run covers
+    (``classes.entity_names``), made the first time a block entity is
+    built."""
+    run = getattr(classes, "entity_run", None)
+    if run is None or name not in run[1]:
+        names = sorted(set(getattr(classes, "entity_names", None) or ()) | {name})
+        run = _registered(classes, names, holders=True)
+        classes.entity_run = run
+    return run
+
+
+class _EntityWorld:
+    """The block entity a block's placement makes, built once per block
+    (see the section comment); ``why`` says why there is none."""
+
+    def __init__(self, machine: Machine, obj: Obj, name: str):
+        self.why, self.entity, self.machine, self.obj = "", None, None, None
+        self.level, self.pos, self.state = _PlacedLevel(), _Near(), UNKNOWN
+        self._build(machine.classes, obj, name)
+
+    def hook(self, saved):
+        def hook(owner, mname, mdesc, args, static):
+            recv = None if static or not args else args[0]
+            rest = args if static else args[1:]
+            if recv is self.level:
+                if (mname, mdesc) == _GET_BLOCK_ENTITY and len(rest) == 1 and isinstance(rest[0], _Near):
+                    return [self.entity if rest[0] == _Near() else None]
+                self.asked = self.asked or f"asks the level {mname}, which isn't read"
+                return [UNKNOWN]
+            if isinstance(recv, _Near):
+                if mname in _POS_STEPS and not rest:
+                    return [recv.moved(_POS_STEPS[mname])]
+                if mname == "relative" and len(rest) == 1 and isinstance(rest[0], Dir):
+                    return [recv.moved(_DIR_STEPS[rest[0].name])]
+                if mname == "immutable" and not rest:
+                    return [recv]
+                return [UNKNOWN]
+            if self.state is not UNKNOWN and recv is self.state and mname == "getBlock" and not rest:
+                # The game asks a block's shape at a state of its own.
+                return [self.obj]
+            if recv is not None and recv is self.entity and not rest and mname in _BE_GETTERS:
+                return [{"getBlockPos": self.pos, "getLevel": self.level, "hasLevel": 1}.get(mname, self.state)]
+            if owner == "java/util/Objects" and mname == "requireNonNull" and static and args \
+                    and isinstance(args[0], (_Near, _PlacedLevel)):
+                return [args[0]]
+            return saved(owner, mname, mdesc, args, static) if saved is not None else None
+        return hook
+
+    def _build(self, classes: ClassIndex, obj: Obj, name: str) -> None:
+        placement = getattr(classes, "entity_placement", None)
+        if placement is None:
+            self.why = "how the mod places the block entity it makes isn't read (no adapter reads it)"
+            return
+        machine, registered = _entity_run(classes, name)
+        objs, why = registered.get(name, ([], "not registered"))
+        if not objs or objs[0].cls != obj.cls:
+            self.why = f"the registration run that follows block entity types doesn't build the block ({why})"
+            return
+        own = objs[0]
+        found = machine.find_method(own.cls, *_NEW_BE)
+        if found is None:
+            self.why = "the block's newBlockEntity isn't found"
+            return
+        where = f"{found[0].name.replace('/', '.')}#newBlockEntity"
+        saved = machine.call_hook
+        machine.call_hook = self.hook(saved)
+        self.asked = ""
+        try:
+            machine.steps = 0
+            machine.new_epoch()
+            havocs = len(machine.havocs)
+            try:
+                built = machine.run(*found, [own, self.pos, UNKNOWN])
+            except Unreadable as exc:
+                self.why = f"{where} can't be followed ({exc})"
+                return
+            if len(built) != 1 or not isinstance(built[0], Obj) or not machine.is_mod(built[0].cls):
+                self.why = f"{where} doesn't build one block entity of the mod's it can read"
+                return
+            be = built[0]
+            # Fields a constructor's undecided ways leave differently are
+            # unknown (_join_fields), so a shape that reads one isn't read;
+            # a constructor that stopped part way is a reason.
+            joined = str(be.fields.get("__partial", "")).startswith(_JOINED)
+            if ("__partial" in be.fields and not joined) or len(machine.havocs) > havocs:
+                self.why = f"{where}: the block entity's constructor makes a call the reader can't follow" + (
+                    f" ({machine.havocs[havocs]})" if len(machine.havocs) > havocs else f" ({be.fields['__partial']})")
+                return
+            be_where = be.cls.replace("/", ".")
+            for method in (_PLACED_BY, _ON_PLACE):
+                decl = machine.find_method(own.cls, *method)
+                if decl is None or not machine.is_mod(decl[0].name):
+                    continue
+                at = f"{decl[0].name.replace('/', '.')}#{method[0]}"
+                self.entity = be
+                machine.steps = 0
+                args = [own, self.level, self.pos, UNKNOWN, UNKNOWN, UNKNOWN] if method is _PLACED_BY else \
+                    [own, UNKNOWN, self.level, self.pos, UNKNOWN, 0]
+                try:
+                    machine.run(*decl, args)
+                except Unreadable as exc:
+                    self.why = f"{at}, run when the block is placed, can't be followed ({exc})"
+                    return
+                if self.asked or len(machine.havocs) > havocs:
+                    self.why = f"{at}, run when the block is placed, " + (
+                        self.asked or "makes a call the reader can't follow")
+                    return
+            why = placement(own.cls, be.cls)
+            if why:
+                self.why = why
+                return
+            self.entity, self.machine, self.obj, self.where = be, machine, own, f"{where} ({be_where})"
+        finally:
+            machine.call_hook = saved
+
+    def call(self, method: str, state, ctx) -> list:
+        """``method`` (getShape / getCollisionShape) of the block at ``state``
+        with this block entity at its position."""
+        machine = self.machine
+        saved = machine.call_hook
+        machine.call_hook = self.hook(saved)
+        self.state, self.asked = state, ""
+        try:
+            machine.steps = 0
+            return machine.call(self.obj.cls, method, _GET_SHAPE_DESC, [self.obj, state, self.level, self.pos, ctx])
+        finally:
+            machine.call_hook, self.state = saved, UNKNOWN
+
+
+def _asks_entity(machine: Machine, obj: Obj, method: str) -> bool:
+    """Whether ``method`` of the block's classes is the mod's and reads
+    ``getBlockEntity`` itself, and the block's classes make a block entity."""
+    found = machine.find_method(obj.cls, method, _GET_SHAPE_DESC)
+    if found is None or not machine.is_mod(found[0].name) or found[1].code is None:
+        return False
+    made = machine.find_method(obj.cls, *_NEW_BE)
+    if made is None or not machine.is_mod(made[0].name):
+        return False
+    from .bytecode import Ref, instructions
+    return any(isinstance(i.arg, Ref) and (i.arg.name, i.arg.desc) == _GET_BLOCK_ENTITY
+               for i in instructions(found[0], found[1].code))
+
+
+def _shape_call(machine: Machine, obj: Obj, name: str, method: str, state, ctx=UNKNOWN) -> list:
+    """``method`` (getShape / getCollisionShape) of ``obj`` at ``state``:
+    with the block entity its placement makes at its position when the
+    method asks for it (see _EntityWorld), else on an unknown world. A block
+    entity that can't be built leaves the read as it was (the unknown world);
+    :func:`entity_why` gives its reason."""
+    if _asks_entity(machine, obj, method):
+        worlds = machine.__dict__.setdefault("entity_worlds", {})
+        world = worlds.get((id(obj), name))
+        if world is None:
+            world = worlds[(id(obj), name)] = (obj, _EntityWorld(machine, obj, name))
+        if world[1].machine is not None:
+            return world[1].call(method, state, ctx)
+    return machine.call(obj.cls, method, _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, ctx])
+
+
+def _entity_world(machine: Machine, obj: Obj, name: str):
+    world = machine.__dict__.get("entity_worlds", {}).get((id(obj), name))
+    return world[1] if world is not None and world[1].machine is not None else None
+
+
+def entity_why(machine: Machine, obj: Obj, name: str) -> str:
+    """Why the shape of ``name`` wasn't read with the block entity its
+    placement makes ("" when it was, or wasn't asked for)."""
+    world = machine.__dict__.get("entity_worlds", {}).get((id(obj), name))
+    return world[1].why if world is not None else ""
+
+
 def ask_key(machine: Machine, fn_cls: str, method: tuple[str, str], args: list) -> tuple[list | None, str]:
     """(results, "") or (None, why): a method ``method`` = (name, desc) of
     the mod's class ``fn_cls`` asked of a key :func:`read_key_alone` read
@@ -7218,7 +7463,7 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
         for key in directional_keys(r.kind, r.facings):
             state = _with_key(default if isinstance(default, State) else State(), r.kind, key, r)
-            results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
+            results = _shape_call(machine, obj, r.name, "getShape", state)
             label = (f"{key[1]}=true" if r.kind == "vine" else
                      f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}")
             if not results or any(not isinstance(x, Shape) for x in results):
@@ -7407,7 +7652,7 @@ def _read_dir_state_shapes(machine: Machine, obj: Obj, r: DirStateReading) -> No
         for combo in combinations(r.bools):
             for key in directional_keys(r.kind):
                 state = _with_key(_with(default, r.bools, combo), r.kind, key)
-                results = machine.call(obj.cls, "getShape", _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, UNKNOWN])
+                results = _shape_call(machine, obj, r.name, "getShape", state)
                 label = (f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}") + "".join(
                     f",{p}={'true' if v else 'false'}" for p, v in zip(r.bools, combo))
                 if not results or any(not isinstance(x, Shape) for x in results):

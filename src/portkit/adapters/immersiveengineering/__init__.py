@@ -592,7 +592,61 @@ def orientations(mod, classes_by_name, sites=None, states=None) -> dict[str, Ori
     return out
 
 
+def entity_placement(classes):
+    """``(block class, block entity class) -> reason`` ("" when IE's own
+    placement leaves the block entity as its constructor and the block's
+    setPlacedBy / onPlace made it, but for the block's state), or None when
+    the jar isn't Immersive Engineering's (#296, read by
+    :class:`portkit.blockcode._EntityWorld`).
+
+    ``BlockItemIE#placeBlock`` (module docstring) runs, for an
+    ``IEBaseBlock``, ``onIEBlockPlacedBy`` after vanilla's placement: on an
+    ``IDirectionalBE`` it calls ``setFacing``, which for an
+    ``IStateBasedDirectional`` whose ``setFacing`` is the interface's only
+    sets the block's state (``IEBlockInterfaces.java`` L170-175); an
+    ``IAdvancedDirectionalBE`` (``onDirectionalPlacement``), an
+    ``IHasDummyBlocks`` (``placeDummies``) or an ``IPlacementInteraction``
+    (``onBEPlaced``) may write the block entity, so it isn't read. The
+    instructions of each method are checked against that form (the same
+    checks :func:`orientations` makes); a block that isn't an
+    ``IEBaseBlock`` gets nothing from ``BlockItemIE#placeBlock`` but
+    vanilla's."""
+    if classes is None or classes.get(_BASE) is None:
+        return None
+    shared = _shared_checks(classes)
+
+    def check(cls: str, be: str) -> str:
+        if _BASE not in _chain(classes, cls):
+            return shared
+        if shared:
+            return shared
+        cf, m = _declaring(classes, cls, "canIEBlockBePlaced", f"({_STATE}{_CTX})Z")
+        if cf is None or cf.name != _BASE or _shape(cf, m, keep=("iconst", "ireturn")) != _CAN_BE_PLACED:
+            where = cf.name.replace("/", ".") if cf is not None else cls.replace("/", ".")
+            return f"{where}#canIEBlockBePlaced may refuse a placement, which isn't read"
+        cf, m = _declaring(classes, cls, "onIEBlockPlacedBy", _PLACED_BY_DESC)
+        if cf is None or cf.name != _ENTITY_BLOCK:
+            where = cf.name.replace("/", ".") if cf is not None else cls.replace("/", ".")
+            return f"{where}#onIEBlockPlacedBy isn't IEEntityBlock's"
+        ifaces = _interfaces(classes, be)
+        dotted = be.replace("/", ".")
+        for iface, what in ((_ADVANCED, "IAdvancedDirectionalBE#onDirectionalPlacement"),
+                            (_DUMMIES, "IHasDummyBlocks#placeDummies"),
+                            (_PLACEMENT_INTERACTION, "IPlacementInteraction#onBEPlaced")):
+            if iface in ifaces:
+                return f"IEEntityBlock#onIEBlockPlacedBy runs {dotted}'s {what.split('#')[1]} ({what}), which isn't read"
+        if _DIRECTIONAL in ifaces:
+            if _STATE_BASED not in ifaces:
+                return f"{dotted} is an IDirectionalBE whose facing isn't a block state, so setFacing isn't read"
+            for c in _chain(classes, be):
+                own = classes.get(c)
+                if own is not None and own.method("setFacing", _SET_FACING_DESC) is not None:
+                    return f"{c.replace('/', '.')}#setFacing overrides IStateBasedDirectional's"
+        return ""
+    return check
+
+
 from . import ieobj  # noqa: E402  (imports Adapter's package too)
 
 ADAPTER = Adapter(name="immersiveengineering", namespaces=frozenset({NAMESPACE}), orientations=orientations,
-                  model_loaders={ieobj.LOADER: ieobj.read})
+                  model_loaders={ieobj.LOADER: ieobj.read}, entity_placement=entity_placement)
