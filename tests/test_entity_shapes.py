@@ -78,7 +78,10 @@ def test_constructed_type_creates_through_its_factory(monkeypatch):
     factory = _lam("Lnet/minecraft/world/level/block/entity/BlockEntity;")
     calls = []
     monkeypatch.setattr(machine, "call_lambda", lambda lam, args: calls.append((lam, args)) or ["made"])
-    kind = blockcode.Obj(_TYPE, {"factory": factory})
+    kind = blockcode.Obj(_TYPE, {"__vanilla_ctor": (_TYPE, "(Lnet/minecraft/world/level/block/entity/"
+                                                      "BlockEntityType$BlockEntitySupplier;Ljava/util/Set;"
+                                                      "Lcom/mojang/datafixers/types/Type;)V",
+                                                      (factory, blockcode.UNKNOWN, None))})
     assert machine._holder_call(_TYPE, "create", "(Lnet/minecraft/core/BlockPos;"
                                 "Lnet/minecraft/world/level/block/state/BlockState;)"
                                 "Lnet/minecraft/world/level/block/entity/BlockEntity;",

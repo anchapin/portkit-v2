@@ -2789,9 +2789,17 @@ class Machine:
             return [Obj("__betype_builder", {"factory": rest[0]})]
         if isinstance(recv, Obj) and recv.cls == "__betype_builder" and name == "build":
             return [Obj("__betype", {"factory": recv.fields["factory"]})]
-        if isinstance(recv, Obj) and (recv.cls == "__betype" or (recv.cls == _BE_TYPE and "factory" in recv.fields)) \
-                and name == "create" and len(rest) == 2:
+        if isinstance(recv, Obj) and recv.cls == "__betype" and name == "create" and len(rest) == 2:
             return self.call_lambda(recv.fields["factory"], list(rest))
+        if isinstance(recv, Obj) and recv.cls == _BE_TYPE and name == "create" and len(rest) == 2:
+            # ``new BlockEntityType(factory, validBlocks, dataType)``
+            # (BlockEntityType#<init>, MC 1.21.1: the type keeps the
+            # factory, as Builder#build does): its constructor's arguments
+            # are kept as __vanilla_ctor (see _vanilla_init).
+            ctor = recv.fields.get("__vanilla_ctor")
+            if ctor and ctor[0] == _BE_TYPE and str(ctor[1]).startswith(_BE_TYPE_CTOR) and ctor[2] \
+                    and isinstance(ctor[2][0], Lam):
+                return self.call_lambda(ctor[2][0], list(rest))
         return _NOT_HANDLED
 
     def _service_call(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
@@ -3012,13 +3020,6 @@ class Machine:
                         # to store is not known.
                         obj.fields.setdefault("__partial", str(exc))
                     return None
-            if self.holders and ref.owner == _BE_TYPE and ref.desc.startswith(_BE_TYPE_CTOR) \
-                    and isinstance(obj, Obj) and len(args) == 4 and isinstance(args[1], Lam):
-                # new BlockEntityType(factory, validBlocks, dataType) keeps
-                # the factory (BlockEntityType#<init>, MC 1.21.1), as
-                # Builder#build does (see _holder_call).
-                obj.fields["factory"] = args[1]
-                return None
             if self._vec_math(ref.owner, "<init>", ref.desc, obj, args[1:], False) is not _NOT_HANDLED:
                 return None  # a Vec3 or MutableObject (see _vec_math)
             self._vanilla_init(ref, args, f)
