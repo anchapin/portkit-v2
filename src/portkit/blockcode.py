@@ -2847,7 +2847,13 @@ class Machine:
                 and isinstance(rest[2], Obj):
             # Registry.register(registry, id, value) returns the value
             # (1.21.1 Registry#register); Fabric registers a block entity
-            # type this way (#355).
+            # type this way (#355). Into a ``BuiltInRegistries`` registry
+            # under a known namespaced id, the value is filed under it
+            # (keys_of, #296).
+            if isinstance(rest[0], Const) and rest[0].owner == _BUILTIN_REGISTRIES:
+                loc = rest[1].path if isinstance(rest[1], RL) and not rest[1].lookup else rest[1]
+                if isinstance(loc, str) and ":" in loc and _RESOURCE_NAME.fullmatch(loc):
+                    self._file_key(rest[2], rest[0].name, loc)
             return [rest[2]]
         if isinstance(recv, Obj) and recv.cls == "__holder" and name in ("get", "value") and not rest:
             out = self.call_lambda(recv.fields["supplier"], [])
@@ -2858,7 +2864,7 @@ class Machine:
             if key is not None:
                 for v in out:
                     if isinstance(v, Obj):
-                        self.keys_of[id(v)] = (v, *key)
+                        self._file_key(v, *key)
             return out
         if (owner, name) in _BE_TYPE_FACTORIES and static and rest and isinstance(rest[0], Lam):
             return [Obj("__betype_builder", {"factory": rest[0]})]
@@ -2876,6 +2882,16 @@ class Machine:
                     and isinstance(ctor[2][0], Lam):
                 return self.call_lambda(ctor[2][0], list(rest))
         return _NOT_HANDLED
+
+    def _file_key(self, obj: "Obj", registry: str, key: str) -> None:
+        """File ``obj`` under ``key`` in ``registry`` (keys_of); an object
+        filed under two different keys has none (a registry holds a value
+        once: Registry#register refuses a duplicate value, MC 1.21.1)."""
+        entry = self.keys_of.get(id(obj))
+        if entry is not None and entry[0] is obj and entry[1:] != (registry, key):
+            self.keys_of[id(obj)] = (obj, None, None)
+            return
+        self.keys_of[id(obj)] = (obj, registry, key)
 
     def _service_call(self, owner: str, name: str, desc: str, recv, rest: list, static: bool):
         """``java.util.ServiceLoader`` (Java SE 21), followed while reading
@@ -3762,7 +3778,7 @@ class Machine:
             # Another registry's getKey (BLOCK_ENTITY_TYPE, ...): the key a
             # holder of that registry filed the object under (keys_of).
             entry = self.keys_of.get(id(rest[0])) if isinstance(rest[0], Obj) else None
-            if entry is None or entry[0] is not rest[0] or entry[1] != recv.name:
+            if entry is None or entry[0] is not rest[0] or entry[1] != recv.name or entry[2] is None:
                 return _NOT_HANDLED
             return [RL(entry[2], True)]
         if isinstance(recv, RL) and not rest and not static:
