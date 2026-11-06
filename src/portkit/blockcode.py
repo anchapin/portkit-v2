@@ -187,6 +187,15 @@ _GET_SHAPE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/mine
 _BE_BUILDER = "net/minecraft/world/level/block/entity/BlockEntityType$Builder"
 _BE_TYPE = "net/minecraft/world/level/block/entity/BlockEntityType"
 _BE_TYPE_CTOR = "(Lnet/minecraft/world/level/block/entity/BlockEntityType$BlockEntitySupplier;"
+# NeoForge 1.21.1 / Forge ``DeferredRegister.create(registry, namespace)``: a
+# register whose ``register(name, supplier)`` files each object under
+# ``namespace:name`` in that registry (see Machine._holder_call, #296).
+_DEFERRED_REGISTERS = frozenset({"net/neoforged/neoforge/registries/DeferredRegister",
+                                 "net/minecraftforge/registries/DeferredRegister"})
+# The registry a ``DeferredRegister.create`` names: a ``BuiltInRegistries``
+# registry or its ``Registries`` key, by field name.
+_REGISTRY_OWNERS = frozenset({"net/minecraft/core/registries/BuiltInRegistries",
+                              "net/minecraft/core/registries/Registries"})
 # Static builders that take a block entity type's factory first and whose
 # ``build`` makes the type (see Machine._holder_call): vanilla 1.17+
 # ``BlockEntityType$Builder.of(factory, blocks...)``; 1.14-1.16 under MCP
@@ -587,6 +596,9 @@ class MapV:
     clean: bool = True
     # The top-level run that allocated the map (Machine._top).
     run: int = -1
+    # The value a lookup that misses answers in a ``"float"`` map (fastutil's
+    # ``defaultReturnValue``, 0 until set; see Machine._float_map_call).
+    default: object = 0.0
     # (class, field) when this map stands for what the per-object map in
     # that final instance field holds over every object of the class
     # (Machine._site_map, #280): shared by the registration runs.
@@ -1100,6 +1112,19 @@ class Machine:
         # with), as recorded by _record: what a block registry's getKey
         # answers for it (see _registry_key, #280).
         self.names_of: dict[int, tuple] = {}
+        # id(object) -> (the object, the registry field, "namespace:path"):
+        # an object a registry holder registered under a known name made
+        # while registry holders are followed (_holder_call, #296), which
+        # that ``BuiltInRegistries`` registry's getKey answers for it.
+        self.keys_of: dict[int, tuple] = {}
+        # (method, offset, name) of a ``register(name, supplier)`` call made
+        # on a modelled DeferredRegister -> the keys it filed ``name`` under.
+        self._site_keys: dict[tuple, set] = {}
+        # The ``DeferredRegister`` the call being answered by ``vanilla`` is
+        # made on (see call): read only by its ``register`` (_holder_call);
+        # every other call sees an unknown receiver, as before registers
+        # were modelled.
+        self._register_recv = None
         # (instructions, offset -> index) of each method being run, innermost
         # last (see _throws_only).
         self._code: list = []
@@ -1763,6 +1788,13 @@ class Machine:
         """Possible results of calling ``owner.name(desc)`` with ``args``
         (receiver first unless static)."""
         recv = None if static or not args else args[0]
+        register_recv = None
+        if isinstance(recv, Obj) and recv.cls == "__register":
+            # A modelled DeferredRegister (_holder_call) is, to everything
+            # but its own ``register``, the unknown value it was before.
+            register_recv = recv
+            recv = UNKNOWN
+            args = [UNKNOWN, *args[1:]]
         if self.call_hook is not None:
             hooked = self.call_hook(owner, name, desc, args, static)
             if hooked is not None:
@@ -1832,7 +1864,11 @@ class Machine:
             vowner = self.vanilla_base(start)
         else:
             vowner = owner
-        handled = self.vanilla(vowner, name, desc, args, static)
+        self._register_recv = register_recv
+        try:
+            handled = self.vanilla(vowner, name, desc, args, static)
+        finally:
+            self._register_recv = None
         if handled is not _NOT_HANDLED:
             return handled
         if self.is_mod(start) and not static:
@@ -2762,14 +2798,44 @@ class Machine:
           and Fabric API builders too (_BE_TYPE_FACTORIES);
         * ``Registry.register(registry, id, value)`` returns the value.
 
+        * ``DeferredRegister.create(registry, namespace)`` with a
+          ``BuiltInRegistries`` registry (or its ``Registries`` key) and a
+          known namespace is a register of that registry and namespace; a
+          holder its ``register(name, supplier)`` makes for a valid name
+          carries the key ``namespace:name`` (NeoForge 1.21.1
+          ``DeferredRegister#register``: ``ResourceLocation.fromNamespaceAndPath(
+          this.namespace, name)``), and each object its ``get``/``value``
+          returns is filed under that key in that registry (keys_of), which
+          ``Registry#getKey`` answers (_registry_key, #296);
+
         Anything else is not handled here."""
+        register = self._register_recv
+        if static and name == "create" and owner in _DEFERRED_REGISTERS and len(rest) == 2 \
+                and isinstance(rest[0], Const) and rest[0].owner in _REGISTRY_OWNERS \
+                and isinstance(rest[1], str) and re.fullmatch(r"[a-z0-9_.-]+", rest[1]):
+            return [Obj("__register", {"registry": rest[0].name, "namespace": rest[1]})]
         if name == "register" and not static and not desc.endswith(")V"):
             ids = [a for a in rest if isinstance(a, (str, RL))]
             lams = [a for a in rest if isinstance(a, Lam)]
             if self.entity_types and not (len(lams) == 1 and lams[0].handle.ref.desc.endswith(")L" + _BE_TYPE + ";")):
                 return _NOT_HANDLED
             if len(ids) == 1 and len(lams) == 1 and len(rest) == 2:
-                return [Obj("__holder", {"supplier": lams[0]})]
+                fields = {"supplier": lams[0]}
+                if isinstance(rest[0], str) and desc.startswith(_REGISTER_SUPPLIER) \
+                        and re.fullmatch(r"[a-z0-9_./-]+", rest[0]):
+                    site = (self._methods[-1] if self._methods else None,
+                            self._frame.pc if self._frame is not None else None, rest[0])
+                    if isinstance(register, Obj):
+                        key = (register.fields["registry"], f"{register.fields['namespace']}:{rest[0]}")
+                        fields["key"] = key
+                        self._site_keys.setdefault(site, set()).add(key)
+                    else:
+                        # The same call run again on unknown arguments (a
+                        # registration run's stand-in for its real call,
+                        # _run_pass): the key its real calls filed this name
+                        # under, when they all agree (see the get below).
+                        fields["site"] = site
+                return [Obj("__holder", fields)]
             if len(lams) == 1 and len(rest) == 2 and rest[0] is UNKNOWN and rest[1] is lams[0] \
                     and desc.startswith(_REGISTER_SUPPLIER):
                 # ``register(String, Supplier)`` with a name the run can't
@@ -2784,7 +2850,16 @@ class Machine:
             # type this way (#355).
             return [rest[2]]
         if isinstance(recv, Obj) and recv.cls == "__holder" and name in ("get", "value") and not rest:
-            return self.call_lambda(recv.fields["supplier"], [])
+            out = self.call_lambda(recv.fields["supplier"], [])
+            key = recv.fields.get("key")
+            if key is None and "site" in recv.fields:
+                keys = self._site_keys.get(recv.fields["site"], ())
+                key = next(iter(keys)) if len(keys) == 1 else None
+            if key is not None:
+                for v in out:
+                    if isinstance(v, Obj):
+                        self.keys_of[id(v)] = (v, *key)
+            return out
         if (owner, name) in _BE_TYPE_FACTORIES and static and rest and isinstance(rest[0], Lam):
             return [Obj("__betype_builder", {"factory": rest[0]})]
         if isinstance(recv, Obj) and recv.cls == "__betype_builder" and name == "build":
@@ -2852,6 +2927,8 @@ class Machine:
         return obj
 
     def _new(self, cls: str):
+        if cls in _FASTUTIL_FLOAT_MAPS:
+            return MapV({}, kind="float", run=self._top)
         if cls in ("java/util/EnumMap", "java/util/HashMap", "java/util/LinkedHashMap",
                    "java/util/TreeMap", "java/util/concurrent/ConcurrentHashMap"):
             return MapV({}, kind="linked" if cls == "java/util/LinkedHashMap" else
@@ -3680,6 +3757,14 @@ class Machine:
                 return [UNKNOWN]
             (raw,) = entry[1]
             return [RL(raw, True) if ":" in raw else RL(Tail(raw), True)]
+        if not static and name == "getKey" and desc == "(Ljava/lang/Object;)Lnet/minecraft/resources/ResourceLocation;" \
+                and isinstance(recv, Const) and recv.owner == _BUILTIN_REGISTRIES and len(rest) == 1:
+            # Another registry's getKey (BLOCK_ENTITY_TYPE, ...): the key a
+            # holder of that registry filed the object under (keys_of).
+            entry = self.keys_of.get(id(rest[0])) if isinstance(rest[0], Obj) else None
+            if entry is None or entry[0] is not rest[0] or entry[1] != recv.name:
+                return _NOT_HANDLED
+            return [RL(entry[2], True)]
         if isinstance(recv, RL) and not rest and not static:
             loc = recv.path
             if name == "getPath" and desc == "()Ljava/lang/String;":
@@ -4117,6 +4202,8 @@ class Machine:
             return [UNKNOWN] if returns else [None]
         if recv.havoc:
             return [UNKNOWN] if returns else [None]
+        if recv.kind == "float":
+            return self._float_map_call(recv, name, desc, rest)
         if recv.kind == "fixed" and name in _MAP_CHANGES:
             return []  # UnsupportedOperationException (ImmutableCollections)
         if recv.kind == "concurrent" and (None in rest or name not in _CONCURRENT_MAP_CALLS):
@@ -4220,6 +4307,45 @@ class Machine:
         recv.items, recv.havoc, recv.exact = {}, True, False
         return [UNKNOWN] if returns else [None]
 
+    def _float_map_call(self, recv: "MapV", name: str, desc: str, rest: list) -> list:
+        """A call on a fastutil ``Object2FloatArrayMap`` / ``Object2FloatOpenHashMap``
+        built here (fastutil 8.5: keys compared with ``equals``, a null key
+        allowed; ``put(k, float)`` returns the value it replaced or the
+        default return value, ``getFloat(k)`` the value held or the default
+        return value, which is 0 until ``defaultReturnValue(float)`` sets it).
+        A key that doesn't compare exactly here (_map_key), or any other
+        call, leaves the map unknown (#296)."""
+        returns = _arg_count(desc)[1]
+        key = rest[0] if rest else UNKNOWN
+        keyed = key is not UNKNOWN and _hashable(key) and self._map_key(key) is not _NOKEY
+        if name == "put" and desc == "(Ljava/lang/Object;F)F" and len(rest) == 2 and keyed and recv.exact:
+            self._map_touch(recv)
+            found, old = self._map_find(recv, key)
+            if found:
+                stored = key if key in recv.items else recv.canon[self._map_key(key)]
+                recv.items[stored] = rest[1]
+                return [old]
+            recv.canon[self._map_key(key)] = key
+            recv.items[key] = rest[1]
+            recv.mod += 1
+            return [recv.default]
+        if name in ("getFloat", "containsKey") and desc in ("(Ljava/lang/Object;)F", "(Ljava/lang/Object;)Z") \
+                and len(rest) == 1 and keyed and recv.exact:
+            found, value = self._map_find(recv, key)
+            if name == "containsKey":
+                return [int(found)]
+            return [value if found else recv.default]
+        if name == "defaultReturnValue" and desc == "(F)V" and len(rest) == 1:
+            self._map_touch(recv)
+            recv.default = rest[0] if isinstance(rest[0], float) else UNKNOWN
+            return [None]
+        if name == "defaultReturnValue" and desc == "()F" and not rest:
+            return [recv.default]
+        if name in ("isEmpty", "size") and not rest and recv.exact:
+            return [int(not recv.items)] if name == "isEmpty" else [len(recv.items)]
+        recv.items, recv.havoc, recv.exact = {}, True, False
+        return [UNKNOWN] if returns else [None]
+
     def _fixed_map(self, pairs: list) -> list:
         """``Map.of(k1, v1, ..)`` / ``Map.ofEntries(Map.entry(k, v), ..)`` /
         Guava ``ImmutableMap.of`` (Java SE 21, Guava 33): an unmodifiable map
@@ -4314,6 +4440,14 @@ class Machine:
         stored every component."""
         if key is UNKNOWN or not _hashable(key):
             return _NOKEY
+        if isinstance(key, RL):
+            # ResourceLocation#equals compares namespace and path (MC
+            # 1.21.1; a location without one is in "minecraft"): a location
+            # whose namespace isn't known isn't known to equal or differ,
+            # and the getKey mark (RL.lookup) takes no part (#296).
+            if not isinstance(key.path, str):
+                return _NOKEY
+            return ("__rl", key.path if ":" in key.path else f"minecraft:{key.path}")
         if isinstance(key, Obj) and not self._key_ok(key):
             comps = self._record_components(key.cls)
             if comps is None or "__partial" in key.fields or getattr(key, "_uninit", False):
@@ -4725,6 +4859,10 @@ _MAP_CHANGES = frozenset({"put", "putAll", "putIfAbsent", "remove", "clear", "co
 _CONCURRENT_MAP_CALLS = frozenset({"get", "containsKey", "put", "putIfAbsent", "computeIfAbsent",
                                    "isEmpty", "size"})
 # Map methods that change nothing (java.util.Map, Java SE 21).
+# fastutil 8.5 maps from objects to floats whose keys compare with
+# ``equals`` (see Machine._float_map_call).
+_FASTUTIL_FLOAT_MAPS = frozenset({"it/unimi/dsi/fastutil/objects/Object2FloatArrayMap",
+                                  "it/unimi/dsi/fastutil/objects/Object2FloatOpenHashMap"})
 _MAP_READS = frozenset({"containsValue", "equals", "hashCode", "toString", "getClass", "forEach"})
 _JAVA_MAPS = frozenset({"java/util/Map", "java/util/HashMap", "java/util/LinkedHashMap", "java/util/TreeMap",
                         "java/util/IdentityHashMap", "java/util/WeakHashMap", "java/util/EnumMap",
