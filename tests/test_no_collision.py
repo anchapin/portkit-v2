@@ -65,8 +65,9 @@ def test_an_override_that_collides_somewhere_keeps_the_default():
     # Its box is getShape's (the full block), so that is read too.
     assert r["solid"].collision is True
     assert r["solid"].collision_from == "com.example.nmod.NSolid#getCollisionShape"
-    # Every state of the block has lit, so hasProperty(lit) is true.
-    assert r["has"].collision is None
+    # Every state of the block has lit, so hasProperty(lit) is true: it
+    # collides with the full block, getShape's box, so that is read.
+    assert r["has"].collision is True
 
 
 def test_collider_answers_only_what_every_entity_context_is():
