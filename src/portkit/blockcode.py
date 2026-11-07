@@ -6457,6 +6457,14 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
     Anything else (a box, a shape it can't read, a test on the world it
     can't decide that leads to a box) keeps the DEFAULT, with the reason."""
     where = f"{own[0].name.replace('/', '.')}#getCollisionShape"
+    # At the states getShape was read at first: the same boxes there is
+    # collision as a converted block has it. (Read before the every-state
+    # call, whose unknown state a block entity's cache would keep.)
+    same = _same_as_selection(machine, obj, r) if "__partial" not in obj.fields else ""
+    if same is True:
+        r.collision = True
+        r.collision_from = where
+        return
     machine.steps = 0
     try:
         if "__partial" in obj.fields:
@@ -6470,15 +6478,12 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
         r.collision_from = where
         return
     if results and all(isinstance(x, Shape) for x in results):
-        same = _same_as_selection(machine, obj, r)
-        if same is True:
-            r.collision = True
-            r.collision_from = where
-            return
         r.collision_why = f"{where} overrides the collision shape with a box of its own" + (
             f" ({same})" if same else "")
     else:
-        r.collision_why = f"{where} overrides the collision shape with one it can't read"
+        r.collision_why = f"{where} overrides the collision shape with one it can't read" + (
+            f" ({same})" if same else " (getShape isn't read, so there is no box to check it against)"
+            if not r.shape_states else "")
 
 
 def _same_as_selection(machine: Machine, obj: Obj, r: Reading):
