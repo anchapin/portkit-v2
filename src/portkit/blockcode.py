@@ -1187,6 +1187,9 @@ class Machine:
         # (class, static field) -> whether it reads as null until written
         # (see _lazy_null).
         self._lazy: dict = {}
+        # Instance lazy caches (#296) whose guard test this run took as null:
+        # (owner, field) -> the object it tested.
+        self._lazy_fill: dict = {}
         # Whether a class of the mod or its libraries can change a system
         # property (see _system_property); computed on first use.
         self._sets_properties: bool | None = None
@@ -1714,53 +1717,118 @@ class Machine:
         return Const(owner, ref.name)
 
     def _lazy_guard(self, insn: Insn) -> bool:
-        """Whether ``insn``, a ``getstatic F`` the run is at, is the test of
-        a lazy-initialisation guard ``if (F == null) F = <expr>;``
-        (``getstatic F; ifnonnull L; ...; putstatic F; L:``, #280) on a
-        field that only such guards write (see _lazy_field). Such a test
-        may be taken as finding null: when the field is set, it holds what
-        an earlier run of a guard on it computed, so running the guard's
-        computation again yields what the read would have (javac's lazy
-        singleton, e.g. ``getBlockRegistry()``). Only the guard's own test
-        is read this way; any other read of the field is as before."""
+        """Whether ``insn``, a ``getstatic F`` (or ``aload n; getfield F``)
+        the run is at, is the test of a lazy-initialisation guard ``if (F ==
+        null) F = <expr>;`` (``getstatic F; ifnonnull L; ...; putstatic F;
+        L:``, #280; on an instance field ``aload n; getfield F; ifnonnull L;
+        aload n; ...; putfield F; L:``, #296) on a field that only such
+        guards write (see _lazy_field). Such a test may be taken as finding
+        null: when the field is set, it holds what an earlier run of a guard
+        on it computed, so running the guard's computation again yields what
+        the read would have (javac's lazy singleton, e.g.
+        ``getBlockRegistry()``; a per-object cache such as a block's class
+        data). Only the guard's own test is read this way; any other read of
+        the field is as before. The outer test of a double-checked fill
+        (``if (F == null) synchronized (lock) { if (F == null) F = ..; }``)
+        is a guard too when its inner test is one: the lock only orders the
+        fill between threads, the value is the same (see _locked_guard)."""
         found = self._code[-1] if self._code else None
         if found is None:
             return False
         _depth, code, at = found
         k = at.get(insn.offset)
-        if k is None or k + 1 >= len(code) or code[k + 1].op != 0xC7 or not isinstance(insn.arg, Ref):
+        if k is None:
+            return False
+        return self._lazy_guard_at(code, k) or self._locked_guard(code, k)
+
+    def _lazy_guard_at(self, code: list, k: int) -> bool:
+        insn = code[k]
+        if k + 1 >= len(code) or code[k + 1].op != 0xC7 or not isinstance(insn.arg, Ref) \
+                or insn.op not in (0xB2, 0xB4):
+            return False
+        static = insn.op == 0xB2
+        if not static and _guarded_slot(code, k) is None:
             return False
         owner = self._field_owner(insn.arg.owner, insn.arg.name)
-        if not self.is_mod(owner) or not self._lazy_field(owner, insn.arg.name):
+        if not self.is_mod(owner) or not self._lazy_field(owner, insn.arg.name, static):
             return False
         target = code[k + 1].arg
+        put = 0xB3 if static else 0xB5
         # The write this test guards: its guard must be this very test, not
         # an inner one (code between two tests may run in the game only
         # while the field is null).
-        return any(c.op == 0xB3 and isinstance(c.arg, Ref) and c.arg.name == insn.arg.name
+        return any(c.op == put and isinstance(c.arg, Ref) and c.arg.name == insn.arg.name
                    and code[i + 1].offset == target
-                   and _lazy_guarded(code, i, owner, insn.arg.name, self) == k + 1
+                   and _lazy_guarded(code, i, owner, insn.arg.name, self, static) == k + 1
                    for i, c in enumerate(code[k + 2:], k + 2) if i + 1 < len(code))
 
-    def _lazy_field(self, owner: str, name: str) -> bool:
-        """Whether static ``owner.name`` is written only by a lazy-
-        initialisation guard: a private, non-final reference field without
-        a ConstantValue (so only its own nest can write it, JVMS 5.4.4,
-        and it starts null, JVMS 2.3, 5.4.2) with exactly one ``putstatic``
-        in its nest's classes, its static initializer included, and that
-        one guarded (see _lazy_guarded). One write, so a set field holds
-        what that same guard computed: two guards could compute different
-        values, and which ran first in the game isn't known."""
-        key = (owner, name)
+    def _locked_guard(self, code: list, k: int) -> bool:
+        """Whether ``code[k]`` is the outer test of a double-checked fill:
+        the same field's read and ``ifnonnull L`` (on the same local, for an
+        instance field), then only the lock taken (loads, ``dup``,
+        ``astore``, ``monitorenter``), then an inner test of the same field
+        that is itself a lazy guard (_lazy_guard_at), whose way on after the
+        fill releases the lock (``monitorexit``) and goes to ``L``. Both
+        tests then find null on the same run; nothing else runs between."""
+        insn = code[k]
+        if k + 1 >= len(code) or code[k + 1].op != 0xC7 or not isinstance(insn.arg, Ref) \
+                or insn.op not in (0xB2, 0xB4):
+            return False
+        slot = None if insn.op == 0xB2 else _guarded_slot(code, k)
+        if insn.op == 0xB4 and slot is None:
+            return False
+        end = code[k + 1].arg
+        locked = False
+        for j in range(k + 2, min(len(code) - 1, k + 12)):
+            c = code[j]
+            if c.op == insn.op and isinstance(c.arg, Ref) and c.arg.name == insn.arg.name \
+                    and c.arg.owner == insn.arg.owner:
+                if not locked or (slot is not None and _guarded_slot(code, j) != slot) \
+                        or not self._lazy_guard_at(code, j):
+                    return False
+                inner_end = code[j + 1].arg
+                at = next((i for i, x in enumerate(code) if x.offset == inner_end), None)
+                if at is None or at + 2 >= len(code):
+                    return False
+                # Release the lock: a load of the lock, monitorexit, then go
+                # to (or fall into) the outer test's L.
+                rel = code[at + 1]
+                if rel.op != 0xC3:
+                    return False
+                nxt = code[at + 2]
+                return nxt.offset == end or (nxt.op in (0xA7, 0xC8) and nxt.arg == end)
+            if c.op == 0xC2:
+                locked = True
+            elif not (c.op in (0x59, 0x12, 0x13, 0xB2) or _local_load(c) is not None
+                      or _local_store(c) is not None) or (c.op in (0x15, 0x16, 0x17, 0x18, 0x84)):
+                return False
+        return False
+
+    def _lazy_field(self, owner: str, name: str, static: bool = True) -> bool:
+        """Whether field ``owner.name`` (static, or an instance field when
+        ``static`` is false) is written only by a lazy-initialisation guard:
+        a private, non-final reference field without a ConstantValue (so
+        only its own nest can write it, JVMS 5.4.4, and it starts null, JVMS
+        2.3, 5.4.2; an instance field starts null in each new object, JLS 4.12.5,
+        until a ``putfield``) with exactly one write
+        (``putstatic`` / ``putfield``) in its nest's classes, its
+        initializers included, and that one guarded (see _lazy_guarded).
+        One write, so a set field holds what that same guard computed: two
+        guards could compute different values, and which ran first in the
+        game isn't known."""
+        key = (owner, name, static)
         if key in self._lazy:
             return self._lazy[key]
         self._lazy[key] = False
         cf = self.classes.get(owner)
         access = getattr(cf, "field_access", {}).get(name) if cf is not None else None
         desc = cf.fields.get(name, "") if cf is not None else ""
-        # ACC_STATIC and ACC_PRIVATE set; ACC_FINAL and ConstantValue not.
-        if access is None or access & 0x1001A != 0x000A or not desc.startswith(("L", "[")):
+        # ACC_PRIVATE set (and ACC_STATIC as asked); ACC_FINAL and
+        # ConstantValue not.
+        want = 0x000A if static else 0x0002
+        if access is None or access & 0x1001A != want or not desc.startswith(("L", "[")):
             return False
+        put = 0xB3 if static else 0xB5
         nest = getattr(self.classes, "nest", None)
         writers = 0
         for cname in (nest(owner) if nest else [owner]):
@@ -1772,10 +1840,10 @@ class Machine:
                     continue
                 code = instructions(other, m.code)
                 for k, insn in enumerate(code):
-                    if insn.op != 0xB3 or not isinstance(insn.arg, Ref) or insn.arg.name != name \
+                    if insn.op != put or not isinstance(insn.arg, Ref) or insn.arg.name != name \
                             or self._field_owner(insn.arg.owner, name) != owner:
                         continue
-                    if _lazy_guarded(code, k, owner, name, self) is None:
+                    if _lazy_guarded(code, k, owner, name, self, static) is None:
                         return False
                     writers += 1
         self._lazy[key] = writers == 1
@@ -2627,7 +2695,15 @@ class Machine:
                 # the same StateDefinition getStateDefinition() returns.
                 s.append(Obj("__statedef"))
             elif isinstance(obj, Obj):
-                s.append(obj.fields[name] if name in obj.fields else self._field_default(obj, name))
+                value = obj.fields[name] if name in obj.fields else self._field_default(obj, name)
+                if (value is UNKNOWN or value is None) and self._lazy_guard(insn):
+                    # A per-object lazy cache's test (#296): the fill runs on
+                    # this object, and only it may take the write.
+                    value = None
+                    self._lazy_fill[(self._field_owner(insn.arg.owner, name), name)] = obj
+                elif self._lazy_fill:
+                    self._lazy_fill.pop((self._field_owner(insn.arg.owner, name), name), None)
+                s.append(value)
             else:
                 site = self._site_map(insn.arg) if obj is UNKNOWN else None
                 s.append(UNKNOWN if site is None else site)
@@ -2636,6 +2712,10 @@ class Machine:
             if isinstance(val, IterV):
                 val.escaped = True
             self._escape_shared(val)
+            filling = self._lazy_fill.pop((self._field_owner(insn.arg.owner, insn.arg.name), insn.arg.name),
+                                          None) if self._lazy_fill else None
+            if filling is not None and obj is not filling:
+                raise Unreadable("a lazy cache's fill writes the field of another object than the one it tested")
             if isinstance(obj, Obj):
                 self._write(f, obj)
                 obj.fields[insn.arg.name] = val
@@ -4946,21 +5026,45 @@ _VANILLA_BLOCKS = "net/minecraft/world/level/block/Blocks"
 _RESOURCE_NAME = re.compile(r"([a-z0-9_.-]+:)?[a-z0-9_./-]+")
 
 
-def _lazy_guarded(code: list, k: int, owner: str, name: str, machine: "Machine") -> int | None:
-    """The index of the ``ifnonnull`` guarding the ``putstatic`` at
-    ``code[k]`` as ``getstatic F; ifnonnull L; ...; putstatic F; L:``, with
-    nothing between the guard and the write jumping out of it or into it
-    from elsewhere, returning or throwing, and no local variable read there that the stretch didn't
-    first write (a computation from the method's arguments or earlier
-    locals could yield a different value each call), or None."""
+def _guarded_slot(code: list, k: int) -> int | None:
+    """The local slot an instance field's guard ``code[k]`` (a getfield)
+    reads the field of, as ``aload n; getfield F``, when nothing in the
+    method stores to slot ``n`` (so every read of slot ``n`` there is the
+    same object), or None."""
+    if k < 1 or code[k - 1].op not in (0x19, 0x2A, 0x2B, 0x2C, 0x2D):
+        return None
+    slot = _local_load(code[k - 1])
+    if any(_local_store(c) == slot for c in code):
+        return None
+    return slot
+
+
+def _lazy_guarded(code: list, k: int, owner: str, name: str, machine: "Machine",
+                  static: bool = True) -> int | None:
+    """The index of the ``ifnonnull`` guarding the write at ``code[k]`` as
+    ``getstatic F; ifnonnull L; ...; putstatic F; L:`` (static) or ``aload
+    n; getfield F; ifnonnull L; ...; putfield F; L:`` (instance, on the
+    object in slot n, which nothing in the method replaces), with nothing
+    between the guard and the write jumping out of it or into it from
+    elsewhere, returning or throwing, and no local variable read there that
+    the stretch didn't first write, but for the guarded object's own slot
+    (a computation from the method's arguments or earlier locals could
+    yield a different value each call), or None."""
     after = code[k + 1].offset if k + 1 < len(code) else None
+    get = 0xB2 if static else 0xB4
     for j in range(k - 1, 0, -1):
         insn = code[j]
         if insn.op == 0xC7 and insn.arg == after:
             prev = code[j - 1]
-            if not (prev.op == 0xB2 and isinstance(prev.arg, Ref) and prev.arg.name == name
+            if not (prev.op == get and isinstance(prev.arg, Ref) and prev.arg.name == name
                     and machine._field_owner(prev.arg.owner, name) == owner):
                 return None
+            written: set = set()
+            if not static:
+                slot = _guarded_slot(code, j - 1)
+                if slot is None:
+                    return None
+                written.add(slot)
             inside = {c.offset for c in code[j + 1:k + 1]}
             for i, other in enumerate(code):
                 if j <= i <= k:
@@ -4970,7 +5074,6 @@ def _lazy_guarded(code: list, k: int, owner: str, name: str, machine: "Machine")
                     continue
                 if any(t in inside for t in _targets(other)):
                     return None
-            written: set = set()
             for other in code[j + 1:k]:
                 if 0xAC <= other.op <= 0xB1 or other.op == 0xBF:
                     return None  # leaves the method before the write
@@ -5250,6 +5353,9 @@ class Reading:
     # Where a read collision comes from: "" for the Properties
     # (noCollission or not), else the getCollisionShape override read (#296).
     collision_from: str = ""
+    # The states the shape reader read getShape at, each with the boxes it
+    # gave (#296: a getCollisionShape override is checked against them).
+    shape_states: list = field(default_factory=list)
     # The state names createBlockStateDefinition adds, or None if unread.
     states: tuple | None = None
     # Behaviour methods the block's own classes override (use, ticks, a block
@@ -5906,6 +6012,7 @@ def _read_shape(machine: Machine, obj: Obj, r: Reading) -> None:
     where = _declaring(machine, obj.cls, "getShape", _GET_SHAPE_DESC)
     default = obj.fields.get("__default", State())
     shapes = {}
+    r.shape_states = []
     try:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
@@ -5917,6 +6024,7 @@ def _read_shape(machine: Machine, obj: Obj, r: Reading) -> None:
             if len({x for x in results}) != 1:
                 raise Unreadable(f"the shape at facing={d} depends on more than the facing")
             shapes[d] = results[0].boxes
+            r.shape_states.append((state, results[0].boxes))
     except Unreadable as exc:
         r.shape_why = f"{where}: {exc}"
     else:
@@ -6304,6 +6412,7 @@ def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading, flat: bool =
     where = _declaring(machine, obj.cls, "getShape", _GET_SHAPE_DESC)
     default = obj.fields.get("__default", State())
     shapes = {}
+    r.shape_states = []
     try:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
@@ -6320,6 +6429,7 @@ def _read_state_shapes(machine: Machine, obj: Obj, r: StateReading, flat: bool =
                 if len({x for x in results}) != 1:
                     raise Unreadable(f"the shape at {at} depends on more than the drawn states")
                 shapes[(d, combo)] = results[0].boxes
+                r.shape_states.append((state, results[0].boxes))
     except Unreadable as exc:
         r.shape_why = f"{where}: {exc}"
     else:
@@ -6347,6 +6457,14 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
     Anything else (a box, a shape it can't read, a test on the world it
     can't decide that leads to a box) keeps the DEFAULT, with the reason."""
     where = f"{own[0].name.replace('/', '.')}#getCollisionShape"
+    # At the states getShape was read at first: the same boxes there is
+    # collision as a converted block has it. (Read before the every-state
+    # call, whose unknown state a block entity's cache would keep.)
+    same = _same_as_selection(machine, obj, r) if "__partial" not in obj.fields else ""
+    if same is True:
+        r.collision = True
+        r.collision_from = where
+        return
     machine.steps = 0
     try:
         if "__partial" in obj.fields:
@@ -6360,9 +6478,34 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
         r.collision_from = where
         return
     if results and all(isinstance(x, Shape) for x in results):
-        r.collision_why = f"{where} overrides the collision shape with a box of its own"
+        r.collision_why = f"{where} overrides the collision shape with a box of its own" + (
+            f" ({same})" if same else "")
     else:
-        r.collision_why = f"{where} overrides the collision shape with one it can't read"
+        r.collision_why = f"{where} overrides the collision shape with one it can't read" + (
+            f" ({same})" if same else " (getShape isn't read, so there is no box to check it against)"
+            if not r.shape_states else "")
+
+
+def _same_as_selection(machine: Machine, obj: Obj, r: Reading):
+    """True when the block's getCollisionShape, read for an entity the code
+    doesn't single out (Collider), gives at each state the shape reader
+    read getShape at (``r.shape_states``) exactly the boxes getShape gave
+    there, one shape on every path (#296): its collision is then the
+    selection box, as a converted block's is. Else why not, as text, or ""
+    when the shapes weren't read."""
+    if not r.shape_states:
+        return ""
+    for state, boxes in r.shape_states:
+        machine.steps = 0
+        try:
+            results = _shape_call(machine, obj, r.name, "getCollisionShape", state, COLLIDER_CONTEXT)
+        except Unreadable as exc:
+            return f"it can't be followed at a drawn state ({exc})"
+        if not results or any(not isinstance(x, Shape) for x in results) or len(set(results)) != 1:
+            return "the box at a drawn state depends on more than the drawn states"
+        if results[0].boxes != boxes:
+            return "a box other than the selection box at a drawn state"
+    return True
 
 
 def _read_shape_collision(machine: Machine, obj: Obj, r: Reading) -> None:
@@ -7612,6 +7755,7 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
     where = _declaring(machine, obj.cls, "getShape", _GET_SHAPE_DESC)
     default = obj.fields.get("__default", State())
     shapes = {}
+    r.shape_states = []
     try:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
@@ -7625,6 +7769,7 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
             if len({x for x in results}) != 1:
                 raise Unreadable(f"the shape at {label} depends on more than the drawn states")
             shapes[key] = results[0].boxes
+            r.shape_states.append((state, results[0].boxes))
     except Unreadable as exc:
         r.shape_why = f"{where}: {exc}"
     else:
@@ -7800,6 +7945,7 @@ def _read_dir_state_shapes(machine: Machine, obj: Obj, r: DirStateReading) -> No
     default = obj.fields.get("__default", State())
     default = default if isinstance(default, State) else State()
     shapes = {}
+    r.shape_states = []
     try:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
@@ -7814,6 +7960,7 @@ def _read_dir_state_shapes(machine: Machine, obj: Obj, r: DirStateReading) -> No
                 if len({x for x in results}) != 1:
                     raise Unreadable(f"the shape at {label} depends on more than the drawn states")
                 shapes[(key, combo)] = results[0].boxes
+                r.shape_states.append((state, results[0].boxes))
     except Unreadable as exc:
         r.shape_why = f"{where}: {exc}"
     else:

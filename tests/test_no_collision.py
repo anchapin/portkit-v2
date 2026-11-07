@@ -53,16 +53,21 @@ def test_a_copy_of_a_mod_blocks_properties_carries_its_collision():
 
 def test_an_override_that_collides_somewhere_keeps_the_default():
     r = _read()
-    # Only projectiles pass: every other entity collides.
-    assert r["grate"].collision is None
-    assert "box of its own" in r["grate"].collision_why
+    # Only projectiles pass: every other entity collides, with getShape's
+    # own box, so the collision box is the selection box (read; #296, the
+    # lazy-cache follow-up: an override is checked against getShape at the
+    # states the shape reader read).
+    assert r["grate"].collision is True
+    assert r["grate"].collision_from == "com.example.nmod.NGrate#getCollisionShape"
     # Empty only in some states: every state is followed.
     assert r["gate"].collision is None
     # noCollission Properties, but the override collides (it wins, as in Java).
-    assert r["solid"].collision is None
-    assert "NSolid#getCollisionShape" in r["solid"].collision_why
-    # Every state of the block has lit, so hasProperty(lit) is true.
-    assert r["has"].collision is None
+    # Its box is getShape's (the full block), so that is read too.
+    assert r["solid"].collision is True
+    assert r["solid"].collision_from == "com.example.nmod.NSolid#getCollisionShape"
+    # Every state of the block has lit, so hasProperty(lit) is true: it
+    # collides with the full block, getShape's box, so that is read.
+    assert r["has"].collision is True
 
 
 def test_collider_answers_only_what_every_entity_context_is():
