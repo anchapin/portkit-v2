@@ -62,8 +62,9 @@ def test_an_override_that_collides_somewhere_keeps_the_default():
     # Empty only in some states: every state is followed.
     assert r["gate"].collision is None
     # noCollission Properties, but the override collides (it wins, as in Java).
-    assert r["solid"].collision is None
-    assert "NSolid#getCollisionShape" in r["solid"].collision_why
+    # Its box is getShape's (the full block), so that is read too.
+    assert r["solid"].collision is True
+    assert r["solid"].collision_from == "com.example.nmod.NSolid#getCollisionShape"
     # Every state of the block has lit, so hasProperty(lit) is true.
     assert r["has"].collision is None
 
