@@ -3496,6 +3496,12 @@ def _no_collision_notes(records: list[dict]) -> list[str]:
         notes.append("No collision, read from bytecode (the block's getCollisionShape returns "
                      "Shapes.empty() in every state, read for an entity its code doesn't single out; "
                      "Bedrock has one collision box for every entity) - " + _grouped(own) + ".")
+    same = [(r["collision_from"], r["name"]) for r in records
+            if r["collision"] is True and r.get("collision_from")]
+    if same:
+        notes.append("Collision read from bytecode (the block's getCollisionShape gives the same boxes as "
+                     "its getShape at every drawn state, read for an entity its code doesn't single out; "
+                     "Bedrock has one collision box for every entity) - " + _grouped(same) + ".")
     return notes
 
 
