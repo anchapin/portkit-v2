@@ -6867,6 +6867,15 @@ def _read_water(machine: Machine, obj: Obj, r: WaterReading) -> None:
 # BlockState#canSurvive, the answer is true, as if the clicked face held the
 # block up; Java would try the next looking direction or refuse to place. The
 # reading says when it leaned on this (support_assumed).
+#
+# The box (#296) is getShape at each state the blockstate draws (the facing,
+# the face, and with booleans each combination), with every other state of
+# the block unknown (_undrawn_unknown): a box that also depends on a state
+# the blockstate doesn't draw gives more than one shape there and keeps the
+# labelled DEFAULT, named, rather than the box of that state's registered
+# value at every facing (Create's FluidValveBlock picks its pipe axis by
+# axis_along_first). Direction.Axis#values / #ordinal are read, so javac's
+# switch map on an axis (Immersive Engineering's WindowBlock) is followed.
 
 DIRECTIONAL_KINDS = ("facing6", "attach", "vslab", "facing", "vine")
 # ``facing`` (#296): a blockstate whose only state is ``facing`` over some of
