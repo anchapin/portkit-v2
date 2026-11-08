@@ -7209,7 +7209,7 @@ def _state_text(value) -> str | None:
 
 
 def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, start: dict,
-                       machine: Machine | None = None) -> tuple[dict | None, str]:
+                       machine: Machine | None = None, untouched: bool = False) -> tuple[dict | None, str]:
     """({clicked face: ((state, value), ...)}, "") for a method of the mod's
     block entity class ``cls`` (slashed) that a mod calls once its block is
     placed, with the clicked face as its first ``Direction`` argument (#296:
@@ -7228,7 +7228,10 @@ def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, star
     ``Player``) is the placing player; any other argument is unknown, so a
     state set from it, or from anything but the clicked face, isn't one: the
     run must take one way through, and a call it can't follow (one that
-    might set a block) stops the reading."""
+    might set a block) stops the reading. With ``untouched``, a field of the
+    block entity it writes is a reason too (#296: the block entity a shape
+    is read from is then as its constructor and the block's own placement
+    hooks left it, its block state aside)."""
     machine = machine or Machine(classes)
     where = f"{cls.replace('/', '.')}#{name}"
     found = machine.find_method(cls, name, desc) or machine.default_method(cls, name, desc)
@@ -7301,6 +7304,9 @@ def read_placed_states(classes: ClassIndex, cls: str, name: str, desc: str, star
                               "sets follows something besides the clicked face")
             if current["why"]:
                 return None, f"{where}, clicking the {c} face, {current['why']}"
+            written = sorted(k for k in obj.fields if k not in (_OWN_POS_FIELD, _OWN_LEVEL_FIELD))
+            if untouched and written:
+                return None, f"{where}, clicking the {c} face, writes its block entity's {', '.join(written)}"
             if len(machine.havocs) > havocs:
                 return None, (f"{where}, clicking the {c} face, makes a call the reader can't follow "
                               f"({machine.havocs[havocs]})")
@@ -7641,10 +7647,38 @@ class _EntityWorld:
                     self.why = f"{at}, run when the block is placed, " + (
                         self.asked or "makes a call the reader can't follow")
                     return
-            why = placement(own.cls, be.cls)
+            # The block's states (its createBlockStateDefinition names), for
+            # an adapter that reads placement code setting them.
+            named = Reading(name)
+            _read_states(machine, own, named)
+            states = tuple(n for n in (named.states or ()) if isinstance(n, str) and not n.startswith("__"))
+            why = placement(own.cls, be.cls, states)
+            runs = ()
+            if isinstance(why, tuple):
+                why, runs = why
             if why:
                 self.why = why
                 return
+            for mname, mdesc in runs:
+                # A method the mod's own placement runs on the block entity
+                # (its adapter names it), run as setPlacedBy is: every
+                # argument but the block entity unknown.
+                decl = machine.find_method(be.cls, mname, mdesc) or machine.default_method(be.cls, mname, mdesc)
+                at = f"{decl[0].name.replace('/', '.')}#{mname}" if decl is not None else f"{be_where}#{mname}"
+                if decl is None or decl[1].code is None:
+                    self.why = f"{at}, run when the block is placed, isn't found"
+                    return
+                self.entity = be
+                machine.steps = 0
+                try:
+                    machine.run(*decl, [be] + [UNKNOWN] * len(_param_types(mdesc)))
+                except Unreadable as exc:
+                    self.why = f"{at}, run when the block is placed, can't be followed ({exc})"
+                    return
+                if self.asked or len(machine.havocs) > havocs:
+                    self.why = f"{at}, run when the block is placed, " + (
+                        self.asked or "makes a call the reader can't follow")
+                    return
             self.entity, self.machine, self.obj, self.where = be, machine, own, f"{where} ({be_where})"
         finally:
             machine.call_hook = saved
@@ -7993,7 +8027,7 @@ def _read_dir_state_shapes(machine: Machine, obj: Obj, r: DirStateReading) -> No
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
         drawn = set(r.bools) | ({"face"} if r.kind == "attach" else set())
         for combo in combinations(r.bools):
-            for key in directional_keys(r.kind):
+            for key in directional_keys(r.kind, r.facings):
                 state, undrawn = _undrawn_unknown(default, r, drawn)
                 state = _with_key(_with(state, r.bools, combo), r.kind, key)
                 label = (f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}") + "".join(
@@ -8005,6 +8039,45 @@ def _read_dir_state_shapes(machine: Machine, obj: Obj, r: DirStateReading) -> No
     else:
         r.shapes_by = shapes
         r.shape_from = where
+
+
+def read_facing_second_shapes(classes: ClassIndex | None, specs: dict[str, tuple[tuple, str]],
+                              run=None) -> dict[str, DirStateReading]:
+    """Java's boxes per (facing, boolean) for blockstates drawing ``facing``
+    over ``facings`` beside one boolean state ``second`` (name -> (facings,
+    second)) whose placement another reader gives (#296: a facing the mod
+    sets after placement beside a state it sets from the clicked face,
+    converters/blocks._after_placement_second). ``getShape`` runs at each
+    drawn (facing, boolean) with every other state of the block unknown
+    (_undrawn_unknown), as _read_dir_state_shapes runs it for 6-way facing
+    blocks with booleans; a block entity's shape is read as _shape_call
+    reads it. ``shapes_by`` maps ((face, facing), (0 or 1,)) to the boxes;
+    the collision is checked at the same states (_read_shape_collision)."""
+    readings = {n: DirStateReading(n, kind="facing", facings=tuple(f), bools=(b,)) for n, (f, b) in specs.items()}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.shape_why = r.collision_why = "the mod ships no class files"
+        return readings
+    machine, registered = _from_run(run, classes, list(specs))
+    for name, r in readings.items():
+        objs, why = registered.get(name) or ([], "no registration found")
+        if not objs:
+            r.shape_why = r.collision_why = why
+            continue
+        obj = objs[0]
+        r.cls = obj.cls.replace("/", ".")
+        _read_states(machine, obj, r)
+        _read_dir_state_shapes(machine, obj, r)
+        _read_shape_collision(machine, obj, r)
+        if len(objs) > 1:
+            other = DirStateReading(name, kind="facing", facings=r.facings, bools=r.bools)
+            _read_states(machine, objs[1], other)
+            _read_dir_state_shapes(machine, objs[1], other)
+            _read_shape_collision(machine, objs[1], other)
+            if (other.shapes_by, other.collision) != (r.shapes_by, r.collision):
+                r.shapes_by, r.collision = None, None
+                r.shape_why = r.collision_why = "registered twice with different settings"
+    return readings
 
 
 # --- Containers (#179) -------------------------------------------------------
