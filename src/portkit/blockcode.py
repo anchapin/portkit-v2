@@ -7647,11 +7647,17 @@ class _EntityWorld:
                     self.why = f"{at}, run when the block is placed, " + (
                         self.asked or "makes a call the reader can't follow")
                     return
-            # The block's states (its createBlockStateDefinition names), for
-            # an adapter that reads placement code setting them.
+            # The block's states (its createBlockStateDefinition names, else
+            # its default state's, as _undrawn_unknown takes them), for an
+            # adapter that reads placement code setting them.
             named = Reading(name)
             _read_states(machine, own, named)
-            states = tuple(n for n in (named.states or ()) if isinstance(n, str) and not n.startswith("__"))
+            default = own.fields.get("__default")
+            names = named.states if named.states is not None else tuple(
+                k for k, _v in default.values) if isinstance(default, State) else ()
+            states = tuple(sorted({n for n in names if isinstance(n, str) and not n.startswith("__")
+                                   and n != "facing6"}))
+            havocs = len(machine.havocs)
             why = placement(own.cls, be.cls, states)
             runs = ()
             if isinstance(why, tuple):

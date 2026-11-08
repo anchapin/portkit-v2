@@ -243,3 +243,78 @@ def test_facing_beside_unread_states_stays_residue_with_its_reason(converted):
         why = next(u.reason for u in converted.unhandled if u.source.endswith(f"blockstates/{stem}.json"))
         assert "doesn't set facing" in why and "the mod's placement after the block is set isn't read" in why
         assert part in why
+
+
+# --- The curtain's box per (facing, ceiling_attached) (#296) -----------------
+#
+# CurtainBlock#getShape asks the world for its block entity (IEEntityBlock),
+# whose getBlockBounds picks a rail by facing and ceiling_attached
+# (StripCurtainBlockEntity). The core reads it at each drawn (facing,
+# ceiling_attached) with the block entity its placement makes; the adapter
+# reads onDirectionalPlacement (it only sets the block's own state) and hands
+# onBEPlaced back for the core to run on that block entity.
+
+CURTAIN_BLOCK = "blusunrize/immersiveengineering/common/blocks/CurtainBlock"
+_BE_PLACED = ("onBEPlaced", "(Lnet/minecraft/world/item/context/BlockPlaceContext;)V")
+
+
+def test_placement_check_reads_a_block_entity_told_the_clicked_face():
+    classes = ClassIndex.from_source(CLASSES)
+    check = ie.entity_placement(classes)
+    # onDirectionalPlacement sets only ceiling_attached on its own block;
+    # onBEPlaced is the core's to run on the block entity it built.
+    assert check(CURTAIN_BLOCK, THINGS + "CurtainBE", ("ceiling_attached", "facing")) == ("", [_BE_PLACED])
+    # Not told the block's states, a state it sets wasn't asked about.
+    why = check(CURTAIN_BLOCK, THINGS + "CurtainBE")
+    assert "onDirectionalPlacement" in why and "wasn't asked about" in why
+    # Writing a field of the block entity there is a reason.
+    why = check(CURTAIN_BLOCK, THINGS + "TallyBE", ("ceiling_attached", "facing"))
+    assert "writes its block entity's tally" in why
+    # A block entity placing more blocks stays named.
+    assert "placeDummies" in check(CURTAIN_BLOCK, THINGS + "TwoHighBE", ("facing", "multiblockslave"))
+
+
+def test_core_names_the_fields_a_placement_method_writes():
+    classes = ClassIndex.from_source(CLASSES)
+    start = {"ceiling_attached": None, "facing": "north"}
+    sets, why = blockcode.read_placed_states(classes, THINGS + "TallyBE", "onDirectionalPlacement", ADVANCED_DESC,
+                                             start, untouched=True)
+    assert sets is None and "writes its block entity's tally" in why
+    # Without untouched the field isn't looked at (the facing reader's use).
+    sets, why = blockcode.read_placed_states(classes, THINGS + "TallyBE", "onDirectionalPlacement", ADVANCED_DESC,
+                                             start)
+    assert why == "" and sets["down"] == (("ceiling_attached", "true"),)
+    sets, why = blockcode.read_placed_states(classes, THINGS + "CurtainBE", "onDirectionalPlacement", ADVANCED_DESC,
+                                             start, untouched=True)
+    assert why == "" and sets["down"] == (("ceiling_attached", "true"),)
+
+
+def test_core_reads_the_box_per_facing_and_boolean(tmp_path):
+    mod = _mod(tmp_path)
+    mod.classes.entity_placement = ie.entity_placement(mod.classes)
+    got = blockcode.read_facing_second_shapes(mod.classes, {"curtain": (("north", "south", "west", "east"),
+                                                                        "ceiling_attached")})["curtain"]
+    assert got.shape_why == "" and got.shapes_by is not None
+    px = {(k[1], c[0]): tuple(round(v, 4) for v in boxes[0]) for (k, c), boxes in got.shapes_by.items()}
+    # In pixels. Wall rails by (ordinal - 2) % 4; the ceiling rail along z or x.
+    assert px[("north", 0)] == (0, 0, 0, 16, 3, 1)
+    assert px[("south", 0)] == (0, 0, 15, 16, 3, 16)
+    assert px[("west", 0)] == (0, 0, 0, 1, 3, 16)
+    assert px[("east", 0)] == (15, 0, 0, 16, 3, 16)
+    assert px[("north", 1)] == px[("south", 1)] == (0, 13, 7.5, 16, 16, 8.5)
+    assert px[("west", 1)] == px[("east", 1)] == (7.5, 13, 0, 8.5, 16, 16)
+    # getCollisionShape isn't overridden: collision as Properties say.
+    assert got.collision is True
+
+
+def test_curtain_box_follows_ceiling_attached(converted):
+    block = converted.files["blocks/curtain.json"]["minecraft:block"]
+    boxes = {}
+    for p in block["permutations"]:
+        ceiling = "'minecraft:block_face') == 'down'" in p["condition"]
+        sel = p["components"].get("minecraft:selection_box") or block["components"].get("minecraft:selection_box")
+        assert p["components"].get("minecraft:collision_box", sel) == sel
+        boxes.setdefault(ceiling, set()).add(json.dumps(sel, sort_keys=True))
+    # Stored before the permutation's y turn: one box per half.
+    assert boxes[False] == {json.dumps({"origin": [-8, 0, -8], "size": [16, 3, 1]}, sort_keys=True)}
+    assert boxes[True] == {json.dumps({"origin": [-8, 13, -0.5], "size": [16, 3, 1]}, sort_keys=True)}

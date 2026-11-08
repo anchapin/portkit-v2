@@ -5276,7 +5276,7 @@ def _second_shapes(mod: SourceMod, name: str, r, second: str, order: list, keys:
     states unknown (#296); else (None, why the box isn't read). Sets the
     reading's box source and collision from that read."""
     if set(order) != _BOOL_VALUES:
-        return None, f"the box isn't read per {second}, which isn't a boolean"
+        return None, f"the box isn't read per {second}, which isn't a boolean drawn at both values"
     facings = tuple(d for d in _SIX if any(f == d for _, f in keys))
     got = blockcode.read_facing_second_shapes(getattr(mod, "classes", None), {name: (facings, second)},
                                               run=run)[name]
