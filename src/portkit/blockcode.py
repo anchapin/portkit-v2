@@ -7710,6 +7710,7 @@ class _AloneContext:
         return "placement of the block alone, by no player"
 
 
+
 def _entity_run(classes: ClassIndex, name: str):
     """The registration run that follows block entity types, one per mod:
     over every blockstate the converter's shared run covers
@@ -7727,12 +7728,15 @@ class _EntityWorld:
     """The block entity a block's placement makes, built once per block
     (see the section comment); ``why`` says why there is none."""
 
+    # The place context an adapter-named placement method runs with.
+    ctx = None
+    # Set once the block's placement or shape code asks about a position
+    # beside the block, answered as empty (#296: read as placed alone).
+    beside = False
+
     def __init__(self, machine: Machine, obj: Obj, name: str):
         self.why, self.entity, self.machine, self.obj = "", None, None, None
         self.level, self.pos, self.state = _PlacedLevel(), _Near(), UNKNOWN
-        self.ctx = _AloneContext()
-        # Set once the block's placement or shape code asks about a position
-        # beside the block, answered as empty (#296: read as placed alone).
         self.beside = False
         self._build(machine.classes, obj, name)
 
@@ -7900,6 +7904,9 @@ class _EntityWorld:
             return machine.call(self.obj.cls, method, _GET_SHAPE_DESC, [self.obj, state, self.level, self.pos, ctx])
         finally:
             machine.call_hook, self.state = saved, UNKNOWN
+
+
+_EntityWorld.ctx = _AloneContext()
 
 
 def _asks_entity(machine: Machine, obj: Obj, method: str) -> bool:
