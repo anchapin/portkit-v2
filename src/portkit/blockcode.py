@@ -3544,6 +3544,12 @@ class Machine:
             return self._player(name, recv, rest)
         if owner == _DIRECTION or isinstance(recv, (Dir, PlayerDir, LookDir)):
             return self._direction(name, recv, rest, static)
+        if owner == _DIRECTION + "$Axis" and static and name == "values" and not rest:
+            # Direction$Axis: X, Y, Z in declaration order (MC 1.21.1).
+            return [Arr([Const(_DIRECTION + "$Axis", n) for n in ("X", "Y", "Z")])]
+        if isinstance(recv, Const) and recv.owner == _DIRECTION + "$Axis" and recv.name in ("X", "Y", "Z") \
+                and name == "ordinal" and not rest:
+            return [("X", "Y", "Z").index(recv.name)]
         if isinstance(recv, Const) and recv.owner == _DIRECTION + "$Axis" and recv.name in ("X", "Y", "Z") \
                 and name in ("isHorizontal", "isVertical") and not rest:
             # Direction.Axis#isHorizontal / #isVertical (MC 1.21.1): X and Z
@@ -7023,6 +7029,36 @@ def _with_key(state: State, kind: str, key: tuple, r: "DirReading | None" = None
     return state.set("face", Const(_ATTACH_FACE, face.upper()))
 
 
+def _undrawn_unknown(state: State, r: "Reading", drawn) -> tuple[State, tuple]:
+    """``state`` with every state of the block (#296: its
+    createBlockStateDefinition names, else its default state's) other than
+    ``drawn`` and the facing names set unknown, and those names: a 6-way
+    facing block's box is read at each drawn state alone, so a box that
+    also depends on a state the blockstate doesn't draw (one placement or
+    the world sets) gives more than one shape there and isn't read, rather
+    than reading the box of that state's registered value at every facing."""
+    names = r.states if r.states is not None else tuple(k for k, _v in state.values)
+    keep = set(drawn) | {"facing", "facing6"}
+    undrawn = tuple(sorted({n for n in names if isinstance(n, str) and not n.startswith("__") and n not in keep}))
+    for n in undrawn:
+        state = state.set(n, UNKNOWN)
+    return state, undrawn
+
+
+def _shape_at(machine: Machine, obj: Obj, r: "Reading", base: State, undrawn: tuple, label: str):
+    """getShape's boxes at ``base`` (the drawn state, undrawn states unknown),
+    or Unreadable with the reason."""
+    results = _shape_call(machine, obj, r.name, "getShape", base)
+    if not results or any(not isinstance(x, Shape) for x in results):
+        raise Unreadable(f"the shape at {label} is not built from boxes it can read")
+    if len({x for x in results}) != 1:
+        if undrawn:
+            raise Unreadable(f"the shape at {label} depends on more than the drawn states (it can also "
+                             f"depend on {', '.join(undrawn)}, which the blockstate doesn't draw)")
+        raise Unreadable(f"the shape at {label} depends on more than the drawn states")
+    return results[0].boxes
+
+
 def read_directional(classes: ClassIndex | None, kinds: dict[str, str], run=None,
                      facings: dict[str, tuple] | None = None,
                      faces: dict[str, tuple] | None = None) -> dict[str, DirReading]:
@@ -7759,17 +7795,14 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
     try:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
+        drawn = set(VINE_FACES) if r.kind == "vine" else {r.face_prop, "face"} if r.kind == "attach" else set()
         for key in directional_keys(r.kind, r.facings):
-            state = _with_key(default if isinstance(default, State) else State(), r.kind, key, r)
-            results = _shape_call(machine, obj, r.name, "getShape", state)
+            state, undrawn = _undrawn_unknown(default if isinstance(default, State) else State(), r, drawn)
+            state = _with_key(state, r.kind, key, r)
             label = (f"{key[1]}=true" if r.kind == "vine" else
                      f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}")
-            if not results or any(not isinstance(x, Shape) for x in results):
-                raise Unreadable(f"the shape at {label} is not built from boxes it can read")
-            if len({x for x in results}) != 1:
-                raise Unreadable(f"the shape at {label} depends on more than the drawn states")
-            shapes[key] = results[0].boxes
-            r.shape_states.append((state, results[0].boxes))
+            shapes[key] = _shape_at(machine, obj, r, state, undrawn, label)
+            r.shape_states.append((state, shapes[key]))
     except Unreadable as exc:
         r.shape_why = f"{where}: {exc}"
     else:
@@ -7949,18 +7982,15 @@ def _read_dir_state_shapes(machine: Machine, obj: Obj, r: DirStateReading) -> No
     try:
         if "__partial" in obj.fields:
             raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
+        drawn = set(r.bools) | ({"face"} if r.kind == "attach" else set())
         for combo in combinations(r.bools):
             for key in directional_keys(r.kind):
-                state = _with_key(_with(default, r.bools, combo), r.kind, key)
-                results = _shape_call(machine, obj, r.name, "getShape", state)
+                state, undrawn = _undrawn_unknown(default, r, drawn)
+                state = _with_key(_with(state, r.bools, combo), r.kind, key)
                 label = (f"face={key[0]},facing={key[1]}" if key[0] else f"facing={key[1]}") + "".join(
                     f",{p}={'true' if v else 'false'}" for p, v in zip(r.bools, combo))
-                if not results or any(not isinstance(x, Shape) for x in results):
-                    raise Unreadable(f"the shape at {label} is not built from boxes it can read")
-                if len({x for x in results}) != 1:
-                    raise Unreadable(f"the shape at {label} depends on more than the drawn states")
-                shapes[(key, combo)] = results[0].boxes
-                r.shape_states.append((state, results[0].boxes))
+                shapes[(key, combo)] = _shape_at(machine, obj, r, state, undrawn, label)
+                r.shape_states.append((state, shapes[(key, combo)]))
     except Unreadable as exc:
         r.shape_why = f"{where}: {exc}"
     else:
