@@ -47,4 +47,8 @@ public class IEBlockInterfaces {
     public interface IPlacementInteraction {
         void onBEPlaced(BlockPlaceContext ctx);
     }
+
+    public interface IBlockBounds {
+        net.minecraft.world.phys.shapes.VoxelShape getBlockBounds(net.minecraft.world.phys.shapes.CollisionContext ctx);
+    }
 }

@@ -5137,7 +5137,7 @@ def _read_set_after_placement(mod: SourceMod, loaded: dict, coded: dict, shared,
         elif "isn't read (" in r.rule_conflict:
             why[name] = f"facing: {r.rule_conflict}"
     if starts:
-        _after_placement_second(mod, loaded, {n: readings[n] for n in starts}, starts, out, why)
+        _after_placement_second(mod, loaded, {n: readings[n] for n in starts}, starts, out, why, run=run)
 
 
 def _facing_and_others(blockstate: dict) -> tuple[tuple, dict] | None:
@@ -5166,7 +5166,7 @@ def _facing_and_others(blockstate: dict) -> tuple[tuple, dict] | None:
 
 
 def _after_placement_second(mod: SourceMod, loaded: dict, readings: dict, starts: dict, out: dict,
-                            why: dict) -> None:
+                            why: dict, run=None) -> None:
     """Fill ``out`` / ``why`` for blockstates drawing ``facing`` beside other
     states whose facing the mod sets after placement (#296): the adapter's
     rule gives facing; the one other state it sets from the clicked face
@@ -5175,7 +5175,10 @@ def _after_placement_second(mod: SourceMod, loaded: dict, readings: dict, starts
     minecraft:block_face, with minecraft:cardinal_direction /
     facing_direction where the player decides); every other state is held
     at its registered start (#215 item 6, #383 pick 1a: what the code
-    changes after placement is static at its start)."""
+    changes after placement is static at its start). A boolean second
+    state's boxes are read per (second state, facing)
+    (blockcode.read_facing_second_shapes); any other second state keeps
+    the box DEFAULT, named."""
     from ..adapters import Orientation, orientations
     asked = {n: r for n, r in readings.items() if r.rule is None and r.rule_conflict
              and "doesn't set facing" in r.rule_conflict and r.cls}
@@ -5260,9 +5263,30 @@ def _after_placement_second(mod: SourceMod, loaded: dict, readings: dict, starts
             order = sorted({v for v, _ in cells})
             keys = [(v, f) for f in _SIX for v in order if (v, f) in cells]
             r.rule, r.rule_from, r.rule_why, r.rule_conflict = dict(o.rule), o.source, "", ""
+            shapes, box_why = _second_shapes(mod, name, r, second, order, keys, run)
             out[name] = ("facing_spin", {(k, ()): v for k, v in cells.items()}, r, (), {
                 "orientation": spin_o, "second": second, "placed": bedrock, "keys": keys,
-                "z_only": [], "held": held})
+                "z_only": [], "held": held, "shapes": shapes, "box_why": box_why})
+
+
+def _second_shapes(mod: SourceMod, name: str, r, second: str, order: list, keys: list, run) -> tuple:
+    """({(second state's value, facing): Java's boxes}, "") for a
+    facing-with-second-state block whose second state is a boolean, read
+    from its code at each drawn (facing, second state) with its other
+    states unknown (#296); else (None, why the box isn't read). Sets the
+    reading's box source and collision from that read."""
+    if set(order) != _BOOL_VALUES:
+        return None, f"the box isn't read per {second}, which isn't a boolean drawn at both values"
+    facings = tuple(d for d in _SIX if any(f == d for _, f in keys))
+    got = blockcode.read_facing_second_shapes(getattr(mod, "classes", None), {name: (facings, second)},
+                                              run=run)[name]
+    r.collision, r.collision_why, r.collision_from = got.collision, got.collision_why, got.collision_from
+    if got.shapes_by is None:
+        r.shape_why = got.shape_why
+        return None, got.shape_why
+    r.shape_from, r.shape_why = got.shape_from, ""
+    return {(("true" if combo[0] else "false"), key[1]): boxes
+            for (key, combo), boxes in got.shapes_by.items()}, ""
 
 
 def _adapter_rules(mod: SourceMod, readings: dict, states: dict | None = None) -> None:
@@ -5560,8 +5584,9 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
     for conds, key in bedrock:
         conds_of.setdefault(key, []).append(conds)
     keys = list(spin["keys"]) if spin else blockcode.directional_keys(kind, facings)
-    # A facing-with-second-state block's boxes aren't read per second state.
-    shapes_by = None if spin else reading.shapes_by
+    # A facing-with-second-state block's boxes are read per (second state,
+    # facing) only where its second state is a boolean (_second_shapes).
+    shapes_by = spin.get("shapes") if spin else reading.shapes_by
     stray = sorted({k for k in conds_of if k not in keys}, key=lambda k: _SIX.index(k[1])) if kind == "facing" else []
     if stray:
         # The placement rule gives a facing the blockstate doesn't draw.
@@ -5829,7 +5854,8 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
             rule, "the face set is" if kind == "vine" else _DIR_PROP.get(kind, "facing")),
         "support": not spin and (reading.support_assumed or reading.rule is None and kind == "attach"),
         "box": reading.shape_from if shapes_by is not None else None,
-        "box_why": (f"the box isn't read per {spin['second']}" if spin else reading.shape_why),
+        "box_why": (spin.get("box_why") or f"the box isn't read per {spin['second']}" if spin and shapes_by is None
+                    else reading.shape_why),
         "collision": reading.collision,
         "collision_why": reading.collision_why,
         "collision_from": reading.collision_from,

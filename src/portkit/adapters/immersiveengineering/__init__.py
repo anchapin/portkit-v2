@@ -451,7 +451,8 @@ def _side_is_clicked_face(classes) -> bool:
     return False
 
 
-def _advanced_states(classes, be: str, prop: str, start: dict, machine) -> tuple[dict | None, str]:
+def _advanced_states(classes, be: str, prop: str, start: dict, machine,
+                     untouched: bool = False) -> tuple[dict | None, str]:
     """({clicked face: ((state, value), ...)}, "") that an
     IAdvancedDirectionalBE's ``onDirectionalPlacement`` sets on its block
     after its facing (IEEntityBlock#onIEBlockPlacedBy L203-206), read by the
@@ -469,7 +470,8 @@ def _advanced_states(classes, be: str, prop: str, start: dict, machine) -> tuple
     got = None
     for f in facings:
         sets, why = blockcode.read_placed_states(classes, owner, "onDirectionalPlacement", _ADVANCED_DESC,
-                                                 {**start, "facing": f}, machine=machine)
+                                                 {**start, "facing": f}, machine=machine,
+                                                 untouched=untouched)
         if sets is None:
             return None, why
         if any(p in ("facing", "facing6") for v in sets.values() for p, _ in v):
@@ -592,6 +594,40 @@ def orientations(mod, classes_by_name, sites=None, states=None) -> dict[str, Ori
     return out
 
 
+def _advanced_untouched(classes, be: str, states: tuple) -> str:
+    """Why an IAdvancedDirectionalBE's onDirectionalPlacement may leave its
+    block entity other than its constructor made it, "" when it only sets
+    states of its own block (read as :func:`_advanced_states` reads it, at
+    every facing the block can hold, every other state's start unknown)."""
+    from ... import blockcode
+    machine = blockcode.Machine(classes)
+    why, prop = _entity_checks(classes, be, machine)
+    if why:
+        return why
+    start = {s: None for s in states if s not in ("facing", "facing6")}
+    got, why = _advanced_states(classes, be, prop, start, machine, untouched=True)
+    return why if got is None else ""
+
+
+def _placed_interaction(classes, be: str) -> str:
+    """Why an IPlacementInteraction's onBEPlaced isn't run on the block
+    entity ("" when it is found and calls nothing that sets a block's
+    state, the check :func:`_entity_checks` makes)."""
+    from ... import blockcode
+    from ...bytecode import Ref, instructions
+    machine = blockcode.Machine(classes)
+    found = machine.find_method(be, "onBEPlaced", f"({_CTX})V") or machine.default_method(
+        be, "onBEPlaced", f"({_CTX})V")
+    if found is None:
+        return f"its onBEPlaced isn't found"
+    cf, m = found
+    calls = {i.arg.name for i in instructions(cf, m.code or b"") if isinstance(i.arg, Ref)
+             and i.name.startswith("invoke")}
+    if calls & _SETS_STATE:
+        return f"{cf.name.replace('/', '.')}#onBEPlaced may set the block's state after placement"
+    return ""
+
+
 def entity_placement(classes):
     """``(block class, block entity class) -> reason`` ("" when IE's own
     placement leaves the block entity as its constructor and the block's
@@ -603,10 +639,21 @@ def entity_placement(classes):
     ``IEBaseBlock``, ``onIEBlockPlacedBy`` after vanilla's placement: on an
     ``IDirectionalBE`` it calls ``setFacing``, which for an
     ``IStateBasedDirectional`` whose ``setFacing`` is the interface's only
-    sets the block's state (``IEBlockInterfaces.java`` L170-175); an
-    ``IAdvancedDirectionalBE`` (``onDirectionalPlacement``), an
-    ``IHasDummyBlocks`` (``placeDummies``) or an ``IPlacementInteraction``
-    (``onBEPlaced``) may write the block entity, so it isn't read. The
+    sets the block's state (``IEBlockInterfaces.java`` L170-175). An
+    ``IAdvancedDirectionalBE``'s ``onDirectionalPlacement`` (#296:
+    ``StripCurtainBlockEntity`` L190-194 -> ``setCeilingAttached``,
+    L238-242) is read as :func:`orientations` reads it, by the core per
+    clicked face at every facing the block can hold, with the block's
+    ``states`` (the core's names for them) at an unknown start
+    (:func:`portkit.blockcode.read_placed_states`, ``untouched``): when it
+    only sets states of its own block and writes no field of the block
+    entity, the shape read at a drawn state is the one it leaves. An
+    ``IPlacementInteraction``'s ``onBEPlaced`` that calls nothing setting a
+    block's state is handed back for the core to run on the block entity it
+    built (``("", [(name, desc)])``), as it runs the block's ``setPlacedBy``
+    (#296: ``StripCurtainBlockEntity#onBEPlaced`` L212-217 copies the item's
+    colour, which then follows the unknown item). An ``IHasDummyBlocks``
+    (``placeDummies``) places more blocks, so it isn't read. The
     instructions of each method are checked against that form (the same
     checks :func:`orientations` makes); a block that isn't an
     ``IEBaseBlock`` gets nothing from ``BlockItemIE#placeBlock`` but
@@ -615,7 +662,7 @@ def entity_placement(classes):
         return None
     shared = _shared_checks(classes)
 
-    def check(cls: str, be: str) -> str:
+    def check(cls: str, be: str, states: tuple = ()) -> str:
         if _BASE not in _chain(classes, cls):
             return shared
         if shared:
@@ -630,11 +677,24 @@ def entity_placement(classes):
             return f"{where}#onIEBlockPlacedBy isn't IEEntityBlock's"
         ifaces = _interfaces(classes, be)
         dotted = be.replace("/", ".")
-        for iface, what in ((_ADVANCED, "IAdvancedDirectionalBE#onDirectionalPlacement"),
-                            (_DUMMIES, "IHasDummyBlocks#placeDummies"),
-                            (_PLACEMENT_INTERACTION, "IPlacementInteraction#onBEPlaced")):
-            if iface in ifaces:
-                return f"IEEntityBlock#onIEBlockPlacedBy runs {dotted}'s {what.split('#')[1]} ({what}), which isn't read"
+        if _DUMMIES in ifaces:
+            return (f"IEEntityBlock#onIEBlockPlacedBy runs {dotted}'s placeDummies "
+                    "(IHasDummyBlocks#placeDummies), which isn't read")
+        runs = []
+        if _PLACEMENT_INTERACTION in ifaces:
+            why = _placed_interaction(classes, be)
+            if why:
+                return (f"IEEntityBlock#onIEBlockPlacedBy runs {dotted}'s onBEPlaced "
+                        f"(IPlacementInteraction#onBEPlaced), which isn't read ({why})")
+            # The core runs it on the block entity it built, as it runs the
+            # block's setPlacedBy: a level question or a call it can't
+            # follow is a reason there.
+            runs.append(("onBEPlaced", f"({_CTX})V"))
+        if _ADVANCED in ifaces:
+            why = _advanced_untouched(classes, be, states)
+            if why:
+                return (f"IEEntityBlock#onIEBlockPlacedBy runs {dotted}'s onDirectionalPlacement "
+                        f"(IAdvancedDirectionalBE#onDirectionalPlacement), which isn't read ({why})")
         if _DIRECTIONAL in ifaces:
             if _STATE_BASED not in ifaces:
                 return f"{dotted} is an IDirectionalBE whose facing isn't a block state, so setFacing isn't read"
@@ -642,7 +702,7 @@ def entity_placement(classes):
                 own = classes.get(c)
                 if own is not None and own.method("setFacing", _SET_FACING_DESC) is not None:
                     return f"{c.replace('/', '.')}#setFacing overrides IStateBasedDirectional's"
-        return ""
+        return ("", runs) if runs else ""
     return check
 
 
