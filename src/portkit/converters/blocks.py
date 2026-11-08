@@ -1614,6 +1614,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     # One registration run over every blockstate, shared by every block
     # reader (#375; #280 for the readers that shared it first).
     shared = _SharedRun(mod, loaded)
+    stateless: list[str] = []
     # An enum state the player doesn't set on placement is held at the start
     # value read from code before the placement readers look (#296); the
     # run is over every blockstate's name, which holding doesn't change.
@@ -1946,9 +1947,12 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             continue
         if geo is not None:
             result.files[f"models/blocks/{name}.geo.json"] = geo
+            if undrawn is None:
+                stateless.append(name)
         result.files[f"blocks/{name}.json"] = _block_definition(
             mod.namespace, name, identifier, instances or {}
         )
+    stateless_notes = _stateless_boxes(mod, result, stateless, shared)
     models.RENDER_TYPES_SEEN.reset(outer)
     models.BLOCK_DRAWN.reset(outer_block)
     held_notes = _held_claims(mod, result, held)
@@ -1990,8 +1994,78 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(r["note"] for r in paired_records if r["kind"] == "twin")
     result.notes.extend(buttons.notes([r for r in directional_bool if r.get("button")]))
     result.notes.extend(later)
+    result.notes.extend(stateless_notes)
     result.notes.extend(containers.pop("", []))
     return result
+
+
+def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
+                     shared: "_SharedRun") -> list[str]:
+    """Selection and collision boxes for blocks whose blockstate draws one
+    look with a geometry of its own (#296): Java's ``getShape`` read at the
+    block's one look (blockcode.read_stateless_shapes: every state of the
+    block unknown; a block entity as its placement makes it, in a level with
+    nothing beside the block), its bounding box as the selection box, and
+    collision as read. A block whose code asks about the blocks beside it
+    gets the box it has placed alone (what neighbours add in Java is named
+    as a DEFAULT). A box that isn't read, or is the whole block (Bedrock's
+    own default), leaves the block as it was: no box written."""
+    if not names or getattr(mod, "classes", None) is None or not len(mod.classes):
+        return []
+    readings = blockcode.read_stateless_shapes(mod.classes, sorted(names), run=shared())
+    read, alone, collide_same, no_collide, clamped = [], [], [], [], []
+    for name in sorted(names):
+        r = readings[name]
+        if r.shapes is None:
+            continue
+        box = _bbox(r.shapes)
+        if box is None:
+            continue
+        box, cut = _clamped(box)
+        if any(box[i + 3] <= box[i] for i in range(3)):
+            continue
+        if box == (0.0, 0.0, 0.0, 16.0, 16.0, 16.0) and r.collision is not False:
+            continue
+        block = result.files.get(f"blocks/{name}.json")
+        if block is None:
+            continue
+        selection = _bedrock_box(box)
+        components = block["minecraft:block"]["components"]
+        components["minecraft:collision_box"] = False if r.collision is False else dict(selection)
+        components["minecraft:selection_box"] = selection
+        if r.collision is False:
+            no_collide.append((r.collision_from or "the block's Properties call noCollission", name))
+        elif r.collision is True and r.collision_from:
+            collide_same.append((r.collision_from, name))
+        (alone if r.alone else read).append((r.shape_from, name, r.collision, r.collision_why))
+        if cut:
+            clamped.append(name)
+    if not read and not alone:
+        return []
+    notes = []
+    if read:
+        notes.append("Box read from bytecode for a block whose blockstate draws one look (the bounding box "
+                     "of getShape with every state of the block unknown) - "
+                     + _grouped([(w, n) for w, n, _c, _y in read]) + ".")
+    if alone:
+        notes.append("Box read from bytecode at the block placed alone (its getShape asks about the blocks "
+                     "beside it, answered as nothing there, as its look is drawn); what neighbours add to "
+                     "the shape in Java is a DEFAULT, not drawn, since no Bedrock state carries them - "
+                     + _grouped([(w, n) for w, n, _c, _y in alone]) + ".")
+    if collide_same:
+        notes.append("Collision read from bytecode (the block's getCollisionShape gives the same boxes as "
+                     "its getShape there, read for an entity its code doesn't single out; Bedrock has one "
+                     "collision box for every entity) - " + _grouped(collide_same) + ".")
+    if no_collide:
+        notes.append("No collision, read from bytecode - " + _grouped(no_collide) + ".")
+    default_c = [(y, n) for _w, n, c, y in read + alone if c is None]
+    if default_c:
+        notes.append(f"Collision DEFAULT, not read from code ({_COLLISION_DEFAULT}) - "
+                     + _grouped(default_c) + ".")
+    if clamped:
+        notes.append("Java's shape reaches outside the block, and Bedrock's boxes stop at its edges: "
+                     + ", ".join(clamped) + ".")
+    return notes
 
 
 def _held_claims(mod: SourceMod, result: ConversionResult, held: dict) -> list[str]:

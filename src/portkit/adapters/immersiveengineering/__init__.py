@@ -619,7 +619,7 @@ def _placed_interaction(classes, be: str) -> str:
     found = machine.find_method(be, "onBEPlaced", f"({_CTX})V") or machine.default_method(
         be, "onBEPlaced", f"({_CTX})V")
     if found is None:
-        return f"its onBEPlaced isn't found"
+        return "its onBEPlaced isn't found"
     cf, m = found
     calls = {i.arg.name for i in instructions(cf, m.code or b"") if isinstance(i.arg, Ref)
              and i.name.startswith("invoke")}

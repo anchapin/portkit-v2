@@ -596,6 +596,8 @@ class MapV:
     clean: bool = True
     # The top-level run that allocated the map (Machine._top).
     run: int = -1
+    # Set when the map is a cache of one function (#296, Machine._memo_field).
+    memo: bool = False
     # The value a lookup that misses answers in a ``"float"`` map (fastutil's
     # ``defaultReturnValue``, 0 until set; see Machine._float_map_call).
     default: object = 0.0
@@ -1074,6 +1076,7 @@ class Machine:
         self.classes = classes
         self._subclassed: set | None = None  # see has_subclass
         self._found: dict = {}  # see find_method
+        self._memo_cache: dict = {}  # see _memo_field
         # Per-name answers of is_mod / _library and chains (see those).
         self._mod_names: dict = {}
         self._lib_names: dict = {}
@@ -1344,6 +1347,11 @@ class Machine:
         on a block of the jar)."""
         if v is None:
             return 0
+        types = getattr(v, "java_types", None)
+        if types is not None and isinstance(cls, str):
+            # A modelled world object (#296: the server level a placed
+            # block is read in): its own types, none of the jar's.
+            return 1 if cls in types else 0 if self.is_mod(cls) or cls in getattr(v, "not_types", ()) else UNKNOWN
         if isinstance(v, Collider):
             return int(cls in _COLLIDER_TYPES[v.part])
         if isinstance(cls, str) and self._vanilla_block_id(v) is not None and self.is_mod(cls):
@@ -2696,6 +2704,8 @@ class Machine:
                 s.append(Obj("__statedef"))
             elif isinstance(obj, Obj):
                 value = obj.fields[name] if name in obj.fields else self._field_default(obj, name)
+                if isinstance(value, MapV) and not value.memo and self._memo_field(insn.arg.owner, name):
+                    value.memo = True
                 if (value is UNKNOWN or value is None) and self._lazy_guard(insn):
                     # A per-object lazy cache's test (#296): the fill runs on
                     # this object, and only it may take the write.
@@ -2704,6 +2714,8 @@ class Machine:
                 elif self._lazy_fill:
                     self._lazy_fill.pop((self._field_owner(insn.arg.owner, name), name), None)
                 s.append(value)
+            elif name in (getattr(obj, "java_fields", None) or {}):
+                s.append(obj.java_fields[name])
             else:
                 site = self._site_map(insn.arg) if obj is UNKNOWN else None
                 s.append(UNKNOWN if site is None else site)
@@ -4123,6 +4135,9 @@ class Machine:
             else:
                 return [UNKNOWN]
             return self._collections(owner, "of", "([Ljava/lang/Object;)", None, [Arr(items)], True)
+        if static and name == "newArrayList" and owner == "com/google/common/collect/Lists" and not rest:
+            # Guava Lists#newArrayList(): ``new ArrayList<>()``.
+            return [ListV([])]
         if static and name == "of" and owner in _IMMUTABLE_OF:
             items = list(rest)
             if items and desc.split(")", 1)[0].endswith("[Ljava/lang/Object;"):
@@ -4383,6 +4398,13 @@ class Machine:
                 recv.items, recv.havoc, recv.exact = {}, True, False
                 return [UNKNOWN]
             return [view]
+        if name == "computeIfAbsent" and len(rest) == 2 and recv.memo and rest[0] is not UNKNOWN:
+            # A cache of one function (#296, _memo_field): whatever it holds
+            # was the function's value for an equal key, so the answer is the
+            # function's value for this key, and the cache is left as it is.
+            out = self._apply(rest[1], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [rest[0]])
+            if out is not UNKNOWN and not isinstance(out, _Many):
+                return [out]
         if name == "computeIfAbsent" and len(rest) == 2 and self._key_ok(rest[0]):
             # Map#computeIfAbsent (Java SE 21, HashMap): the value held
             # for the key, else the function's value for it, kept unless
@@ -4593,6 +4615,53 @@ class Machine:
         if len(names) != len(indy.args) - 2:
             return None
         return names
+
+    def _memo_field(self, owner: str, name: str) -> bool:
+        """Whether instance field ``name`` (read through ``owner``) is a cache
+        of one function (#296: Immersive Engineering's
+        ``CachedVoxelShapes#calculatedShapes``): private and final, set only
+        by its class's constructors, and read by its class only to call
+        ``Map#computeIfAbsent`` with a function of its own class, always the
+        same one, and nothing else (a private field nothing else can reach).
+        Such a map only ever holds the function's value for each key."""
+        key = ("memo", owner, name)
+        if key in self._memo_cache:
+            return self._memo_cache[key]
+        self._memo_cache[key] = False
+        decl = self._field_owner(owner, name)
+        cf = self.classes.get(decl)
+        if cf is None or (cf.field_access.get(name, 0) & 0x12) != 0x12:
+            return False
+        from .bytecode import Ref, Indy, instructions
+        fns, ok = set(), True
+        for m in cf.methods:
+            if m.code is None:
+                continue
+            code = instructions(cf, m.code)
+            for k, insn in enumerate(code):
+                if not (isinstance(insn.arg, Ref) and insn.arg.name == name):
+                    continue
+                if insn.op == 0xB5:
+                    ok = ok and m.name == "<init>"
+                    continue
+                if insn.op != 0xB4:
+                    ok = False
+                    continue
+                # getfield F; <load key>; <load this>; invokedynamic f;
+                # invokeinterface/virtual Map.computeIfAbsent
+                tail = code[k + 1:k + 5]
+                call = next((j for j, t in enumerate(tail) if isinstance(t.arg, Ref)
+                             and t.op in (0xB6, 0xB9)), None)
+                if call is None or tail[call].arg.name != "computeIfAbsent" or call < 2 \
+                        or tail[call - 1].op != 0xBA:
+                    ok = False
+                    continue
+                indy = tail[call - 1].arg
+                fns.add(repr(indy))
+                if decl not in repr(getattr(indy, "args", ())):
+                    ok = False
+        self._memo_cache[key] = bool(ok and len(fns) == 1)
+        return self._memo_cache[key]
 
     def _key_ok(self, key) -> bool:
         """Whether ``key`` compares in a Java map as it does here: a known
@@ -5367,6 +5436,9 @@ class Reading:
     # Behaviour methods the block's own classes override (use, ticks, a block
     # entity...), which a converted facing block doesn't carry.
     behaviour: tuple = ()
+    # True when the shape was read with a question about a position beside
+    # the block answered as empty (read_stateless_shapes, #296).
+    alone: bool = False
 
 
 # Properties#noCollission, renamed noCollision in later Mojang mappings
@@ -6351,6 +6423,63 @@ def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple], run=N
                 r.placement, r.shapes_by, r.collision = None, None, None
                 r.placement_why = r.shape_why = r.collision_why = "registered twice with different settings"
                 r.defaults = {}
+    return readings
+
+
+def read_stateless_shapes(classes: ClassIndex | None, names: list[str], run=None) -> dict[str, Reading]:
+    """A :class:`Reading` per blockstate name in ``names``, each one a
+    blockstate that draws no state (one look): ``getShape`` at the block's
+    default state with every state of the block unknown (#410's guard, so a
+    box that depends on a state the blockstate doesn't draw gives more than
+    one shape and isn't read), a block entity read as its placement makes
+    it (:class:`_EntityWorld`, whose level holds nothing beside the block);
+    ``shapes`` holds the boxes and ``shape_from`` where they were read, and
+    collision is read as for every other shape (#409)."""
+    readings = {n: Reading(n) for n in names}
+    if classes is None or not len(classes):
+        for r in readings.values():
+            r.shape_why = r.collision_why = "the mod ships no class files"
+        return readings
+    machine, registered = _from_run(run, classes, names)
+    for name, r in readings.items():
+        objs, why = registered[name]
+        if not objs:
+            r.shape_why = r.collision_why = why
+            continue
+        got = []
+        for obj in objs[:2]:
+            one = Reading(name)
+            one.cls = obj.cls.replace("/", ".")
+            if machine.vanilla_base(obj.cls) not in _PLAIN_VANILLA:
+                one.shape_why = one.collision_why = (
+                    f"{one.cls} is a vanilla {machine.vanilla_base(obj.cls).rsplit('/', 1)[-1]}, "
+                    "whose shape is vanilla code that isn't read")
+                got.append(one)
+                continue
+            _read_states(machine, obj, one)
+            where = _declaring(machine, obj.cls, "getShape", _GET_SHAPE_DESC)
+            default = obj.fields.get("__default")
+            base, undrawn = _undrawn_unknown(default if isinstance(default, State) else State(), one, ())
+            machine.steps = 0
+            one.shape_states = []
+            try:
+                if "__partial" in obj.fields:
+                    raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
+                boxes = _shape_at(machine, obj, one, base, undrawn, "its one look")
+            except Unreadable as exc:
+                why = entity_why(machine, obj, name)
+                one.shape_why = f"{where}: {exc}" + (f" (its block entity isn't read: {why})" if why else "")
+            else:
+                one.shapes = boxes
+                one.shape_from = where
+                one.shape_states.append((base, boxes))
+            _read_shape_collision(machine, obj, one)
+            one.alone = entity_beside(machine, obj, name)
+            got.append(one)
+        r.__dict__.update(got[0].__dict__)
+        if len(got) > 1 and (got[1].shapes, got[1].collision) != (got[0].shapes, got[0].collision):
+            r.shapes, r.collision = None, None
+            r.shape_why = r.collision_why = "registered twice with different settings"
     return readings
 
 
@@ -7532,10 +7661,54 @@ _BE_GETTERS = frozenset({"getBlockPos", "getLevel", "hasLevel", "getBlockState"}
 
 class _PlacedLevel:
     """The level a shape is read in: the placed block's own block entity at
-    its position, nothing else known."""
+    its position, nothing else known. It is the server's level (#296: the
+    one whose block entity is authoritative; ``instanceof ServerLevel``
+    holds, ``ClientLevel`` doesn't), and NeoForge answers no capability at
+    a position beside the block, where nothing is (``_NoCapability``)."""
+
+    java_types = frozenset({
+        "net/minecraft/world/level/Level", "net/minecraft/server/level/ServerLevel",
+        "net/minecraft/world/level/BlockGetter", "net/minecraft/world/level/LevelReader",
+        "net/minecraft/world/level/LevelAccessor", "net/minecraft/world/level/ServerLevelAccessor",
+        "net/minecraft/world/level/WorldGenLevel", "net/minecraft/world/level/CommonLevelAccessor",
+        "net/minecraft/world/level/LevelWriter", "net/minecraft/world/level/LevelSimulatedReader",
+        "net/minecraft/world/level/LevelSimulatedRW", "net/minecraft/world/level/SignalGetter",
+        "net/minecraft/world/level/CollisionGetter", "net/minecraft/world/level/EntityGetter",
+        "net/minecraft/world/level/LevelHeightAccessor", "net/minecraft/world/level/LevelTimeAccess",
+    })
+    not_types = frozenset({"net/minecraft/client/multiplayer/ClientLevel"})
+    java_fields = {"isClientSide": 0}
 
     def __repr__(self):
         return "level with the placed block alone"
+
+
+_PLACE_CTX_TYPE = "Lnet/minecraft/world/item/context/BlockPlaceContext;"
+_CAP_CACHE = "net/neoforged/neoforge/capabilities/BlockCapabilityCache"
+
+
+class _NoCapability:
+    """NeoForge's ``BlockCapabilityCache`` at a position beside a block
+    placed alone: nothing is there, so its ``getCapability`` is null; its
+    ``level``, ``pos`` and ``context`` are the ones it was made with."""
+
+    def __init__(self, level=None, pos=None, context=None):
+        self.answers = {"level": level, "pos": pos, "context": context}
+
+    def __repr__(self):
+        return "capability cache of an empty position"
+
+
+class _AloneContext:
+    """The ``BlockPlaceContext`` a placement method an adapter names is run
+    with (#296): the block placed alone, by no player (``getPlayer`` null,
+    so nothing in another hand is applied), on the server (its level's
+    ``isClientSide`` false), at the block entity's own position. Anything
+    else it is asked is unknown."""
+
+    def __repr__(self):
+        return "placement of the block alone, by no player"
+
 
 
 def _entity_run(classes: ClassIndex, name: str):
@@ -7555,17 +7728,39 @@ class _EntityWorld:
     """The block entity a block's placement makes, built once per block
     (see the section comment); ``why`` says why there is none."""
 
+    # The place context an adapter-named placement method runs with.
+    ctx = None
+    # Set once the block's placement or shape code asks about a position
+    # beside the block, answered as empty (#296: read as placed alone).
+    beside = False
+
     def __init__(self, machine: Machine, obj: Obj, name: str):
         self.why, self.entity, self.machine, self.obj = "", None, None, None
         self.level, self.pos, self.state = _PlacedLevel(), _Near(), UNKNOWN
+        self.beside = False
         self._build(machine.classes, obj, name)
 
     def hook(self, saved):
         def hook(owner, mname, mdesc, args, static):
             recv = None if static or not args else args[0]
             rest = args if static else args[1:]
+            if recv is self.ctx:
+                got = {"getLevel": self.level, "getClickedPos": self.pos, "getPlayer": None}
+                return [got[mname]] if not rest and mname in got else [UNKNOWN]
+            if owner == _CAP_CACHE and mname == "create" and static and len(args) == 4 \
+                    and args[1] is self.level and isinstance(args[2], _Near) and args[2] != _Near():
+                self.beside = True
+                return [_NoCapability(args[1], args[2], args[3])]
+            if isinstance(recv, _NoCapability) and not rest and mname in ("getCapability", "level", "pos", "context"):
+                return [None if mname == "getCapability" else recv.answers[mname]]
             if recv is self.level:
+                if mname == "getCapability" and len(rest) == 3 and isinstance(rest[1], _Near) \
+                        and rest[1] != _Near():
+                    self.beside = True
+                    return [None]
                 if (mname, mdesc) == _GET_BLOCK_ENTITY and len(rest) == 1 and isinstance(rest[0], _Near):
+                    if rest[0] != _Near():
+                        self.beside = True
                     return [self.entity if rest[0] == _Near() else None]
                 self.asked = self.asked or f"asks the level {mname}, which isn't read"
                 return [UNKNOWN]
@@ -7582,6 +7777,9 @@ class _EntityWorld:
                 return [self.obj]
             if recv is not None and recv is self.entity and not rest and mname in _BE_GETTERS:
                 return [{"getBlockPos": self.pos, "getLevel": self.level, "hasLevel": 1}.get(mname, self.state)]
+            if owner == "java/util/Objects" and mname == "equals" and static and len(args) == 2 \
+                    and all(isinstance(a, (_Near, Dir)) for a in args):
+                return [int(type(args[0]) is type(args[1]) and args[0] == args[1])]
             if owner == "java/util/Objects" and mname == "requireNonNull" and static and args \
                     and isinstance(args[0], (_Near, _PlacedLevel)):
                 return [args[0]]
@@ -7620,6 +7818,10 @@ class _EntityWorld:
                 self.why = f"{where} doesn't build one block entity of the mod's it can read"
                 return
             be = built[0]
+            if be.fields.get("level", UNKNOWN) in (UNKNOWN, None):
+                # BlockEntity#level, as the game sets it once the block is in
+                # the level (what getLevel() answers here too).
+                be.fields["level"] = self.level
             # Fields a constructor's undecided ways leave differently are
             # unknown (_join_fields), so a shape that reads one isn't read;
             # a constructor that stopped part way is a reason.
@@ -7677,7 +7879,8 @@ class _EntityWorld:
                 self.entity = be
                 machine.steps = 0
                 try:
-                    machine.run(*decl, [be] + [UNKNOWN] * len(_param_types(mdesc)))
+                    machine.run(*decl, [be] + [self.ctx if t == _PLACE_CTX_TYPE else UNKNOWN
+                                               for t in _param_types(mdesc)])
                 except Unreadable as exc:
                     self.why = f"{at}, run when the block is placed, can't be followed ({exc})"
                     return
@@ -7701,6 +7904,9 @@ class _EntityWorld:
             return machine.call(self.obj.cls, method, _GET_SHAPE_DESC, [self.obj, state, self.level, self.pos, ctx])
         finally:
             machine.call_hook, self.state = saved, UNKNOWN
+
+
+_EntityWorld.ctx = _AloneContext()
 
 
 def _asks_entity(machine: Machine, obj: Obj, method: str) -> bool:
@@ -7736,6 +7942,14 @@ def _shape_call(machine: Machine, obj: Obj, name: str, method: str, state, ctx=U
 def _entity_world(machine: Machine, obj: Obj, name: str):
     world = machine.__dict__.get("entity_worlds", {}).get((id(obj), name))
     return world[1] if world is not None and world[1].machine is not None else None
+
+
+def entity_beside(machine: Machine, obj: Obj, name: str) -> bool:
+    """Whether the block entity world of ``name`` answered a question about
+    a position beside the block (nothing there) while its placement or
+    shape was read (#296)."""
+    world = _entity_world(machine, obj, name)
+    return bool(world is not None and world.beside)
 
 
 def entity_why(machine: Machine, obj: Obj, name: str) -> str:
