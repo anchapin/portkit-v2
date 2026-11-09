@@ -6657,7 +6657,7 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
     ctx = COLLIDER_CONTEXT
     if tested:
         # The code singles out entities by type: read it for a player.
-        other = _shape_text(results)
+        other = _SAME_TEXT if same is True else _shape_text(results)
         ctx = PLAYER_CONTEXT
         same = _same_as_selection(machine, obj, r, ctx) if not partial else ""
         machine.steps = 0
@@ -6666,9 +6666,9 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
         except Unreadable as exc:
             results, unread = None, exc
         types = ", ".join(sorted(t.rsplit("/", 1)[-1] for t in tested))
+        mine = _SAME_TEXT if same is True else _shape_text(results)
         r.collision_for = (f"read for a player: its getCollisionShape tests the entity's type ({types}); "
-                           f"for a player it gives {_shape_text(results)}, for an entity it doesn't single "
-                           f"out {other}")
+                           f"for a player it gives {mine}, for an entity it doesn't single out {other}")
         # Every converter's note names a read collision by where it came
         # from: this one says it was read for a player.
         read_where = f"{where}, {r.collision_for}"
@@ -6699,12 +6699,15 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
         r.collision_why += f" ({r.collision_for})"
 
 
+_SAME_TEXT = "getShape's boxes at every drawn state"
+
+
 def _shape_text(results) -> str:
     """What a getCollisionShape read gave, in words, for a note."""
     if not results or not all(isinstance(x, Shape) for x in results):
         return "a shape that isn't read"
     if len(set(results)) != 1:
-        return "a shape that depends on more than is read"
+        return "a shape that depends on the block's state"
     boxes = results[0].boxes
     if not boxes:
         return "no collision"
