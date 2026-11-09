@@ -842,21 +842,37 @@ class Collider:
     ``CollisionContext.empty()`` build, 1.20.1 and 1.21.1 client jars), the
     entity is an ``Entity``, and every other ``instanceof`` test on either
     is false (a projectile, a player, an item: an entity the code tests for
-    is one it treats apart)."""
+    is one it treats apart).
+
+    ``player`` is the same context for a player (see _override_collision:
+    where the code tests the entity's type, the box Bedrock players feel is
+    the one Java gives a player): the entity is then also a
+    ``LivingEntity`` and a ``Player``; whether it is one of the vanilla
+    player classes below ``Player`` (the server's or the client's) is
+    unknown, as Java asks the same block on both sides."""
 
     part: str
+    player: bool = False
 
     def __repr__(self):
-        return f"collider-{self.part}"
+        return f"collider-{self.part}" + ("-player" if self.player else "")
 
 
 COLLIDER_CONTEXT = Collider("context")
 COLLIDER_ENTITY = Collider("entity")
+PLAYER_CONTEXT = Collider("context", True)
+PLAYER_ENTITY = Collider("entity", True)
 _COLLIDER_TYPES = {
     "context": ("net/minecraft/world/phys/shapes/EntityCollisionContext",
                 "net/minecraft/world/phys/shapes/CollisionContext"),
     "entity": ("net/minecraft/world/entity/Entity",),
 }
+_PLAYER_TYPES = ("net/minecraft/world/entity/LivingEntity", "net/minecraft/world/entity/player/Player")
+# Vanilla classes below Player (1.20.1 / 1.21.1 client jars) and the loaders'
+# fake players: a player in the game is one of them on one side or the other.
+_PLAYER_SUBTYPES = ("net/minecraft/server/level/ServerPlayer", "net/minecraft/client/player/AbstractClientPlayer",
+                    "net/minecraft/client/player/LocalPlayer", "net/minecraft/client/player/RemotePlayer",
+                    "net/minecraftforge/common/util/FakePlayer", "net/neoforged/neoforge/common/util/FakePlayer")
 
 
 class _Ctx:
@@ -1353,6 +1369,14 @@ class Machine:
             # block is read in): its own types, none of the jar's.
             return 1 if cls in types else 0 if self.is_mod(cls) or cls in getattr(v, "not_types", ()) else UNKNOWN
         if isinstance(v, Collider):
+            if v.part == "entity" and cls != "net/minecraft/world/entity/Entity":
+                # The code tests the entity's type (#296): see _override_collision.
+                self.__dict__.setdefault("collider_tests", set()).add(cls)
+            if v.player and v.part == "entity":
+                if cls in _PLAYER_TYPES:
+                    return 1
+                if cls in _PLAYER_SUBTYPES:
+                    return UNKNOWN
             return int(cls in _COLLIDER_TYPES[v.part])
         if isinstance(cls, str) and self._vanilla_block_id(v) is not None and self.is_mod(cls):
             # A vanilla Blocks constant is an object of a vanilla class (#280).
@@ -3446,9 +3470,9 @@ class Machine:
             # class (#280: a trait key's javac-style ``equals`` compares
             # ``getClass()`` of both sides).
             return [ClassLit(recv.cls)]
-        if recv is COLLIDER_CONTEXT and name == "getEntity" and not rest:
+        if isinstance(recv, Collider) and recv.part == "context" and name == "getEntity" and not rest:
             # EntityCollisionContext#getEntity: the colliding entity (#296).
-            return [COLLIDER_ENTITY]
+            return [PLAYER_ENTITY if recv.player else COLLIDER_ENTITY]
         if owner == _BLOCK_SET_TYPE and not static and not rest and isinstance(recv, Const) \
                 and recv.owner == _BLOCK_SET_TYPE \
                 and ((name in _BLOCK_SET_TYPE_PARTS and desc.startswith("()L") and desc != "()Ljava/lang/String;")
@@ -5428,6 +5452,13 @@ class Reading:
     # Where a read collision comes from: "" for the Properties
     # (noCollission or not), else the getCollisionShape override read (#296).
     collision_from: str = ""
+    # Set when the getCollisionShape override was read for a player, because
+    # it tests the entity's type (#296, _override_collision): why, and what it
+    # gives an entity it doesn't single out.
+    collision_for: str = ""
+    # Java's collision boxes (pixels) when they are read and aren't the
+    # selection box (read_stateless_shapes only; collision is then True).
+    collision_boxes: tuple | None = None
     # The states the shape reader read getShape at, each with the boxes it
     # gave (#296: a getCollisionShape override is checked against them).
     shape_states: list = field(default_factory=list)
@@ -6473,12 +6504,13 @@ def read_stateless_shapes(classes: ClassIndex | None, names: list[str], run=None
                 one.shapes = boxes
                 one.shape_from = where
                 one.shape_states.append((base, boxes))
-            _read_shape_collision(machine, obj, one)
+            _read_shape_collision(machine, obj, one, boxes_ok=True)
             one.alone = entity_beside(machine, obj, name)
             got.append(one)
         r.__dict__.update(got[0].__dict__)
-        if len(got) > 1 and (got[1].shapes, got[1].collision) != (got[0].shapes, got[0].collision):
-            r.shapes, r.collision = None, None
+        if len(got) > 1 and (got[1].shapes, got[1].collision, got[1].collision_boxes) != \
+                (got[0].shapes, got[0].collision, got[0].collision_boxes):
+            r.shapes, r.collision, r.collision_boxes, r.collision_for = None, None, None, ""
             r.shape_why = r.collision_why = "registered twice with different settings"
     return readings
 
@@ -6584,33 +6616,73 @@ def _every_state(obj: Obj, r: Reading) -> State:
     return State(tuple((n, UNKNOWN) for n in sorted(set(names)) if isinstance(n, str) and not n.startswith("__")))
 
 
-def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
+def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: bool = False) -> None:
     """A getCollisionShape the block's classes override (#296): no collision
     when it returns ``Shapes.empty()`` on every path, read at every state
     (see _every_state) for an entity the code doesn't single out (see
     Collider).
-    Anything else (a box, a shape it can't read, a test on the world it
-    can't decide that leads to a box) keeps the DEFAULT, with the reason."""
+
+    Where the code tests the entity's type (an ``instanceof`` on
+    ``EntityCollisionContext#getEntity``), Bedrock's one collision box for
+    every entity can't follow it, and it is read for a player instead
+    (Collider ``player``): players are who feel a block's collision on
+    Bedrock as in Java. ``collision_for`` then says so, with what the code
+    gives an entity it doesn't single out.
+
+    With ``boxes_ok`` (a reader whose converter writes a collision box of
+    its own: read_stateless_shapes), the player's box, when it is one shape
+    on every path and at every state but isn't the selection box, is read
+    too (``collision_boxes``). (A box of its own that isn't read for a
+    player keeps the DEFAULT, as before.) Anything else (a box elsewhere, a shape it can't
+    read, a test on the world it can't decide that leads to a box) keeps the
+    DEFAULT, with the reason."""
     where = f"{own[0].name.replace('/', '.')}#getCollisionShape"
+    partial = "__partial" in obj.fields
+    machine.__dict__.pop("collider_tests", None)
     # At the states getShape was read at first: the same boxes there is
     # collision as a converted block has it. (Read before the every-state
     # call, whose unknown state a block entity's cache would keep.)
-    same = _same_as_selection(machine, obj, r) if "__partial" not in obj.fields else ""
+    same = _same_as_selection(machine, obj, r) if not partial else ""
+    tested = set(machine.__dict__.pop("collider_tests", ()) or ())
+    other = None
+    machine.steps = 0
+    try:
+        if partial:
+            raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
+        results = _shape_call(machine, obj, r.name, "getCollisionShape", _every_state(obj, r), COLLIDER_CONTEXT)
+    except Unreadable as exc:
+        results, unread = None, exc
+    tested |= set(machine.__dict__.pop("collider_tests", ()) or ())
+    ctx = COLLIDER_CONTEXT
+    if tested:
+        # The code singles out entities by type: read it for a player.
+        other = _shape_text(results)
+        ctx = PLAYER_CONTEXT
+        same = _same_as_selection(machine, obj, r, ctx) if not partial else ""
+        machine.steps = 0
+        try:
+            results = _shape_call(machine, obj, r.name, "getCollisionShape", _every_state(obj, r), ctx)
+        except Unreadable as exc:
+            results, unread = None, exc
+        types = ", ".join(sorted(t.rsplit("/", 1)[-1] for t in tested))
+        r.collision_for = (f"read for a player: its getCollisionShape tests the entity's type ({types}); "
+                           f"for a player it gives {_shape_text(results)}, for an entity it doesn't single "
+                           f"out {other}")
     if same is True:
         r.collision = True
         r.collision_from = where
         return
-    machine.steps = 0
-    try:
-        if "__partial" in obj.fields:
-            raise Unreadable(f"its constructor can't be followed to the end ({obj.fields['__partial']})")
-        results = _shape_call(machine, obj, r.name, "getCollisionShape", _every_state(obj, r), COLLIDER_CONTEXT)
-    except Unreadable as exc:
-        r.collision_why = f"{where} overrides the collision shape and can't be followed ({exc})"
+    if results is None:
+        r.collision_why = f"{where} overrides the collision shape and can't be followed ({unread})"
         return
     if results and all(isinstance(x, Shape) and not x.boxes for x in results):
         r.collision = False
         r.collision_from = where
+        return
+    if boxes_ok and tested and results and all(isinstance(x, Shape) for x in results) and len(set(results)) == 1:
+        r.collision = True
+        r.collision_from = where
+        r.collision_boxes = tuple(results[0].boxes)
         return
     if results and all(isinstance(x, Shape) for x in results):
         r.collision_why = f"{where} overrides the collision shape with a box of its own" + (
@@ -6619,11 +6691,25 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading) -> None:
         r.collision_why = f"{where} overrides the collision shape with one it can't read" + (
             f" ({same})" if same else " (getShape isn't read, so there is no box to check it against)"
             if not r.shape_states else "")
+    if r.collision_for:
+        r.collision_why += f" ({r.collision_for})"
 
 
-def _same_as_selection(machine: Machine, obj: Obj, r: Reading):
-    """True when the block's getCollisionShape, read for an entity the code
-    doesn't single out (Collider), gives at each state the shape reader
+def _shape_text(results) -> str:
+    """What a getCollisionShape read gave, in words, for a note."""
+    if not results or not all(isinstance(x, Shape) for x in results):
+        return "a shape that isn't read"
+    if len(set(results)) != 1:
+        return "a shape that depends on more than is read"
+    boxes = results[0].boxes
+    if not boxes:
+        return "no collision"
+    return " + ".join("[" + ", ".join(f"{v:g}" for v in b) + "]" for b in boxes) + " (pixels)"
+
+
+def _same_as_selection(machine: Machine, obj: Obj, r: Reading, ctx=COLLIDER_CONTEXT):
+    """True when the block's getCollisionShape, read for ``ctx`` (an entity
+    the code doesn't single out, Collider, by default), gives at each state the shape reader
     read getShape at (``r.shape_states``) exactly the boxes getShape gave
     there, one shape on every path (#296): its collision is then the
     selection box, as a converted block's is. Else why not, as text, or ""
@@ -6633,7 +6719,7 @@ def _same_as_selection(machine: Machine, obj: Obj, r: Reading):
     for state, boxes in r.shape_states:
         machine.steps = 0
         try:
-            results = _shape_call(machine, obj, r.name, "getCollisionShape", state, COLLIDER_CONTEXT)
+            results = _shape_call(machine, obj, r.name, "getCollisionShape", state, ctx)
         except Unreadable as exc:
             return f"it can't be followed at a drawn state ({exc})"
         if not results or any(not isinstance(x, Shape) for x in results) or len(set(results)) != 1:
@@ -6643,12 +6729,12 @@ def _same_as_selection(machine: Machine, obj: Obj, r: Reading):
     return True
 
 
-def _read_shape_collision(machine: Machine, obj: Obj, r: Reading) -> None:
+def _read_shape_collision(machine: Machine, obj: Obj, r: Reading, boxes_ok: bool = False) -> None:
     """Collision as _read_shape reads it (Properties#noCollission, or a
     getCollisionShape override), without reading the facing-only shapes."""
     own = machine.find_method(obj.cls, "getCollisionShape", _GET_SHAPE_DESC)
     if own is not None:
-        _override_collision(machine, obj, own, r)
+        _override_collision(machine, obj, own, r, boxes_ok)
         return
     props = obj.fields.get("__props", UNKNOWN)
     if _shared_changed(props):
@@ -7935,7 +8021,14 @@ def _shape_call(machine: Machine, obj: Obj, name: str, method: str, state, ctx=U
         if world is None:
             world = worlds[(id(obj), name)] = (obj, _EntityWorld(machine, obj, name))
         if world[1].machine is not None:
-            return world[1].call(method, state, ctx)
+            inner = world[1].machine
+            try:
+                return world[1].call(method, state, ctx)
+            finally:
+                if inner is not machine and inner.__dict__.get("collider_tests"):
+                    # What the block's code asked of the entity (#296), on
+                    # the machine the caller reads it from.
+                    machine.__dict__.setdefault("collider_tests", set()).update(inner.__dict__.pop("collider_tests"))
     return machine.call(obj.cls, method, _GET_SHAPE_DESC, [obj, state, UNKNOWN, UNKNOWN, ctx])
 
 
