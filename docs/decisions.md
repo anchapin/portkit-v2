@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-11-09 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #PRNUM): collision is read from a copied vanilla block's Properties (a client-jar `hasCollision` table) and from a `getCollisionShape` box of the block's own that lies inside it; a block registered twice whose readings disagree only on collision keeps the rest
+## 2026-11-09 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order), PR #415): collision is read from a copied vanilla block's Properties (a client-jar `hasCollision` table) and from a `getCollisionShape` box of the block's own that lies inside it; a block registered twice whose readings disagree only on collision keeps the rest
 
 - **Status:** approved (Hark, high confidence; no policy choice arose: every change is Java's exact value or a labelled DEFAULT, and no pack's engine floor moves). Part of #296, part of #277. Generic and in core (`data/vanilla_block_collision`, `blockcode`, `converters/blocks`), no mod names. Follows PR #412 (collision read from code), PR #413 (arrays) and PR #414 (read for a player).
 - **Decision (generic, core):**
@@ -46,7 +46,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 - **Tests:** `tests/test_vanilla_block_collision.py` (javac stand-ins `tests/data/vanillablockcollision`), `tests/test_collision_read.py` (javac example mod `tests/data/collread`: copy of WHEAT/STONE/unread, `noCollission` after a copy, own box in and beyond the block, registered twice, block files and notes); `tests/conftest.py` unsets `PORTKIT_VANILLA_BLOCK_COLLISION`.
 - **Rejected:** guessing a vanilla block's collision from its name or class (#87); vendoring the table (EULA, 2026-10-11 entry); reading a box of its own that reaches outside the block (Bedrock's collision box stops at the block's edge; keeps the labelled DEFAULT).
 - **Coverage:** RUNSLINE
-- **Links:** #296, #277, PR #PRNUM, PR #414, PR #413, PR #412.
+- **Links:** #296, #277, PR #415, PR #414, PR #413, PR #412.
 
 ## 2026-11-09 (approved (Alex, 2026-11-09): picked a, PR #414, picks on #296 in comment 6742580463): where a block's getCollisionShape tests the colliding entity's type, collision is read for a player and labelled; Create's seats collide at 3 px (pick a, recommended)
 
