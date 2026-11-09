@@ -45,7 +45,8 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
   - Botania: notes only (`fel_pumpkin` collision now read true).
 - **Tests:** `tests/test_vanilla_block_collision.py` (javac stand-ins `tests/data/vanillablockcollision`), `tests/test_collision_read.py` (javac example mod `tests/data/collread`: copy of WHEAT/STONE/unread, `noCollission` after a copy, own box in and beyond the block, registered twice, block files and notes); `tests/conftest.py` unsets `PORTKIT_VANILLA_BLOCK_COLLISION`.
 - **Rejected:** guessing a vanilla block's collision from its name or class (#87); vendoring the table (EULA, 2026-10-11 entry); reading a box of its own that reaches outside the block (Bedrock's collision box stops at the block's edge; keeps the labelled DEFAULT).
-- **Coverage:** RUNSLINE
+- **Coverage:** unchanged (no file added or removed; real-mods rows all equal to `fixtures/real/coverage-baseline.json`, nothing rebanked).
+- **Runs (2cb4373):** PR CI 42678517839 green. ingame 42678559154: success, all 19 jobs (the verdict fails a job on any content-log error, so `content_errors` 0). real-mods (include_optional) 42678553612: success, all 13 rows equal to the baseline (Create 4160 / 5496, 43.1%). gap-leaderboard (gauntlet) 42678563259: success, board rows identical to 42632160539 (mean 11.69%); `docs/gauntlet.md` not rebanked. Local: pytest `-m 'not realmods'` (6 shards), `portkit eval` (21 fixtures at or above baseline), node tests 261/261.
 - **Links:** #296, #277, PR #415, PR #414, PR #413, PR #412.
 
 ## 2026-11-09 (approved (Alex, 2026-11-09): picked a, PR #414, picks on #296 in comment 6742580463): where a block's getCollisionShape tests the colliding entity's type, collision is read for a player and labelled; Create's seats collide at 3 px (pick a, recommended)
