@@ -1975,6 +1975,8 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     later, result.notes = result.notes, notes
     # Last: the container reader resets the shared machine's class state.
     containers = _add_containers(mod, result, stations or {}, experiments, shared)
+    # After every component is written (liquid_detection and containers included).
+    arrays_notes = _raise_for_arrays(result)
     for record in coded + coded_bool + directional + directional_bool + vslabs + flat_bool:
         if record["name"] in containers:
             # Carried: the block entity and the use that opens its menu.
@@ -1996,6 +1998,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(later)
     result.notes.extend(stateless_notes)
     result.notes.extend(containers.pop("", []))
+    result.notes.extend(arrays_notes)
     return result
 
 
@@ -2024,14 +2027,16 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
         box, cut = _clamped(box)
         if any(box[i + 3] <= box[i] for i in range(3)):
             continue
-        if box == (0.0, 0.0, 0.0, 16.0, 16.0, 16.0) and r.collision is not False:
+        # Java's own boxes when its collision is read and they don't fill one cuboid.
+        array = _collision_array(r.shapes) if r.collision is True else None
+        if box == (0.0, 0.0, 0.0, 16.0, 16.0, 16.0) and r.collision is not False and array is None:
             continue
         block = result.files.get(f"blocks/{name}.json")
         if block is None:
             continue
         selection = _bedrock_box(box)
         components = block["minecraft:block"]["components"]
-        components["minecraft:collision_box"] = False if r.collision is False else dict(selection)
+        components["minecraft:collision_box"] = _collision_value(dict(selection), array, r.collision is not False)
         components["minecraft:selection_box"] = selection
         if r.collision is False:
             no_collide.append((r.collision_from or "the block's Properties call noCollission", name))
@@ -2065,6 +2070,51 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
     if clamped:
         notes.append("Java's shape reaches outside the block, and Bedrock's boxes stop at its edges: "
                      + ", ".join(clamped) + ".")
+    return notes
+
+
+def _raise_for_arrays(result: ConversionResult) -> list[str]:
+    """Move each block written below block format 1.26.0 whose collision_box
+    is an array (see _collision_array) to 1.26.0, the first format that reads
+    one, keeping what the move would change (#296): liquid_detection keeps
+    the pre-1.26.0 use_liquid_clipping default (true), as _add_containers
+    does. A block the move would change otherwise (minecraft:geometry.full_block
+    is another geometry from 1.26.0, see _container_bump) keeps the bounding
+    box instead. Returns the notes."""
+    raised, kept = [], []
+    for path in sorted(result.files):
+        definition = result.files[path]
+        if not (path.startswith("blocks/") and path.endswith(".json") and isinstance(definition, dict)):
+            continue
+        if _version(definition.get("format_version", _BLOCK_FORMAT)) >= _version(_ARRAY_FORMAT):
+            continue
+        block = definition.get("minecraft:block", {})
+        parts = [block.get("components", {})] + [p.get("components", {}) for p in block.get("permutations", [])]
+        arrayed = [c for c in parts if isinstance(c.get("minecraft:collision_box"), list)]
+        if not arrayed:
+            continue
+        name = path[len("blocks/"):-len(".json")]
+        if any(c.get("minecraft:geometry") == "minecraft:geometry.full_block" for c in parts):
+            for c in arrayed:
+                c["minecraft:collision_box"] = _union(c["minecraft:collision_box"])
+            kept.append(name)
+            continue
+        for comps in parts:
+            for rule in (comps.get("minecraft:liquid_detection") or {}).get("detection_rules", []):
+                rule.setdefault("use_liquid_clipping", True)
+        definition["format_version"] = _ARRAY_FORMAT
+        counts = sorted({len(c["minecraft:collision_box"]) for c in arrayed})
+        raised.append((f"{'/'.join(map(str, counts))} boxes", name))
+    notes = []
+    if raised:
+        notes.append(f"{len(raised)} block(s) collide with the boxes Java's code gives rather than their bounding "
+                     "box (collision read from bytecode, and the boxes don't fill one cuboid): "
+                     "minecraft:collision_box as an array, block format 1.26.0, so the pack needs Bedrock 1.26.0 "
+                     "or newer; the selection box stays the bounding box - " + _grouped(raised) + ".")
+    if kept:
+        notes.append("Collision kept as the bounding box of Java's boxes, which an array (block format 1.26.0) "
+                     "would carry exactly, since the block uses minecraft:geometry.full_block, another geometry "
+                     "from that format: " + ", ".join(kept) + ".")
     return notes
 
 
@@ -3385,6 +3435,64 @@ def _bbox(boxes) -> tuple | None:
             max(b[3] for b in boxes), max(b[4] for b in boxes), max(b[5] for b in boxes))
 
 
+# Bedrock's minecraft:collision_box takes an array of up to 16 boxes from
+# block format 1.26.0, no experiment (learn.microsoft.com minecraft:collision_box,
+# 1.26.0 creator update notes). Where a block's collision is read from code
+# and Java's boxes don't fill one cuboid, the array carries them as they are
+# instead of their bounding box (#296); the selection box stays the bounding
+# box (Bedrock's selection_box is one box). _raise_for_arrays moves such a
+# block to block format 1.26.0 once every component is written.
+_ARRAY_FORMAT = "1.26.0"
+_ARRAY_MAX = 16
+
+
+def _collision_array(boxes, turn: int = 0) -> list[tuple] | None:
+    """Java's collision ``boxes`` (pixels), each turned by ``turn`` as
+    _java_turn does and cut to the block, deduplicated (a box another holds
+    adds nothing) and sorted, so the same boxes listed in another order (as a
+    turned shape lists them) are the same array; None when what is left fills
+    one cuboid (the bounding box is then exact), is one box, or is more than
+    Bedrock's 16."""
+    out: list[tuple] = []
+    for box in boxes or ():
+        cut, _ = _clamped(_java_turn(tuple(float(v) for v in box), turn))
+        cut = tuple(round(v, 4) for v in cut)
+        if any(cut[i + 3] <= cut[i] for i in range(3)) or cut in out:
+            continue
+        out.append(cut)
+    out = [b for b in out if not any(o is not b and _holds(o, b) for o in out)]
+    if len(out) < 2 or len(out) > _ARRAY_MAX or _one_cuboid(out):
+        return None
+    return sorted(out)
+
+
+def _holds(outer: tuple, inner: tuple) -> bool:
+    return all(outer[i] <= inner[i] and inner[i + 3] <= outer[i + 3] for i in range(3))
+
+
+def _one_cuboid(boxes: list[tuple]) -> bool:
+    """Whether ``boxes`` together fill their bounding box exactly: every cell
+    of the grid their faces cut the bounding box into lies in one of them."""
+    axes = [sorted({b[i] for b in boxes} | {b[i + 3] for b in boxes}) for i in range(3)]
+    for x1, x2 in zip(axes[0], axes[0][1:]):
+        for y1, y2 in zip(axes[1], axes[1][1:]):
+            for z1, z2 in zip(axes[2], axes[2][1:]):
+                if not any(b[0] <= x1 and x2 <= b[3] and b[1] <= y1 and y2 <= b[4] and b[2] <= z1 and z2 <= b[5]
+                           for b in boxes):
+                    return False
+    return True
+
+
+def _collision_value(selection, array: list[tuple] | None, collides: bool):
+    """A block's minecraft:collision_box: False when it doesn't collide, the
+    array when Java's boxes make one (see _collision_array), else the selection box."""
+    if not collides:
+        return False
+    if array:
+        return [_bedrock_box(b) for b in array]
+    return selection
+
+
 def _element_bounds(elements: list) -> tuple | None:
     boxes = []
     for element in elements:
@@ -3434,6 +3542,8 @@ def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, na
     if reading.shapes is not None:
         world = {d: _bbox(reading.shapes[d]) for d in _CARDINALS}
     clamped = False
+    # Java's own collision boxes per facing, in the frame its box is (see _collision_array).
+    arrays = {d: None for d in _CARDINALS}
 
     outside = False
 
@@ -3451,6 +3561,8 @@ def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, na
         # Boxes in the model's own frame: transformation turns them with it.
         if world is not None:
             boxes = {d: frame(world[d], 360 - turns[d]) for d in _CARDINALS}
+            if reading.collision is True:
+                arrays = {d: _collision_array(reading.shapes[d], 360 - turns[d]) for d in _CARDINALS}
         else:
             bounds = _element_bounds(elements)
             boxes = {d: frame(bounds, 0) for d in _CARDINALS}
@@ -3492,6 +3604,8 @@ def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, na
         # No transformation: the boxes are the world's.
         if world is not None:
             boxes = {d: frame(world[d], 0) for d in _CARDINALS}
+            if reading.collision is True:
+                arrays = {d: _collision_array(reading.shapes[d]) for d in _CARDINALS}
         else:
             bounds = _element_bounds(elements)
             boxes = {d: frame(bounds, turns[d]) for d in _CARDINALS}
@@ -3503,25 +3617,25 @@ def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, na
     placement = reading.placement if reading.placement is not None else DEFAULT_PLACEMENT
     collides = reading.collision if reading.collision is not None else True
 
-    def box_components(box) -> dict:
+    def box_components(box, array=None) -> dict:
         selection = _bedrock_box(box) if box is not None else False
-        collision = selection if collides else False
+        collision = _collision_value(selection, array, collides)
         return {"minecraft:collision_box": collision, "minecraft:selection_box": selection}
 
     trait = {"enabled_states": ["minecraft:cardinal_direction"]}
     if placement:
         trait["y_rotation_offset"] = placement
     components = {"minecraft:geometry": geometry, "minecraft:material_instances": instances}
-    same_box = len({json.dumps(boxes[d]) for d in _CARDINALS}) == 1
+    same_box = len({json.dumps([boxes[d], arrays[d]]) for d in _CARDINALS}) == 1
     if same_box:
-        components.update(box_components(boxes["north"]))
+        components.update(box_components(boxes["north"], arrays["north"]))
     permutations = []
     for d in _CARDINALS:
         extra = {}
         if not uvlock and _bedrock_turn(turns[d]):
             extra["minecraft:transformation"] = {"rotation": [0, _bedrock_turn(turns[d]), 0]}
         if not same_box:
-            extra.update(box_components(boxes[d]))
+            extra.update(box_components(boxes[d], arrays[d]))
         if extra:
             permutations.append({"condition": f"q.block_state('minecraft:cardinal_direction') == '{d}'",
                                  "components": extra})
@@ -4168,11 +4282,14 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         outside = outside or any(out[i + 3] <= out[i] for i in range(3))
         return out
 
-    boxes = {}
+    boxes, arrays = {}, {}
     for cell, (model_ref, y, lock) in cells.items():
+        arrays[cell] = None
         if reading.shapes_by is not None:
             world = _bbox(reading.shapes_by[cell])
             boxes[cell] = None if world is None else frame(world, 0 if lock else 360 - y)
+            if world is not None and reading.collision is True:
+                arrays[cell] = _collision_array(reading.shapes_by[cell], 0 if lock else 360 - y)
         else:
             bounds = _element_bounds(flats[model_ref].get("elements") or [])
             boxes[cell] = None if bounds is None else frame(bounds, y if lock else 0)
@@ -4182,9 +4299,9 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         return None
     collides = reading.collision if reading.collision is not None else True
 
-    def box_components(box) -> dict:
+    def box_components(box, array=None) -> dict:
         selection = _bedrock_box(box) if box is not None else False
-        return {"minecraft:collision_box": selection if collides else False,
+        return {"minecraft:collision_box": _collision_value(selection, array, collides),
                 "minecraft:selection_box": selection}
 
     light = reading.light_by
@@ -4200,9 +4317,10 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         states[_state_name(ns, p)] = [value, not value]
     components = {"minecraft:geometry": {"identifier": identifier, "bone_visibility": visibility},
                   "minecraft:material_instances": instances}
-    same_box = len({json.dumps(b) for b in boxes.values()}) == 1
+    same_box = len({json.dumps([boxes[c], arrays[c]]) for c in boxes}) == 1
     if same_box:
-        components.update(box_components(next(iter(boxes.values()))))
+        first = next(iter(boxes))
+        components.update(box_components(boxes[first], arrays[first]))
     same_light = light is None or len(set(light.values())) == 1
     if light is not None and same_light and light[combos[0]]:
         components["minecraft:light_emission"] = light[combos[0]]
@@ -4213,7 +4331,7 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         if not lock and _bedrock_turn(y):
             extra["minecraft:transformation"] = {"rotation": [0, _bedrock_turn(y), 0]}
         if not same_box:
-            extra.update(box_components(boxes[(facing, combo)]))
+            extra.update(box_components(boxes[(facing, combo)], arrays[(facing, combo)]))
         if not same_light:
             extra["minecraft:light_emission"] = light[combo]
         extras[(facing, combo)] = extra
@@ -5784,13 +5902,16 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         outside = outside or any(out[i + 3] <= out[i] for i in range(3))
         return out
 
-    boxes = {}
+    boxes, arrays = {}, {}
     for cell in live:
         key, combo = cell
         model_ref, x, y, lock = cells[cell]
+        arrays[cell] = None
         if shapes_by is not None:
             world = _bbox(shapes_by[cell] if bools else shapes_by[key])
             boxes[cell] = None if world is None else frame(world, 0 if lock else 360 - y)
+            if world is not None and reading.collision is True:
+                arrays[cell] = _collision_array(shapes_by[cell] if bools else shapes_by[key], 0 if lock else 360 - y)
         else:
             bounds = _element_bounds(bone_elements[bone_key(cell)])
             boxes[cell] = None if bounds is None else frame(bounds, 0)
@@ -5800,17 +5921,17 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         return None
     collides = reading.collision if reading.collision is not None else True
 
-    def box_components(box) -> dict:
+    def box_components(box, array=None) -> dict:
         selection = _bedrock_box(box) if box is not None else False
-        return {"minecraft:collision_box": selection if collides else False,
+        return {"minecraft:collision_box": _collision_value(selection, array, collides),
                 "minecraft:selection_box": selection}
 
     light = getattr(reading, "light_by", None) if bools else None
     components = {"minecraft:geometry": {"identifier": identifier, "bone_visibility": visibility},
                   "minecraft:material_instances": instances}
-    same_box = len({json.dumps(boxes[c]) for c in live}) == 1
+    same_box = len({json.dumps([boxes[c], arrays[c]]) for c in live}) == 1
     if same_box:
-        components.update(box_components(boxes[live[0]]))
+        components.update(box_components(boxes[live[0]], arrays[live[0]]))
     same_light = light is None or len(set(light.values())) == 1
     if light is not None and same_light and light[combos[0]]:
         components["minecraft:light_emission"] = light[combos[0]]
@@ -5826,7 +5947,7 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         if not lock and _bedrock_turn(y):
             extra["minecraft:transformation"] = {"rotation": [0, _bedrock_turn(y), 0]}
         if not same_box:
-            extra.update(box_components(boxes[cell]))
+            extra.update(box_components(boxes[cell], arrays[cell]))
         if not same_light:
             extra["minecraft:light_emission"] = light[combo]
         extras[cell] = extra
