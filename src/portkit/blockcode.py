@@ -807,6 +807,11 @@ class Props:
     # built (BlockStateBase#<init>, dtb$a bytecode 128-134) and
     # BlockStateBase#canOcclude returns it (L1046). True, False or UNKNOWN.
     can_occlude: object = True
+    # The vanilla block (``Blocks.WHEAT``) whose Properties this is a copy of
+    # when has_collision was read from that block (#296,
+    # portkit.data.vanilla_block_collision); cleared once the mod's own
+    # code sets it.
+    collision_copied: str = ""
 
 
 @dataclass(frozen=True)
@@ -1050,7 +1055,7 @@ def _snapshot(props):
     if not isinstance(props, Props):
         return props
     return Props(props.has_collision, props.light, props.epoch, origin=props.origin or props, air=props.air,
-                 can_occlude=props.can_occlude)
+                 can_occlude=props.can_occlude, collision_copied=props.collision_copied)
 
 
 def _shared_changed(props) -> bool:
@@ -4031,6 +4036,7 @@ class Machine:
             if name in ("ofFullCopy", "ofLegacyCopy", "copy") and rest:
                 src = rest[0]
                 collision = occlude = UNKNOWN
+                copied = ""
                 if isinstance(src, Obj) and isinstance(src.fields.get("__props"), Props):
                     light = src.fields["__props"].light  # a mod block's own Properties
                     # It copies hasCollision too (1.20.1 Properties#copy,
@@ -4049,12 +4055,14 @@ class Machine:
                     block_id = self._vanilla_block_id(src)
                     if block_id is not None and isinstance(collides.get(block_id), bool):
                         collision = collides[block_id]
+                        copied = light.source
                 else:
                     light = CopiedLight("a block it can't read")
                 # Whether a block it can't read collides isn't known. Whether
                 # a copy is air isn't read (#296), so a copy is never taken
                 # for an air block.
-                return [Props(collision, light, self.epoch, air=UNKNOWN, can_occlude=occlude)]
+                return [Props(collision, light, self.epoch, air=UNKNOWN, can_occlude=occlude,
+                              collision_copied=copied)]
             return [Props(UNKNOWN, UNKNOWN, self.epoch, air=UNKNOWN, can_occlude=UNKNOWN)]
         if not isinstance(recv, Props):
             return [UNKNOWN]
@@ -4076,11 +4084,15 @@ class Machine:
             collision, light, air, occlude = UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN
         else:
             return [recv]
+        # A copied vanilla block's collision stands until the mod's own code
+        # sets it (noCollission, or a setting that can't be told apart).
+        copied = "" if name in _NO_COLLISION or _OBFUSCATED.match(name) else recv.collision_copied
         if self._forked:
-            return [Props(collision, light, self.epoch, air=air, can_occlude=occlude)]
+            return [Props(collision, light, self.epoch, air=air, can_occlude=occlude, collision_copied=copied)]
         if recv.epoch != self.epoch:
             recv.shared_changed = True
         recv.has_collision, recv.light, recv.air, recv.can_occlude = collision, light, air, occlude
+        recv.collision_copied = copied
         return [recv]
 
     def _player(self, name: str, recv, rest: list):
@@ -5464,6 +5476,10 @@ class Reading:
     # it tests the entity's type (#296, _override_collision): why, and what it
     # gives an entity it doesn't single out.
     collision_for: str = ""
+    # Set when no collision comes from a vanilla block's Properties the
+    # block copies (``Blocks.WHEAT``), read out of the client jar (#296,
+    # portkit.data.vanilla_block_collision): that block's field.
+    collision_copied: str = ""
     # Java's collision boxes (pixels) when they are read and aren't the
     # selection box (read_stateless_shapes only; collision is then True).
     collision_boxes: tuple | None = None
@@ -6028,6 +6044,7 @@ def read_blocks(classes: ClassIndex | None, names: list[str], run=None) -> dict[
             other = Reading(name)
             _read_placement(machine, objs[1], other)
             _read_shape(machine, objs[1], other)
+            _settle_collision(r, other)
             if (other.placement, other.shapes, other.collision) != (r.placement, r.shapes, r.collision):
                 r.placement, r.shapes, r.collision = None, None, None
                 r.placement_why = r.shape_why = r.collision_why = "registered twice with different settings"
@@ -6457,6 +6474,7 @@ def read_state_blocks(classes: ClassIndex | None, bools: dict[str, tuple], run=N
             _read_defaults(machine, objs[1], other, _placed_states(machine, objs[1]))
             _read_state_shapes(machine, objs[1], other, flat)
             _read_shape_collision(machine, objs[1], other)
+            _settle_collision(r, other)
             if (other.placement, other.shapes_by, other.collision, other.defaults) != \
                     (r.placement, r.shapes_by, r.collision, r.defaults):
                 r.placement, r.shapes_by, r.collision = None, None, None
@@ -6516,9 +6534,13 @@ def read_stateless_shapes(classes: ClassIndex | None, names: list[str], run=None
             one.alone = entity_beside(machine, obj, name)
             got.append(one)
         r.__dict__.update(got[0].__dict__)
+        if len(got) > 1:
+            _settle_collision(r, got[1])
+            got[0] = r
         if len(got) > 1 and (got[1].shapes, got[1].collision, got[1].collision_boxes) != \
                 (got[0].shapes, got[0].collision, got[0].collision_boxes):
             r.shapes, r.collision, r.collision_boxes, r.collision_for = None, None, None, ""
+            r.collision_copied = ""
             r.shape_why = r.collision_why = "registered twice with different settings"
     return readings
 
@@ -6718,6 +6740,20 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
 _SAME_TEXT = "getShape's boxes at every drawn state"
 
 
+def _settle_collision(r: Reading, other: Reading) -> None:
+    """A block registered twice whose two readings disagree only on its
+    collision (one read, say from a copied vanilla block's Properties, the
+    other not) keeps what they agree on: its collision becomes a DEFAULT,
+    with the reason, and ``other`` is told the same so the caller's check
+    of the rest still holds (#296)."""
+    if (r.collision, r.collision_boxes) == (other.collision, other.collision_boxes):
+        return
+    for x in (r, other):
+        x.collision, x.collision_boxes, x.collision_for, x.collision_copied = None, None, "", ""
+        x.collision_from = ""
+        x.collision_why = "registered twice with different settings"
+
+
 def _in_block(boxes) -> bool:
     """Whether every box (pixels) lies inside the block's own cube, so
     Bedrock's collision box, which stops at the block's edges, carries it
@@ -6775,6 +6811,8 @@ def _read_shape_collision(machine: Machine, obj: Obj, r: Reading, boxes_ok: bool
                            "it collides isn't known")
         return
     r.collision = bool(props.has_collision)
+    if not props.has_collision and props.collision_copied:
+        r.collision_copied = props.collision_copied
 
 
 def _read_toggle(machine: Machine, obj: Obj, r: StateReading, cells: list | None = None) -> None:
@@ -8350,6 +8388,7 @@ def read_directional_states(classes: ClassIndex | None,
             _read_defaults(machine, objs[1], other, _dir_placed_states(machine, objs[1]), where)
             _read_dir_state_shapes(machine, objs[1], other)
             _read_shape_collision(machine, objs[1], other)
+            _settle_collision(r, other)
             if (other.rule, other.shapes_by, other.collision, other.defaults) != \
                     (r.rule, r.shapes_by, r.collision, r.defaults):
                 r.rule, r.shapes_by, r.collision = None, None, None
@@ -8417,6 +8456,7 @@ def read_facing_second_shapes(classes: ClassIndex | None, specs: dict[str, tuple
             _read_states(machine, objs[1], other)
             _read_dir_state_shapes(machine, objs[1], other)
             _read_shape_collision(machine, objs[1], other)
+            _settle_collision(r, other)
             if (other.shapes_by, other.collision) != (r.shapes_by, r.collision):
                 r.shapes_by, r.collision = None, None
                 r.shape_why = r.collision_why = "registered twice with different settings"

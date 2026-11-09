@@ -2017,6 +2017,7 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
         return []
     readings = blockcode.read_stateless_shapes(mod.classes, sorted(names), run=shared())
     read, alone, collide_same, no_collide, clamped, for_player, own = [], [], [], [], [], [], []
+    copied_off = []
     for name in sorted(names):
         r = readings[name]
         if r.shapes is None:
@@ -2055,7 +2056,10 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
             components["minecraft:collision_box"] = _collision_value(dict(selection), array, r.collision is not False)
         components["minecraft:selection_box"] = selection
         if r.collision is False:
-            no_collide.append((r.collision_from or "the block's Properties call noCollission", name))
+            if r.collision_copied and not r.collision_from:
+                copied_off.append((r.collision_copied, name))
+            else:
+                no_collide.append((r.collision_from or "the block's Properties call noCollission", name))
         elif r.collision is True and r.collision_from and not r.collision_for and r.collision_boxes is not None:
             own.append((r.collision_from, name))
         elif r.collision is True and r.collision_from and not r.collision_for:
@@ -2088,6 +2092,8 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
                      "box, the selection box stays getShape's - " + _grouped(own) + ".")
     if no_collide:
         notes.append("No collision, read from bytecode - " + _grouped(no_collide) + ".")
+    if copied_off:
+        notes.append(_COPIED_NO_COLLISION + _grouped(copied_off) + ".")
     if for_player:
         notes.append("Collision read from bytecode for a player (Bedrock has one collision box for every "
                      "entity, and the block's getCollisionShape tests the entity's type: the box players feel "
@@ -3693,6 +3699,7 @@ def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, na
         "collision": reading.collision,
         "collision_why": reading.collision_why,
         "collision_from": reading.collision_from,
+        "collision_copied": reading.collision_copied,
         "states": extra_states,
         "behaviour": list(reading.behaviour),
         "clamped": clamped,
@@ -3700,15 +3707,28 @@ def _convert_coded_facing(mod: SourceMod, result: ConversionResult, rel: str, na
     }
 
 
+# No collision from a copy of a vanilla block's Properties whose hasCollision is
+# false, read out of the client jar of the game version the mod declares (#296,
+# portkit.data.vanilla_block_collision).
+_COPIED_NO_COLLISION = ("No collision, read from bytecode (the block's Properties copy a vanilla block's, "
+                        "whose hasCollision is false, read from Minecraft's client jar: ofFullCopy/"
+                        "ofLegacyCopy copy it, so BlockBehaviour#getCollisionShape is empty) - ")
+
+
 def _no_collision_notes(records: list[dict]) -> list[str]:
     """No collision read from bytecode: the Properties' noCollission (the
     vanilla getCollisionShape is then empty), or a getCollisionShape the
     block overrides that returns Shapes.empty() (#296)."""
     notes = []
-    props = [r["name"] for r in records if r["collision"] is False and not r.get("collision_from")]
+    props = [r["name"] for r in records if r["collision"] is False and not r.get("collision_from")
+             and not r.get("collision_copied")]
     if props:
         notes.append("No collision, read from bytecode (the block's Properties call noCollission, so "
                      "BlockBehaviour#getCollisionShape is empty): " + ", ".join(props) + ".")
+    copied = [(r["collision_copied"], r["name"]) for r in records
+              if r["collision"] is False and not r.get("collision_from") and r.get("collision_copied")]
+    if copied:
+        notes.append(_COPIED_NO_COLLISION + _grouped(copied) + ".")
     own = [(r["collision_from"], r["name"]) for r in records
            if r["collision"] is False and r.get("collision_from")]
     if own:
@@ -4418,6 +4438,7 @@ def _convert_coded_bool(mod: SourceMod, result: ConversionResult, rel: str, name
         "collision": reading.collision,
         "collision_why": reading.collision_why,
         "collision_from": reading.collision_from,
+        "collision_copied": reading.collision_copied,
         "states": extra_states,
         # A use toggle read is carried; the rest of the behaviour isn't.
         "behaviour": [m for m in reading.behaviour if not (reading.toggle and m in ("useWithoutItem", "use"))],
@@ -5504,6 +5525,7 @@ def _second_shapes(mod: SourceMod, name: str, r, second: str, order: list, keys:
     got = blockcode.read_facing_second_shapes(getattr(mod, "classes", None), {name: (facings, second)},
                                               run=run)[name]
     r.collision, r.collision_why, r.collision_from = got.collision, got.collision_why, got.collision_from
+    r.collision_copied = got.collision_copied
     if got.shapes_by is None:
         r.shape_why = got.shape_why
         return None, got.shape_why
@@ -6085,6 +6107,7 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         "collision": reading.collision,
         "collision_why": reading.collision_why,
         "collision_from": reading.collision_from,
+        "collision_copied": reading.collision_copied,
         "states": sorted(set(reading.states or ()) - drawn - {"facing6"} - set(bools)),
         "behaviour": [m for m in reading.behaviour if not (toggle and m in ("useWithoutItem", "use"))],
         "clamped": clamped,
