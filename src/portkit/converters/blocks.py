@@ -2016,7 +2016,7 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
     if not names or getattr(mod, "classes", None) is None or not len(mod.classes):
         return []
     readings = blockcode.read_stateless_shapes(mod.classes, sorted(names), run=shared())
-    read, alone, collide_same, no_collide, clamped, for_player = [], [], [], [], [], []
+    read, alone, collide_same, no_collide, clamped, for_player, own = [], [], [], [], [], [], []
     for name in sorted(names):
         r = readings[name]
         if r.shapes is None:
@@ -2056,6 +2056,8 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
         components["minecraft:selection_box"] = selection
         if r.collision is False:
             no_collide.append((r.collision_from or "the block's Properties call noCollission", name))
+        elif r.collision is True and r.collision_from and not r.collision_for and r.collision_boxes is not None:
+            own.append((r.collision_from, name))
         elif r.collision is True and r.collision_from and not r.collision_for:
             collide_same.append((r.collision_from, name))
         if r.collision is not None and r.collision_for:
@@ -2079,6 +2081,11 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
         notes.append("Collision read from bytecode (the block's getCollisionShape gives the same boxes as "
                      "its getShape there, read for an entity its code doesn't single out; Bedrock has one "
                      "collision box for every entity) - " + _grouped(collide_same) + ".")
+    if own:
+        notes.append("Collision read from bytecode (the block's getCollisionShape gives boxes of its own, "
+                     "the same at every state and inside the block, read for an entity its code doesn't "
+                     "single out; Bedrock has one collision box for every entity): they are the collision "
+                     "box, the selection box stays getShape's - " + _grouped(own) + ".")
     if no_collide:
         notes.append("No collision, read from bytecode - " + _grouped(no_collide) + ".")
     if for_player:

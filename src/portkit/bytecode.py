@@ -590,6 +590,10 @@ class ClassIndex:
         # version the mod declares (:mod:`portkit.data.vanilla_blocks`, #280),
         # or None when that table isn't pinned or cached.
         self.vanilla_blocks: dict[str, str] | None = None
+        # Vanilla block registry id -> whether its Properties collide
+        # (``hasCollision``), for the same game version
+        # (:mod:`portkit.data.vanilla_block_collision`, #296), or None.
+        self.vanilla_collision: dict[str, bool] | None = None
         # The loader metadata files of the mod's jar and of each library jar
         # (one {path: bytes} per jar, the mod's first): which classes the
         # loader constructs itself (:mod:`portkit.entrypoints`, #280).

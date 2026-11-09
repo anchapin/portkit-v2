@@ -4041,11 +4041,19 @@ class Machine:
                         occlude = src.fields["__props"].can_occlude
                 elif isinstance(src, Const):
                     light = CopiedLight(f"{src.owner.rsplit('/', 1)[-1]}.{src.name}")
+                    # A vanilla block's hasCollision, read out of the declared
+                    # game version's client jar (#296,
+                    # portkit.data.vanilla_block_collision), when that table
+                    # is cached and reads the block; else unknown, as before.
+                    collides = getattr(self.classes, "vanilla_collision", None) or {}
+                    block_id = self._vanilla_block_id(src)
+                    if block_id is not None and isinstance(collides.get(block_id), bool):
+                        collision = collides[block_id]
                 else:
                     light = CopiedLight("a block it can't read")
-                # Whether a vanilla block (or one it can't read) collides is
-                # that block's, not read here. Whether a copy is air isn't
-                # read (#296), so a copy is never taken for an air block.
+                # Whether a block it can't read collides isn't known. Whether
+                # a copy is air isn't read (#296), so a copy is never taken
+                # for an air block.
                 return [Props(collision, light, self.epoch, air=UNKNOWN, can_occlude=occlude)]
             return [Props(UNKNOWN, UNKNOWN, self.epoch, air=UNKNOWN, can_occlude=UNKNOWN)]
         if not isinstance(recv, Props):
@@ -6632,8 +6640,9 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
     With ``boxes_ok`` (a reader whose converter writes a collision box of
     its own: read_stateless_shapes), the player's box, when it is one shape
     on every path and at every state but isn't the selection box, is read
-    too (``collision_boxes``). (A box of its own that isn't read for a
-    player keeps the DEFAULT, as before.) Anything else (a box elsewhere, a shape it can't
+    too (``collision_boxes``), and so is a box of its own for an entity the
+    code doesn't single out when it is one shape on every path and at every
+    state and lies inside the block (see _in_block). Anything else (a box elsewhere, a shape it can't
     read, a test on the world it can't decide that leads to a box) keeps the
     DEFAULT, with the reason."""
     where = f"{own[0].name.replace('/', '.')}#getCollisionShape"
@@ -6686,7 +6695,11 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
         r.collision = False
         r.collision_from = read_where
         return
-    if boxes_ok and r.collision_for and results and all(isinstance(x, Shape) for x in results) and len(set(results)) == 1:
+    if boxes_ok and results and all(isinstance(x, Shape) for x in results) and len(set(results)) == 1 \
+            and (r.collision_for or _in_block(results[0].boxes)):
+        # One shape on every path and at every state: a player's box (read
+        # for a player, above), or a box of its own inside the block, which
+        # the converter writes as it is.
         r.collision = True
         r.collision_from = read_where
         r.collision_boxes = tuple(results[0].boxes)
@@ -6703,6 +6716,13 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
 
 
 _SAME_TEXT = "getShape's boxes at every drawn state"
+
+
+def _in_block(boxes) -> bool:
+    """Whether every box (pixels) lies inside the block's own cube, so
+    Bedrock's collision box, which stops at the block's edges, carries it
+    exactly."""
+    return all(len(b) == 6 and all(0 <= b[i] < b[i + 3] <= 16 for i in range(3)) for b in boxes)
 
 
 def _shape_text(results) -> str:
