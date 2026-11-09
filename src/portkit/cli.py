@@ -1174,6 +1174,7 @@ def cmd_reference(args) -> int:
     # Vanilla Blocks field -> id tables (#280): every pinned set, or the one
     # the mod's declared game version needs.
     from .data import vanilla_blocks as block_id_data
+    from .data import vanilla_block_collision as block_collision_data
     from .data import vanilla_block_tools as block_tool_data
     if meta is None:
         block_id_sets = list(block_id_data.SETS)
@@ -1191,6 +1192,10 @@ def cmd_reference(args) -> int:
             if tool_set is not None:
                 state = "cached" if block_tool_data.cached(tool_set, cache) else "missing"
                 print(f"{tool_set.id:28} {tool_set.label} {state}")
+            collision_set = block_collision_data.select(block_ids.minecraft)
+            if collision_set is not None:
+                state = "cached" if block_collision_data.cached(collision_set, cache) else "missing"
+                print(f"{collision_set.id:28} {collision_set.label} {state}")
         state = "cached" if forge_versions.cached(cache) else "missing"
         print(f"{forge_versions.SET_ID:28} {forge_versions.LABEL} {state}")
         state = "cached" if data.cached_sounds(cache) else "missing"
@@ -1276,6 +1281,17 @@ def cmd_reference(args) -> int:
             failed += 1
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} {block_ids.id} -> {path}")
+        # Whether each vanilla block's Properties collide (#296), from the
+        # same jar (before the tool table, whose download lets the kept jar go).
+        collision_set = block_collision_data.select(block_ids.minecraft)
+        if collision_set is not None:
+            try:
+                path, downloaded = block_collision_data.fetch(collision_set, cache)
+            except data.ReferenceDataError as exc:
+                print(f"FAILED {exc}", file=sys.stderr)
+                failed += 1
+            else:
+                print(f"{'fetched' if downloaded else 'cached ':7} {collision_set.id} -> {path}")
         # Which vanilla blocks need the correct tool (#280), from the same jar.
         tool_set = block_tool_data.select(block_ids.minecraft)
         if tool_set is not None:

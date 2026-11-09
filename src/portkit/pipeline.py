@@ -24,6 +24,7 @@ from .converters.recipes import (
 )
 from .data import worldgen as worldgen_ref
 from .data.mappings import attach as attach_mappings
+from .data.vanilla_block_collision import attach as attach_vanilla_collision
 from .data.vanilla_blocks import attach as attach_vanilla_blocks
 from .libraries import attach as attach_libraries
 from .icon import resolve as resolve_icon
@@ -527,6 +528,7 @@ def convert(
             meta.notes.append(mapping_note)
         # Vanilla Blocks field -> id for the declared game version (#280).
         attach_vanilla_blocks(staged.classes, meta.minecraft or meta.loader_minecraft)
+        attach_vanilla_collision(staged.classes, meta.minecraft or meta.loader_minecraft)
         bundled_note = staged.bundled_note()
         if bundled_note:
             meta.notes.append(bundled_note)

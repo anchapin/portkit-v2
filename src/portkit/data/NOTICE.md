@@ -172,3 +172,21 @@ The slot rules are quoted from
 [Mojang/bedrock-samples](https://github.com/Mojang/bedrock-samples)
 `documentation/Recipes.html` at the pinned commit. It holds item identifiers,
 tag names and where each comes from, nothing else.
+
+## Vanilla block tables read from Mojang's client jar (#280, #296)
+
+Nothing from Mojang's client jar is stored here or shipped in the package.
+`portkit reference fetch` downloads the client jar and `client.txt` of each game
+version pinned in `portkit/data/vanilla_blocks.py` (piston-data.mojang.com,
+sha1-pinned as Mojang's version manifest gives them) and derives three small
+tables from `net.minecraft.world.level.block.Blocks` with `portkit.bytecode`:
+each `Blocks` field's registry id (`vanilla-blocks-VERSION`), whether each
+block's Properties call `requiresCorrectToolForDrops` (`vanilla-block-tools-VERSION`,
+#280) and whether each block's Properties leave `hasCollision` set
+(`vanilla-block-collision-VERSION`, #296). Each is checked against the sha256
+pinned in its module and cached in the same reference cache. Derived from
+Minecraft: (c) Microsoft / Mojang AB, subject to the
+[Minecraft EULA](https://www.minecraft.net/en-us/eula); never vendored. Without
+them, a reading that needs one stays a labelled DEFAULT. The tests use javac
+stand-ins of their own (`tests/data/vanillablocktools`,
+`tests/data/vanillablockcollision`), not Mojang's classes.
