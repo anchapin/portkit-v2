@@ -6658,6 +6658,7 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
     if tested:
         # The code singles out entities by type: read it for a player.
         other = _SAME_TEXT if same is True else _shape_text(results)
+        before = (same is True, None if results is None else frozenset(results))
         ctx = PLAYER_CONTEXT
         same = _same_as_selection(machine, obj, r, ctx) if not partial else ""
         machine.steps = 0
@@ -6667,11 +6668,13 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
             results, unread = None, exc
         types = ", ".join(sorted(t.rsplit("/", 1)[-1] for t in tested))
         mine = _SAME_TEXT if same is True else _shape_text(results)
-        r.collision_for = (f"read for a player: its getCollisionShape tests the entity's type ({types}); "
-                           f"for a player it gives {mine}, for an entity it doesn't single out {other}")
-        # Every converter's note names a read collision by where it came
-        # from: this one says it was read for a player.
-        read_where = f"{where}, {r.collision_for}"
+        if (same is True, None if results is None else frozenset(results)) != before:
+            # A player gets another shape than other entities: say so.
+            r.collision_for = (f"read for a player: its getCollisionShape tests the entity's type ({types}); "
+                               f"for a player it gives {mine}, for an entity it doesn't single out {other}")
+            # Every converter's note names a read collision by where it
+            # came from: this one says it was read for a player.
+            read_where = f"{where}, {r.collision_for}"
     if same is True:
         r.collision = True
         r.collision_from = read_where
@@ -6683,7 +6686,7 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
         r.collision = False
         r.collision_from = read_where
         return
-    if boxes_ok and tested and results and all(isinstance(x, Shape) for x in results) and len(set(results)) == 1:
+    if boxes_ok and r.collision_for and results and all(isinstance(x, Shape) for x in results) and len(set(results)) == 1:
         r.collision = True
         r.collision_from = read_where
         r.collision_boxes = tuple(results[0].boxes)
