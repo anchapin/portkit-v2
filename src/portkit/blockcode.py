@@ -6637,6 +6637,7 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
     read, a test on the world it can't decide that leads to a box) keeps the
     DEFAULT, with the reason."""
     where = f"{own[0].name.replace('/', '.')}#getCollisionShape"
+    read_where = where
     partial = "__partial" in obj.fields
     machine.__dict__.pop("collider_tests", None)
     # At the states getShape was read at first: the same boxes there is
@@ -6668,20 +6669,23 @@ def _override_collision(machine: Machine, obj: Obj, own, r: Reading, boxes_ok: b
         r.collision_for = (f"read for a player: its getCollisionShape tests the entity's type ({types}); "
                            f"for a player it gives {_shape_text(results)}, for an entity it doesn't single "
                            f"out {other}")
+        # Every converter's note names a read collision by where it came
+        # from: this one says it was read for a player.
+        read_where = f"{where}, {r.collision_for}"
     if same is True:
         r.collision = True
-        r.collision_from = where
+        r.collision_from = read_where
         return
     if results is None:
         r.collision_why = f"{where} overrides the collision shape and can't be followed ({unread})"
         return
     if results and all(isinstance(x, Shape) and not x.boxes for x in results):
         r.collision = False
-        r.collision_from = where
+        r.collision_from = read_where
         return
     if boxes_ok and tested and results and all(isinstance(x, Shape) for x in results) and len(set(results)) == 1:
         r.collision = True
-        r.collision_from = where
+        r.collision_from = read_where
         r.collision_boxes = tuple(results[0].boxes)
         return
     if results and all(isinstance(x, Shape) for x in results):

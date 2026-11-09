@@ -2059,7 +2059,7 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
         elif r.collision is True and r.collision_from and not r.collision_for:
             collide_same.append((r.collision_from, name))
         if r.collision is not None and r.collision_for:
-            for_player.append((f"{r.collision_from}, {r.collision_for}", name))
+            for_player.append((r.collision_from, name))
         (alone if r.alone else read).append((r.shape_from, name, r.collision, r.collision_why))
         if cut:
             clamped.append(name)
