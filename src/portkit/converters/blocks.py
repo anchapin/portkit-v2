@@ -3449,8 +3449,10 @@ _ARRAY_MAX = 16
 def _collision_array(boxes, turn: int = 0) -> list[tuple] | None:
     """Java's collision ``boxes`` (pixels), each turned by ``turn`` as
     _java_turn does and cut to the block, deduplicated (a box another holds
-    adds nothing), in Java's order; None when what is left fills one cuboid
-    (the bounding box is then exact), is empty, or is more than Bedrock's 16."""
+    adds nothing) and sorted, so the same boxes listed in another order (as a
+    turned shape lists them) are the same array; None when what is left fills
+    one cuboid (the bounding box is then exact), is one box, or is more than
+    Bedrock's 16."""
     out: list[tuple] = []
     for box in boxes or ():
         cut, _ = _clamped(_java_turn(tuple(float(v) for v in box), turn))
@@ -3461,7 +3463,7 @@ def _collision_array(boxes, turn: int = 0) -> list[tuple] | None:
     out = [b for b in out if not any(o is not b and _holds(o, b) for o in out)]
     if len(out) < 2 or len(out) > _ARRAY_MAX or _one_cuboid(out):
         return None
-    return out
+    return sorted(out)
 
 
 def _holds(outer: tuple, inner: tuple) -> bool:

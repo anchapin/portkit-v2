@@ -21,7 +21,9 @@ POSTS = ((2.0, 0.0, 0.0, 14.0, 12.0, 6.0), (9.0, 12.0, 1.0, 13.0, 16.0, 5.0), (3
 
 
 def test_boxes_that_dont_fill_one_cuboid_are_an_array():
-    assert blocks._collision_array(POSTS) == list(POSTS)
+    assert blocks._collision_array(POSTS) == sorted(POSTS)
+    # The same boxes in another order are the same array.
+    assert blocks._collision_array(POSTS[::-1]) == sorted(POSTS)
 
 
 def test_one_cuboid_is_no_array():
@@ -35,16 +37,16 @@ def test_one_cuboid_is_no_array():
 
 def test_array_is_deduplicated_and_cut_to_the_block():
     got = blocks._collision_array(POSTS + POSTS[:1] + ((4.0, 1.0, 1.0, 5.0, 2.0, 2.0),))
-    assert got == list(POSTS)
+    assert got == sorted(POSTS)
     # A box reaching below the block is cut at its floor; one left with no volume is dropped.
     got = blocks._collision_array(((2.0, -2.0, 2.0, 14.0, 8.0, 14.0), (0.0, 4.0, 0.0, 16.0, 10.0, 16.0),
                                    (0.0, -3.0, 0.0, 16.0, -1.0, 16.0)))
-    assert got == [(2.0, 0.0, 2.0, 14.0, 8.0, 14.0), (0.0, 4.0, 0.0, 16.0, 10.0, 16.0)]
+    assert got == [(0.0, 4.0, 0.0, 16.0, 10.0, 16.0), (2.0, 0.0, 2.0, 14.0, 8.0, 14.0)]
 
 
 def test_array_turns_as_the_bounding_box_does():
     got = blocks._collision_array(POSTS, 90)
-    assert got == [tuple(float(v) for v in blocks._java_turn(b, 90)) for b in POSTS]
+    assert got == sorted(tuple(float(v) for v in blocks._java_turn(b, 90)) for b in POSTS)
     assert blocks._bbox(got) == blocks._java_turn(blocks._bbox(POSTS), 90)
 
 
@@ -87,7 +89,7 @@ def test_one_look_block_collides_with_its_boxes(monkeypatch):
 
     bound = blocks._bedrock_box(blocks._bbox(POSTS))
     assert comps("posts")["minecraft:selection_box"] == bound
-    assert comps("posts")["minecraft:collision_box"] == [blocks._bedrock_box(b) for b in POSTS]
+    assert comps("posts")["minecraft:collision_box"] == [blocks._bedrock_box(b) for b in sorted(POSTS)]
     # Collision not read from code: the DEFAULT bounding box, as before.
     assert comps("guess")["minecraft:collision_box"] == bound
     assert comps("slab")["minecraft:collision_box"] == comps("slab")["minecraft:selection_box"]
