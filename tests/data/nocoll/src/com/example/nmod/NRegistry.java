@@ -16,4 +16,5 @@ public class NRegistry {
   public static final Object GATE = BLOCKS.register("gate", () -> new NGate(Properties.of()));
   public static final Object SOLID = BLOCKS.register("solid", () -> new NSolid(Properties.of().noCollission()));
   public static final Object HAS = BLOCKS.register("has", () -> new NHas(Properties.of()));
+  public static final Object SEAT = BLOCKS.register("seat", () -> new NSeat(Properties.of()));
 }

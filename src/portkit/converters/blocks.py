@@ -2016,7 +2016,7 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
     if not names or getattr(mod, "classes", None) is None or not len(mod.classes):
         return []
     readings = blockcode.read_stateless_shapes(mod.classes, sorted(names), run=shared())
-    read, alone, collide_same, no_collide, clamped = [], [], [], [], []
+    read, alone, collide_same, no_collide, clamped, for_player = [], [], [], [], [], []
     for name in sorted(names):
         r = readings[name]
         if r.shapes is None:
@@ -2027,21 +2027,39 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
         box, cut = _clamped(box)
         if any(box[i + 3] <= box[i] for i in range(3)):
             continue
-        # Java's own boxes when its collision is read and they don't fill one cuboid.
-        array = _collision_array(r.shapes) if r.collision is True else None
-        if box == (0.0, 0.0, 0.0, 16.0, 16.0, 16.0) and r.collision is not False and array is None:
+        # Java's own boxes when its collision is read and they don't fill one
+        # cuboid; a collision read as boxes of its own (collision_boxes) is
+        # their array, else their bounding box (cut to the block).
+        coll_boxes = r.collision_boxes if r.collision is True else None
+        array = _collision_array(coll_boxes if coll_boxes is not None else r.shapes) if r.collision is True else None
+        coll_box = None
+        if coll_boxes is not None and array is None:
+            coll_box = _bbox(coll_boxes)
+            if coll_box is not None:
+                coll_box, _ = _clamped(coll_box)
+                if any(coll_box[i + 3] <= coll_box[i] for i in range(3)):
+                    coll_box = None
+            if coll_box is None:
+                continue
+        whole = (0.0, 0.0, 0.0, 16.0, 16.0, 16.0)
+        if box == whole and r.collision is not False and array is None and coll_box in (None, whole):
             continue
         block = result.files.get(f"blocks/{name}.json")
         if block is None:
             continue
         selection = _bedrock_box(box)
         components = block["minecraft:block"]["components"]
-        components["minecraft:collision_box"] = _collision_value(dict(selection), array, r.collision is not False)
+        if coll_box is not None:
+            components["minecraft:collision_box"] = _bedrock_box(coll_box)
+        else:
+            components["minecraft:collision_box"] = _collision_value(dict(selection), array, r.collision is not False)
         components["minecraft:selection_box"] = selection
         if r.collision is False:
             no_collide.append((r.collision_from or "the block's Properties call noCollission", name))
-        elif r.collision is True and r.collision_from:
+        elif r.collision is True and r.collision_from and not r.collision_for:
             collide_same.append((r.collision_from, name))
+        if r.collision is not None and r.collision_for:
+            for_player.append((r.collision_from, name))
         (alone if r.alone else read).append((r.shape_from, name, r.collision, r.collision_why))
         if cut:
             clamped.append(name)
@@ -2063,6 +2081,12 @@ def _stateless_boxes(mod: SourceMod, result: ConversionResult, names: list[str],
                      "collision box for every entity) - " + _grouped(collide_same) + ".")
     if no_collide:
         notes.append("No collision, read from bytecode - " + _grouped(no_collide) + ".")
+    if for_player:
+        notes.append("Collision read from bytecode for a player (Bedrock has one collision box for every "
+                     "entity, and the block's getCollisionShape tests the entity's type: the box players feel "
+                     "in Java is kept, and every other entity collides as a player does; a box other than "
+                     "getShape's is the collision box, the selection box stays getShape's) - "
+                     + _grouped(for_player) + ".")
     default_c = [(y, n) for _w, n, c, y in read + alone if c is None]
     if default_c:
         notes.append(f"Collision DEFAULT, not read from code ({_COLLISION_DEFAULT}) - "
