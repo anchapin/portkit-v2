@@ -3547,6 +3547,22 @@ class Machine:
             # class (#280: a trait key's javac-style ``equals`` compares
             # ``getClass()`` of both sides).
             return [ClassLit(recv.cls)]
+        if owner == "java/util/Objects" and name == "equals" and static \
+                and desc == "(Ljava/lang/Object;Ljava/lang/Object;)Z" and len(rest) == 2:
+            # Objects#equals (Java SE 21): ``(a == b) || (a != null &&
+            # a.equals(b))``; two nulls are equal, null and a known non-null
+            # value aren't, else as _equals_known (#296 pick a: a library's
+            # trait key compares its namespace and path strings this way).
+            a, b = rest
+            if a is None or b is None:
+                if a is None and b is None:
+                    return [1]
+                if isinstance(a if b is None else b, (str, int, Const, Dir)):
+                    return [0]
+            else:
+                same = _equals_known(a, b)
+                if same is not None:
+                    return [int(same)]
         if isinstance(recv, Collider) and recv.part == "context" and name == "getEntity" and not rest:
             # EntityCollisionContext#getEntity: the colliding entity (#296).
             return [PLAYER_ENTITY if recv.player else COLLIDER_ENTITY]
