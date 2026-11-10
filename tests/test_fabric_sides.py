@@ -74,6 +74,15 @@ def test_a_name_the_sides_build_different_classes_for_is_not_read(read):
     assert objs == [] and why == blockcode._SIDE_WHY
 
 
+def test_a_name_one_side_cant_read_keeps_that_side_s_reason():
+    m = Machine(ClassIndex({}))
+    block = blockcode.Obj("com/example/smod/SBlock", {"glow": 1})
+    out = blockcode._merge_sides(m, {"a": ([block], ""), "b": ([], "its registration can't be followed (x)")},
+                                 Machine(ClassIndex({})), {"a": ([], "no registration (y)"), "b": ([block], "")})
+    assert out["a"] == ([], "no registration (y)")
+    assert out["b"] == ([], "its registration can't be followed (x)")
+
+
 def test_a_run_that_never_asks_is_read_once():
     lazy = Path(__file__).parent / "data" / "lazycode" / "classes"
     machine, reg = blockcode._registered(ClassIndex(_entries(lazy)), ["lazy_first"])

@@ -6074,6 +6074,11 @@ def _merge_sides(machine: Machine, mine: dict, server: Machine, theirs: dict) ->
     out: dict = {}
     for name, (objs, why) in mine.items():
         other, other_why = theirs.get(name, ([], why))
+        if bool(objs) != bool(other):
+            # One side's block can't be read: the name isn't read, for that
+            # side's reason.
+            out[name] = ([], (why if not objs else other_why) or _SIDE_WHY)
+            continue
         if len(objs) != len(other) or [o.cls for o in objs] != [o.cls for o in other]:
             out[name] = ([], _SIDE_WHY)
             continue
