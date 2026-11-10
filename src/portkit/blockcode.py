@@ -4536,8 +4536,15 @@ class Machine:
             # function's value for this key, and the cache is left as it is.
             # A key the run doesn't know is handed to the function as it is
             # (#296 pick a): what the function's value holds whatever the key
-            # is stays known, the rest is unknown.
-            out = self._apply(rest[1], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [rest[0]])
+            # is stays known, the rest is unknown. Should the function throw
+            # on every way for the unknown key, that says nothing about the
+            # real key: the answer is unknown, as before.
+            try:
+                out = self._apply(rest[1], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [rest[0]])
+            except Unreadable:
+                if rest[0] is not UNKNOWN:
+                    raise
+                out = UNKNOWN
             if out is not UNKNOWN and not isinstance(out, _Many):
                 return [out]
         if name == "computeIfAbsent" and len(rest) == 2 and self._key_ok(rest[0]):
