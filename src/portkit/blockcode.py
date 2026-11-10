@@ -1088,6 +1088,15 @@ class Registration:
     # class (_constructed): it counts only for a name no other run reads, as
     # the module run building that block makes the same registration.
     own: bool = False
+    # The block a dependency jar's own code built by calling ``value`` (a
+    # factory: a lambda or constructor reference taking arguments) during
+    # the registration run, once, on no undecided way (#296): the object
+    # the game registers, built from the arguments the library hands it
+    # (a builder's Properties), instead of one built from unknown
+    # arguments. ``applied_many`` when it called the factory more than
+    # once, on an undecided way, or the call built no whole block.
+    applied: object = None
+    applied_many: bool = False
 
 
 class Machine:
@@ -1227,6 +1236,9 @@ class Machine:
         # past a branch it can't decide (see _invoke, _map_touch): a change
         # to a map allocated before it may happen on one way only.
         self._fork_floor = -1
+        # ids of the lambdas registrations recorded as their value (see
+        # _factory_applied).
+        self._factories: set = set()
         # Counts top-level runs (a run entered at depth 0, see run).
         self._top = 0
         # The closed world's census (#280, see _census and sole_instance):
@@ -1908,7 +1920,13 @@ class Machine:
             self.binds.append((list(args if static else args[1:]), self._running[-1] if self._running else ""))
             return [None]
         if isinstance(recv, Lam) and name not in ("equals", "hashCode", "toString"):
-            return self.call_lambda(recv, args[1:])
+            # The call sits after a branch the run can't decide, in its own
+            # frame or one that called it (see _invoke).
+            forked = self._forked or self._fork_floor >= 0
+            out = self.call_lambda(recv, args[1:])
+            if self.registrations is not None and self._running and self._library(self._running[-1]):
+                self._factory_applied(recv, out, forked)
+            return out
         if self.assume_support and name == "canSurvive" and desc == _CAN_SURVIVE_DESC:
             # The block's own canSurvive(state, level, pos), called directly
             # while a placement is read: assumed true (see read_directional).
@@ -2361,6 +2379,8 @@ class Machine:
         name = names[0].rsplit(":", 1)[-1]
         if len(values) == 1:
             self.registrations.append(Registration(name, values[0]))
+            if isinstance(values[0], Lam):
+                self._factories.add(id(values[0]))
             if isinstance(values[0], Obj) and _RESOURCE_NAME.fullmatch(names[0]):
                 # Only a valid resource location can be a registry key (a
                 # format such as "%s_wall" handed with the block isn't one).
@@ -2378,11 +2398,36 @@ class Machine:
         suppliers = [v for v in values if self.supplies_block(v)]
         if len(suppliers) == 1:
             self.registrations.append(Registration(name, suppliers[0]))
+            self._factories.add(id(suppliers[0]))
         else:
             self.registrations.append(Registration(name, None, (
                 f"its registration passes {len(values)} lambdas and {len(suppliers)} of them take no arguments "
                 "and return a block class (by the lambda's dynamicMethodType; exactly one must), so which "
                 "one builds the block can't be told")))
+
+    def _factory_applied(self, lam: Lam, built: list, forked: bool) -> None:
+        """A dependency jar's code called ``lam``, the value of a
+        registration this run recorded (handed to the jar with its name:
+        ``registrate.block(name, FooBlock::new)``), as the game calls a
+        factory a builder holds (#296: Registrate's ``BlockBuilder#createEntry``
+        is ``factory.apply(propertiesCallback.apply(initialProperties.get()))``).
+        The block it built is the registration's when this is the jar's only
+        call of it, on no undecided way, and it built one block object whose
+        constructor ran to the end; otherwise the registration is built as
+        before (the factory on unknown arguments)."""
+        if id(lam) not in self._factories:
+            return
+        regs = [r for r in self.registrations if r.value is lam]
+        if not regs or not _arg_count(lam.itype or "()V")[0]:
+            return
+        one = built[0] if len(built) == 1 else None
+        whole = isinstance(one, Obj) and self.is_block_class(one.cls) and "__partial" not in one.fields \
+            and not getattr(one, "_uninit", False)
+        for r in regs:
+            if r.applied is not None or forked or not whole:
+                r.applied, r.applied_many = None, True
+            elif not r.applied_many:
+                r.applied = one
 
     def supplies_block(self, lam: Lam) -> bool:
         """Whether ``lam``, by its dynamicMethodType, takes no arguments
@@ -5886,6 +5931,10 @@ def _registered(classes: ClassIndex, names: list[str],
     plain: set = set()
     found_ids: dict[str, set] = {}
     for reg in machine.registrations:
+        if reg.applied is not None and not reg.applied_many:
+            # The block the dependency jar built with the factory it was
+            # handed (Machine._factory_applied).
+            reg.value = reg.applied
         if reg.value is None:
             if not reg.concat:
                 unread.setdefault(reg.name, reg.why)
