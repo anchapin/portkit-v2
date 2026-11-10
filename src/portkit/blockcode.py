@@ -4530,10 +4530,13 @@ class Machine:
                 recv.items, recv.havoc, recv.exact = {}, True, False
                 return [UNKNOWN]
             return [view]
-        if name == "computeIfAbsent" and len(rest) == 2 and recv.memo and rest[0] is not UNKNOWN:
+        if name == "computeIfAbsent" and len(rest) == 2 and recv.memo:
             # A cache of one function (#296, _memo_field): whatever it holds
             # was the function's value for an equal key, so the answer is the
             # function's value for this key, and the cache is left as it is.
+            # A key the run doesn't know is handed to the function as it is
+            # (#296 pick a): what the function's value holds whatever the key
+            # is stays known, the rest is unknown.
             out = self._apply(rest[1], "apply", "(Ljava/lang/Object;)Ljava/lang/Object;", [rest[0]])
             if out is not UNKNOWN and not isinstance(out, _Many):
                 return [out]
