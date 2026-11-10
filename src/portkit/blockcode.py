@@ -114,6 +114,11 @@ _DIRECTION = "net/minecraft/core/Direction"
 # and negation of the doubles; equals(Object) compares the three fields with
 # Double.compare. A Vec3 on the machine is an Obj of this class with x, y, z.
 _VEC3 = "net/minecraft/world/phys/Vec3"
+# Fabric Loader's side query (fabric-loader 0.16: ``FabricLoader#getEnvironmentType()``
+# answers ``EnvType.CLIENT`` on a client and ``EnvType.SERVER`` on a dedicated
+# server, #296): a registration run answers it for the side it reads.
+_FABRIC_LOADER = "net/fabricmc/loader/api/FabricLoader"
+_ENV_TYPE = "net/fabricmc/api/EnvType"
 # net.minecraft.util.Mth (1.20.1 / 1.21.1 client jars): SIN is
 # ``(float) Math.sin((double) i * Math.PI * 2.0 / 65536.0)`` for i in
 # 0..65535; sin(f) = SIN[(int) (f * 10430.378F) & 65535], cos(f) =
@@ -1216,6 +1221,12 @@ class Machine:
         # (owner, name, desc, args, static) for every call; a list is the
         # call's results, None lets the call run as usual.
         self.call_hook = None
+        # The side a registration run reads (#296, _registered): "client" or
+        # "server" while it runs, so Fabric's side query has an answer; None
+        # otherwise (the query is then an unknown call, as before). Set
+        # ``side_asked`` when a run asked it.
+        self.side: str | None = None
+        self.side_asked = False
         self._vec3_zero = None  # Vec3.ZERO, one object (identity tests read it)
         # (class, static field) -> whether it reads as null until written
         # (see _lazy_null).
@@ -1916,6 +1927,10 @@ class Machine:
             hooked = self.call_hook(owner, name, desc, args, static)
             if hooked is not None:
                 return hooked
+        if self.side is not None and owner == _FABRIC_LOADER and name == "getEnvironmentType" \
+                and desc == "()L" + _ENV_TYPE + ";":
+            self.side_asked = True
+            return [Const(_ENV_TYPE, "CLIENT" if self.side == "client" else "SERVER")]
         if self.binds is not None and (owner, name) in self.bind_calls:
             self.binds.append((list(args if static else args[1:]), self._running[-1] if self._running else ""))
             return [None]
@@ -2748,6 +2763,9 @@ class Machine:
             return ("return", None)
         elif op == 0xB2:
             value = self.get_static(insn.arg)
+            if isinstance(value, MapV) and not value.memo \
+                    and self._memo_field(insn.arg.owner, insn.arg.name, static=True):
+                value.memo = True
             if self._static_writes and self._static_writes[-1][0] == self._clinit_depth:
                 self._static_writes[-1][2][id(value)] = value
             if (value is UNKNOWN or value is None) and self._lazy_guard(insn):
@@ -2803,7 +2821,16 @@ class Machine:
             if filling is not None and obj is not filling:
                 raise Unreadable("a lazy cache's fill writes the field of another object than the one it tested")
             if isinstance(obj, Obj):
-                self._write(f, obj)
+                try:
+                    self._write(f, obj)
+                except Unreadable:
+                    if not self._weak_ok() or filling is not None:
+                        raise
+                    # A dependency jar's write to a field on one way of a
+                    # branch the run can't decide (#296 pick a, as an array
+                    # store): the field is unknown from then on, on every way.
+                    obj.fields[insn.arg.name] = UNKNOWN
+                    return None
                 obj.fields[insn.arg.name] = val
         elif op in (0xB6, 0xB7, 0xB8, 0xB9):
             return self._invoke(op, insn.arg, f)
@@ -4705,22 +4732,28 @@ class Machine:
             return None
         return names
 
-    def _memo_field(self, owner: str, name: str) -> bool:
+    def _memo_field(self, owner: str, name: str, static: bool = False) -> bool:
         """Whether instance field ``name`` (read through ``owner``) is a cache
         of one function (#296: Immersive Engineering's
         ``CachedVoxelShapes#calculatedShapes``): private and final, set only
         by its class's constructors, and read by its class only to call
         ``Map#computeIfAbsent`` with a function of its own class, always the
         same one, and nothing else (a private field nothing else can reach).
-        Such a map only ever holds the function's value for each key."""
-        key = ("memo", owner, name)
+        Such a map only ever holds the function's value for each key. With
+        ``static``, the same for a private static final field set only by its
+        class initializer (#296 pick a: a library's tag cache,
+        ``SurvivesOnBlockTrait#TAG_CACHE``)."""
+        key = ("memo", owner, name, static)
         if key in self._memo_cache:
             return self._memo_cache[key]
         self._memo_cache[key] = False
         decl = self._field_owner(owner, name)
         cf = self.classes.get(decl)
-        if cf is None or (cf.field_access.get(name, 0) & 0x12) != 0x12:
+        need = 0x1A if static else 0x12
+        access = cf.field_access.get(name, 0) if cf is not None else 0
+        if cf is None or (access & need) != need or bool(access & 0x08) != static:
             return False
+        put, get, maker = (0xB3, 0xB2, "<clinit>") if static else (0xB5, 0xB4, "<init>")
         from .bytecode import Ref, Indy, instructions
         fns, ok = set(), True
         for m in cf.methods:
@@ -4730,10 +4763,10 @@ class Machine:
             for k, insn in enumerate(code):
                 if not (isinstance(insn.arg, Ref) and insn.arg.name == name):
                     continue
-                if insn.op == 0xB5:
-                    ok = ok and m.name == "<init>"
+                if insn.op == put:
+                    ok = ok and m.name == maker
                     continue
-                if insn.op != 0xB4:
+                if insn.op != get:
                     ok = False
                     continue
                 # getfield F; <load key>; <load this>; invokedynamic f;
@@ -5872,8 +5905,171 @@ def _census(machine: Machine) -> None:
     machine.census_done = frozenset(machine._finished_methods - machine._stopped_methods)
 
 
+_SIDE_WHY = ("built differently on a client and on a dedicated server (its registration asks Fabric's "
+             "FabricLoader#getEnvironmentType)")
+
+
 def _registered(classes: ClassIndex, names: list[str],
                 holders: bool = False) -> tuple[Machine, dict[str, tuple[list, str]]]:
+    """:func:`_registered_on` for a client; when that run asked which side
+    it runs on (Fabric's ``FabricLoader#getEnvironmentType``, #296 pick a),
+    the registration is read again for a dedicated server and only what both
+    sides agree on is kept (_merge_sides): every value the two sides give
+    differently is unknown, so a reader leaves it a labelled DEFAULT, and a
+    name the two sides build different blocks for isn't read. A run that
+    never asks is the one run, as before. Reading afterwards answers the
+    side query as an unknown call again."""
+    machine, out = _registered_on(classes, names, holders, "client")
+    if machine.side_asked:
+        server, theirs = _registered_on(classes, names, holders, "server")
+        out = _merge_sides(machine, out, server, theirs)
+    machine.side = None
+    return machine, out
+
+
+# Props fields that count evaluations rather than hold a setting.
+_SIDE_SKIP = frozenset({"epoch"})
+
+
+class _SideMerge:
+    """Joins what a client's registration run left (``a``, kept) with what a
+    dedicated server's left (``b``), value by value (#296 pick a): an object
+    of the same class keeps each field both give equally and takes UNKNOWN
+    for the rest, in place; lists, arrays, maps and the machine's own tuples
+    of the same shape keep the elements both agree on, else nothing about
+    them is known; any other value is kept when the two are equal, else it
+    is UNKNOWN. Each client object is joined once, with the first server
+    value it meets."""
+
+    def __init__(self):
+        self.seen: dict = {}
+
+    def join(self, a, b):
+        if a is b:
+            return a
+        done = self.seen.get(id(a))
+        if done is not None:
+            return done[1]
+        if isinstance(a, Obj):
+            if not isinstance(b, Obj) or a.cls != b.cls:
+                return UNKNOWN
+            self.seen[id(a)] = (a, a)
+            for k in set(a.fields) | set(b.fields):
+                a.fields[k] = self.join(a.fields[k], b.fields[k]) if k in a.fields and k in b.fields else UNKNOWN
+            return a
+        if isinstance(a, Props):
+            if not isinstance(b, Props):
+                return UNKNOWN
+            self.seen[id(a)] = (a, a)
+            for f in a.__dataclass_fields__:
+                if f in _SIDE_SKIP:
+                    continue
+                x, y = getattr(a, f), getattr(b, f)
+                if f == "shared_changed":
+                    a.shared_changed = bool(x or y)
+                elif f == "collision_copied":
+                    if x != y:
+                        a.collision_copied, a.has_collision = "", UNKNOWN
+                else:
+                    setattr(a, f, self.join(x, y))
+            return a
+        if isinstance(a, (Arr, Builder)):
+            attr = "items" if isinstance(a, Arr) else "parts"
+            xs = getattr(a, attr)
+            ys = getattr(b, attr) if type(b) is type(a) else None
+            if ys is None or len(xs) != len(ys):
+                return UNKNOWN
+            self.seen[id(a)] = (a, a)
+            xs[:] = [self.join(x, y) for x, y in zip(xs, ys)]
+            return a
+        if isinstance(a, ListV):
+            self.seen[id(a)] = (a, a)
+            if not isinstance(b, ListV) or a.havoc or b.havoc or len(a.items) != len(b.items):
+                a.items, a.havoc = [], True
+            else:
+                a.items[:] = [self.join(x, y) for x, y in zip(a.items, b.items)]
+            return a
+        if isinstance(a, MapV):
+            self.seen[id(a)] = (a, a)
+            plain = (str, int, float, Const, Dir, RL, RKey, ClassLit, Prop)
+            if not isinstance(b, MapV) or a.havoc or b.havoc or not a.exact or not b.exact \
+                    or a.kind != b.kind or list(a.items) != list(b.items) \
+                    or not all(isinstance(k, plain) for k in a.items):
+                a.items, a.havoc, a.exact, a.canon = {}, True, False, {}
+            else:
+                for k in a.items:
+                    a.items[k] = self.join(a.items[k], b.items[k])
+            return a
+        if isinstance(a, Lam):
+            if not isinstance(b, Lam) or (a.handle, a.itype, a.iface) != (b.handle, b.itype, b.iface) \
+                    or len(a.captured) != len(b.captured):
+                return UNKNOWN
+            self.seen[id(a)] = (a, a)
+            got = tuple(self.join(x, y) for x, y in zip(a.captured, b.captured))
+            out = a if all(g is x for g, x in zip(got, a.captured)) else Lam(a.handle, got, a.itype, a.iface)
+            self.seen[id(a)] = (a, out)
+            return out
+        if isinstance(a, tuple) and type(a) is type(b):
+            # The machine's own records (a vanilla constructor call and its
+            # arguments, ``__vanilla_ctor``): element by element.
+            if len(a) != len(b):
+                return UNKNOWN
+            got = tuple(self.join(x, y) for x, y in zip(a, b))
+            return a if all(g is x for g, x in zip(got, a)) else got
+        if isinstance(a, list) and type(b) is list:
+            if len(a) != len(b):
+                return UNKNOWN
+            self.seen[id(a)] = (a, a)
+            a[:] = [self.join(x, y) for x, y in zip(a, b)]
+            return a
+        if isinstance(a, dict) and type(b) is dict:
+            if list(a) != list(b):
+                return UNKNOWN
+            self.seen[id(a)] = (a, a)
+            for k in a:
+                a[k] = self.join(a[k], b[k])
+            return a
+        fields = getattr(a, "__dataclass_fields__", None)
+        if fields is not None and type(a) is type(b) and a.__dataclass_params__.frozen:
+            got = {f: self.join(getattr(a, f), getattr(b, f)) for f, d in fields.items() if d.compare}
+            if any(v is not getattr(a, f) for f, v in got.items()):
+                return UNKNOWN
+            return a
+        return a if type(a) is type(b) and _equal(a, b) else UNKNOWN
+
+
+def _merge_sides(machine: Machine, mine: dict, server: Machine, theirs: dict) -> dict:
+    """What a client's registration run (``machine``, ``mine``) and a
+    dedicated server's (``server``, ``theirs``) agree on (see _SideMerge): the
+    client machine's statics and block objects keep each value the server
+    gives equally, the rest is unknown; a name the two sides build a
+    different number or class of blocks for has none, with _SIDE_WHY."""
+    join = _SideMerge()
+    out: dict = {}
+    for name, (objs, why) in mine.items():
+        other, other_why = theirs.get(name, ([], why))
+        if len(objs) != len(other) or [o.cls for o in objs] != [o.cls for o in other]:
+            out[name] = ([], _SIDE_WHY)
+            continue
+        out[name] = ([join.join(a, b) for a, b in zip(objs, other)], why or other_why)
+    for key in set(machine.statics) | set(server.statics):
+        if key in machine.statics and key in server.statics:
+            machine.statics[key] = join.join(machine.statics[key], server.statics[key])
+        else:
+            machine.statics[key] = UNKNOWN
+    for attr in ("outside", "renamed"):
+        mine_map, their_map = getattr(machine, attr, {}), getattr(server, attr, {})
+        for name in list(mine_map):
+            a, b = mine_map[name], their_map.get(name)
+            same = a == b if isinstance(a, str) else (
+                isinstance(b, list) and [o.cls for o in a] == [o.cls for o in b])
+            if not same:
+                del mine_map[name]
+    return out
+
+
+def _registered_on(classes: ClassIndex, names: list[str], holders: bool,
+                   side: str) -> tuple[Machine, dict[str, tuple[list, str]]]:
     """Run the registration code that names each blockstate in ``names`` and
     return, per name, the block objects built for it (``[]`` with the reason
     when none was found or it can't be followed). With ``holders`` the
@@ -5881,6 +6077,7 @@ def _registered(classes: ClassIndex, names: list[str],
     (Machine.entity_types), so a block keeps the type it makes its block
     entity with (see _EntityWorld)."""
     machine = Machine(classes)
+    machine.side = side
     machine.holders = machine.entity_types = holders
     machine.registrations = []
     machine._allocating = []
