@@ -3833,12 +3833,14 @@ class Machine:
                     return [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),))]
                 if name == "getCollisionShape" and desc == _GET_SHAPE_DESC and len(rest) == 4 \
                         and isinstance(rest[0], State):
-                    # BlockBehaviour#getCollisionShape (L355, 1.21.1 client
-                    # jar dtb#b): ``hasCollision ? state.getShape(level, pos)
-                    # : Shapes.empty()``, reached when a mod override calls
-                    # super (#296). BlockStateBase#getShape(level, pos)
-                    # (dtb$a#j, L1054-1058) is getBlock().getShape(asState(),
-                    # level, pos, CollisionContext.empty()): the block's own
+                    # BlockBehaviour#getCollisionShape (client jars with
+                    # Mojang's mappings: 1.20.1 dca#c L349, 1.21.1 dtb#b L355,
+                    # 1.21.8 eea#b L363): ``hasCollision ? state.getShape(level,
+                    # pos) : Shapes.empty()``, reached when a mod override calls
+                    # super (#296). BlockStateBase#getShape(level, pos) (1.21.1
+                    # dtb$a#j -> #a, L1054-1058; the same in 1.20.1 and 1.21.8)
+                    # is getBlock().getShape(asState(), level, pos,
+                    # CollisionContext.empty()): the block's own
                     # getShape, run here on the same level and position with
                     # the context unknown (EMPTY is no entity the reader
                     # models). hasCollision is the block's own Properties',
