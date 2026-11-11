@@ -7,7 +7,10 @@ blocks copy ``Blocks.WHEAT`` (no collision), ``Blocks.STONE`` (collides) and
 ``Blocks.GLOWSTONE`` (not in the table), ``peel`` is Alex's Mobs
 BlockBananaPeel's shapes (a 4 px peel to select, a 9 px slab to collide with),
 ``post`` collides above its block, and ``twice`` is registered twice, once on a
-copy of WHEAT and once on a copy of GLOWSTONE.
+copy of WHEAT and once on a copy of GLOWSTONE. The ``super_*`` blocks (``CSuper``)
+override getCollisionShape and hand the call back to vanilla (Immersive
+Engineering's IEEntityBlock does so for a block entity without collision
+bounds).
 """
 from __future__ import annotations
 
@@ -139,3 +142,42 @@ def test_block_files_get_the_peels_own_box_and_the_shrubs_no_collision(monkeypat
     copied = [n for n in notes if "copy a vanilla block's" in n]
     assert len(copied) == 1 and copied[0].endswith("Blocks.WHEAT: shrub.")
     assert blocks._raise_for_arrays(result) == []
+
+
+def test_a_super_call_runs_vanillas_get_collision_shape():
+    # BlockBehaviour#getCollisionShape (1.21.1 client jar dtb#b): hasCollision ?
+    # state.getShape(level, pos) : Shapes.empty(); the state's getShape is the
+    # block's own (dtb$a#j -> #a -> getBlock().getShape).
+    r = blockcode.read_stateless_shapes(_index(), ["super_box", "super_cube", "super_off", "super_open"])
+    box = r["super_box"]
+    assert box.shapes == ((4.0, 0.0, 4.0, 12.0, 10.0, 12.0),)
+    assert box.collision is True and box.collision_boxes is None  # the selection box
+    assert box.collision_from == "com.example.cmod.CSuper#getCollisionShape"
+    cube = r["super_cube"]  # getShape is vanilla's too: Shapes.block()
+    assert cube.shapes == ((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),) and cube.collision is True
+    off = r["super_off"]  # noCollission: Shapes.empty()
+    assert off.collision is False and off.collision_from == "com.example.cmod.CSuper#getCollisionShape"
+
+
+def test_a_super_call_on_one_path_only_keeps_the_default():
+    r = blockcode.read_stateless_shapes(_index(), ["super_open"])["super_open"]
+    assert r.collision is None and r.collision_boxes is None
+    assert "depends on more than the drawn states" in r.collision_why
+
+
+def test_a_super_call_reads_has_collision_from_the_blocks_own_properties():
+    from portkit.blockcode import Machine, Obj, Props, State, UNKNOWN
+    machine = Machine(_index())
+    block = Obj("com/example/cmod/CSuper")
+    block.fields["__props"] = Props(has_collision=UNKNOWN)
+    block.fields["own"] = 1
+    args = [block, State(), UNKNOWN, UNKNOWN, UNKNOWN]
+
+    def call():
+        return machine.call("net/minecraft/world/level/block/Block", "getCollisionShape",
+                            blockcode._GET_SHAPE_DESC, args, special=True)
+    assert call() == [UNKNOWN]
+    block.fields["__props"] = Props(has_collision=False)
+    assert call() == [blockcode.Shape(())]
+    block.fields["__props"] = Props(has_collision=True)
+    assert call() == [blockcode.Shape(((4.0, 0.0, 4.0, 12.0, 10.0, 12.0),))]
