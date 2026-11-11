@@ -27,7 +27,7 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
-## 2026-11-11 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-11-11 yes to this task), PR #PRNUM): a getCollisionShape override that calls super runs vanilla BlockBehaviour#getCollisionShape (`hasCollision ? the block's getShape : Shapes.empty()`); Immersive Engineering's dynamo, electromagnet and machine interface read their collision from code
+## 2026-11-11 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-11-11 yes to this task), PR #418): a getCollisionShape override that calls super runs vanilla BlockBehaviour#getCollisionShape (`hasCollision ? the block's getShape : Shapes.empty()`); Immersive Engineering's dynamo, electromagnet and machine interface read their collision from code
 
 - **Status:** approved (Hark, high confidence; no policy choice arose: every change is Java's exact value, checked against the jars' bytecode with javap, or stays a labelled DEFAULT). Part of #296, part of #277. Generic and in core (`blockcode`), no mod names.
 - **Correction:** the entries for PRs #407, #409, #410 and #411 say `dynamo`, `electromagnet` and `machine_interface` "ship no block file". That is wrong: they have converted since PR #396 (2026-10-26) with block file, geometry, loot table and recipe each, on develop da5fcf8 too (local `pipeline.convert` of the gauntlet jar; gap-leaderboard 42900933945's board has no residue for them). What they lacked was their collision, a labelled DEFAULT: "`IEEntityBlock#getCollisionShape` overrides the collision shape with one it can't read (the box at a drawn state depends on more than the drawn states)".
