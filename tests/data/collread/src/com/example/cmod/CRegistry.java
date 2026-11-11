@@ -14,6 +14,11 @@ public class CRegistry {
   public static final Object SHRUB = BLOCKS.register("shrub", () -> new CShrub(Properties.ofFullCopy(Blocks.WHEAT)));
   public static final Object PEEL = BLOCKS.register("peel", () -> new CPeel(Properties.of()));
   public static final Object POST = BLOCKS.register("post", () -> new CPost(Properties.of()));
+  // getCollisionShape overrides that call super (vanilla BlockBehaviour's).
+  public static final Object SUPER_BOX = BLOCKS.register("super_box", () -> new CSuper(Properties.of(), true, false));
+  public static final Object SUPER_CUBE = BLOCKS.register("super_cube", () -> new CSuper(Properties.of(), false, false));
+  public static final Object SUPER_OFF = BLOCKS.register("super_off", () -> new CSuper(Properties.of().noCollission(), true, false));
+  public static final Object SUPER_OPEN = BLOCKS.register("super_open", () -> new CSuper(Properties.of(), false, true));
   // Registered twice (two loaders' registrations, say): the same shape, but
   // only one copies a block whose collision is read.
   public static final Object TWICE = BLOCKS.register("twice", () -> new CShrub(Properties.ofFullCopy(Blocks.WHEAT)));

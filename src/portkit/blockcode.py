@@ -3831,6 +3831,27 @@ class Machine:
                     return [recv.fields.get("__default", State())]
                 if name == "getShape" and desc == _GET_SHAPE_DESC:
                     return [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),))]
+                if name == "getCollisionShape" and desc == _GET_SHAPE_DESC and len(rest) == 4 \
+                        and isinstance(rest[0], State):
+                    # BlockBehaviour#getCollisionShape (client jars with
+                    # Mojang's mappings: 1.20.1 dca#c L349, 1.21.1 dtb#b L355,
+                    # 1.21.8 eea#b L363): ``hasCollision ? state.getShape(level,
+                    # pos) : Shapes.empty()``, reached when a mod override calls
+                    # super (#296). BlockStateBase#getShape(level, pos) (1.21.1
+                    # dtb$a#j -> #a, L1054-1058; the same in 1.20.1 and 1.21.8)
+                    # is getBlock().getShape(asState(), level, pos,
+                    # CollisionContext.empty()): the block's own
+                    # getShape, run here on the same level and position with
+                    # the context unknown (EMPTY is no entity the reader
+                    # models). hasCollision is the block's own Properties',
+                    # as _read_shape_collision reads them.
+                    props = recv.fields.get("__props")
+                    if not isinstance(props, Props) or _shared_changed(props) \
+                            or props.has_collision not in (True, False):
+                        return [UNKNOWN]
+                    if not props.has_collision:
+                        return [Shape(())]
+                    return self.call(recv.cls, "getShape", _GET_SHAPE_DESC, [recv, rest[0], rest[1], rest[2], UNKNOWN])
         if isinstance(recv, Obj) and recv.cls == "__statedef" and name == "any":
             # StateDefinition#any is the first possible state (L92), each
             # property at its first value; the marker lets a reader take a
