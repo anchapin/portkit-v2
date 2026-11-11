@@ -27,6 +27,22 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-11-11 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-11-11 yes to this task), PR #419): a call on a lambda to a method its interface declares with code runs that code; Create's package frogport reads its collision from code
+
+- **Status:** approved (Hark, high confidence; no policy choice arose: every change is Java's exact value, checked with javap against Create 6.0.8, or stays a labelled DEFAULT). Part of #296, part of #277. Generic and in core (`blockcode`: `Machine.lambda_method`, `_runs_in_sight`), no mod names.
+- **Why it wasn't read:** `package_frogport`'s registration calls `properties(...)` twice; Registrate stores these as `propertiesCallback.andThen(op)`, and `NonNullFunction#andThen` is a default method. The interpreter ran every call on a lambda as the lambda's own body, so `f.andThen(g)` was read as `f(g)` and the Properties went unknown.
+- **Decision:** a call on a lambda to a method its functional interface (or a superinterface) declares with code runs that code, following the JVM's lookup rules. When that code reaches anything outside the jar, its libraries and the JDK, the call is read as before (the lambda's own body).
+- **Disclosed:** #416's Registrate read works only because `NonNullSupplier#lazy` (which hands off to Forge's `Lazy.of`) is read as an immediate call to `createEntry`. Reading `lazy` by its real code would drop 33 Create block files' #416 reads; the fallback rule above keeps the old reading, so nothing regresses. JDK interface default methods (e.g. `Function#andThen`) still use the old reading.
+- **Byte diff** (local `pipeline.convert`, develop e3b879b vs a4d45e3, one mod at a time under a flock, md5 of every file plus notes, `portkit reference fetch` first): 61 of 63 mods converted, 60 byte-identical; chisel and twilight_forest unfetchable locally. Create changes two block files and notes; residue list identical.
+  - `package_frogport.json`: collision DEFAULT 16x14x16 -> array of a 16x4x16 base and a 12x12x12 body (format 1.26.0), `AllShapes.PACKAGE_PORT` (no `getCollisionShape` override; Properties copy the gold block's, so it collides).
+  - `refined_radiance_casing.json`: light 12 (`lambda$static$245` -> `lambda$static$244`).
+  - Notes: packager, repackager, casings, bearings and ladders now read their Properties (labels only).
+- **What players notice:** the frogport collides with its own shape instead of a 16x14x16 block; Radiant Casing gives light 12, as in Java.
+- **Not closable exactly:** block-entity renderer residue on six of the seven one-look blocks, `schematicannon`'s `copy_nbt` loot, recipes waiting on `cogwheel`, `large_cogwheel`, `item_vault`. `chain_conveyor`'s shapes cut to the block are the full cube (Bedrock's default), so nothing is written.
+- **Tests:** `tests/test_lambda_default.py` (javac stand-ins `tests/data/lamdefault`; `off_first` fails on develop).
+- **Runs:** PR CI 43040336290, ingame 43040350756, gap-leaderboard 43040359180, real-mods 43040344266.
+- **Links:** #296, #277, PR #419.
+
 ## 2026-11-11 (approved (Hark, high confidence under Alex's 2026-10-14 campaign order and Alex's 2026-11-11 yes to this task), PR #418): a getCollisionShape override that calls super runs vanilla BlockBehaviour#getCollisionShape (`hasCollision ? the block's getShape : Shapes.empty()`); Immersive Engineering's dynamo, electromagnet and machine interface read their collision from code
 
 - **Status:** approved (Hark, high confidence; no policy choice arose: every change is Java's exact value, checked against the jars' bytecode with javap, or stays a labelled DEFAULT). Part of #296, part of #277. Generic and in core (`blockcode`), no mod names.

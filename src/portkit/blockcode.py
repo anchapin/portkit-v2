@@ -545,6 +545,10 @@ class Lam:
     iface: str | None = None
 
 
+# How many methods Machine._runs_in_sight follows before it gives up (#296).
+_IN_SIGHT_METHODS = 64
+
+
 # Every object, array, map and string builder the machine makes is numbered
 # in order (``_serial``): what a path allocated after a branch it couldn't
 # decide, no other path sees (Machine._write).
@@ -1381,6 +1385,88 @@ class Machine:
             todo.extend(cf.interfaces)
         return found[0] if len({cf.name for cf, _m in found}) == 1 else None
 
+    def lambda_method(self, lam: Lam, name: str, desc: str) -> tuple[ClassFile, Method] | None:
+        """The interface method with code that a call of ``name(desc)`` on
+        ``lam`` runs when it isn't the lambda's own body (#296): ``lam`` is
+        made by LambdaMetafactory.metafactory, so its class extends Object
+        and implements only ``lam.iface`` (Java SE 21, LambdaMetafactory),
+        and the call resolves in that interface and its superinterfaces
+        (JVMS 5.4.3.4 interface method resolution, 5.4.6 selection: the
+        maximally-specific method that isn't abstract). Registrate's
+        ``NonNullFunction#andThen`` is one: ``f.andThen(g)`` is the lambda
+        ``x -> g.apply(f.apply(x))``, not ``f`` applied to ``g``.
+
+        None, and the call is read as before (the lambda's body run on the
+        call's arguments), when the interface or a superinterface on the
+        way isn't in the jar or its libraries, when the first declaration
+        on a path is abstract (the functional method: the lambda's body),
+        when more than one interface gives one, or when the method's code
+        reaches code outside the jar, its libraries and the JDK
+        (:meth:`_runs_in_sight`). Registrate's ``NonNullSupplier#lazy`` is
+        such a method: it hands the supplier to Forge's ``Lazy.of``, whose
+        code isn't here, so it stays read as before, as the one call of the
+        supplier (PR #416's ``BlockBuilder#createEntry``; in the game the
+        registry makes that call later, at its register event)."""
+        if lam.iface is None or name.startswith("<"):
+            return None
+        found, seen, todo = [], set(), [lam.iface]
+        while todo:
+            iname = todo.pop(0)
+            if iname in seen:
+                continue
+            seen.add(iname)
+            cf = self.classes.get(iname)
+            if cf is None or not cf.access & 0x0200:
+                return None
+            m = cf.method(name, desc)
+            if m is not None:
+                if m.code is not None and not m.access & 0x0008:
+                    found.append((cf, m))
+                continue  # declared here: a superinterface's is less specific
+            todo.extend(cf.interfaces)
+        if len({cf.name for cf, _m in found}) != 1 or not self._runs_in_sight(*found[0]):
+            return None
+        return found[0]
+
+    def _runs_in_sight(self, cf: ClassFile, m: Method) -> bool:
+        """Whether every method ``m``'s code names, and theirs in turn (at
+        most _IN_SIGHT_METHODS of them), is the JDK's or resolves to code
+        in the jar or its libraries: no call of it reaches code that isn't
+        here (a loader's or Minecraft's)."""
+        key = (cf.name, m.name, m.desc)
+        cache = self.__dict__.setdefault("_in_sight", {})
+        if key in cache:
+            return cache[key]
+        seen, todo, ok = set(), [(cf, m)], True
+        while todo and ok:
+            c, mm = todo.pop()
+            if (c.name, mm.name, mm.desc) in seen or mm.code is None:
+                continue
+            seen.add((c.name, mm.name, mm.desc))
+            if len(seen) > _IN_SIGHT_METHODS:
+                ok = False
+                break
+            try:
+                code = instructions(c, mm.code)
+            except Exception:  # noqa: BLE001 - code that can't be decoded isn't in sight
+                ok = False
+                break
+            for insn in code:
+                if insn.op not in (0xB6, 0xB7, 0xB8, 0xB9) or not isinstance(insn.arg, Ref):
+                    continue
+                owner = insn.arg.owner
+                if owner.startswith("java/"):
+                    continue
+                if self.classes.get(owner) is None:
+                    ok = False
+                    break
+                more = self.find_method(owner, insn.arg.name, insn.arg.desc) \
+                    or self.default_method(owner, insn.arg.name, insn.arg.desc)
+                if more is not None:
+                    todo.append(more)
+        cache[key] = ok
+        return ok
+
     def instance_of(self, v, cls) -> object:
         """``v instanceof cls`` (1 or 0), or UNKNOWN. Exact for null and for
         an object of a class in the jar: its superclasses are known as far as
@@ -1935,6 +2021,14 @@ class Machine:
             self.binds.append((list(args if static else args[1:]), self._running[-1] if self._running else ""))
             return [None]
         if isinstance(recv, Lam) and name not in ("equals", "hashCode", "toString"):
+            own = self.lambda_method(recv, name, desc)
+            if own is not None:
+                # A method of the lambda's functional interface that has
+                # code (a default method such as Registrate's
+                # ``NonNullFunction#andThen``, or the private method its own
+                # lambda runs): it runs with the lambda as ``this``, not the
+                # lambda's body (#296, see lambda_method).
+                return self.run(*own, args)
             # The call sits after a branch the run can't decide, in its own
             # frame or one that called it (see _invoke).
             forked = self._forked or self._fork_floor >= 0
