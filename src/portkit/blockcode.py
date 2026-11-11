@@ -1446,7 +1446,12 @@ class Machine:
             if len(seen) > _IN_SIGHT_METHODS:
                 ok = False
                 break
-            for insn in instructions(c, mm.code):
+            try:
+                code = instructions(c, mm.code)
+            except Exception:  # noqa: BLE001 - code that can't be decoded isn't in sight
+                ok = False
+                break
+            for insn in code:
                 if insn.op not in (0xB6, 0xB7, 0xB8, 0xB9) or not isinstance(insn.arg, Ref):
                     continue
                 owner = insn.arg.owner
