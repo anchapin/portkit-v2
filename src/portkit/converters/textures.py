@@ -188,6 +188,16 @@ def convert(mod: SourceMod, derived=()) -> ConversionResult:
                 try:
                     meta = json.loads(sidecar.read_text())
                 except json.JSONDecodeError as exc:
+                    # Pick 2a (#348): a sidecar that isn't valid JSON stays
+                    # texture_animation residue, never the explained
+                    # connected_texture kind: its sections can't be read, so
+                    # it isn't known to be CTM's, and an unreadable file must
+                    # not be claimed as explained. Java's own reader may be
+                    # lenient (Gson's JsonParser.parse(Reader) sets its reader
+                    # lenient, gson 2.8.0 JsonParser.java line 82), so some of
+                    # these may still be read by Java; what its animation
+                    # parser makes of them is unchecked, so nothing is claimed
+                    # here either way.
                     result.unhandled.append(
                         Unhandled(sidecar_rel, "texture_animation", f"invalid JSON: {exc}")
                     )
