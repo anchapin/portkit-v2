@@ -510,6 +510,10 @@ class LookDir:
 @dataclass(frozen=True)
 class Prop:
     name: str
+    # An EnumProperty's first possible value, where its creation is read
+    # (EnumProperty#create, see Machine._enum_first): the value
+    # StateDefinition#any gives it. Not part of what the property is.
+    first: object = field(default=None, compare=False, hash=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -3551,6 +3555,36 @@ class Machine:
                 and all(isinstance(a, str) for a in args[1:]):
             obj.fields["__rl"] = f"{args[1]}:{args[2]}"
 
+    def _enum_first(self, owner: str, desc: str, rest: list):
+        """The first possible value of an ``EnumProperty.create`` (#296), the
+        one StateDefinition#any gives the property, or None when not read.
+        MC 1.21.1 EnumProperty (client.txt, class dua): ``create(String,
+        Class)`` (L69) is ``create(name, clazz, p -> true)``, which keeps
+        ``clazz.getEnumConstants()`` in their order (L73), the enum's
+        declaration order (its ordinals); ``create(String, Class, T...)``
+        (L77) keeps the constants as given; the constructor (L17-30) stores
+        ``ImmutableSet.copyOf(values)``, which keeps that order. The enum
+        must be a class of the jar, so its initializer runs here."""
+        if desc == "(Ljava/lang/String;Ljava/lang/Class;)Lnet/minecraft/world/level/block/state/properties/EnumProperty;":
+            lit = rest[1] if len(rest) == 2 else None
+            if not isinstance(lit, ClassLit) or not self.is_mod(lit.name):
+                return None
+            try:
+                self.init_class(lit.name)
+            except Unreadable:
+                return None
+            firsts = {id(c): c for (o, _f), c in list(self.statics.items())
+                      if o == lit.name and isinstance(c, Obj) and c.cls == lit.name
+                      and c.fields.get("__ordinal") == 0 and "__enum_name" in c.fields}
+            return next(iter(firsts.values())) if len(firsts) == 1 else None
+        if desc == ("(Ljava/lang/String;Ljava/lang/Class;[Ljava/lang/Enum;)"
+                    "Lnet/minecraft/world/level/block/state/properties/EnumProperty;"):
+            arr = rest[2] if len(rest) == 3 else None
+            if isinstance(arr, Arr) and arr.items and isinstance(arr.items[0], Obj) \
+                    and "__enum_name" in arr.items[0].fields:
+                return arr.items[0]
+        return None
+
     def _crop_age(self, obj: Obj) -> str | None:
         """The name of the property a CropBlock subclass's getAgeProperty
         returns: its own override run here, else CropBlock's AGE ("age",
@@ -4017,13 +4051,15 @@ class Machine:
             props = rest[0].items if rest and isinstance(rest[0], Arr) else rest
             for p in props:
                 recv.fields.setdefault("names", []).append(p.name if isinstance(p, Prop) else "?")
+                recv.fields.setdefault("props", []).append(p)
             return [recv]
         if owner == _PROPERTIES or isinstance(recv, Props):
             return self._properties(name, recv, rest, static)
         if owner.endswith("/properties/DirectionProperty") or owner.endswith("/properties/EnumProperty") \
                 or owner.endswith("/properties/BooleanProperty") or owner.endswith("/properties/IntegerProperty"):
             if static and name == "create" and rest and isinstance(rest[0], str):
-                return [Prop(rest[0])]
+                first = self._enum_first(owner, desc, rest) if owner.endswith("/properties/EnumProperty") else None
+                return [Prop(rest[0], first)]
         if owner in ("java/lang/Boolean", "java/lang/Integer", "java/lang/Double", "java/lang/Float") \
                 and name == "valueOf" and len(rest) == 1:
             return [rest[0]]
@@ -9211,7 +9247,9 @@ class HeldReading:
     ``kind`` ``placed`` (getStateForPlacement puts it on every path) or
     ``registered`` (the registered default state, where placement reads it
     from the world or differs between paths, as #215 item 2 reads a
-    boolean's), and ``source`` citing it; None with ``why`` when unread.
+    boolean's) or ``any`` (that default is StateDefinition#any's and leaves
+    the state at its EnumProperty's first value, #296), and ``source``
+    citing it; None with ``why`` when unread.
     ``changed_by`` names the methods of the block's own classes that change
     the state (``+redstone`` when one reads a signal), as #215's scan."""
 
@@ -9403,13 +9441,50 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
             r.value, r.kind = name, "registered"
             r.source = f"{r.cls}#<init> (registerDefaultState); {why}"
         else:
-            # StateDefinition#any's value (the enum's first constant) isn't
-            # taken: no reader of an enum's order is approved (#87).
-            r.why = f"{why}; the registered default state doesn't set it" if why else \
-                "the registered default state doesn't set it"
-            return
+            first = _any_enum_value(machine, obj, r.prop, default)
+            if first is None:
+                r.why = f"{why}; the registered default state doesn't set it" if why else \
+                    "the registered default state doesn't set it"
+                return
+            # StateDefinition#any's value (#296, pick a pending Alex): the
+            # registered default is built from StateDefinition#any and
+            # doesn't set the state, so it has the enum's first value.
+            r.value, r.kind = first, "any"
+            r.source = (f"{r.cls}#<init> (registerDefaultState from StateDefinition#any, which leaves "
+                        f"{r.prop} at its EnumProperty's first value); {why}")
     r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
 
+
+
+def _any_enum_value(machine: Machine, obj: Obj, prop: str, default) -> str | None:
+    """The serialized name of ``prop``'s value in StateDefinition#any's
+    state (#296): read only where the registered default is that state
+    (the ``_ANY`` marker) and doesn't set ``prop``, no state was set under
+    a name that wasn't read, and the block's createBlockStateDefinition
+    adds exactly one property of that name whose EnumProperty#create is
+    read (Prop.first). StateDefinition#any is the first state (L92), each
+    property at its first possible value."""
+    if not isinstance(default, State):
+        return None
+    values = dict(default.values)
+    if _ANY not in values or prop in values or any(str(k).startswith("?") for k in values):
+        return None
+    desc = "(Lnet/minecraft/world/level/block/state/StateDefinition$Builder;)V"
+    if machine.find_method(obj.cls, "createBlockStateDefinition", desc) is None:
+        return None
+    builder = Obj("__statebuilder")
+    machine.steps = 0
+    try:
+        machine.call(obj.cls, "createBlockStateDefinition", desc, [obj, builder])
+    except Unreadable:
+        return None
+    props = builder.fields.get("props", [])
+    if any(not isinstance(p, Prop) for p in props):
+        return None
+    named = [p for p in props if p.name == prop]
+    if len(named) != 1 or named[0].first is None:
+        return None
+    return _serialized(machine, named[0].first)
 
 
 def _placement_hooks(machine: Machine, cls: str) -> list[str]:
