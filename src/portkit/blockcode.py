@@ -1269,8 +1269,8 @@ class Machine:
         # The side a registration run reads (#296, _registered): "client" or
         # "server" while it runs, so Fabric's, Forge's and NeoForge's side
         # queries have an answer; None otherwise (the query is then unknown,
-        # as before). ``side_asked`` names the first query a run asked
-        # ("" while none has).
+        # as before). ``side_asked`` names the queries a run asked, in the
+        # order it first asked them ("" while none has).
         self.side: str | None = None
         self.side_asked = ""
         self._vec3_zero = None  # Vec3.ZERO, one object (identity tests read it)
@@ -2060,7 +2060,7 @@ class Machine:
                 return hooked
         if self.side is not None and owner == _FABRIC_LOADER and name == "getEnvironmentType" \
                 and desc == "()L" + _ENV_TYPE + ";":
-            self.side_asked = self.side_asked or "Fabric's FabricLoader#getEnvironmentType"
+            self._asked("Fabric's FabricLoader#getEnvironmentType")
             return [Const(_ENV_TYPE, "CLIENT" if self.side == "client" else "SERVER")]
         if owner in _FML_DIST and name == "getDist" and static and desc == "()L" + _FML_DIST[owner] + ";":
             return [self._dist(owner)]
@@ -5007,13 +5007,17 @@ class Machine:
                            for c in chain)
         return True
 
+    def _asked(self, query: str) -> None:
+        """Note that the run asked side query ``query`` (see ``side``)."""
+        if query not in self.side_asked.split(", "):
+            self.side_asked = f"{self.side_asked}, {query}" if self.side_asked else query
+
     def _dist(self, owner: str):
         """``FMLEnvironment.dist`` / ``FMLLoader.getDist()`` of ``owner``'s
         loader: the side a registration run reads (#296), unknown elsewhere."""
         if self.side is None:
             return UNKNOWN
-        self.side_asked = self.side_asked or ("FML's " + owner.rsplit("/", 1)[1]
-                                              + (".dist" if owner.endswith("Environment") else "#getDist"))
+        self._asked("FML's " + owner.rsplit("/", 1)[1] + (".dist" if owner.endswith("Environment") else "#getDist"))
         return Const(_FML_DIST[owner], "CLIENT" if self.side == "client" else "DEDICATED_SERVER")
 
     def _dist_executor(self, name: str, desc: str, args: list) -> list | None:
@@ -5030,7 +5034,7 @@ class Machine:
             dist = args[0]
             if not (isinstance(dist, Const) and dist.owner == _FORGE_DIST):
                 return None
-            self.side_asked = self.side_asked or "Forge's DistExecutor#" + name
+            self._asked("Forge's DistExecutor#" + name)
             if dist.name != here:
                 return [None]
             out = []
@@ -5043,7 +5047,7 @@ class Machine:
             return out
         if name in ("unsafeRunForDist", "runForDist", "safeRunForDist") and len(args) == 2 \
                 and desc == "(Ljava/util/function/Supplier;Ljava/util/function/Supplier;)Ljava/lang/Object;":
-            self.side_asked = self.side_asked or "Forge's DistExecutor#" + name
+            self._asked("Forge's DistExecutor#" + name)
             out = []
             for inner in self.call(*_SUPPLIER_GET, [args[0] if self.side == "client" else args[1]]):
                 out += self.call(*_SUPPLIER_GET, [inner])
