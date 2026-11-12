@@ -3569,10 +3569,9 @@ class Machine:
             lit = rest[1] if len(rest) == 2 else None
             if not isinstance(lit, ClassLit) or not self.is_mod(lit.name):
                 return None
-            try:
-                self.init_class(lit.name)
-            except Unreadable:
-                return None
+            self.init_class(lit.name)
+            if lit.name in self._clinit_failed:
+                return None  # a constant may be missing
             firsts = {id(c): c for (o, _f), c in list(self.statics.items())
                       if o == lit.name and isinstance(c, Obj) and c.cls == lit.name
                       and c.fields.get("__ordinal") == 0 and "__enum_name" in c.fields}
