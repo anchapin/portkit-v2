@@ -6,7 +6,7 @@ a note, not drawn. An unread start converts nothing.
 
 The class files under tests/data/blockcode/classes are javac 21 output of
 tests/data/blockcode/src (HeldBlocks.java, LyingLogBlock, PlacedFillBlock,
-UnsetFillBlock, Fill; rebuild with build.sh): real compiler patterns, no
+UnsetFillBlock, PickedFillBlock, FilteredFillBlock, Fill; rebuild with build.sh): real compiler patterns, no
 Minecraft code.
 """
 from __future__ import annotations
@@ -67,6 +67,7 @@ def _mod(tmp_path: Path) -> SourceMod:
         (root / f"assets/{NS}/models/block/{name}.json").write_text(json.dumps(model))
     crate = {"variants": {"axis=x": {"model": f"{NS}:block/log", "y": 90}, "axis=z": {"model": f"{NS}:block/log"}}}
     for name, bs in {"lying_log": _log_states(), "unset_fill": _log_states(), "placed_fill": _fill_states(),
+                     "picked_fill": _log_states(), "filtered_fill": _log_states(),
                      "lying_crate": crate, "flip_box": crate}.items():
         (root / f"assets/{NS}/blockstates/{name}.json").write_text(json.dumps(bs))
     return SourceMod(root=root, namespace=NS, classes=ClassIndex.from_source(CLASSES))
@@ -109,7 +110,8 @@ def test_hold_keeps_the_start_value_only():
 @pytest.fixture(scope="module")
 def readings():
     return blockcode.read_held_states(ClassIndex.from_source(CLASSES),
-                                      {"lying_log": "fill", "placed_fill": "fill", "unset_fill": "fill"})
+                                      {"lying_log": "fill", "placed_fill": "fill", "unset_fill": "fill",
+                                       "picked_fill": "fill", "filtered_fill": "fill"})
 
 
 def test_start_from_the_registered_default(readings):
@@ -127,9 +129,27 @@ def test_start_from_placement(readings):
     assert placed.changed_by == ()
 
 
-def test_unread_start_is_not_guessed(readings):
+def test_start_from_state_definition_any(readings):
+    # #296 (pick a, pending Alex): a default that leaves fill unset is
+    # StateDefinition#any's, whose fill is the EnumProperty's first value:
+    # the enum's first constant for create(name, Class) (EnumProperty L69-73,
+    # getEnumConstants), here registered by vanilla Block#<init> ...
     unset = readings["unset_fill"]
-    assert unset.value is None and "the registered default state doesn't set it" in unset.why
+    assert (unset.value, unset.kind) == ("empty", "any")
+    assert unset.source.startswith("net.minecraft.world.level.block.Block#<init> (vanilla) "
+                                   "(registerDefaultState from StateDefinition#any")
+    # ... and the first constant given for create(name, Class, T...) (L77),
+    # under a default the block's own constructor registers.
+    picked = readings["picked_fill"]
+    assert (picked.value, picked.kind) == ("moss", "any")
+    assert picked.source.startswith("com.example.deco.PickedFillBlock#<init> (registerDefaultState from")
+
+
+def test_unread_start_is_not_guessed(readings):
+    # A predicate filters the values (create(name, Class, Predicate)): which
+    # one comes first isn't read.
+    filtered = readings["filtered_fill"]
+    assert filtered.value is None and "the registered default state doesn't set it" in filtered.why
 
 
 def test_no_classes():
@@ -174,10 +194,19 @@ def test_facing_block_held_at_its_placed_value(converted):
 
 
 def test_unread_start_stays_residue(converted):
-    (miss,) = [u for u in converted.unhandled if u.source.endswith("blockstates/unset_fill.json")]
+    (miss,) = [u for u in converted.unhandled if u.source.endswith("blockstates/filtered_fill.json")]
     assert miss.kind == "block"
     assert miss.reason.startswith("held state: fill (empty, moss, waterlogged) isn't set by the player")
-    assert "blocks/unset_fill.json" not in converted.files
+    assert "blocks/filtered_fill.json" not in converted.files
+
+
+def test_state_definition_any_start_is_held(converted):
+    # Held at StateDefinition#any's fill, what is left is the axis, whose
+    # placement these blocks don't read (vanilla Block#getStateForPlacement):
+    # they now stop at the horizontal-pillar reason, past the held state.
+    for name in ("unset_fill", "picked_fill"):
+        (miss,) = [u for u in converted.unhandled if u.source.endswith(f"blockstates/{name}.json")]
+        assert miss.reason.startswith("horizontal pillar (axis x or z): how the axis is placed isn't read")
 
 
 # --- horizontal pillars -----------------------------------------------------------

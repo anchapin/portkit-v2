@@ -115,11 +115,16 @@ def test_enum_alone_held_at_its_registered_start(converted):
     assert any(c.endswith("models/block/jet_on.json") for c in converted.consumed)
 
 
-def test_enum_alone_with_unread_start_stays_residue(converted):
-    assert "blocks/unset_jet.json" not in converted.files
-    (u,) = _residue(converted, "unset_jet")
-    assert u.reason.startswith("held state: mode (flame, idle, timeout) isn't set by the player on placement")
-    assert "the registered default state doesn't set it" in u.reason
+def test_enum_alone_held_at_state_definition_any(converted):
+    # #296 (pick a, pending Alex): no start set by the code is
+    # StateDefinition#any's, the EnumProperty's first value: Mode's first
+    # constant as declared (IDLE), not the first name in sorted order (flame).
+    assert "blocks/unset_jet.json" in converted.files
+    assert not _residue(converted, "unset_jet")
+    note = next(n for n in converted.notes if n.startswith("unset_jet: "))
+    assert "mode starts at idle (any: net.minecraft.world.level.block.Block#<init> (vanilla) " \
+           "(registerDefaultState from StateDefinition#any" in note
+    assert "flame, timeout (jet_on) aren't drawn" in note
 
 
 def test_undrawn_states_convert_as_one_look(converted):

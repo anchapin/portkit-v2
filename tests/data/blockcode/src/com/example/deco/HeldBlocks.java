@@ -11,4 +11,6 @@ public class HeldBlocks {
     public static final Object PLACED_FILL = BLOCKS.register("placed_fill", () -> new PlacedFillBlock(Properties.of()));
     public static final Object LYING_CRATE = BLOCKS.register("lying_crate", () -> new CrateBlock(Properties.of()));
     public static final Object UNSET_FILL = BLOCKS.register("unset_fill", () -> new UnsetFillBlock(Properties.of()));
+    public static final Object PICKED_FILL = BLOCKS.register("picked_fill", () -> new PickedFillBlock(Properties.of()));
+    public static final Object FILTERED_FILL = BLOCKS.register("filtered_fill", () -> new FilteredFillBlock(Properties.of()));
 }
