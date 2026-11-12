@@ -372,6 +372,24 @@ VINE_FACES = ("up", "north", "south", "west", "east")
 _VINE_BOXES = {"up": (0.0, 15.0, 0.0, 16.0, 16.0, 16.0), "north": (0.0, 0.0, 0.0, 16.0, 16.0, 1.0),
                "south": (0.0, 0.0, 15.0, 16.0, 16.0, 16.0), "east": (15.0, 0.0, 0.0, 16.0, 16.0, 16.0),
                "west": (0.0, 0.0, 0.0, 1.0, 16.0, 16.0)}
+# Vanilla block classes whose getCollisionShape is BlockBehaviour's (they and
+# the vanilla classes between them and Block declare none; client.txt
+# 1.20.1, 1.21.1 and 1.21.8, Mojang mappings), so a mod override's super call
+# runs BlockBehaviour#getCollisionShape (see Machine.vanilla): the plain ones,
+# those that declare getShape but no getCollisionShape - VineBlock (getShape
+# L73 / L81 / L68 in 1.20.1 / 1.21.1 / 1.21.8), CropBlock (L45 / L53 / L45),
+# ButtonBlock (L72-94 / L86-108 / L88), LeverBlock (L51-79 / L63-91 / L64) -
+# and those that declare neither (RotatedPillarBlock,
+# FaceAttachedHorizontalDirectionalBlock). GrindstoneBlock and
+# ScaffoldingBlock declare their own getCollisionShape and aren't here. The
+# block's getShape then runs as it would anywhere: read where the reader
+# models it (a mod override, VineBlock's, FaceAttachedHorizontalDirectionalBlock's),
+# unknown otherwise.
+_BEHAVIOUR_COLLISION = _PLAIN_VANILLA | {
+    _VINE, _CROP, _PILLAR, _FACE_ATTACHED,
+    "net/minecraft/world/level/block/ButtonBlock",
+    "net/minecraft/world/level/block/LeverBlock",
+}
 _CAN_SURVIVE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/LevelReader;"
                      "Lnet/minecraft/core/BlockPos;)Z")
 _ATTACH_ORDER = ("FLOOR", "WALL", "CEILING")  # AttachFace declaration order (dtn a, b, c)
@@ -3925,6 +3943,7 @@ class Machine:
                     return [recv.fields.get("__default", State())]
                 if name == "getShape" and desc == _GET_SHAPE_DESC:
                     return [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),))]
+            if base in _BEHAVIOUR_COLLISION:
                 if name == "getCollisionShape" and desc == _GET_SHAPE_DESC and len(rest) == 4 \
                         and isinstance(rest[0], State):
                     # BlockBehaviour#getCollisionShape (client jars with
@@ -3945,7 +3964,12 @@ class Machine:
                         return [UNKNOWN]
                     if not props.has_collision:
                         return [Shape(())]
-                    return self.call(recv.cls, "getShape", _GET_SHAPE_DESC, [recv, rest[0], rest[1], rest[2], UNKNOWN])
+                    # getShape is the state's block's (getBlock()); hasCollision
+                    # above is the receiver's own field. A state with no block
+                    # of its own recorded is taken as the receiver's (#418).
+                    owner_block = rest[0].block if isinstance(rest[0].block, Obj) else recv
+                    return self.call(owner_block.cls, "getShape", _GET_SHAPE_DESC,
+                                     [owner_block, rest[0], rest[1], rest[2], UNKNOWN])
         if isinstance(recv, Obj) and recv.cls == "__statedef" and name == "any":
             # StateDefinition#any is the first possible state (L92), each
             # property at its first value; the marker lets a reader take a
