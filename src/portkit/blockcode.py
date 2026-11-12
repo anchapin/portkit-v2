@@ -119,6 +119,29 @@ _VEC3 = "net/minecraft/world/phys/Vec3"
 # server, #296): a registration run answers it for the side it reads.
 _FABRIC_LOADER = "net/fabricmc/loader/api/FabricLoader"
 _ENV_TYPE = "net/fabricmc/api/EnvType"
+# Forge's and NeoForge's side queries (#296, the generalisation of pick a
+# above), read with javap from Forge fmlloader/fmlcore 1.20.1-47.3.0 and
+# NeoForge fancymodloader loader 4.0.29 (mergetool-api 1.0 / 2.0.0 for Dist):
+# ``FMLEnvironment.dist`` is a static final field set once from
+# ``FMLLoader.getDist()``, ``Dist.CLIENT`` on a client and
+# ``Dist.DEDICATED_SERVER`` on a dedicated server; ``Dist#isClient()`` is
+# ``this == CLIENT`` and ``isDedicatedServer()`` is ``!isClient()``. Forge's
+# ``DistExecutor`` (fmlcore): ``unsafeRunWhenOn`` / ``runWhenOn`` /
+# ``safeRunWhenOn(dist, s)`` run ``s.get().run()`` when ``dist ==
+# FMLEnvironment.dist``; ``unsafeCallWhenOn`` / ``callWhenOn`` /
+# ``safeCallWhenOn(dist, s)`` return ``s.get().call()`` then, else null;
+# ``unsafeRunForDist`` / ``runForDist`` / ``safeRunForDist(c, s)`` return
+# ``c.get().get()`` on a client and ``s.get().get()`` on a dedicated server.
+_FML_DIST = {
+    "net/minecraftforge/fml/loading/FMLEnvironment": "net/minecraftforge/api/distmarker/Dist",
+    "net/minecraftforge/fml/loading/FMLLoader": "net/minecraftforge/api/distmarker/Dist",
+    "net/neoforged/fml/loading/FMLEnvironment": "net/neoforged/api/distmarker/Dist",
+    "net/neoforged/fml/loading/FMLLoader": "net/neoforged/api/distmarker/Dist",
+}
+_DISTS = frozenset(_FML_DIST.values())
+_DIST_EXECUTOR = "net/minecraftforge/fml/DistExecutor"
+_FORGE_DIST = "net/minecraftforge/api/distmarker/Dist"
+_SUPPLIER_GET = ("java/util/function/Supplier", "get", "()Ljava/lang/Object;")
 # net.minecraft.util.Mth (1.20.1 / 1.21.1 client jars): SIN is
 # ``(float) Math.sin((double) i * Math.PI * 2.0 / 65536.0)`` for i in
 # 0..65535; sin(f) = SIN[(int) (f * 10430.378F) & 65535], cos(f) =
@@ -1244,11 +1267,12 @@ class Machine:
         # call's results, None lets the call run as usual.
         self.call_hook = None
         # The side a registration run reads (#296, _registered): "client" or
-        # "server" while it runs, so Fabric's side query has an answer; None
-        # otherwise (the query is then an unknown call, as before). Set
-        # ``side_asked`` when a run asked it.
+        # "server" while it runs, so Fabric's, Forge's and NeoForge's side
+        # queries have an answer; None otherwise (the query is then unknown,
+        # as before). ``side_asked`` names the queries a run asked, in the
+        # order it first asked them ("" while none has).
         self.side: str | None = None
-        self.side_asked = False
+        self.side_asked = ""
         self._vec3_zero = None  # Vec3.ZERO, one object (identity tests read it)
         # (class, static field) -> whether it reads as null until written
         # (see _lazy_null).
@@ -1874,6 +1898,9 @@ class Machine:
             return Prop(prop)
         if owner == _DIRECTION and ref.name.lower() in DIRECTIONS:
             return Dir(ref.name.lower())
+        if ref.name == "dist" and owner in _FML_DIST and owner.endswith("/FMLEnvironment"):
+            # The side a registration run reads (#296); elsewhere unknown.
+            return self._dist(owner)
         if owner == _VEC3 and ref.name == "ZERO":
             if self._vec3_zero is None:
                 self._vec3_zero = _vec3(0.0, 0.0, 0.0)
@@ -2033,8 +2060,18 @@ class Machine:
                 return hooked
         if self.side is not None and owner == _FABRIC_LOADER and name == "getEnvironmentType" \
                 and desc == "()L" + _ENV_TYPE + ";":
-            self.side_asked = True
+            self._asked("Fabric's FabricLoader#getEnvironmentType")
             return [Const(_ENV_TYPE, "CLIENT" if self.side == "client" else "SERVER")]
+        if owner in _FML_DIST and owner.endswith("/FMLLoader") and name == "getDist" and static \
+                and desc == "()L" + _FML_DIST[owner] + ";":
+            return [self._dist(owner)]
+        if owner in _DISTS and not static and isinstance(recv, Const) and recv.owner == owner \
+                and name in ("isClient", "isDedicatedServer") and desc == "()Z":
+            return [int((recv.name == "CLIENT") == (name == "isClient"))]
+        if owner == _DIST_EXECUTOR and static and self.side is not None:
+            ran = self._dist_executor(name, desc, args)
+            if ran is not None:
+                return ran
         if self.binds is not None and (owner, name) in self.bind_calls:
             self.binds.append((list(args if static else args[1:]), self._running[-1] if self._running else ""))
             return [None]
@@ -4971,6 +5008,53 @@ class Machine:
                            for c in chain)
         return True
 
+    def _asked(self, query: str) -> None:
+        """Note that the run asked side query ``query`` (see ``side``)."""
+        if query not in self.side_asked.split(", "):
+            self.side_asked = f"{self.side_asked}, {query}" if self.side_asked else query
+
+    def _dist(self, owner: str):
+        """``FMLEnvironment.dist`` / ``FMLLoader.getDist()`` of ``owner``'s
+        loader: the side a registration run reads (#296), unknown elsewhere."""
+        if self.side is None:
+            return UNKNOWN
+        self._asked("FML's " + owner.rsplit("/", 1)[1] + (".dist" if owner.endswith("Environment") else "#getDist"))
+        return Const(_FML_DIST[owner], "CLIENT" if self.side == "client" else "DEDICATED_SERVER")
+
+    def _dist_executor(self, name: str, desc: str, args: list) -> list | None:
+        """Forge's ``DistExecutor`` call ``name`` on the side a registration
+        run reads (see _FML_DIST), or None when it isn't one of these or its
+        side isn't a known ``Dist``."""
+        here = "CLIENT" if self.side == "client" else "DEDICATED_SERVER"
+        sup = "(L" + _FORGE_DIST + ";Ljava/util/function/Supplier;)"
+        if name in ("unsafeRunWhenOn", "runWhenOn", "safeRunWhenOn", "unsafeCallWhenOn",
+                    "callWhenOn", "safeCallWhenOn") and len(args) == 2:
+            calls = "Call" in name
+            if desc != sup + ("Ljava/lang/Object;" if calls else "V"):
+                return None
+            dist = args[0]
+            if not (isinstance(dist, Const) and dist.owner == _FORGE_DIST):
+                return None
+            self._asked("Forge's DistExecutor#" + name)
+            if dist.name != here:
+                return [None]
+            out = []
+            for inner in self.call(*_SUPPLIER_GET, [args[1]]):
+                if calls:
+                    out += self.call("java/util/concurrent/Callable", "call", "()Ljava/lang/Object;", [inner])
+                else:
+                    self.call("java/lang/Runnable", "run", "()V", [inner])
+                    out.append(None)
+            return out
+        if name in ("unsafeRunForDist", "runForDist", "safeRunForDist") and len(args) == 2 \
+                and desc == "(Ljava/util/function/Supplier;Ljava/util/function/Supplier;)Ljava/lang/Object;":
+            self._asked("Forge's DistExecutor#" + name)
+            out = []
+            for inner in self.call(*_SUPPLIER_GET, [args[0] if self.side == "client" else args[1]]):
+                out += self.call(*_SUPPLIER_GET, [inner])
+            return out
+        return None
+
     def _apply(self, fn, method: str, desc: str, args: list):
         """The one value ``fn`` (a lambda, or an object of the mod's or a
         library's class implementing a functional interface's ``method``)
@@ -6070,14 +6154,15 @@ def _census(machine: Machine) -> None:
     machine.census_done = frozenset(machine._finished_methods - machine._stopped_methods)
 
 
-_SIDE_WHY = ("built differently on a client and on a dedicated server (its registration asks Fabric's "
-             "FabricLoader#getEnvironmentType)")
+_SIDE_WHY = "built differently on a client and on a dedicated server (its registration asks {})"
 
 
 def _registered(classes: ClassIndex, names: list[str],
                 holders: bool = False) -> tuple[Machine, dict[str, tuple[list, str]]]:
     """:func:`_registered_on` for a client; when that run asked which side
-    it runs on (Fabric's ``FabricLoader#getEnvironmentType``, #296 pick a),
+    it runs on (Fabric's ``FabricLoader#getEnvironmentType``, #296 pick a;
+    Forge's and NeoForge's ``FMLEnvironment.dist``, ``FMLLoader#getDist`` and
+    Forge's ``DistExecutor``, see _FML_DIST),
     the registration is read again for a dedicated server and only what both
     sides agree on is kept (_merge_sides): every value the two sides give
     differently is unknown, so a reader leaves it a labelled DEFAULT, and a
@@ -6087,6 +6172,8 @@ def _registered(classes: ClassIndex, names: list[str],
     machine, out = _registered_on(classes, names, holders, "client")
     if machine.side_asked:
         server, theirs = _registered_on(classes, names, holders, "server")
+        for query in server.side_asked.split(", ") if server.side_asked else ():
+            machine._asked(query)
         out = _merge_sides(machine, out, server, theirs)
     machine.side = None
     return machine, out
@@ -6216,10 +6303,10 @@ def _merge_sides(machine: Machine, mine: dict, server: Machine, theirs: dict) ->
         if bool(objs) != bool(other):
             # One side's block can't be read: the name isn't read, for that
             # side's reason.
-            out[name] = ([], (why if not objs else other_why) or _SIDE_WHY)
+            out[name] = ([], (why if not objs else other_why) or _SIDE_WHY.format(machine.side_asked))
             continue
         if len(objs) != len(other) or [o.cls for o in objs] != [o.cls for o in other]:
-            out[name] = ([], _SIDE_WHY)
+            out[name] = ([], _SIDE_WHY.format(machine.side_asked))
             continue
         out[name] = ([join.join(a, b) for a, b in zip(objs, other)], why or other_why)
     for key in set(machine.statics) | set(server.statics):
