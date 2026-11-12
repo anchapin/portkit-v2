@@ -374,11 +374,12 @@ _VINE_BOXES = {"up": (0.0, 15.0, 0.0, 16.0, 16.0, 16.0), "north": (0.0, 0.0, 0.0
                "west": (0.0, 0.0, 0.0, 1.0, 16.0, 16.0)}
 # Vanilla block classes whose getCollisionShape is BlockBehaviour's (they and
 # the vanilla classes between them and Block declare none; client.txt
-# 1.20.1 and 1.21.1, Mojang mappings), so a mod override's super call runs
-# BlockBehaviour#getCollisionShape (see Machine.vanilla): the plain ones, and
+# 1.20.1, 1.21.1 and 1.21.8, Mojang mappings), so a mod override's super call
+# runs BlockBehaviour#getCollisionShape (see Machine.vanilla): the plain ones,
 # those that declare getShape but no getCollisionShape - VineBlock (getShape
-# 1.21.1 L81, 1.20.1 L73), CropBlock (L53 / L45), ButtonBlock (L86-108 /
-# L72-94), LeverBlock (L63-91 / L51-79) - or neither (RotatedPillarBlock,
+# L73 / L81 / L68 in 1.20.1 / 1.21.1 / 1.21.8), CropBlock (L45 / L53 / L45),
+# ButtonBlock (L72-94 / L86-108 / L88), LeverBlock (L51-79 / L63-91 / L64) -
+# and those that declare neither (RotatedPillarBlock,
 # FaceAttachedHorizontalDirectionalBlock). GrindstoneBlock and
 # ScaffoldingBlock declare their own getCollisionShape and aren't here. The
 # block's getShape then runs as it would anywhere: read where the reader
