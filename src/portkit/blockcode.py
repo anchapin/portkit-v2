@@ -9441,7 +9441,11 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
             r.value, r.kind = name, "registered"
             r.source = f"{r.cls}#<init> (registerDefaultState); {why}"
         else:
-            first = _any_enum_value(machine, obj, r.prop, default)
+            # No default registered by the block's own code: Block#<init>'s
+            # registerDefaultState(stateDefinition.any()), where it is read.
+            registered = isinstance(default, State)
+            first = _any_enum_value(machine, obj, r.prop, default if registered
+                                    else machine._unregistered_default(obj))
             if first is None:
                 r.why = f"{why}; the registered default state doesn't set it" if why else \
                     "the registered default state doesn't set it"
@@ -9450,7 +9454,8 @@ def _read_held(machine: Machine, obj: Obj, r: HeldReading) -> None:
             # registered default is built from StateDefinition#any and
             # doesn't set the state, so it has the enum's first value.
             r.value, r.kind = first, "any"
-            r.source = (f"{r.cls}#<init> (registerDefaultState from StateDefinition#any, which leaves "
+            ctor = f"{r.cls}#<init>" if registered else "net.minecraft.world.level.block.Block#<init> (vanilla)"
+            r.source = (f"{ctor} (registerDefaultState from StateDefinition#any, which leaves "
                         f"{r.prop} at its EnumProperty's first value); {why}")
     r.changed_by = tuple(_changed_by(machine, obj.cls, (r.prop,)).get(r.prop, []))
 
