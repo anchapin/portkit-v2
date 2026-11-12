@@ -372,6 +372,23 @@ VINE_FACES = ("up", "north", "south", "west", "east")
 _VINE_BOXES = {"up": (0.0, 15.0, 0.0, 16.0, 16.0, 16.0), "north": (0.0, 0.0, 0.0, 16.0, 16.0, 1.0),
                "south": (0.0, 0.0, 15.0, 16.0, 16.0, 16.0), "east": (15.0, 0.0, 0.0, 16.0, 16.0, 16.0),
                "west": (0.0, 0.0, 0.0, 1.0, 16.0, 16.0)}
+# Vanilla block classes whose getCollisionShape is BlockBehaviour's (they and
+# the vanilla classes between them and Block declare none; client.txt
+# 1.20.1 and 1.21.1, Mojang mappings), so a mod override's super call runs
+# BlockBehaviour#getCollisionShape (see Machine.vanilla): the plain ones, and
+# those that declare getShape but no getCollisionShape - VineBlock (getShape
+# 1.21.1 L81, 1.20.1 L73), CropBlock (L53 / L45), ButtonBlock (L86-108 /
+# L72-94), LeverBlock (L63-91 / L51-79) - or neither (RotatedPillarBlock,
+# FaceAttachedHorizontalDirectionalBlock). GrindstoneBlock and
+# ScaffoldingBlock declare their own getCollisionShape and aren't here. The
+# block's getShape then runs as it would anywhere: read where the reader
+# models it (a mod override, VineBlock's, FaceAttachedHorizontalDirectionalBlock's),
+# unknown otherwise.
+_BEHAVIOUR_COLLISION = _PLAIN_VANILLA | {
+    _VINE, _CROP, _PILLAR, _FACE_ATTACHED,
+    "net/minecraft/world/level/block/ButtonBlock",
+    "net/minecraft/world/level/block/LeverBlock",
+}
 _CAN_SURVIVE_DESC = ("(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/LevelReader;"
                      "Lnet/minecraft/core/BlockPos;)Z")
 _ATTACH_ORDER = ("FLOOR", "WALL", "CEILING")  # AttachFace declaration order (dtn a, b, c)
@@ -3925,6 +3942,7 @@ class Machine:
                     return [recv.fields.get("__default", State())]
                 if name == "getShape" and desc == _GET_SHAPE_DESC:
                     return [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 16.0),))]
+            if base in _BEHAVIOUR_COLLISION:
                 if name == "getCollisionShape" and desc == _GET_SHAPE_DESC and len(rest) == 4 \
                         and isinstance(rest[0], State):
                     # BlockBehaviour#getCollisionShape (client jars with

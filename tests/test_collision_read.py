@@ -181,3 +181,34 @@ def test_a_super_call_reads_has_collision_from_the_blocks_own_properties():
     assert call() == [blockcode.Shape(())]
     block.fields["__props"] = Props(has_collision=True)
     assert call() == [blockcode.Shape(((4.0, 0.0, 4.0, 12.0, 10.0, 12.0),))]
+
+
+def _super_call(cls: str, owner: str, state, has_collision):
+    from portkit.blockcode import Machine, Obj, Props, UNKNOWN
+    machine = Machine(_index())
+    block = Obj(cls)
+    block.fields["__props"] = Props(has_collision=has_collision)
+    return machine.call(owner, "getCollisionShape", blockcode._GET_SHAPE_DESC,
+                        [block, state, UNKNOWN, UNKNOWN, UNKNOWN], special=True)
+
+
+def test_a_super_call_under_vine_block_runs_vanillas_collision_with_the_vines_shape():
+    # VineBlock declares getShape but no getCollisionShape (client.txt 1.20.1,
+    # 1.21.1), so super is BlockBehaviour's: hasCollision ? getShape : empty.
+    from portkit.blockcode import Shape, State, UNKNOWN
+    vine = "net/minecraft/world/level/block/VineBlock"
+    north = State(tuple(sorted({"up": 0, "north": 1, "south": 0, "west": 0, "east": 0}.items())))
+    assert _super_call("com/example/cmod/CVineSuper", vine, north, True) == \
+        [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 1.0),))]
+    assert _super_call("com/example/cmod/CVineSuper", vine, north, False) == [Shape(())]
+    assert _super_call("com/example/cmod/CVineSuper", vine, north, UNKNOWN) == [UNKNOWN]
+
+
+def test_a_super_call_under_crop_block_stays_unknown_where_its_shape_isnt_read():
+    # CropBlock's collision is BlockBehaviour's too, but its getShape
+    # (SHAPE_BY_AGE) isn't modelled: no shape is made up.
+    from portkit.blockcode import Shape, State, UNKNOWN
+    crop = "net/minecraft/world/level/block/CropBlock"
+    assert _super_call("com/example/cmod/CCropSuper", crop, State(), False) == [Shape(())]
+    out = _super_call("com/example/cmod/CCropSuper", crop, State(), True)
+    assert all(not isinstance(o, Shape) for o in out)
