@@ -6169,12 +6169,10 @@ def _registered(classes: ClassIndex, names: list[str],
     never asks is the one run, as before. Reading afterwards answers the
     side query as an unknown call again."""
     machine, out = _registered_on(classes, names, holders, "client")
-    import os as _os  # PROBE-ONLY
-    if _os.environ.get("PK_SIDE_PIN") == "client":  # PROBE-ONLY
-        machine.side = None  # PROBE-ONLY
-        return machine, out  # PROBE-ONLY
     if machine.side_asked:
         server, theirs = _registered_on(classes, names, holders, "server")
+        for query in server.side_asked.split(", ") if server.side_asked else ():
+            machine._asked(query)
         out = _merge_sides(machine, out, server, theirs)
     machine.side = None
     return machine, out
