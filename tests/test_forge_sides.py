@@ -97,3 +97,14 @@ def test_a_run_that_never_asks_is_read_once():
     m.side = "client"
     assert m.call(FORGE_DIST, "isClient", "()Z", [Const(FORGE_DIST, "CLIENT")]) == [1]
     assert m.side_asked == ""
+
+
+def test_only_fml_loader_s_get_dist_is_answered():
+    # NeoForge 21.9+'s FMLEnvironment#getDist isn't read here (no jar checked).
+    m = Machine(ClassIndex({}))
+    m.side = "client"
+    assert m.call("net/neoforged/fml/loading/FMLEnvironment", "getDist", f"()L{NEO_DIST};", [],
+                  static=True) == [UNKNOWN]
+    assert m.call("net/neoforged/fml/loading/FMLLoader", "getDist", f"()L{NEO_DIST};", [],
+                  static=True) == [Const(NEO_DIST, "CLIENT")]
+    assert m.side_asked == "FML's FMLLoader#getDist"

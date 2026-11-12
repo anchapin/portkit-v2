@@ -2062,7 +2062,8 @@ class Machine:
                 and desc == "()L" + _ENV_TYPE + ";":
             self._asked("Fabric's FabricLoader#getEnvironmentType")
             return [Const(_ENV_TYPE, "CLIENT" if self.side == "client" else "SERVER")]
-        if owner in _FML_DIST and name == "getDist" and static and desc == "()L" + _FML_DIST[owner] + ";":
+        if owner in _FML_DIST and owner.endswith("/FMLLoader") and name == "getDist" and static \
+                and desc == "()L" + _FML_DIST[owner] + ";":
             return [self._dist(owner)]
         if owner in _DISTS and not static and isinstance(recv, Const) and recv.owner == owner \
                 and name in ("isClient", "isDedicatedServer") and desc == "()Z":
