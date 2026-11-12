@@ -3964,7 +3964,12 @@ class Machine:
                         return [UNKNOWN]
                     if not props.has_collision:
                         return [Shape(())]
-                    return self.call(recv.cls, "getShape", _GET_SHAPE_DESC, [recv, rest[0], rest[1], rest[2], UNKNOWN])
+                    # getShape is the state's block's (getBlock()); hasCollision
+                    # above is the receiver's own field. A state with no block
+                    # of its own recorded is taken as the receiver's (#418).
+                    owner_block = rest[0].block if isinstance(rest[0].block, Obj) else recv
+                    return self.call(owner_block.cls, "getShape", _GET_SHAPE_DESC,
+                                     [owner_block, rest[0], rest[1], rest[2], UNKNOWN])
         if isinstance(recv, Obj) and recv.cls == "__statedef" and name == "any":
             # StateDefinition#any is the first possible state (L92), each
             # property at its first value; the marker lets a reader take a

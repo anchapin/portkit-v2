@@ -210,5 +210,15 @@ def test_a_super_call_under_crop_block_stays_unknown_where_its_shape_isnt_read()
     from portkit.blockcode import Shape, State, UNKNOWN
     crop = "net/minecraft/world/level/block/CropBlock"
     assert _super_call("com/example/cmod/CCropSuper", crop, State(), False) == [Shape(())]
-    out = _super_call("com/example/cmod/CCropSuper", crop, State(), True)
-    assert all(not isinstance(o, Shape) for o in out)
+    assert _super_call("com/example/cmod/CCropSuper", crop, State(), True) == [UNKNOWN]
+
+
+def test_a_super_call_takes_get_shape_from_the_states_own_block():
+    # BlockBehaviour#getCollisionShape: this.hasCollision (the receiver's),
+    # then state.getShape(level, pos), which is getBlock().getShape: the
+    # block the state belongs to, here a vine at its north face.
+    from portkit.blockcode import Obj, Shape, State
+    vine_block = Obj("com/example/cmod/CVineSuper")
+    north = State(tuple(sorted({"up": 0, "north": 1, "south": 0, "west": 0, "east": 0}.items())), vine_block)
+    assert _super_call("com/example/cmod/CCropSuper", "net/minecraft/world/level/block/CropBlock", north, True) == \
+        [Shape(((0.0, 0.0, 0.0, 16.0, 16.0, 1.0),))]
