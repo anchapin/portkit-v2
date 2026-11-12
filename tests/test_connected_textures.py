@@ -14,9 +14,10 @@ import json
 
 import pytest
 
-from portkit.agent.residue import SKIP_KINDS
+from portkit.agent.fake import FakeLLM
+from portkit.agent.residue import SKIP_KINDS, ResidueAgent
 from portkit.converters import models, textures
-from portkit.model import SourceMod
+from portkit.model import SourceMod, Unhandled
 from portkit.validate.rules import _TEXTURE_KEY
 
 from test_animated_textures import png_bytes
@@ -100,6 +101,20 @@ def test_kind_is_explained():
     assert "connected_texture" in SKIP_KINDS
 
 
+def test_the_residue_agent_skips_the_kind_without_a_session(tmp_path):
+    # pick 5a: the agent's tools write static textures and flipbooks, neither
+    # of which can follow a connected texture, so the group is skipped outright.
+    client = FakeLLM([])
+    run = ResidueAgent(client).run(
+        tmp_path, tmp_path / "out",
+        [Unhandled("assets/examplemod/textures/block/plate.png.mcmeta", "connected_texture",
+                   "sidecar carries a 'ctm' section and no animation")],
+        "examplemod")
+    assert [o.status for o in run.outcomes] == ["skipped"]
+    assert client.seen == []          # no session was opened
+    assert len(run.remaining) == 1    # the sidecar stays residue
+
+
 def test_animation_beside_a_ctm_section_still_converts(tmp_path):
     # pick 4a: unchanged by #348
     mod = _mod(tmp_path, {"block/fan.png": png_bytes(16, 32),
@@ -116,7 +131,12 @@ def test_animation_beside_a_ctm_section_still_converts(tmp_path):
     '{"ctm": {"ctm_version": 1, }}',                           # even with a ctm section
 ])
 def test_invalid_json_stays_texture_animation(tmp_path, text):
-    # pick 2a: an unreadable sidecar isn't known to be CTM's
+    # pick 2a: an unreadable sidecar isn't known to be CTM's, so it stays
+    # residue; it is never claimed as explained (its sections can't be read).
+    # Java's own reader may be lenient (gson 2.8.0 JsonParser.parse(Reader)
+    # sets its reader lenient), so some of these may still be read by Java;
+    # what its animation parser makes of them is unchecked, so nothing is
+    # claimed here either way.
     mod = _mod(tmp_path, {"block/strobe.png": png_bytes(16, 32), "block/strobe.png.mcmeta": text})
     result = textures.convert(mod)
     assert [u.kind for u in result.unhandled] == ["texture_animation"]
