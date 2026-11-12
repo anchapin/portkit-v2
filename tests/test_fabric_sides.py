@@ -71,7 +71,7 @@ def test_a_value_both_sides_give_is_kept_and_one_they_differ_on_is_unknown(read)
 def test_a_name_the_sides_build_different_classes_for_is_not_read(read):
     _m, reg = read
     objs, why = reg["side_forked"]
-    assert objs == [] and why == blockcode._SIDE_WHY
+    assert objs == [] and why == blockcode._SIDE_WHY.format("Fabric's FabricLoader#getEnvironmentType")
 
 
 def test_a_name_one_side_cant_read_keeps_that_side_s_reason():
