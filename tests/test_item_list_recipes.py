@@ -19,9 +19,13 @@ def _write(root: Path, rel: str, body) -> None:
     path.write_text(json.dumps(body))
 
 
-def _mod(tmp_path, recipe, name="thing"):
+def _mod(tmp_path, recipe, name="thing", tags=None, items=()):
     root = tmp_path / "mod"
     _write(root, f"data/examplemod/recipe/{name}.json", recipe)
+    for tag, values in (tags or {}).items():
+        _write(root, f"data/examplemod/tags/items/{tag}.json", {"values": values})
+    for item in items:
+        _write(root, f"assets/examplemod/models/item/{item}.json", {"parent": "minecraft:item/generated"})
     return SourceMod(root=root, namespace="examplemod", loader="fabric", minecraft="1.21.1")
 
 
@@ -189,14 +193,136 @@ def test_a_list_whose_every_item_did_not_convert_goes_with_them(tmp_path):
     assert u.reason in owned.reason
 
 
-def test_list_beside_another_multi_ingredient_stays_residue(tmp_path):
+def test_two_item_lists_in_different_slots_write_one_recipe_per_combination(tmp_path):
+    """#302 sub-reason 4: two lists in different slots are written once per mix.
+
+    The player may put any item of either list in its own slot, so a recipe
+    per item would forbid it; a recipe per combination of the two lists is
+    exact, under the same cap and the same rules as a vanilla-only tag's
+    combinations (#302 pick 1)."""
     recipe = {"type": "minecraft:crafting_shapeless",
               "ingredients": [["examplemod:a", "examplemod:b"], ["examplemod:c", "examplemod:d"]],
               "result": {"id": "examplemod:thing"}}
     result = recipes.convert(_mod(tmp_path, recipe), _emitted("a", "b", "c", "d", "thing"))
+    files = _recipes(result)
+    assert sorted(files) == [
+        "recipes/thing__examplemod_a__examplemod_c.json",
+        "recipes/thing__examplemod_a__examplemod_d.json",
+        "recipes/thing__examplemod_b__examplemod_c.json",
+        "recipes/thing__examplemod_b__examplemod_d.json",
+    ]
+    body = files["recipes/thing__examplemod_a__examplemod_c.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "examplemod:a"}, {"item": "examplemod:c"}]
+    assert not _reasons(result)
+    assert any("combination" in n for n in result.notes)
+
+
+def test_two_item_lists_in_a_shaped_grid_write_one_recipe_per_combination(tmp_path):
+    """#302 sub-reason 4: the same in a shaped grid, one list over two slots.
+
+    The list over the two slots may hold a different item in each, so the
+    combinations are the mixes of both lists (2 over one slot, 2 over two:
+    eight recipes)."""
+    recipe = {"type": "minecraft:crafting_shaped", "pattern": ["ABB"],
+              "key": {"A": ["examplemod:a", "examplemod:b"], "B": ["examplemod:c", "examplemod:d"]},
+              "result": {"id": "examplemod:thing"}}
+    result = recipes.convert(_mod(tmp_path, recipe), _emitted("a", "b", "c", "d", "thing"))
+    files = _recipes(result)
+    assert len(files) == 8
+    mixed = files["recipes/thing__examplemod_a__examplemod_c__examplemod_d.json"]["minecraft:recipe_shaped"]
+    assert mixed["pattern"] == ["ACD"]
+    assert mixed["key"] == {"A": {"item": "examplemod:a"},
+                             "C": {"item": "examplemod:c"},
+                             "D": {"item": "examplemod:d"}}
+    same = files["recipes/thing__examplemod_a__examplemod_c__examplemod_c.json"]["minecraft:recipe_shaped"]
+    assert same["pattern"] == ["ABB"]
+    assert same["key"] == {"A": {"item": "examplemod:a"}, "B": {"item": "examplemod:c"}}
+    assert not _reasons(result)
+
+
+def test_a_list_beside_a_multi_member_tag_writes_one_recipe_per_combination(tmp_path):
+    """#302 sub-reason 4: a list beside a multi-member tag, one of each.
+
+    The tag holds only vanilla items, which an add-on can't tag, so it is
+    written out member by member, and the list beside it is written out too:
+    one recipe per combination of the two (#302 pick 1)."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [["examplemod:a", "examplemod:b"], {"tag": "examplemod:coals"}],
+              "result": {"id": "examplemod:thing"}}
+    result = recipes.convert(
+        _mod(tmp_path, recipe, tags={"coals": ["minecraft:coal", "minecraft:charcoal"]}),
+        _emitted("a", "b", "thing"))
+    files = _recipes(result)
+    assert sorted(files) == [
+        "recipes/thing__examplemod_a__charcoal.json",
+        "recipes/thing__examplemod_a__coal.json",
+        "recipes/thing__examplemod_b__charcoal.json",
+        "recipes/thing__examplemod_b__coal.json",
+    ]
+    body = files["recipes/thing__examplemod_a__coal.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "examplemod:a"}, {"item": "minecraft:coal"}]
+    assert not _reasons(result)
+
+
+def test_a_list_beside_a_tag_of_this_mod_writes_one_recipe_per_combination(tmp_path):
+    """#302 sub-reason 4: a list beside a tag this mod's own member carries.
+
+    The tag's own member carries the tag, so the recipe takes the tag; the
+    vanilla member of the tag can't carry it and gets a value of its own, so
+    the combinations are the list's items times the tag and that member."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [["examplemod:a", "examplemod:b"], {"tag": "examplemod:mixed"}],
+              "result": {"id": "examplemod:thing"}}
+    result = recipes.convert(
+        _mod(tmp_path, recipe, tags={"mixed": ["examplemod:x", "minecraft:coal"]}, items=["x"]),
+        _emitted("a", "b", "x", "thing"))
+    files = _recipes(result)
+    assert sorted(files) == [
+        "recipes/thing__examplemod_a__coal.json",
+        "recipes/thing__examplemod_a__examplemod_mixed.json",
+        "recipes/thing__examplemod_b__coal.json",
+        "recipes/thing__examplemod_b__examplemod_mixed.json",
+    ]
+    tagged = files["recipes/thing__examplemod_a__examplemod_mixed.json"]["minecraft:recipe_shapeless"]
+    assert tagged["ingredients"] == [{"item": "examplemod:a"}, {"tag": "examplemod:mixed"}]
+    plain = files["recipes/thing__examplemod_a__coal.json"]["minecraft:recipe_shapeless"]
+    assert plain["ingredients"] == [{"item": "examplemod:a"}, {"item": "minecraft:coal"}]
+    # The tag is written, so the recipe that takes it matches.
+    item = result.files["items/x.json"]["minecraft:item"]["components"]
+    assert item["minecraft:tags"] == {"tags": ["examplemod:mixed"]}
+    assert not _reasons(result)
+
+
+def test_the_combinations_over_the_cap_stay_residue_with_their_count(tmp_path):
+    """#302 sub-reason 4: the combinations are capped like every other expansion.
+
+    Four items in one slot and five in another are 20 combinations, over
+    :data:`EXPANSION_CAP`, so the recipe stays residue and says how many it
+    would take."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [["examplemod:a", "examplemod:b", "examplemod:c", "examplemod:d"],
+                              ["examplemod:e", "examplemod:f", "examplemod:g", "examplemod:h",
+                               "examplemod:i"]],
+              "result": {"id": "examplemod:thing"}}
+    result = recipes.convert(_mod(tmp_path, recipe), _emitted(*"abcdefghi", "thing"))
     assert not _recipes(result)
-    (reason,) = _reasons(result)
-    assert "beside another multi-item ingredient" in reason
+    (u,) = result.unhandled
+    assert u.kind == recipes.OVER_CAP
+    assert "20 recipes" in u.reason and "over the 16" in u.reason
+    assert "one recipe per combination" in u.reason
+
+
+def test_a_single_list_beside_a_plain_item_is_written_once_per_item(tmp_path):
+    """One multi-item ingredient on its own keeps the one-recipe-per-item form."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [["examplemod:a", "examplemod:b"], {"item": "minecraft:stick"}],
+              "result": {"id": "examplemod:thing"}}
+    result = recipes.convert(_mod(tmp_path, recipe), _emitted("a", "b", "thing"))
+    files = _recipes(result)
+    assert sorted(files) == ["recipes/thing__examplemod_a.json", "recipes/thing__examplemod_b.json"]
+    body = files["recipes/thing__examplemod_a.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "examplemod:a"}, {"item": "minecraft:stick"}]
+    assert not _reasons(result)
 
 
 def test_list_holding_a_tag_stays_residue(tmp_path):
