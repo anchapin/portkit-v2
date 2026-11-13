@@ -56,6 +56,15 @@
 //              ticks the earlier checks took; the lag is reported). Reported,
 //              not asserted: an arrow spawned flying at it (pressed where its
 //              set type lets arrows press it).
+//   player     a block carrying the portkit door, trapdoor, button or
+//              pressure plate component, with a simulated player's hand on it
+//              (#335): the @minecraft/server-gametest module's
+//              SimulatedPlayer uses the block it faces, and the states are
+//              read back. A hand opens the doors and trapdoors the pack says
+//              a hand opens (the pack's door and trapdoor tables) and is
+//              refused on the redstone-only ones (the iron copies: the state
+//              does not change), presses the buttons, and the player standing
+//              on a pressure plate presses it (a plate has no use).
 //   ore        an ore feature the converter wrote (#281). Asserted
 //              (ore_generate): outside the flat Overworld, fresh chunks of the
 //              rule's dimension are loaded and the ore blocks the world
@@ -79,6 +88,7 @@ import {
   PAIRED_CARDINAL, pairedSlot, pairedVerdict, plateSlot, plateVerdict, slot, trapdoorSlot, trapdoorVerdict, buttonSlot,
   gateSlot, gateVerdict, OPPOSITE,
   GEN_ORIGIN, GEN_SIZE, ORE_CUBE, generateVerdict, oreSlot, oreVerdict, scanRange,
+  playerExpectation, playerSlot, playerVerdict,
 } from "./ingame_core.js";
 import { CHECKS } from "./data.js";
 
@@ -86,6 +96,40 @@ const BATCH = 16;
 // A redstone tick in game ticks (Bedrock's circuit system updates every second game tick).
 const REDSTONE_TICK = 2;
 const say = (kind, payload) => console.warn(line(kind, payload));
+
+// The player check (#335): a simulated player's hand on the converted blocks.
+//
+// The @minecraft/server-gametest module (Microsoft Learn, the module page
+// https://learn.microsoft.com/minecraft/creator/scripting/api/overview/gametest/minecraft-server-gametest)
+// carries the SimulatedPlayer class (Learn, "SimulatedPlayer class",
+// https://learn.microsoft.com/minecraft/creator/scripting/api/overview/gametest/simulatedplayer):
+// a player the script drives, with no client of its own.
+// interactWithBlock(block) is the use a player's hand makes on the block it
+// faces, and the converted doors, trapdoors and buttons answer it (their
+// runtimes' onPlayerInteract: portkit/runtime/door.js, trapdoor.js and
+// button.js). So a hand opens what the pack says a hand opens and is
+// refused on the rest: the iron copies, the doors and trapdoors the pack's
+// tables mark hand false, which open by redstone only (the hand is refused
+// by the same use() the runtime uses, portkit/runtime/door_core.js).
+//
+// The module is a Beta API (docs/decisions.md, 2026-10-15) and the generated
+// pack declares it as a dependency (portkit.ingame.testpack writes the
+// manifest), so the server loads it with the check script. Two documented
+// ways to a SimulatedPlayer are used, in this order:
+//   1. the module's own spawnSimulatedPlayer(location);
+//   2. register(name, callback): the callback's Test spawns one with
+//      test.spawnSimulatedPlayer(location), and the check runs the test with
+//      the /test run command.
+// A pressure plate has no use (Java's is stepped on, and the converted one
+// has no onPlayerInteract): the player stands on it instead.
+//
+// The module is loaded as the script runs, not when the checks start: the
+// tests it registers are collected when the world loads, so the registration
+// must not wait for the checks.
+const gametest = import("@minecraft/server-gametest").catch(() => undefined);
+// The tally and the failure reporter, for the registered test (which runs
+// outside the checks' own flow).
+let RESULTS = null;
 
 world.afterEvents.worldLoad.subscribe(() => {
   system.run(() => {
@@ -108,6 +152,163 @@ async function loaded(dim) {
   return false;
 }
 
+// The name of the registered test the player check runs (#335).
+const PLAYER_TEST = "portkit_player_hand";
+let playerTestDone = false;
+
+// The states of the block under test, read by role ("open", "powered").
+function readStates(dim, at, entry) {
+  const seen = {};
+  for (const [role, state] of Object.entries(entry.states ?? {})) {
+    try {
+      seen[role] = dim.getBlock(at)?.permutation.getState(state);
+    } catch {
+      seen[role] = undefined;
+    }
+  }
+  return seen;
+}
+
+// One block, one hand: the block is placed beside the player, the hand uses
+// it, and the states are read back.
+async function handOn(dim, entry, anchor, spawn) {
+  const seen = { id: entry.id, kind: entry.kind, hand: entry.hand };
+  const block = { x: anchor.x + 1, y: anchor.y, z: anchor.z };
+  const under = { x: block.x, y: block.y - 1, z: block.z };
+  const floor = { x: anchor.x, y: anchor.y - 1, z: anchor.z };
+  dim.getBlock(floor).setPermutation(BlockPermutation.resolve("minecraft:stone"));
+  dim.getBlock(under).setPermutation(BlockPermutation.resolve("minecraft:stone"));
+  if (entry.kind === "door") {
+    // A door is two blocks: the lower half and the one above it.
+    dim.getBlock(block).setPermutation(BlockPermutation.resolve(entry.id, { [PAIRED_PART]: 0 }));
+    dim.getBlock({ x: block.x, y: block.y + 1, z: block.z })
+      .setPermutation(BlockPermutation.resolve(entry.id, { [PAIRED_PART]: 1 }));
+  } else if (entry.kind === "button") {
+    let placed;
+    try {
+      placed = BlockPermutation.resolve(entry.id, { "minecraft:block_face": "up" });
+    } catch {
+      placed = BlockPermutation.resolve(entry.id);
+    }
+    dim.getBlock(block).setPermutation(placed);
+  } else {
+    dim.getBlock(block).setPermutation(BlockPermutation.resolve(entry.id));
+  }
+  await system.waitTicks(2);
+  seen.before = readStates(dim, block, entry);
+  // The player: beside the block for a use, on it for a plate.
+  const where = entry.kind === "plate"
+    ? { x: block.x + 0.5, y: block.y + 1, z: block.z + 0.5 }
+    : { x: anchor.x + 0.5, y: anchor.y, z: anchor.z + 0.5 };
+  const player = spawn(where);
+  if (!player) throw new Error("no simulated player");
+  try {
+    if (entry.kind === "plate") {
+      // The player falls onto the plate and presses it.
+      await system.waitTicks(10);
+    } else {
+      // The hand reaches the block the player faces.
+      const centre = { x: block.x + 0.5, y: block.y + 0.5, z: block.z + 0.5 };
+      try { player.lookAt?.(centre); } catch { /* not every build turns */ }
+      player.interactWithBlock(dim.getBlock(block));
+      await system.waitTicks(2);
+    }
+    seen.after = readStates(dim, block, entry);
+  } finally {
+    try { player.remove?.(); } catch { /* already gone */ }
+  }
+  seen.want = playerExpectation(entry);
+  return { seen, verdict: playerVerdict(seen.want, seen.after) };
+}
+
+// One block, one hand, recorded: the hand that opens a block the pack says
+// a hand opens, and the hand refused on the ones it does not.
+async function onePlayer(dim, entry, anchor, spawn) {
+  const refused = entry.hand === false || entry.mobs_only === true;
+  const check = refused ? "player_hand_refused" : "player_hand";
+  try {
+    const { seen, verdict } = await handOn(dim, entry, anchor, spawn);
+    say("PLAYER", seen);
+    if (verdict.ok) RESULTS?.tally.record(check, entry.id, true);
+    else RESULTS?.fail(check, entry.id, verdict.problems.join("; "));
+  } catch (err) {
+    RESULTS?.fail(check, entry.id, describe(err));
+  }
+}
+
+// The registered test: it runs where the framework puts it, so the blocks
+// are placed beside the player instead of at the check's own slots.
+async function runPlayerTest(test) {
+  try {
+    const scout = test.spawnSimulatedPlayer({ x: 0, y: 0, z: 0 });
+    const home = scout.location;
+    try { scout.remove?.(); } catch { /* already gone */ }
+    const anchor = { x: Math.floor(home.x), y: Math.floor(home.y), z: Math.floor(home.z) };
+    const spawn = (where) => test.spawnSimulatedPlayer({
+      x: where.x - home.x, y: where.y - home.y, z: where.z - home.z,
+    });
+    for (const entry of CHECKS.players ?? []) {
+      await onePlayer(world.getDimension("overworld"), entry, anchor, spawn);
+    }
+    try { test.succeed?.(); } catch { /* not every build has it */ }
+  } catch (err) {
+    RESULTS?.fail("player_hand", PLAYER_TEST, describe(err));
+  } finally {
+    playerTestDone = true;
+  }
+}
+
+// The player check (#335): every converted door, trapdoor, button and plate
+// the pack ships, with a simulated player's hand on it.
+async function playerChecks(dim) {
+  const entries = CHECKS.players ?? [];
+  if (!entries.length) return;
+  const report = { players: entries.length };
+  const mod = await gametest;
+  if (!mod) {
+    report.skipped = "the @minecraft/server-gametest module is not available";
+    say("PLAYER", report);
+    return;
+  }
+  const spawn = typeof mod.spawnSimulatedPlayer === "function"
+    ? (where) => mod.spawnSimulatedPlayer(where)
+    : undefined;
+  if (spawn) {
+    for (let i = 0; i < entries.length; i++) {
+      await onePlayer(dim, entries[i], playerSlot(i), spawn);
+    }
+    return;
+  }
+  // The module's other documented way to a SimulatedPlayer: a registered
+  // test, whose Test spawns one (Learn, "Test class",
+  // https://learn.microsoft.com/minecraft/creator/scripting/api/overview/gametest/test).
+  // The check registers one when the script starts (the framework collects
+  // the tests as the world loads) and runs it with the /test run command.
+  if (typeof mod.register !== "function") {
+    report.skipped = "no simulated player in @minecraft/server-gametest";
+    say("PLAYER", report);
+    return;
+  }
+  report.test = PLAYER_TEST;
+  try {
+    dim.runCommand(`test run ${PLAYER_TEST}`);
+  } catch (err) {
+    report.run = { error: describe(err) };
+  }
+  for (let tick = 0; tick < 300 && !playerTestDone; tick += 10) await system.waitTicks(10);
+  report.done = playerTestDone;
+  say("PLAYER", report);
+}
+
+// The registration, as soon as the module is there: the framework collects
+// the registered tests when the world loads.
+gametest.then((mod) => {
+  if (!mod || typeof mod.register !== "function") return;
+  mod.register(PLAYER_TEST, (test) => {
+    system.run(() => runPlayerTest(test));
+  });
+});
+
 async function run() {
   const dim = world.getDimension("overworld");
   dim.runCommand(`tickingarea add 0 0 0 ${AREA - 1} 0 ${AREA - 1} portkit_ingame true`);
@@ -128,6 +329,7 @@ async function run() {
     tally.record(check, id, false, detail);
     say("FAIL", { check, id, detail });
   };
+  RESULTS = { tally, fail };
 
   // place (and container, on the placed block)
   for (let i = 0; i < CHECKS.blocks.length; i++) {
@@ -673,6 +875,9 @@ async function run() {
     }
     say("GATE", seen);
   }
+
+  // player: a simulated player's hand on the converted blocks (#335)
+  await playerChecks(dim);
 
   // ore: each ore feature placed into a cube of what it replaces (#281)
   const ores = CHECKS.ores ?? [];

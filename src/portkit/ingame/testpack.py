@@ -68,6 +68,14 @@ converter wrote, so the checks test the pack as shipped.
   and opens) and again (closed), sets a redstone block beside it and removes it
   (open and powered, then closed), breaks it and counts the drop, then places it
   again between a wall and air (in_wall).
+- ``players``: the blocks a simulated player's hand is tried on (#335): the
+  converted doors, trapdoors, buttons and pressure plates. Each is
+  ``{"id", "kind", "hand", "states"}`` (``kind`` is "door", "trapdoor",
+  "button" or "plate"; ``hand`` says whether a hand opens it, read from the
+  pack's own door and trapdoor tables, so the redstone-only ones (the iron
+  copies) are known to refuse a hand; ``states`` names the states to read
+  back). The check has a SimulatedPlayer (``@minecraft/server-gametest``)
+  use the block and reads the states.
 - ``ores``: feature rules whose feature is a ``minecraft:ore_feature`` of the
   pack (#281). Each is ``{"rule", "feature", "blocks", "replaces",
   "dimension", "y"}``. Outside the Overworld (the check world is flat) the
@@ -97,6 +105,16 @@ SCRIPT_FILES = ("ingame.js", "ingame_core.js")
 # drop check); the server ships 2.x up to 2.10.0 (MicrosoftDocs/minecraft-creator,
 # ScriptAPI/minecraft/server changelog).
 SERVER_MODULE = "2.2.0"
+# The Script API module the player check needs (#335): its SimulatedPlayer
+# class, the player the check drives (Microsoft Learn, the module page
+# https://learn.microsoft.com/minecraft/creator/scripting/api/overview/gametest/minecraft-server-gametest
+# lists @minecraft/server-gametest as a Beta API, with the SimulatedPlayer
+# class on https://learn.microsoft.com/minecraft/creator/scripting/api/overview/gametest/simulatedplayer).
+# A manifest dependency is the version the check needs at least (the server
+# ships a newer one and loads that: the pack asks for @minecraft/server 2.2.0
+# and the server carries up to 2.10.0), so this is the lowest version of the
+# gametest module that carries the class.
+GAMETEST_MODULE = "2.0.0-beta"
 _NS = uuid.UUID("5f0b8a64-6d1e-4c38-9a7e-1d2b2a6c2380")
 
 
@@ -113,6 +131,7 @@ class Checks:
     plates: list[dict] = field(default_factory=list)
     buttons: list[dict] = field(default_factory=list)
     gates: list[dict] = field(default_factory=list)
+    players: list[dict] = field(default_factory=list)
     ores: list[dict] = field(default_factory=list)
     geodes: list[dict] = field(default_factory=list)
     # "flat" (the default check world) or "default": a generated Overworld,
@@ -133,6 +152,7 @@ class Checks:
             "plates": self.plates,
             "buttons": self.buttons,
             "gates": self.gates,
+            "players": self.players,
             "ores": self.ores,
             "geodes": self.geodes,
         }
@@ -461,6 +481,77 @@ def _gate_check(behavior_pack: Path, ident: str, block: dict, tables: dict) -> d
             "wall": row["wall"], "expect": _block_expect(behavior_pack, ident, block)}
 
 
+def _js_table(path: Path) -> dict:
+    """The JSON a portkit data table file holds (``export default {...};``)."""
+    _, sep, body = path.read_text(encoding="utf-8").partition("export default ")
+    if not sep:
+        return {}
+    try:
+        table = json.loads(body.strip().rstrip(";"))
+    except ValueError:
+        return {}
+    return table if isinstance(table, dict) else {}
+
+
+def _hand_tables(behavior_pack: Path, kind: str) -> dict[str, dict]:
+    """Every door or trapdoor entry of the pack's own tables, by block id,
+    each with whether a hand opens it (the converter read it from the block's
+    BlockSetType, ``canOpenByHand``). Nothing here reads the mod jar: the
+    table is what the converted pack ships."""
+    out: dict[str, dict] = {}
+    for path in sorted((behavior_pack / "scripts" / "portkit" / "data").glob(f"*_{kind}.js")):
+        for ident, row in (_js_table(path).get(kind) or {}).items():
+            if isinstance(row, dict):
+                out[ident] = {"hand": bool(row.get("hand"))}
+    return out
+
+
+def _player_checks(behavior_pack: Path) -> list[dict]:
+    """The blocks a simulated player's hand is tried on (#335): the converted
+    doors, trapdoors, buttons and pressure plates, each with whether a hand
+    opens it (the pack's own door and trapdoor tables) and the states to read
+    back. The iron copies, the doors and trapdoors the tables mark hand
+    false, open by redstone only: the hand is refused on them. The ids and
+    the hand flag are the ones the converter wrote, so the check tests the
+    pack as shipped."""
+    doors = _hand_tables(behavior_pack, "doors")
+    trapdoors = _hand_tables(behavior_pack, "trapdoors")
+    plates = _plate_tables(behavior_pack)
+    buttons = _button_tables(behavior_pack)
+    out: list[dict] = []
+    for path in sorted((behavior_pack / "blocks").rglob("*.json")):
+        doc = _read_json(path)
+        block = (doc or {}).get("minecraft:block") if isinstance(doc, dict) else None
+        if not isinstance(block, dict):
+            continue
+        desc = block.get("description") or {}
+        ident = desc.get("identifier")
+        if not isinstance(ident, str):
+            continue
+        components = block.get("components") or {}
+        states = [s for s in (desc.get("states") or {}) if isinstance(s, str)]
+        opened = [s for s in states if s.endswith(":open")]
+        powered = [s for s in states if s.endswith(":powered")]
+
+        def has(component: str) -> bool:
+            return any(isinstance(k, str) and k.endswith(component) for k in components)
+
+        if has(DOOR_COMPONENT) and len(opened) == 1 and len(powered) == 1 and ident in doors:
+            out.append({"id": ident, "kind": "door", "hand": doors[ident]["hand"],
+                        "states": {"open": opened[0], "powered": powered[0]}})
+        elif has(TRAPDOOR_COMPONENT) and len(opened) == 1 and len(powered) == 1 and ident in trapdoors:
+            out.append({"id": ident, "kind": "trapdoor", "hand": trapdoors[ident]["hand"],
+                        "states": {"open": opened[0], "powered": powered[0]}})
+        elif has(BUTTON_COMPONENT) and len(powered) == 1 and ident in buttons:
+            out.append({"id": ident, "kind": "button", "hand": True,
+                        "states": {"powered": powered[0]}})
+        elif has(PLATE_COMPONENT) and len(powered) == 1 and ident in plates:
+            out.append({"id": ident, "kind": "plate", "hand": True,
+                        "mobs_only": bool(plates[ident].get("mobs_only")),
+                        "states": {"powered": powered[0]}})
+    return out
+
+
 def _tags(value) -> set[str]:
     if isinstance(value, dict):
         out = {value["value"]} if value.get("test") == "has_biome_tag" and isinstance(value.get("value"), str) else set()
@@ -626,6 +717,8 @@ def read_checks(behavior_pack: Path) -> Checks:
     checks.plates.sort(key=lambda d: d["id"])
     checks.buttons.sort(key=lambda d: d["id"])
     checks.gates.sort(key=lambda d: d["id"])
+    checks.players = _player_checks(behavior_pack)
+    checks.players.sort(key=lambda p: p["id"])
     checks.ores = _ore_checks(behavior_pack)
     checks.geodes = _geode_checks(behavior_pack)
     return checks
@@ -656,7 +749,11 @@ def manifest(name: str, data: bool = False) -> dict:
                 "entry": "scripts/ingame.js",
             }
         ] + ([{"type": "data", "uuid": uid("data"), "version": [1, 0, 0]}] if data else []),
-        "dependencies": [{"module_name": "@minecraft/server", "version": SERVER_MODULE}],
+        "dependencies": [
+            {"module_name": "@minecraft/server", "version": SERVER_MODULE},
+            # The player check's simulated player (#335).
+            {"module_name": "@minecraft/server-gametest", "version": GAMETEST_MODULE},
+        ],
     }
 
 
