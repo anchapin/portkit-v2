@@ -394,13 +394,13 @@ def cmd_probe(args) -> int:
 
 def cmd_report(args) -> int:
     """Markdown a modder can read, or paste into an issue, without the jar."""
-    from .report import render
+    from .report import render, render_json
 
     tree = Path(args.tree)
     if not tree.is_dir():
         print(f"{tree} is not a directory", file=sys.stderr)
         return 2
-    text = render(tree)
+    text = render_json(tree) if args.format == "json" else render(tree)
     if args.out:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -1557,6 +1557,10 @@ def main(argv=None) -> int:
     p = sub.add_parser("report", help="Markdown report for a converted tree")
     p.add_argument("tree")
     p.add_argument("-o", "--out", help="write to a file instead of stdout")
+    p.add_argument(
+        "--format", choices=("markdown", "json"), default="markdown",
+        help="markdown for people to read (default), json for tools to read",
+    )
     p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("probe", help="build a verification probe pack (dev harness)")
