@@ -24,6 +24,16 @@ knockback resistance have no Bedrock item component: they are read (an
 unreadable one leaves the piece unwritten like any other stat) and named in a
 note, never approximated.
 
+The core reads the armor itself when no adapter answers for the mod
+(:func:`code_armor`): the item a class's registration lambda builds, its
+constructor chain up to vanilla ``ArmorItem``, the ``ArmorMaterial`` enum
+constant it is built on and that constant's numbers. The numbers are the
+material's, so a piece is read only when the material is the mod's own enum
+(vanilla's materials are Minecraft's code, not in the jar), the item class
+decides none of them in code and no ``Item.Properties`` call sets one. What
+that reader can't read keeps today's outcome: a plain item, and residue when
+Java's tags call it armor.
+
 A mod item Java's own data marks as armor (its ``#minecraft:head_armor``,
 ``chest_armor``, ``leg_armor``, ``foot_armor`` or ``trimmable_armor``
 membership) that no adapter can read is left as the plain item it converted
@@ -51,8 +61,9 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 
-from .. import png
+from .. import itemcode, png
 from ..itemcode import VANILLA_SOURCES, ArmorLook, ArmorPiece
 from ..model import ConversionResult, SourceMod, Unhandled
 from .tags import TagResolver
@@ -116,6 +127,97 @@ def _version(text) -> tuple[int, ...]:
         return tuple(int(p) for p in str(text).split("."))
     except ValueError:
         return ()
+
+
+def _sites(index, names: set[str], namespace: str) -> dict[str, tuple[str, str]]:
+    """``{item name: (the class that registers it, the lambda that builds it)}``
+    for the names a class's ``<clinit>`` registers exactly once.
+
+    A registration is the name's ``ldc`` followed by the ``LambdaMetafactory``
+    call that builds the item (:func:`portkit.itemcode.registration_lambda`);
+    the name may be the bare path or the namespaced id. A name two classes
+    register is left out: which one is the item isn't decided."""
+    if not names:
+        return {}
+    # One scan of the jar's class bytes for any of the names (the names are
+    # the mod's own item ids, so a class that names one is the class that
+    # registers it). The longest name matches first, so a name that is a
+    # prefix of another doesn't hide it.
+    by_bytes: dict[bytes, list[str]] = {}
+    for name in names:
+        by_bytes.setdefault(name.encode(), []).append(name)
+    pattern = re.compile(b"|".join(re.escape(raw) for raw in sorted(by_bytes, key=lambda b: (-len(b), b))))
+    found: dict[str, list[tuple[str, str]]] = {}
+    for cname in index.names():
+        raw = index.raw(cname) or b""
+        matched = {m.group(0) for m in pattern.finditer(raw)}
+        if not matched:
+            continue
+        cf = index.get(cname)
+        if cf is None:
+            continue
+        candidates: set[str] = set()
+        for text in matched:
+            candidates.update(by_bytes[text])
+        for name in candidates:
+            for candidate in (name, f"{namespace}:{name}"):
+                lam = itemcode.registration_lambda(cf, candidate)
+                if lam:
+                    found.setdefault(name, []).append((cname, lam))
+                    break
+    return {name: sites[0] for name, sites in found.items() if len(sites) == 1}
+
+
+def code_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
+    """The armor the mod's own code builds on an ``ArmorMaterial`` enum -> its
+    :class:`portkit.itemcode.ArmorPiece`.
+
+    The core's own reader, for the mods no adapter answers: the item the
+    class's registration lambda builds, its constructor chain up to vanilla
+    ``ArmorItem`` (:func:`portkit.itemcode.armor_item_args`), the
+    ``ArmorMaterial`` enum constant it is built on and that constant's
+    numbers (:func:`portkit.itemcode.armor_material_enum`). The numbers are
+    the material's, so the piece is only read when the material is the mod's
+    own enum (vanilla's materials are Minecraft's code, not in the jar), when
+    the item class decides none of them in code and when no ``Item.Properties``
+    call sets one. Everything else stays unread, and the item keeps today's
+    outcome (a plain item, and residue when Java's tags call it armor)."""
+    index = mod.classes
+    if index is None or not names:
+        return {}
+    found: dict[str, object] = {}
+    for name, (cname, lam) in sorted(_sites(index, set(names), mod.namespace).items()):
+        cf = index.get(cname)
+        if cf is None:
+            continue
+        built, made = itemcode.factory(cf, lam)
+        if built is None:
+            continue
+        chain = itemcode.armor_item_args(index, built.cls, built.desc, built.args)
+        if chain is None:
+            continue
+        material, kind, props, desc = chain
+        # A 1.21 material is a record built in a static initializer; this
+        # reader takes the 1.20-style enum the adapters' readers share.
+        if desc != itemcode.ARMOR_ITEM_1_20 or not isinstance(material, itemcode.Static):
+            continue
+        if set(props + made) & itemcode.ARMOR_PROPERTY_CALLS:
+            continue
+        if itemcode.decides_armor_in_code(index, built.cls) is not False:
+            continue
+        stats = itemcode.armor_material_enum(index, material.owner).get(material.name)
+        if stats is None:
+            continue
+        cls = built.cls.rsplit("/", 1)[-1]
+        source = (f"{mod.namespace} jar: {cname} registers {name} as new {cls}(...), whose constructor chain reaches "
+                  f"vanilla's ArmorItem with the material {material.owner.rsplit('/', 1)[-1]}.{material.name} and the "
+                  f"type {getattr(kind, 'name', kind)}; the material's own getters give the armor points, "
+                  "enchantability, toughness, knockback resistance and durability; "
+                  + itemcode.VANILLA_SOURCES["armor_stats_1_20"])
+        piece = itemcode.armor_piece(stats, kind, None, source)
+        if piece is not None:
+            found[name] = piece
+    return found
 
 
 def java_armor(mod: SourceMod, tags: TagResolver) -> dict[str, list[str]]:
@@ -271,7 +373,11 @@ def convert(mod: SourceMod, files: dict, tags: TagResolver | None = None) -> Con
         return result
     from ..adapters import item_armors
 
+    # The adapters answer for the mods they know; the core's own reader takes
+    # the rest (#274): armor the mod's code builds on an ArmorMaterial enum.
     answers = item_armors(mod, frozenset(items))
+    missing = frozenset(name for name in items if name not in answers)
+    answers = {**code_armor(mod, missing), **answers}
     marked = java_armor(mod, tags if tags is not None else TagResolver(mod))
     worn: dict[str, list[str]] = {}
     dropped, extras = [], {}

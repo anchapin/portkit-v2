@@ -27,6 +27,21 @@ on top and mark the old one "superseded by" with its date; don't rewrite it.
 
 ---
 
+## 2026-11-13: the core reads a mod's armor itself: an ArmorItem built on the mod's own ArmorMaterial enum is wearable without a per-mod adapter (#274)
+
+- **Decision:** the core armor converter (`portkit.converters.armor`) reads a mod's armor from the mod's own code when no adapter answers for it: the item a class's registration lambda builds, its constructor chain up to vanilla `ArmorItem` (`portkit.itemcode.armor_item_args`), the `ArmorMaterial` enum constant it is built on and that constant's numbers (`portkit.itemcode.armor_material_enum`). The piece then carries `minecraft:wearable` (slot + protection), `minecraft:durability`, `minecraft:enchantable` and `minecraft:max_stack_size` 1, with the citation naming the class, the material constant and vanilla's `ArmorItem`. What the reader can't read keeps today's outcome: the item stays a plain item, and it is residue (kind `armor`) when Java's tags call it armor.
+  1. **Read, don't invent** (#87): the piece is written only when the material is the mod's **own** `ArmorMaterial` enum (vanilla's `ArmorMaterials` are Minecraft's code, not in the jar, so they stay unread), the item class decides none of its numbers in code (`getDefense`, `getToughness`, `getEnchantmentValue`, `isEnchantable`, `getEquipmentSlot`, `getMaxDamage`, ... are refused), no `Item.Properties` call sets a number (`durability`, `attributes`, `component`), the constructor chain reaches vanilla's `ArmorItem` without a branch, and the material's getters are constants. Every number is the material's, read by the shared readers the adapters use, so the citation is the same shape as theirs.
+  2. **Only the 1.20-style enum** is read here: a 1.21 `ArmorMaterial` record built in a static initializer (the shape Mythic Metals uses) is the adapters' readers' job, and a piece this reader can't read stays unread (no second guess, no fallback).
+  3. **The adapters win:** a name an adapter answers (a piece or a reason) is not read again, so the per-mod readers that already work keep their say (their refusals, e.g. Create's `BacktankItem` and the pieces built on vanilla's materials, stay refusals).
+  4. **No worn look:** the pieces this reader finds carry no attachable: which texture Java draws them with isn't read here (the worn look is #275's slice), so the item is wearable and the note says no worn look was written.
+  5. **The #273 path follows on its own:** a Java `#minecraft:trimmable_armor` member that is wearable now carries `minecraft:trimmable_armors` without any change to that path.
+- **Why:** the adapter-per-mod way reaches only the mods someone wrote an adapter for; the numbers a piece wears are the material's, and the material is a plain enum in the jar, so the core can read them for any mod. Armor that Java's tags call armor stayed a plain, unwearable item (and residue) in every other mod.
+- **Rejected:** copying vanilla's armor numbers for a mod that builds on vanilla's materials (they are Minecraft's code, not in the jar: invented, #87); reading a mod's `data/<ns>/items/*.json` components (the converter doesn't read 1.21.4 item definitions at all); guessing a worn texture (no reader says which texture a piece wears here).
+- **Unverified:** the look in game. BDS is a server and doesn't load resource packs, so nothing here is checked by the in-game run beyond the pack loading. No corpus jar was available in this environment, so the reader is proved with the synthetic fixture (the toy mod's classes) only.
+- **Links:** #274, #275, #272 / PR #273, #87, #268.
+
+---
+
 ## 2026-11-12 (approved (Alex, 2026-11-12), pick a on #296, PR #422): a held enum state the code never sets takes StateDefinition#any's value, its EnumProperty's first value read from the jar; Storage Drawers' 8 compacting drawers and Cooking for Blockheads' 16 fridges convert (pick a, recommended)
 
 - **Status:** approved (Alex, 2026-11-12; pick **a** of the #296 picks comment 6816077123). Part of #296 (the one-off residue Alex said yes to on 2026-11-12), part of #277. PR #422 builds pick a. It reverses one line of PR #383's entry ("Rejected: taking StateDefinition#any's value for an unset enum (needs the enum's declaration order read, not approved)"); Alex approved that reversal with this pick.
