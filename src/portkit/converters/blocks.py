@@ -1692,9 +1692,9 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     render_types: dict[str, set] = {}
     outer = models.RENDER_TYPES_SEEN.set(None)
     outer_block = models.BLOCK_DRAWN.set(None)
-    for path in sorted(src.glob("*.json")):
+    for path in sorted(src.rglob("*.json")):
         rel = result.claim(mod, path)
-        name = path.stem
+        name = _blockstate_name(src, path)
         models.RENDER_TYPES_SEEN.set(render_types.setdefault(name, set()))
         models.BLOCK_DRAWN.set((name, shared))
         try:
@@ -3419,12 +3419,28 @@ def _chain_has_elements(mod: SourceMod, model: dict) -> bool:
     return True
 
 
+def _blockstate_name(src, path) -> str:
+    """The block id a blockstate file names, relative to ``src``.
+
+    A blockstate file in a subfolder names a block whose id holds a slash
+    (``assets/<ns>/blockstates/machine/ore.json`` is the block
+    ``<ns>:machine/ore``), so the name keeps the folder path (#436). A file
+    at the top level keeps its plain name.
+    """
+    return path.relative_to(src).with_suffix("").as_posix()
+
+
 def _load_blockstates(src) -> dict:
-    """name -> parsed blockstate, for every blockstate file that parses."""
+    """name -> parsed blockstate, for every blockstate file that parses.
+
+    Subfolders are walked: a blockstate file in one names a block whose id
+    holds a slash, and reading only the top level dropped those blocks
+    without a word (#436).
+    """
     out = {}
-    for path in sorted(src.glob("*.json")):
+    for path in sorted(src.rglob("*.json")):
         try:
-            out[path.stem] = json.loads(path.read_text())
+            out[_blockstate_name(src, path)] = json.loads(path.read_text())
         except json.JSONDecodeError:
             continue
     return out

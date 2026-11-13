@@ -20,17 +20,15 @@ Two properties are asserted, and both are about the converters' promises:
 The properties are additive: they say nothing the example tests do not, they
 just say it for input nobody wrote down by hand.
 
-One known loss is *not* fixed here: a Java block whose id holds a slash (its
-blockstate file sits in a subfolder) is dropped by the block converter
-without a residue entry. It is pinned as an xfail with its minimal example
-and left for its own issue.
+A Java block whose id holds a slash (its blockstate file sits in a subfolder)
+is converted like any other block (#436): the block converter walks the
+blockstate folders, so such a block is neither dropped nor left unaccounted.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -404,23 +402,12 @@ def test_ids_round_trip_through_the_pack(names, tmp_path_factory):
         assert _java_id(identifier) == (NAMESPACE, name)
 
 
-# --- a known loss, pinned for its own issue --------------------------------
+# --- a block whose id holds a slash ----------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "candidate bug for its own issue (#434): the block converter reads only "
-        "the top level of assets/<ns>/blockstates/, so a Java block whose id "
-        "holds a slash (its blockstate file sits in a subfolder) is neither "
-        "converted nor reported: the conversion result is empty and says "
-        "nothing about the block. The pipeline lists the file as 'unowned' "
-        "later, but the block itself is lost with no reason. Not fixed here."
-    ),
-    strict=False,
-)
 def test_a_block_in_a_subfolder_is_not_lost(tmp_path):
     """A block whose id holds a slash is converted or reported, like any
-    other block."""
+    other block (#436)."""
     assets = tmp_path / "assets" / NAMESPACE
     _write_json(
         assets / "blockstates" / "machine" / "ore.json",
@@ -441,3 +428,28 @@ def test_a_block_in_a_subfolder_is_not_lost(tmp_path):
         assert rel in result.consumed or _accounted(result, path.stem), (
             f"{rel} was neither converted nor reported"
         )
+
+
+def test_a_block_in_a_subfolder_converts_with_its_own_id(tmp_path):
+    """The block of a subfolder converts under the id Java gives it: the
+    blockstate's folder is part of the id (#436)."""
+    assets = tmp_path / "assets" / NAMESPACE
+    _write_json(
+        assets / "blockstates" / "machine" / "ore.json",
+        {"variants": {"": {"model": f"{NAMESPACE}:block/ore"}}},
+    )
+    _write_json(
+        assets / "models" / "block" / "ore.json",
+        {"parent": "minecraft:block/cube_all",
+         "textures": {"all": f"{NAMESPACE}:block/ore"}},
+    )
+    _write_png(assets / "textures" / "block" / "ore.png")
+    mod = SourceMod(root=tmp_path, namespace=NAMESPACE)
+
+    result = blocks.convert(mod)
+
+    assert result.unhandled == []
+    assert "assets/examplemod/blockstates/machine/ore.json" in result.consumed
+    body = result.files["blocks/machine/ore.json"]["minecraft:block"]
+    assert body["description"]["identifier"] == f"{NAMESPACE}:machine/ore"
+

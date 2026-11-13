@@ -377,3 +377,28 @@ def test_random_entries_naming_no_model_are_refused(tmp_path):
 
     assert result.files == {}
     assert "name no model" in result.unhandled[0].reason
+
+
+def test_a_block_in_a_blockstate_folder_converts(tmp_path):
+    """#436: a blockstate file in a subfolder names a block whose id holds a
+    slash; the converter walks the folders, so the block converts under that
+    id instead of being dropped."""
+    assets = tmp_path / "assets" / "examplemod"
+    (assets / "blockstates" / "machine").mkdir(parents=True, exist_ok=True)
+    (assets / "models" / "block" / "machine").mkdir(parents=True, exist_ok=True)
+    (assets / "textures" / "block").mkdir(parents=True, exist_ok=True)
+    (assets / "blockstates" / "machine" / "ore.json").write_text(json.dumps(
+        {"variants": {"": {"model": "examplemod:block/machine/ore"}}}))
+    (assets / "models" / "block" / "machine" / "ore.json").write_text(json.dumps({
+        "parent": "minecraft:block/cube_all",
+        "textures": {"all": "examplemod:block/machine/ore"},
+    }))
+    (assets / "textures" / "block" / "ore.png").write_bytes(b"png")
+    mod = SourceMod(root=tmp_path, namespace="examplemod")
+
+    result = blocks.convert(mod)
+
+    assert result.unhandled == []
+    assert "assets/examplemod/blockstates/machine/ore.json" in result.consumed
+    body = result.files["blocks/machine/ore.json"]["minecraft:block"]
+    assert body["description"]["identifier"] == "examplemod:machine/ore"
