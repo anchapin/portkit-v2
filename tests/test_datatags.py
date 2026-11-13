@@ -153,3 +153,86 @@ def test_pipeline_files_every_tag_and_tags_the_block(tmp_path, fixtures_dir):
     assert "tag:minecraft:is_pickaxe_item_destructible" in block["minecraft:block"]["components"]
     bronze = json.loads((bp / "items" / "bronze_ingot.json").read_text())
     assert "minecraft:planks" in bronze["minecraft:item"]["components"]["minecraft:tags"]["tags"]
+
+
+# -- vanilla's own nesting of the tool tags (#298, supervisor-completed) -------
+_VANILLA_BLOCK_TAGS = {
+    "minecraft:mineable/axe": ["#minecraft:logs", "#minecraft:planks"],
+    "minecraft:logs": ["minecraft:oak_log"],
+    "minecraft:planks": ["minecraft:oak_planks"],
+    "minecraft:needs_iron_tool": ["#minecraft:iron_ores"],
+    "minecraft:iron_ores": ["minecraft:iron_ore"],
+}
+
+
+def _vanilla_env(tmp_path, monkeypatch):
+    path = tmp_path / "vanilla-block-tags.json"
+    path.write_text(json.dumps({"tags": _VANILLA_BLOCK_TAGS}))
+    monkeypatch.setenv("PORTKIT_VANILLA_BLOCK_TAGS", str(path))
+
+
+def _log_jar(tmp_path):
+    """A jar whose log block sits only in #minecraft:logs, the usual Java way."""
+    root = tmp_path / "jar"
+    _write(root, "data/minecraft/tags/blocks/logs.json", {"values": ["m:log"]})
+    return root
+
+
+def test_a_block_only_in_a_vanilla_nested_tag_gets_the_axe_tag(tmp_path, monkeypatch):
+    _vanilla_env(tmp_path, monkeypatch)
+    root = _log_jar(tmp_path)
+    files = {"blocks/log.json": _block("m:log")}
+    claimed, notes = datatags.tool_tags(root, files, "neoforge")
+    comps = files["blocks/log.json"]["minecraft:block"]["components"]
+    assert comps["tag:minecraft:is_axe_item_destructible"] == {}
+    assert claimed == {"data/minecraft/tags/blocks/logs.json"}
+
+
+def test_a_removed_vanilla_nested_tag_gets_no_tag(tmp_path, monkeypatch):
+    _vanilla_env(tmp_path, monkeypatch)
+    root = _log_jar(tmp_path)
+    _write(root, "data/minecraft/tags/blocks/mineable/axe.json",
+           {"values": [], "remove": ["#minecraft:logs"]})
+    files = {"blocks/log.json": _block("m:log")}
+    datatags.tool_tags(root, files, "neoforge")
+    comps = files["blocks/log.json"]["minecraft:block"]["components"]
+    assert "tag:minecraft:is_axe_item_destructible" not in comps
+    files = {"blocks/log.json": _block("m:log")}
+    datatags.tool_tags(root, files, "fabric")
+    comps = files["blocks/log.json"]["minecraft:block"]["components"]
+    assert comps["tag:minecraft:is_axe_item_destructible"] == {}
+
+
+def test_without_the_vanilla_data_nothing_changes(tmp_path, monkeypatch):
+    monkeypatch.delenv("PORTKIT_VANILLA_BLOCK_TAGS", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "empty-cache"))
+    root = _log_jar(tmp_path)
+    files = {"blocks/log.json": _block("m:log")}
+    claimed, notes = datatags.tool_tags(root, files, "neoforge")
+    comps = files["blocks/log.json"]["minecraft:block"]["components"]
+    assert "tag:minecraft:is_axe_item_destructible" not in comps
+    assert claimed == set()
+    assert any("portkit reference fetch" in n for n in notes)
+
+
+def test_a_replacing_jar_file_drops_vanillas_nesting(tmp_path, monkeypatch):
+    _vanilla_env(tmp_path, monkeypatch)
+    root = _log_jar(tmp_path)
+    _write(root, "data/minecraft/tags/blocks/mineable/axe.json",
+           {"values": ["m:other"], "replace": True})
+    files = {"blocks/log.json": _block("m:log"), "blocks/other.json": _block("m:other")}
+    datatags.tool_tags(root, files, "neoforge")
+    assert "tag:minecraft:is_axe_item_destructible" not in \
+        files["blocks/log.json"]["minecraft:block"]["components"]
+    assert files["blocks/other.json"]["minecraft:block"]["components"][
+        "tag:minecraft:is_axe_item_destructible"] == {}
+
+
+def test_a_tier_tag_follows_vanilla_nesting_too(tmp_path, monkeypatch):
+    _vanilla_env(tmp_path, monkeypatch)
+    root = tmp_path / "jar"
+    _write(root, "data/minecraft/tags/blocks/iron_ores.json", {"values": ["m:ore"]})
+    files = {"blocks/ore.json": _block("m:ore")}
+    datatags.tool_tags(root, files, "neoforge")
+    comps = files["blocks/ore.json"]["minecraft:block"]["components"]
+    assert comps["tag:minecraft:iron_tier_destructible"] == {}
