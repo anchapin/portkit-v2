@@ -207,7 +207,9 @@ def test_a_bare_furnace_tag_is_never_an_input_id(tmp_path):
               "result": "examplemod:fried_egg"}
     result = recipes.convert(_mod(tmp_path, recipe, loader="neoforge", minecraft="1.21.1"), emitted={})
     assert not [k for k in result.files if k.startswith("recipes/")]
-    (reason,) = [u.reason for u in result.unhandled if u.kind == "recipe"]
+    # #302 sub-reason 5: a tag whose membership isn't knowable from the jar
+    # is its own explained kind now, not the plain "recipe" bucket.
+    (reason,) = [u.reason for u in result.unhandled if u.kind == recipes.UNKNOWN_MEMBERSHIP]
     assert "minecraft:eggs" in reason
 
 

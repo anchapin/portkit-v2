@@ -112,7 +112,7 @@ def test_forge_glass_without_reference_data_stays_residue(tmp_path):
     result = recipes.convert(mod)
     assert _recipe_files(result) == {}
     reason = result.unhandled[0].reason
-    assert "full membership isn't known" in reason and "portkit reference fetch" in reason
+    assert "full membership isn't knowable" in reason and "portkit reference fetch" in reason
     assert GLASS in result.consumed
 
 

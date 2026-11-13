@@ -73,6 +73,19 @@ count (#342, pending Alex). The converter records every recipe's result
 (``ConversionResult.recipe_results``), so a refused recipe whose result is
 itself residue goes with it (:func:`refine_owned`, #342).
 
+A recipe refused only because a tag ingredient's membership isn't knowable
+from the jar is the kind :data:`UNKNOWN_MEMBERSHIP` (#302 sub-reason 5). A
+tag's membership is the union of everyone who writes to it: the mod's own
+tag file, plus vanilla's and the loader's share for a tag in a shared
+namespace, with nested tags expanded (see :mod:`portkit.converters.tags`).
+That union isn't knowable when the jar's file is only its own share and the
+vanilla/loader share isn't there to read, when a nested tag's membership isn't
+knowable either, or when vanilla may nest the jar's own share of another tag
+in this one. The reason names each tag and why its membership isn't knowable.
+The recipe is never narrowed to the jar's share (#87, #160), and a recipe of
+this kind whose result is residue of its own goes with that result, as any
+refused recipe's does (:func:`refine_owned`, #342).
+
 An ingredient written as a JSON list of items (Java's "any of these"; Mythic
 Metals' ``[{"item": "...:deepslate_adamantite_ore"}, {"item":
 "...:adamantite_ore"}]``) is a membership the recipe states outright, so it
@@ -119,6 +132,12 @@ EXPANSION_CAP = 16
 
 # The explained kind for a recipe refused only for the cap (#342, pending Alex).
 OVER_CAP = "recipe_over_cap"
+
+# The kind for a recipe refused only because a tag ingredient's membership
+# isn't knowable from the jar (#302 sub-reason 5): the jar's own share of the
+# tag, plus vanilla's and the loader's share, is more than the jar says, and
+# the rest isn't there to read.
+UNKNOWN_MEMBERSHIP = "recipe_unknown_membership"
 
 # minecraft:tags on an item needs item format_version 1.20.50 or later
 # (learn.microsoft.com, Items Documentation - minecraft:tags).
@@ -629,6 +648,69 @@ def _tag_reason(spec, tags: TagResolver | None = None) -> str:
     if isinstance(spec, list):
         return "ingredient is a list holding a tag or a non-item entry"
     return "ingredient uses a tag or item list"
+
+
+def _vanilla_nesting(tag: str, tags: TagResolver) -> str | None:
+    """Why vanilla may nest the jar's own share of another tag in ``tag``, or None.
+
+    Vanilla's own tags nest one another (vanilla's ``minecraft:planks`` holds
+    its wood planks, which the jar may add to in its own file). Which of the
+    jar's tag files vanilla nests in which tag is said by the vanilla tag
+    data, and without it the membership of such a tag isn't knowable either:
+    the jar's own members may or may not belong in it.
+    """
+    if tag not in _BEDROCK_VANILLA_TAGS:
+        return None
+    nested = tags.unknown_nested(tag)
+    if not nested or tags.mod_additions(tag) is not None:
+        return None
+    shown = ", ".join(nested[:3]) + (f" and {len(nested) - 3} more" if len(nested) > 3 else "")
+    return (f"this jar adds to {shown}, which vanilla may nest in it, and without the vanilla "
+            f"tag data (run `{FETCH_COMMAND}`) it isn't knowable whether those members belong in it")
+
+
+def _unknown_memberships(failing: list[int], positions: list,
+                         tags: TagResolver) -> list[dict]:
+    """The refused ingredients whose tag membership isn't knowable from the jar.
+
+    A tag's membership is the union of everyone who writes to it: the mod's own
+    tag file, plus vanilla's and the loader's share for a tag in a shared
+    namespace, with nested tags expanded (:mod:`portkit.converters.tags`). It
+    isn't knowable when the jar's file is only its own share and the
+    vanilla/loader share isn't there to read, when a nested tag's membership
+    isn't knowable either, or when vanilla may nest the jar's own share of
+    another tag in this one (#302 sub-reason 5).
+
+    Only tag ingredients count here: a list ingredient names its membership
+    outright (#302 sub-reason 4), and one whose membership isn't known stays a
+    plain recipe refusal.
+    """
+    out: list[dict] = []
+    for i in failing:
+        spec = positions[i][0]
+        if not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
+            continue
+        tag = str(spec["tag"])
+        if tags.unknown_reason(tag) is not None or _vanilla_nesting(tag, tags):
+            out.append(spec)
+    return out
+
+
+def _unknown_membership_reason(specs: list[dict], tags: TagResolver) -> str:
+    """Why a recipe is refused: its tag ingredients' membership isn't knowable."""
+    parts = []
+    for spec in specs:
+        tag = str(spec["tag"])
+        cause = _vanilla_nesting(tag, tags) or tags.unknown_reason(tag)
+        if tags.tag_file(tag) is not None and cause is not None:
+            # The jar's own file for the tag is its own share of it; the rest
+            # is what the cause is about.
+            cause = f"the mod's file for it is only its own share, and {cause}"
+        parts.append(f"ingredient uses tag {tag!r}, whose full membership isn't knowable from "
+                     f"the jar: {cause}")
+    return ("; ".join(parts) + "; a Bedrock recipe would have to name members this conversion "
+            "can't know, and a recipe is never narrowed to part of a tag, so the recipe stays "
+            "residue (#302 sub-reason 5)")
 
 
 def _smithing_item(spec, tags: TagResolver | None = None) -> str | None:
@@ -1971,6 +2053,14 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 # Nothing but the count stops it (#342, pending Alex).
                 result.unhandled.append(Unhandled(rel, OVER_CAP, f"{over_cap} (the ingredient: {reason})"))
                 continue
+            unknown = _unknown_memberships(failing, positions, tag_resolver)
+            if unknown and len(unknown) == len(failing) and not missing:
+                # Every refused ingredient is a tag whose membership can't be
+                # known from the jar: that is the only reason (#302 sub-reason
+                # 5), so the recipe says so instead of being a plain refusal.
+                result.unhandled.append(Unhandled(
+                    rel, UNKNOWN_MEMBERSHIP, _unknown_membership_reason(unknown, tag_resolver)))
+                continue
             result.unhandled.append(Unhandled(rel, "recipe", reason))
             unconverted = _all_unconverted(failing, multis, positions, mapped, tag_resolver, emitted)
             if unconverted:
@@ -2333,7 +2423,7 @@ def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]],
     no entry of its own (another mod's, or one the jar never defines) stays
     ``recipe``. Pack bytes don't change.
 
-    #342 (pending Alex, pick 1a): a ``recipe`` or :data:`OVER_CAP` entry whose
+    #342 (pending Alex, pick 1a): a ``recipe``, :data:`OVER_CAP` or :data:`UNKNOWN_MEMBERSHIP` entry whose
     result (``results``: source -> the item it makes, recorded by
     :func:`convert`) is a mod item with a residue entry of its own goes with
     that item too, whatever else refused it: Bedrock refuses a recipe whose
@@ -2358,7 +2448,7 @@ def refine_owned(unhandled: list[Unhandled], unshipped: dict[str, list[str]],
                 reason=(f"a recipe whose items are residue: {shown}, each refused with an entry of its own, "
                         f"so the recipe goes with them when they convert (the recipe itself: {u.reason})")))
             continue
-        made = results.get(u.source) if u.kind in ("recipe", OVER_CAP) else None
+        made = results.get(u.source) if u.kind in ("recipe", OVER_CAP, UNKNOWN_MEMBERSHIP) else None
         entry = (_owner_entry(made, residue)
                  if made and not made.startswith("minecraft:") and made not in (shipped or ()) else None)
         if entry is not None:

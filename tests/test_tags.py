@@ -61,7 +61,10 @@ def test_convention_name_with_no_matching_item_stays_residue(tmp_path):
 def test_convention_name_with_no_matching_item_and_no_data_stays_residue(tmp_path):
     result = recipes.convert(_mod(tmp_path, "c:ingots/steel", items=["bronze_ingot"], loader=None))
     assert result.files == {}
-    assert "which covers more than one item" in result.unhandled[0].reason
+    # #302 sub-reason 5: with no loader data the c: tag's membership isn't
+    # knowable from the jar, so that is the explained refusal now.
+    assert result.unhandled[0].kind == recipes.UNKNOWN_MEMBERSHIP
+    assert "isn't knowable from the jar" in result.unhandled[0].reason
 
 
 def test_storage_blocks_and_raw_materials_follow_their_own_names(tmp_path):
@@ -140,5 +143,5 @@ def test_without_vanilla_data_a_mods_vanilla_tag_share_stays_unknown(tmp_path):
     }, loader=None, minecraft=None)
     result = recipes.convert(mod)
     assert result.files == {}
-    assert "full membership isn't known" in result.unhandled[0].reason
+    assert "full membership isn't knowable" in result.unhandled[0].reason
     assert "data/minecraft/tags/items/leaves.json" in result.consumed  # read, so owned
