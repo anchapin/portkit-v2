@@ -10,10 +10,12 @@ import pytest
 from portkit.ingame import nbt, server, testpack
 
 
-def _block(path: Path, ident: str, components=None, traits=None):
+def _block(path: Path, ident: str, components=None, traits=None, states=None):
     desc = {"identifier": ident}
     if traits:
         desc["traits"] = traits
+    if states:
+        desc["states"] = states
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"format_version": "1.26.0", "minecraft:block": {
         "description": desc, "components": components or {}}}))
@@ -126,7 +128,12 @@ def test_write_test_pack(tree, tmp_path):
     testpack.write_test_pack(tree / "behavior_pack", out, "demo")
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["modules"][0]["entry"] == "scripts/ingame.js"
-    assert manifest["dependencies"] == [{"module_name": "@minecraft/server", "version": "2.2.0"}]
+    assert manifest["dependencies"] == [
+        {"module_name": "@minecraft/server", "version": "2.2.0"},
+        # The player check's simulated player (#335).
+        {"module_name": "@minecraft/server-gametest", "version": testpack.GAMETEST_MODULE},
+    ]
+    assert testpack.GAMETEST_MODULE
     # Stable uuids: the same name gives the same pack.
     assert manifest == testpack.manifest("demo")
     assert manifest["header"]["uuid"] != testpack.manifest("other")["header"]["uuid"]
@@ -136,6 +143,59 @@ def test_write_test_pack(tree, tmp_path):
     assert [d["id"] for d in body["drops"]] == ["demo:root"]
     for name in testpack.SCRIPT_FILES:
         assert (out / "scripts" / name).read_bytes() == (testpack.RUNTIME / name).read_bytes()
+
+
+def _table(bp: Path, name: str, body: dict):
+    """A portkit data table of the converted pack (scripts/portkit/data)."""
+    path = bp / "scripts" / "portkit" / "data" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"export default {json.dumps(body)};\n")
+
+
+def test_player_checks(tmp_path):
+    """#335: the blocks a simulated player's hand is tried on, and whether a
+    hand opens them (the pack's own door and trapdoor tables)."""
+    bp = tmp_path / "bp"
+    _block(bp / "blocks" / "door.json", "demo:door", components={"demo:portkit_door": {}},
+           states={"demo:open": False, "demo:powered": False})
+    # The iron copy: the pack's table says a hand does not open it.
+    _block(bp / "blocks" / "iron.json", "demo:iron_door", components={"demo:portkit_door": {}},
+           states={"demo:open": False, "demo:powered": False})
+    _block(bp / "blocks" / "trap.json", "demo:trapdoor", components={"demo:portkit_trapdoor": {}},
+           states={"demo:open": False, "demo:powered": False})
+    _block(bp / "blocks" / "button.json", "demo:button", components={"demo:portkit_button": {}},
+           states={"demo:powered": False})
+    _block(bp / "blocks" / "plate.json", "demo:plate", components={"demo:portkit_pressure_plate": {}},
+           states={"demo:powered": False})
+    _table(bp, "demo_doors.js", {"doors": {"demo:door": {"hand": True},
+                                           "demo:iron_door": {"hand": False}}})
+    _table(bp, "demo_trapdoors.js", {"trapdoors": {"demo:trapdoor": {"hand": True}}})
+    _table(bp, "demo_pressure_plates.js", {"plates": {"demo:plate": {"mobs_only": False}}})
+    _table(bp, "demo_buttons.js", {"buttons": {"demo:button": {"ticks": 20}},
+                                   "press_event": "demo:button_press"})
+    checks = testpack.read_checks(bp)
+    assert checks.players == [
+        {"id": "demo:button", "kind": "button", "hand": True, "states": {"powered": "demo:powered"}},
+        {"id": "demo:door", "kind": "door", "hand": True,
+         "states": {"open": "demo:open", "powered": "demo:powered"}},
+        {"id": "demo:iron_door", "kind": "door", "hand": False,
+         "states": {"open": "demo:open", "powered": "demo:powered"}},
+        {"id": "demo:plate", "kind": "plate", "hand": True, "mobs_only": False,
+         "states": {"powered": "demo:powered"}},
+        {"id": "demo:trapdoor", "kind": "trapdoor", "hand": True,
+         "states": {"open": "demo:open", "powered": "demo:powered"}},
+    ]
+    # A plate only mobs press: the player's hand does not press it.
+    _table(bp, "demo_pressure_plates.js", {"plates": {"demo:plate": {"mobs_only": True}}})
+    checks = testpack.read_checks(bp)
+    assert [p for p in checks.players if p["kind"] == "plate"] == [
+        {"id": "demo:plate", "kind": "plate", "hand": True, "mobs_only": True,
+         "states": {"powered": "demo:powered"}}]
+    # The generated pack ships the rows the check needs.
+    out = tmp_path / "checks"
+    testpack.write_test_pack(bp, out, "demo")
+    body = json.loads((out / "scripts" / "data.js").read_text().split("=", 1)[1].strip().rstrip(";"))
+    assert body["players"] == checks.as_json()["players"]
 
 
 def test_fetch_needs_the_eula(tmp_path):

@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  PAIRED_Y, PLATE_Y, TRAPDOOR_Y, doorVerdict, pairedSlot, pairedVerdict, plateSlot, plateVerdict,
+  PAIRED_Y, PLATE_Y, PLAYER_Y, TRAPDOOR_Y, doorVerdict, pairedSlot, pairedVerdict, plateSlot, plateVerdict,
+  playerExpectation, playerSlot, playerStand, playerVerdict,
   trapdoorSlot, trapdoorVerdict,
   AREA, CONNECTION_STATES, DROP_BATCH, DROP_Y, Tally, connectionSlot, connectionVerdict, containerVerdict,
   describe, dropSlot, dropVerdict, line, slot,
@@ -189,4 +190,29 @@ test("plate verdict: pressed as wanted, and the lamp when asked", () => {
   assert.deepEqual(plateVerdict(false, { powered: false }), { ok: true, problems: [] });
   assert.deepEqual(plateVerdict(true, { powered: true, lamp: false }).problems, ["lamp lit=false, expected true"]);
   assert.deepEqual(plateVerdict(false, { powered: undefined }).problems, ["powered=undefined, expected false"]);
+});
+
+test("player slots: the paired layout on their own layer, below the paired layer", () => {
+  assert.deepEqual(playerSlot(0), { x: 2, y: PLAYER_Y, z: 2 });
+  assert.equal(playerSlot(64).y, PLAYER_Y + 4);
+  assert.ok(PLAYER_Y < PAIRED_Y);
+});
+
+test("player stand: beside the block, on its floor, within reach", () => {
+  assert.deepEqual(playerStand({ x: 2, y: PLAYER_Y, z: 2 }), { x: 3.5, y: PLAYER_Y, z: 2.5 });
+});
+
+test("player expectation: a hand opens what the pack says a hand opens", () => {
+  assert.deepEqual(playerExpectation({ kind: "door", hand: true }), { open: true, powered: false });
+  assert.deepEqual(playerExpectation({ kind: "door", hand: false }), { open: false, powered: false });
+  assert.deepEqual(playerExpectation({ kind: "trapdoor", hand: true }), { open: true, powered: false });
+  assert.deepEqual(playerExpectation({ kind: "button", hand: true }), { powered: true });
+  assert.deepEqual(playerExpectation({ kind: "plate", hand: true }), { powered: true });
+  assert.deepEqual(playerExpectation({ kind: "plate", hand: true, mobs_only: true }), { powered: false });
+});
+
+test("player verdict: the states read back against what was wanted", () => {
+  assert.deepEqual(playerVerdict({ open: true, powered: false }, { open: true, powered: false }), { ok: true, problems: [] });
+  assert.deepEqual(playerVerdict({ open: true, powered: false }, { open: false, powered: false }).problems, ["open=false, expected true"]);
+  assert.deepEqual(playerVerdict({ powered: true }, { powered: undefined }).problems, ["powered=undefined, expected true"]);
 });

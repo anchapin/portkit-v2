@@ -215,6 +215,57 @@ export function plateVerdict(want, seen) {
   return { ok: problems.length === 0, problems };
 }
 
+// The player check's layer (#335): one block each, eight apart like the paired
+// check (room for the simulated player to stand beside it), a new layer four
+// up every 64; below the paired layer (a door's upper half needs the block
+// above the tested one).
+export const PLAYER_Y = 30;
+
+/** Where the i-th player-check block goes (the tested block's own position). */
+export function playerSlot(i) {
+  const at = pairedSlot(i);
+  return { ...at, y: at.y - PAIRED_Y + PLAYER_Y };
+}
+
+/**
+ * Where the simulated player stands for the block at `at`: one block east of
+ * it, on the same floor, within a player's reach (4.5 blocks in Java and
+ * Bedrock), so the hand reaches the block it faces.
+ */
+export function playerStand(at) {
+  return { x: at.x + 1.5, y: at.y, z: at.z + 0.5 };
+}
+
+/**
+ * What a hand interaction with `entry` must leave behind (#335).
+ * `entry` is one row of the generated `players` list:
+ *   kind:   "door" | "trapdoor" | "button" | "plate"
+ *   hand:   whether a hand may open it (the pack's door/trapdoor table says
+ *           so: the redstone-only ones, the iron copies, say false)
+ *   mobs_only: a plate only mobs press (the pack's plate table says so)
+ * A door or a trapdoor a hand opens ends up open; one a hand may not open
+ * stays shut (the hand is refused). A button is pressed by a hand; a plate is
+ * pressed by the player standing on it, unless only mobs press it.
+ */
+export function playerExpectation(entry) {
+  if (entry.kind === "door" || entry.kind === "trapdoor") {
+    return { open: entry.hand === true, powered: false };
+  }
+  if (entry.kind === "plate") {
+    return { powered: entry.mobs_only !== true };
+  }
+  return { powered: true };
+}
+
+/** The states read back against what `playerExpectation` wants. */
+export function playerVerdict(want, seen) {
+  const problems = [];
+  for (const [k, v] of Object.entries(want)) {
+    if (seen[k] !== v) problems.push(`${k}=${seen[k]}, expected ${v}`);
+  }
+  return { ok: problems.length === 0, problems };
+}
+
 /** The container check's verdict: the slot count the converter wrote. */
 export function containerVerdict(expected, size) {
   if (size === undefined) return { ok: false, problems: ["no minecraft:inventory component"] };
