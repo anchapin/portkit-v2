@@ -1037,6 +1037,9 @@ class _Multi:
     # block_placer item (see _block_item). Members that can't (vanilla items,
     # a block that has its own item file) are in ``extras``.
     taggable: bool
+    # Every member of this mod can carry the tag, so the tag itself is a
+    # value the ingredient can take (#302 pick 2).
+    own_taggable: bool = False
     vanilla_tag: str | None = None  # a Bedrock vanilla tag with the same membership
     # A Bedrock vanilla tag of the same name whose every member this mod adds
     # can carry it: an emitted item, or an emitted block given an item form.
@@ -1186,12 +1189,17 @@ def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
     # pick 2), so every one of the mod's own members can carry it.
     taggable = (not found.tag.startswith("minecraft:")
                 and any(k in _TAGGABLE_KINDS for k in own))
+    # Every one of the mod's own members can carry it, so the tag itself is a
+    # value the ingredient can take (#302 pick 2).
+    own_taggable = (not found.tag.startswith("minecraft:")
+                    and bool(own) and all(k in _TAGGABLE_KINDS for k in own))
     extras = [m for m, k in zip(found.members, kinds) if k == "vanilla"]
     # Bedrock's tag holds vanilla's whole share, so only when the jar's file
     # doesn't replace the tag (mod_additions is None then).
     bedrock_tag = (found.tag in _BEDROCK_VANILLA_TAGS and tags.mod_additions(found.tag) is not None
                    and all(k == "vanilla" or k in _TAGGABLE_KINDS for k in kinds))
-    return _Multi(spec=spec, found=found, taggable=taggable, vanilla_tag=_bedrock_equivalent(found, tags),
+    return _Multi(spec=spec, found=found, taggable=taggable, own_taggable=own_taggable,
+                  vanilla_tag=_bedrock_equivalent(found, tags),
                   bedrock_tag=bedrock_tag, extras=extras)
 
 
@@ -1349,23 +1357,50 @@ def _vanilla_only(multi: "_Multi | None") -> bool:
             and all(m.startswith("minecraft:") for m in multi.found.members))
 
 
-def _expandable(multi: "_Multi | None", slots: int = 1) -> bool:
-    """A multi-item ingredient whose membership can be written out item by item.
+def _slot_values(multi: "_Multi", with_others: bool) -> list[tuple] | None:
+    """The values a multi-item ingredient can take in each of the slots it fills.
 
-    A vanilla-only tag (an add-on can't tag a vanilla item, and no Bedrock
-    vanilla tag has the same members) is written as one recipe per combination
-    of members over the slots it fills (#302 pick 1). A list ingredient (it
-    names its membership outright and has no tag of its own) is written that
-    way when it fills several grid slots, the case where the player may mix
-    its items across them (#302 sub-reason 4); in one slot it takes the
-    one-recipe-per-item form, which needs it to be the only multi-item
-    ingredient of the recipe.
+    Each value is ``(id, spec, suffix)``: ``id`` names the value in a
+    recipe's key and in the dedup, ``spec`` is what the recipe writes for it
+    and ``suffix`` the part of the recipe's file name it gives.
+
+    A list (Java's "any of these") and a vanilla-only tag (an add-on can't tag
+    a vanilla item, and no Bedrock vanilla tag has the same members) give one
+    value per member, each written as the item itself. A tag whose own
+    members carry the tag gives the tag itself (the recipe takes it, its own
+    members carry it) and one value per member that can't carry it (a vanilla
+    item), written as that item; a tag on its own keeps the forms it had
+    before, so that one is used only beside another multi-item ingredient
+    (#302 sub-reason 4).
+
+    None when the ingredient has no such form: a tag whose members this pack
+    can't write one by one (a block with no item of its own), which is what
+    refuses the recipe.
     """
-    if multi is None:
-        return False
     if multi.listed:
-        return slots > 1
-    return _vanilla_only(multi)
+        return [(m, {"item": m}, _vanilla_suffix(m)) for m in multi.found.members]
+    if _vanilla_only(multi):
+        return [(m, {"item": m}, _vanilla_suffix(m)) for m in multi.found.members]
+    if with_others and multi.own_taggable and multi.extras:
+        return [(("tag", multi.found.tag), {"tag": multi.found.tag}, _member_suffix(multi.found.tag)),
+                *((e, {"item": e}, _vanilla_suffix(e)) for e in multi.extras)]
+    return None
+
+
+def _values(rest: list[int], multis: dict) -> dict[int, list] | None:
+    """The values of every multi-item ingredient of a recipe, or None.
+
+    The per-combination form needs a value for every one of them (#302
+    sub-reason 4); None when one of them has no form, which refuses the
+    recipe.
+    """
+    values: dict[int, list] = {}
+    for i in rest:
+        got = _slot_values(multis[i], with_others=len(rest) > 1)
+        if got is None:
+            return None
+        values[i] = got
+    return values
 
 
 def _result_id(recipe: dict) -> str | None:
@@ -1388,24 +1423,25 @@ def _over_cap(rest: list[int], multis: dict, positions: list, furnace: bool) -> 
     Called once every refused ingredient is a fully known membership whose
     members are vanilla or emitted (``multis`` all set) and no form fits. Only
     two forms are capped: one tag or list in one slot, one recipe per member
-    (n recipes), and vanilla-only tags filling several slots, one recipe per
-    combination (nᵏ, multiplied over the tags; #302 pick 1, never for a
-    furnace). When the count of the form that fits but for its size is over
-    :data:`EXPANSION_CAP` and every vanilla member has a Bedrock id of its own,
-    the cap is all that refuses it: the reason names each tag, its member
-    count, the slots it fills and the total. Anything else (a mixed tag over
-    several slots, a list over several slots, a member with no Bedrock id)
-    gives None and the recipe stays ``recipe``.
+    (n recipes), and the per-combination form (nᵏ over the slots of each
+    multi-item ingredient, multiplied over the ingredients; #302 pick 1 and
+    sub-reason 4, never for a furnace). When the count of the form that fits
+    but for its size is over :data:`EXPANSION_CAP` and every vanilla member
+    has a Bedrock id of its own, the cap is all that refuses it: the reason
+    names each tag or list, its member count, the slots it fills and the
+    total. Anything else (a member with no Bedrock id, an ingredient with no
+    value form) gives None and the recipe stays ``recipe``.
     """
     if not rest or any(multis.get(i) is None for i in rest):
         return None
+    values: dict | None = None
     if len(rest) == 1 and positions[rest[0]][1] == 1:
         total = len(multis[rest[0]].found.members)
         form = "one recipe per member"
-    elif not furnace and all(_expandable(multis[i], positions[i][1]) for i in rest):
+    elif not furnace and (values := _values(rest, multis)) is not None:
         total = 1
         for i in rest:
-            total *= len(multis[i].found.members) ** positions[i][1]
+            total *= len(values[i]) ** positions[i][1]
         form = "one recipe per combination the player can put in the slots (#302 pick 1)"
     else:
         return None
@@ -1421,8 +1457,9 @@ def _over_cap(rest: list[int], multis: dict, positions: list, furnace: bool) -> 
         label = multi.found.tag if multi.listed else repr(multi.found.tag)
         what = "list" if multi.listed else "tag"
         n, k = len(multi.found.members), positions[i][1]
+        mixes = len(values[i]) if values is not None and i in values else n
         parts.append(f"{what} {label} ({n} members) in {k} grid slot{'s' if k != 1 else ''}"
-                     + (f" ({n}^{k} mixes)" if k != 1 else ""))
+                     + (f" ({mixes}^{k} mixes)" if k != 1 else ""))
     return (f"{'; '.join(parts)}: writing every mix Java accepts takes {form}, {total:,} recipes, "
             f"over the {EXPANSION_CAP} the expansion is capped at (#302: over-cap combinations stay "
             "residue, so the recipe book isn't flooded); nothing else refuses it, so it is not "
@@ -1462,11 +1499,14 @@ def _combinations(rest: list[int], multis: dict, positions: list, ingredients: l
     """
     import itertools
 
-    if not rest or not all(_expandable(multis[i], positions[i][1]) for i in rest):
+    if not rest:
+        return None
+    values = _values(rest, multis)
+    if values is None:
         return None
     total = 1
     for i in rest:
-        total *= len(multis[i].found.members) ** positions[i][1]
+        total *= len(values[i]) ** positions[i][1]
     if total > EXPANSION_CAP or (len(rest) == 1 and positions[rest[0]][1] == 1):
         return None
     variants: list[tuple[str, list]] = []
@@ -1481,55 +1521,59 @@ def _combinations(rest: list[int], multis: dict, positions: list, ingredients: l
         cells = [(r, c) for r, row in enumerate(rows) for c, ch in enumerate(row)
                  if ch in {symbols[i] for i in rest}]
         by_cell = {cell: next(i for i in rest if symbols[i] == rows[cell[0]][cell[1]]) for cell in cells}
-        fresh: dict[tuple[int, str], str] = {}
-        for choice in itertools.product(*(multis[by_cell[cell]].found.members for cell in cells)):
+        fresh: dict[tuple, str] = {}
+        for choice in itertools.product(*(values[by_cell[cell]] for cell in cells)):
             pick = dict(zip(cells, choice))
-            grid = tuple(tuple(pick.get((r, c), ch) for c, ch in enumerate(row)) for r, row in enumerate(rows))
+            grid = tuple(tuple(pick[(r, c)][0] if (r, c) in pick else ch
+                               for c, ch in enumerate(row)) for r, row in enumerate(rows))
             mirror = tuple(tuple(reversed(row)) for row in grid)
             if mirror in seen:
                 continue
             seen.add(grid)
-            # Each of the tags' symbols: kept when all its slots hold one member.
-            symbol_of: dict[tuple[int, str], str] = {}
+            # Each of the ingredients' symbols: kept when all its slots hold
+            # one value.
+            symbol_of: dict[tuple, str] = {}
             for i in rest:
-                # Members in the order their slots read (row by row), so the
+                # Values in the order their slots read (row by row), so the
                 # fresh symbols don't depend on string hashing (#309).
-                chosen = list(dict.fromkeys(pick[cell] for cell in cells if by_cell[cell] == i))
-                for member in chosen:
+                chosen = list(dict.fromkeys(pick[cell][0] for cell in cells if by_cell[cell] == i))
+                for value in chosen:
                     if len(chosen) == 1:
-                        symbol_of[(i, member)] = symbols[i]
+                        symbol_of[(i, value)] = symbols[i]
                     else:
-                        if (i, member) not in fresh:
+                        if (i, value) not in fresh:
                             got = next(free, None)
                             if got is None:
                                 return None
-                            fresh[(i, member)] = got
-                        symbol_of[(i, member)] = fresh[(i, member)]
-            new_rows = ["".join(symbol_of[(by_cell[(r, c)], pick[(r, c)])] if (r, c) in pick else ch
+                            fresh[(i, value)] = got
+                        symbol_of[(i, value)] = fresh[(i, value)]
+            new_rows = ["".join(symbol_of[(by_cell[(r, c)], pick[(r, c)][0])] if (r, c) in pick else ch
                                 for c, ch in enumerate(row)) for r, row in enumerate(rows)]
             key: dict = {}
             for i, (symbol, ingredient) in enumerate(zip(symbols, ingredients)):
                 if i not in rest:
                     key[symbol] = ingredient
                     continue
-                for member in dict.fromkeys(pick[cell] for cell in cells if by_cell[cell] == i):
-                    key[symbol_of[(i, member)]] = {"item": member}
-            suffix = "__" + "__".join(_vanilla_suffix(pick[cell]) for cell in cells)
+                for value in dict.fromkeys(pick[cell][0] for cell in cells if by_cell[cell] == i):
+                    spec = next(pick[cell][1] for cell in cells
+                                if by_cell[cell] == i and pick[cell][0] == value)
+                    key[symbol_of[(i, value)]] = spec
+            suffix = "__" + "__".join(pick[cell][2] for cell in cells)
             shaped[suffix] = (new_rows, key)
             one = list(ingredients)
             for i in rest:
-                one[i] = {"item": pick[next(cell for cell in cells if by_cell[cell] == i)]}
+                one[i] = next(pick[cell][1] for cell in cells if by_cell[cell] == i)
             variants.append((suffix, one))
         return variants, shaped
-    for choice in itertools.product(*(multis[i].found.members for i in rest)):
+    for choice in itertools.product(*(values[i] for i in rest)):
         one = list(ingredients)
-        for i, member in zip(rest, choice):
-            one[i] = {"item": member}
+        for i, value in zip(rest, choice):
+            one[i] = value[1]
         order = tuple(sorted(json.dumps(x, sort_keys=True) for x in one))
         if order in seen:
             continue
         seen.add(order)
-        variants.append(("__" + "__".join(_vanilla_suffix(m) for m in choice), one))
+        variants.append(("__" + "__".join(v[2] for v in choice), one))
     return variants, shaped
 
 
@@ -2021,10 +2065,14 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                     (recipe.get("pattern") if java_type == "minecraft:crafting_shaped" else None),
                     [symbol for symbol, _ in key_specs] if java_type == "minecraft:crafting_shaped" else None,
             )) is not None:
-                # Vanilla-only tags filling several slots: one recipe per
-                # combination the player can make (#302 pick 1).
+                # Multi-item ingredients filling slots: one recipe per
+                # combination the player can make (#302 pick 1, sub-reason 4).
                 variants, shaped_forms = combined
                 combos = rest
+                # A tag the combinations take as a tag needs its own members to
+                # carry it (#302 pick 2).
+                native.update(i for i in combos
+                              if not multis[i].listed and multis[i].own_taggable)
             else:
                 native = set()
                 over_cap = _over_cap(rest, multis, positions, furnace)
@@ -2039,12 +2087,18 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             if multis.get(bad_i) is not None and multis[bad_i].listed:
                 # How many recipes the per-combination form would take (#302
                 # sub-reason 4), when every refused ingredient is one that form
-                # can write.
+                # can write. One list in one slot takes the one-recipe-per-item
+                # form instead, so its count is the item count.
                 mixes = 1
-                for i in rest:
-                    mixes *= len(multis[i].found.members) ** positions[i][1]
-                if not all(_expandable(multis[i], positions[i][1]) for i in rest):
+                if len(rest) == 1 and positions[rest[0]][1] == 1:
                     mixes = None
+                else:
+                    values = _values(rest, multis)
+                    if values is None:
+                        mixes = None
+                    else:
+                        for i in rest:
+                            mixes *= len(values[i]) ** positions[i][1]
                 reason = _list_reason(multis[bad_i], positions[bad_i][1], len(rest), mixes)
             missing = _not_emitted(bad, tag_resolver, emitted)
             if missing:
