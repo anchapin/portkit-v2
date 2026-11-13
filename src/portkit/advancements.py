@@ -32,9 +32,10 @@ rest from what each file says (design PR for #340; ``docs/decisions.md``):
     converted recipe whose ``unlock`` could carry it.
 
 Anything else stays ``unowned``: a file Java's reader would reject or that this
-module can't read (not an object, criteria not an object, rewards of a shape or
-key Java doesn't define), a recipe advancement with other rewards too, or one
-whose recipes are a mix of the cases above. Nothing here names a mod.
+module can't read (not an object, criteria not an object, a criterion that is
+not an object with a trigger, rewards of a shape or key Java doesn't define), a
+recipe advancement with other rewards too, or one whose recipes are a mix of the
+cases above. Nothing here names a mod.
 """
 from __future__ import annotations
 
@@ -70,6 +71,41 @@ def _read(path: Path):
 
 def _norm(ident: str) -> str:
     return ident if ":" in ident else f"minecraft:{ident}"
+
+
+def _criteria_ok(criteria: dict) -> bool:
+    """Java's criteria shape: every criterion is an object naming a trigger
+    (minecraft.wiki, "Advancement definition": ``criteria`` is a map of
+    criterion name to a criterion, whose ``trigger`` names the trigger type).
+    A criterion Java's reader would reject makes the whole advancement fail to
+    load, so such a file is not explained here."""
+    for criterion in criteria.values():
+        if not isinstance(criterion, dict):
+            return False
+        trigger = criterion.get("trigger")
+        if not isinstance(trigger, str) or not trigger:
+            return False
+    return True
+
+
+def _rewards_ok(rewards: dict) -> bool:
+    """Java's ``AdvancementRewards`` shapes (minecraft.wiki, "Advancement
+    definition": ``experience`` a whole number, ``loot`` a list of loot table
+    ids, ``function`` a function id). A reward of another shape is one Java
+    doesn't read, so the file stays ``unowned``."""
+    if "experience" in rewards:
+        experience = rewards["experience"]
+        if not isinstance(experience, int) or isinstance(experience, bool):
+            return False
+    if "loot" in rewards:
+        loot = rewards["loot"]
+        if not isinstance(loot, list) or not all(isinstance(x, str) and x for x in loot):
+            return False
+    if "function" in rewards:
+        function = rewards["function"]
+        if not isinstance(function, str) or not function:
+            return False
+    return True
 
 
 def recipe_file(root: Path, recipe_id: str) -> str | None:
@@ -126,8 +162,12 @@ def classify(root: Path, files: list[str], residue: dict[str, str],
         adv = _read(root / rel)
         if not isinstance(adv, dict) or not isinstance(adv.get("criteria"), dict) or not adv["criteria"]:
             continue
+        if not _criteria_ok(adv["criteria"]):
+            continue
         rewards = adv.get("rewards", {})
         if not isinstance(rewards, dict) or set(rewards) - _REWARDS:
+            continue
+        if not _rewards_ok(rewards):
             continue
         recipes = rewards.get("recipes", [])
         if not isinstance(recipes, list) or not all(isinstance(r, str) and r for r in recipes):
