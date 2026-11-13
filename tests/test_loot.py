@@ -84,10 +84,84 @@ def test_a_variable_roll_count_is_refused(tmp_path, rolls):
     assert "rolls" in result.unhandled[0].reason
 
 
-def test_two_pools_are_refused(tmp_path):
-    table = {"pools": [{"rolls": 1, "entries": [ITEM]}, {"rolls": 1, "entries": [ITEM]}]}
+def _dropped_names(table):
+    """Every item every pool of a Bedrock table drops, in order."""
+    return [entry["name"] for pool in table["pools"] for entry in pool["entries"]]
+
+
+def test_several_plain_pools_convert_and_every_item_drops(tmp_path):
+    # A potted plant drops its pot and its plant (two Java pools).
+    table = {"pools": [
+        {"rolls": 1, "conditions": SURVIVES,
+         "entries": [{"type": "minecraft:item", "name": "examplemod:flower_pot"}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:daisy"}]},
+    ]}
+    result = loot.convert(build(tmp_path, {"potted_daisy": table}))
+    assert result.unhandled == []
+    written = result.files["loot_tables/blocks/potted_daisy.json"]
+    assert _dropped_names(written) == ["examplemod:flower_pot", "examplemod:daisy"]
+    # The pool's own condition is kept: the pot survives explosions.
+    pot = [entry for pool in written["pools"] for entry in pool["entries"]
+           if entry["name"] == "examplemod:flower_pot"][0]
+    assert pot["functions"] == [{"function": "explosion_decay"}]
+
+
+def test_a_plain_pool_keeps_its_own_count(tmp_path):
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:stick"}],
+         "functions": [{"function": "minecraft:set_count", "count": 3}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:twig"}]},
+    ]}
+    result = loot.convert(build(tmp_path, {"twig": table}))
+    assert result.unhandled == []
+    written = result.files["loot_tables/blocks/twig.json"]
+    assert _dropped_names(written) == ["examplemod:stick", "examplemod:twig"]
+    stick = [entry for pool in written["pools"] for entry in pool["entries"]
+             if entry["name"] == "examplemod:stick"][0]
+    assert stick["functions"] == [{"function": "set_count", "count": 3}]
+
+
+def test_a_multi_pool_table_with_one_conditional_pool_is_refused(tmp_path):
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:steel_block"}]},
+        {"rolls": 1, "conditions": [{"condition": "minecraft:match_tool",
+                                     "predicate": {"tag": "minecraft:pickaxes"}}],
+         "entries": [{"type": "minecraft:item", "name": "examplemod:ore"}]},
+    ]}
     result = loot.convert(build(tmp_path, {"x": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "2 pools" in reason and "match_tool" in reason
+
+
+def test_a_multi_pool_table_with_an_alternatives_pool_is_refused(tmp_path):
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:steel_block"}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:alternatives", "children": [
+            {"type": "minecraft:item", "name": "examplemod:ore"}]}]},
+    ]}
+    result = loot.convert(build(tmp_path, {"x": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "2 pools" in reason and "alternatives" in reason
+
+
+def test_a_multi_pool_table_with_a_bonus_roll_is_refused(tmp_path):
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:steel_block"}]},
+        {"rolls": 1, "bonus_rolls": 2, "entries": [{"type": "minecraft:item", "name": "examplemod:ore"}]},
+    ]}
+    result = loot.convert(build(tmp_path, {"x": table}))
+    assert result.files == {}
     assert "2 pools" in result.unhandled[0].reason
+
+
+def test_a_single_pool_table_is_still_one_pool(tmp_path):
+    result = loot.convert(build(tmp_path, {"steel_block": pool(ITEM, SURVIVES)}))
+    assert result.unhandled == []
+    table = result.files["loot_tables/blocks/steel_block.json"]
+    assert len(table["pools"]) == 1
+    assert _dropped_names(table) == ["examplemod:steel_block"]
 
 
 def _residue(source, kind, reason="r"):
