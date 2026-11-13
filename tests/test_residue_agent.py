@@ -145,7 +145,7 @@ def test_cli_convert_agent(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert "agent partial: resolved 1 of 2 residue group(s), declined 1:" in out
-    assert f"resolved: recipe:{TAG_RECIPE}" in out
+    assert f"resolved: recipe_unknown_membership:{TAG_RECIPE}" in out
     assert (tmp_path / "out" / "behavior_pack" / "recipes" / "steel_block.json").is_file()
 
 
@@ -222,16 +222,16 @@ def _empty_reply_outcomes(tmp_path, reply):
 def test_an_empty_final_reply_says_why_in_the_note(tmp_path):
     """#85: gemini-pro-latest ended both groups on an empty reply and the note was ""."""
     outcomes = _empty_reply_outcomes(tmp_path, Message("assistant", "", finish_reason="length"))
-    note = outcomes[f"recipe:{TAG_RECIPE}"].note
+    note = outcomes[f"recipe_unknown_membership:{TAG_RECIPE}"].note
     assert note == "model ended with an empty reply (finish_reason=length, 273 output tokens)"
-    assert outcomes[f"recipe:{TAG_RECIPE}"].status != "resolved"
+    assert outcomes[f"recipe_unknown_membership:{TAG_RECIPE}"].status != "resolved"
 
 
 def test_a_refusal_lands_in_the_note(tmp_path):
     outcomes = _empty_reply_outcomes(
         tmp_path, Message("assistant", "", finish_reason="stop", refusal="I can't help with that.")
     )
-    assert outcomes[f"recipe:{TAG_RECIPE}"].note == "model refused: I can't help with that."
+    assert outcomes[f"recipe_unknown_membership:{TAG_RECIPE}"].note == "model refused: I can't help with that."
 
 
 def test_run_status_is_about_the_agent_not_the_pack(tmp_path):

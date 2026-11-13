@@ -20,9 +20,9 @@ from portkit.pipeline import convert
 
 ROOT = Path(__file__).resolve().parents[1]
 HARD = ROOT / "fixtures" / "hard_residue_mod" / "input"
-BRONZE = "recipe:data/examplemod/recipes/bronze_block.json"
-STEEL = "recipe:data/examplemod/recipes/steel_block.json"
-TIN = "recipe:data/examplemod/recipes/tin_block.json"
+BRONZE = "recipe_unknown_membership:data/examplemod/recipes/bronze_block.json"
+STEEL = "recipe_unknown_membership:data/examplemod/recipes/steel_block.json"
+TIN = "recipe_unknown_membership:data/examplemod/recipes/tin_block.json"
 PER_CALL = Usage(input_tokens=1000, output_tokens=200)  # 1,200 tokens a completion
 
 

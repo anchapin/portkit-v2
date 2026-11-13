@@ -12,7 +12,7 @@ from portkit.agent.residue import ResidueAgent
 ROOT = Path(__file__).resolve().parents[1]
 RESIDUE = ROOT / "fixtures" / "residue_mod" / "input"
 TRANSCRIPT = ROOT / "fixtures" / "transcripts" / "residue_mod.jsonl"
-TAG = "recipe:data/examplemod/recipes/steel_block.json"
+TAG = "recipe_unknown_membership:data/examplemod/recipes/steel_block.json"
 
 RECIPE = {
     "format_version": "1.20.10",
