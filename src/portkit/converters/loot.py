@@ -6,8 +6,11 @@ flatter version of the same idea and do not have most of it.
 
 The shape that carries almost every modded decorative block is: one pool, one
 roll, one item entry, drops itself, survives explosions. That converts. A table
-that reaches for fortune, a random count or a condition Bedrock can't test is
-refused with the condition or function that defeated it named in the reason.
+with several pools converts too when every pool is that plain shape: Bedrock's
+table has pools of its own, one per Java pool, so every pool's item drops. A
+table that reaches for fortune, a random count or a condition Bedrock can't
+test is refused with the condition or function that defeated it named in the
+reason.
 Silk Touch, shears and tool tier are approximated with Bedrock's match_tool
 and each approximation is a report note (#299, see the tools section below).
 """
@@ -416,6 +419,126 @@ def _entry_drops(entry: dict, test, decay: bool, silk_world: bool, approx: list[
     return [] if test is None else [(test, entry, decay or own_decay)]
 
 
+# -- several plain pools (#299) ---------------------------------------------
+#
+# A Java table may have several pools: a potted plant drops its pot and its
+# plant, a leaf pile its leaves and what grows from them. Bedrock's table has
+# the same shape (a list of pools, each rolled on its own), so a table whose
+# every pool is a plain drop converts: one Bedrock pool per Java pool, so
+# every pool's item drops, as in Java. A pool that is not a plain drop (a
+# condition of its own, a function the converter can't keep, alternatives,
+# nested children, a roll count other than one) keeps the table refused: a
+# drop that isn't the one Java makes is worse than no drop at all.
+
+def _plain_function(function: dict, where: str) -> tuple[int | None, bool]:
+    """(count, explosion decay) for one function a plain drop may carry: the
+    two the converter already writes (a fixed ``set_count`` and
+    ``explosion_decay``). Anything else refuses the table."""
+    if not isinstance(function, dict):
+        raise _Refused(f"{where} has an unreadable function")
+    fname = function.get("function")
+    if fname in ("minecraft:set_count", "set_count"):
+        if function.get("conditions"):
+            raise _Refused(f"{where} has a set_count that applies only to some block states")
+        if function.get("add") is True:
+            raise _Refused(f"{where} adds to the drop count (set_count add) rather than setting it")
+        value = _constant_count(function)
+        if value is None:
+            raise _Refused("the drop count is a range rather than a fixed number")
+        return value, False
+    if fname in ("minecraft:explosion_decay", "explosion_decay"):
+        return None, True
+    raise _Refused(f"{where} has a function the drop can't keep ({_reason_for_function(function)})")
+
+
+def _plain_drop(pool: dict, index: int, total: int) -> tuple[str, int | None, bool] | None:
+    """(item name, count, explosion decay) for a pool that is a plain drop: one
+    roll of one item entry, no condition but ``survives_explosion``, and only
+    the functions the converter already writes. None for a pool with no entry
+    at all: it drops nothing, as in Java."""
+    where = f"pool {index} of {total}"
+    if not isinstance(pool, dict):
+        raise _Refused(f"{where} is unreadable")
+    rolls = pool.get("rolls", 1)
+    if not isinstance(rolls, (int, float)) or float(rolls) != 1:
+        raise _Refused(f"{where} rolls a variable number of times")
+    if pool.get("bonus_rolls"):
+        raise _Refused(f"{where} has bonus rolls")
+    decay = False
+    for condition in pool.get("conditions") or []:
+        if isinstance(condition, dict) and condition.get("condition") in (_EXPLOSION, "survives_explosion"):
+            decay = True
+            continue
+        name = condition.get("condition") if isinstance(condition, dict) else condition
+        raise _Refused(f"{where} has a condition ({name}); only a plain drop converts")
+    count = None
+    for function in pool.get("functions") or []:
+        value, decayed = _plain_function(function, where)
+        count = value if value is not None else count
+        decay = decay or decayed
+    entries = pool.get("entries") or []
+    if not entries:
+        return None
+    if len(entries) != 1:
+        raise _Refused(f"{where} has {len(entries)} entries; only a single drop is unambiguous")
+    entry = entries[0]
+    if not isinstance(entry, dict):
+        raise _Refused(f"{where} has an unreadable entry")
+    entry_type = entry.get("type")
+    if entry_type not in _SUPPORTED_ENTRY_TYPES:
+        raise _Refused(f"{where} has an entry type {entry_type!r}, which is not a plain item drop")
+    if entry.get("children"):
+        raise _Refused(f"{where} has an entry with nested children; only a plain drop converts")
+    for condition in entry.get("conditions") or []:
+        if isinstance(condition, dict) and condition.get("condition") in (_EXPLOSION, "survives_explosion"):
+            decay = True
+            continue
+        name = condition.get("condition") if isinstance(condition, dict) else condition
+        raise _Refused(f"{where} has an entry with a condition ({name}); only a plain drop converts")
+    entry_count = None
+    for function in entry.get("functions") or []:
+        value, decayed = _plain_function(function, where)
+        entry_count = value if value is not None else entry_count
+        decay = decay or decayed
+    # Java applies the entry's functions before the pool's, so the pool's
+    # set_count is the one that counts.
+    count = count if count is not None else entry_count
+    name = entry.get("name")
+    if not isinstance(name, str) or ":" not in name:
+        raise _Refused(f"{where} has an entry that names {name!r}, which is not a namespaced item")
+    return name, count, decay
+
+
+def _plain_table(pools: list) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
+    """The Bedrock table for a table of several plain pools: one Bedrock pool
+    per Java pool, so every pool's item drops, as in Java. (None, why) when a
+    pool is not a plain drop."""
+    try:
+        drops = [_plain_drop(pool, i + 1, len(pools)) for i, pool in enumerate(pools)]
+    except _Refused as exc:
+        return None, f"the table has {len(pools)} pools; {exc}"
+    entries = []
+    for drop in drops:
+        if drop is None:
+            continue
+        name, count, decay = drop
+        if name in AIR:
+            # Java's drop of air is a drop of nothing (#299 pick 2).
+            continue
+        entry: dict = {"type": "item", "name": name}
+        functions = []
+        if count is not None:
+            functions.append({"function": "set_count", "count": count})
+        if decay:
+            functions.append({"function": "explosion_decay"})
+        if functions:
+            entry["functions"] = functions
+        entries.append(entry)
+    if not entries:
+        return [], None
+    return [(None, {"pools": [{"rolls": 1, "entries": [entry]} for entry in entries]})], None
+
+
 def _match_tool(tags: frozenset) -> dict:
     return {"condition": "match_tool", "minecraft:match_tool_filter_any": sorted(tags)}
 
@@ -423,6 +546,21 @@ def _match_tool(tags: frozenset) -> dict:
 def _java_silk_drop(data: dict, block_id: str) -> str | None:
     """None when Java drops the block itself, once, under Silk Touch (a tool
     no other test names); otherwise what it drops there, in words."""
+    pools = data.get("pools") or []
+    if len(pools) > 1:
+        # Several plain pools: Java drops the same items under Silk Touch
+        # (none of them tests the tool).
+        try:
+            drops = [_plain_drop(pool, i + 1, len(pools)) for i, pool in enumerate(pools)]
+        except _Refused:
+            drops = None
+        if drops is not None:
+            names = [name for name, _, _ in drops if name is not None and name not in AIR]
+            if not names:
+                return "nothing"
+            if all(name == block_id for name in names):
+                return None
+            return " and ".join(names)
     try:
         drop = _drop(data, True, [])
     except _Refused:
@@ -510,6 +648,10 @@ def convert_table(data: dict, block: str | None = None,
 
     Tool tests (Silk Touch, shears, tool tags) are translated as the comment
     above says; each approximation is appended to ``approx``.
+
+    A table with several pools converts when every pool is a plain drop (#299):
+    one Bedrock pool per Java pool, so every pool's item drops, as in Java. A
+    pool that is not a plain drop keeps the table refused, naming what isn't.
     """
     approx = [] if approx is None else approx
     pools = data.get("pools")
@@ -522,7 +664,9 @@ def convert_table(data: dict, block: str | None = None,
         except _Refused:
             live += 1
     if live > 1:
-        return None, f"table has {len(pools)} pools; Bedrock block drops are a single pool"
+        # Several pools: a plain one per pool converts (#299), anything else
+        # keeps the table refused.
+        return _plain_table(pools)
     try:
         drop = _drop(data, False, approx)
     except _Refused as exc:
@@ -575,6 +719,8 @@ def convert_table(data: dict, block: str | None = None,
 
 def _drops_itself(table: dict, block: str) -> bool:
     """The table is Bedrock's default for a block: one of itself (explosion decay aside)."""
+    if len(table.get("pools") or []) != 1:
+        return False
     entries = table["pools"][0]["entries"]
     if len(entries) != 1:
         return False
@@ -598,21 +744,24 @@ def _bedrock_names(cases: list[tuple[str | None, dict]]) -> tuple[list | None, s
 
     out = []
     for condition, table in cases:
-        entries = []
-        for entry in table["pools"][0]["entries"]:
-            entry = dict(entry)
-            got = bedrock_item(entry["name"])
-            if isinstance(got, str):
-                return None, f"the drop can't be written for Bedrock: {got}"
-            ident, data = got
-            entry["name"] = ident
-            if data is not None:
-                functions = [f for f in entry.get("functions") or [] if f.get("function") != "explosion_decay"]
-                functions.append({"function": "set_data", "data": data})
-                functions += [f for f in entry.get("functions") or [] if f.get("function") == "explosion_decay"]
-                entry["functions"] = functions
-            entries.append(entry)
-        out.append((condition, {"pools": [{"rolls": 1, "entries": entries}]}))
+        pools = []
+        for pool in table["pools"]:
+            entries = []
+            for entry in pool["entries"]:
+                entry = dict(entry)
+                got = bedrock_item(entry["name"])
+                if isinstance(got, str):
+                    return None, f"the drop can't be written for Bedrock: {got}"
+                ident, data = got
+                entry["name"] = ident
+                if data is not None:
+                    functions = [f for f in entry.get("functions") or [] if f.get("function") != "explosion_decay"]
+                    functions.append({"function": "set_data", "data": data})
+                    functions += [f for f in entry.get("functions") or [] if f.get("function") == "explosion_decay"]
+                    entry["functions"] = functions
+                entries.append(entry)
+            pools.append({"rolls": 1, "entries": entries})
+        out.append((condition, {"pools": pools}))
     return out, None
 
 
@@ -643,11 +792,12 @@ def _definitions(files: dict) -> tuple[dict[str, str], set[str]]:
 def _wire_refusal(cases: list[tuple[str | None, dict]], obtainable: set[str]) -> str | None:
     """Why a table can't be put on its block, or None."""
     for _, table in cases:
-        for entry in table["pools"][0]["entries"]:
-            name = entry["name"]
-            if not name.startswith("minecraft:") and name not in obtainable:
-                return (f"the block drops {name}, which this pack doesn't define (see that identifier's own "
-                        f"residue entry), so the table can't be wired onto the block")
+        for pool in table["pools"]:
+            for entry in pool["entries"]:
+                name = entry["name"]
+                if not name.startswith("minecraft:") and name not in obtainable:
+                    return (f"the block drops {name}, which this pack doesn't define (see that identifier's own "
+                            f"residue entry), so the table can't be wired onto the block")
     return None
 
 
@@ -723,16 +873,19 @@ def _gate(cases: list[tuple[str | None, dict]], tools: list[str],
     entry per tool: a vanilla tool is one type, so at most one holds)."""
     out = []
     for condition, table in cases:
-        entries = []
-        for entry in table["pools"][0]["entries"]:
-            for tool in tools:
-                gated = json.loads(json.dumps(entry))
-                gated["conditions"] = list(gated.get("conditions") or []) + [{
-                    "condition": "match_tool",
-                    "minecraft:match_tool_filter_all": ["minecraft:is_tool", tool],
-                    "minecraft:match_tool_filter_any": list(tiers)}]
-                entries.append(gated)
-        out.append((condition, {"pools": [{"rolls": 1, "entries": entries}]}))
+        pools = []
+        for pool in table["pools"]:
+            entries = []
+            for entry in pool["entries"]:
+                for tool in tools:
+                    gated = json.loads(json.dumps(entry))
+                    gated["conditions"] = list(gated.get("conditions") or []) + [{
+                        "condition": "match_tool",
+                        "minecraft:match_tool_filter_all": ["minecraft:is_tool", tool],
+                        "minecraft:match_tool_filter_any": list(tiers)}]
+                    entries.append(gated)
+            pools.append({"rolls": 1, "entries": entries})
+        out.append((condition, {"pools": pools}))
     return out
 
 
