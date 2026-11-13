@@ -695,18 +695,22 @@ _MINEABLE = {
 
 def _tier_index(mod: SourceMod) -> dict[str, tuple[str, list[str], tuple[str, ...]]]:
     """block id -> (Java tier tag, Bedrock tool tags of its mineable tags, Bedrock
-    tiers that drop it), from the jar's own block tags (#293's reader)."""
-    from ..datatags import jar_members
+    tiers that drop it), from the jar's own block tags (#293's reader) and
+    vanilla's own nesting of them (#298: ``minecraft:mineable/axe`` holds
+    ``#minecraft:logs``)."""
+    from ..datatags import block_tag_members
+    from ..data import vanilla_block_tags
 
-    dirs = ("blocks", "block")
     loader = getattr(mod, "loader", None)
+    version = getattr(mod, "minecraft", None) or getattr(mod, "loader_minecraft", None)
+    vanilla = vanilla_block_tags.vanilla_tags(version)
     tools: dict[str, list[str]] = {}
     for java, bedrock in _MINEABLE.items():
-        for member in jar_members(mod.root, java, dirs, loader) or []:
+        for member in block_tag_members(mod.root, java, loader, vanilla) or []:
             tools.setdefault(member, []).append(bedrock)
     out: dict[str, tuple[str, list[str], tuple[str, ...]]] = {}
     for java, tiers in _TIERS.items():
-        for member in jar_members(mod.root, java, dirs, loader) or []:
+        for member in block_tag_members(mod.root, java, loader, vanilla) or []:
             have = out.get(member)
             if have is None or len(tiers) < len(have[2]):
                 out[member] = (java, sorted(tools.get(member, [])), tiers)

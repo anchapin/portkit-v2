@@ -702,6 +702,7 @@ def _corpus_cases(args):
 
     from .data import models as model_data
     from .data import java_items, java_sounds, vanilla_items
+    from .data import vanilla_block_tags
 
     if args.fetch:
         try:
@@ -711,6 +712,8 @@ def _corpus_cases(args):
             java_items.fetch()
             for tag_set in tag_data.SETS:
                 tag_data.fetch(tag_set)
+            for block_tag_set in vanilla_block_tags.SETS:
+                vanilla_block_tags.fetch(block_tag_set)
             for sound_set in java_sounds.SETS:
                 java_sounds.fetch(sound_set)
         except data.ReferenceDataError as exc:
@@ -769,6 +772,16 @@ def _corpus_cases(args):
         print(f"warning: {message}", file=sys.stderr)
         if os.environ.get("GITHUB_ACTIONS") == "true":
             print(f"::warning title=java sounds::{message}")
+    missing_block_tags = [s.id for s in vanilla_block_tags.SETS if not vanilla_block_tags.cached(s)]
+    if missing_block_tags and not os.environ.get("PORTKIT_VANILLA_BLOCK_TAGS"):
+        # Vanilla's own block tag nesting (#298): without it a block that only
+        # sits in a vanilla tag (e.g. #minecraft:logs) gets no tool tag.
+        message = (f"vanilla's block tags aren't cached ({', '.join(missing_block_tags)}), so a "
+                   f"block that only sits in a vanilla tag gets no tool/tier tag and the numbers "
+                   f"may differ from the baseline; run `{data.FETCH_COMMAND}` or add --fetch")
+        print(f"warning: {message}", file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::warning title=vanilla block tags::{message}")
     return manifest.parent, cases
 
 
@@ -1122,6 +1135,7 @@ def _reference_sets(args):
 def cmd_reference(args) -> int:
     """``portkit reference fetch|list``: reference data fetched on demand: Mojang's
     vanilla sound list (#124), the loaders' and vanilla's item tags (#160),
+    vanilla's own block tags per game version (#298),
     the vanilla block model templates stairs, slabs and walls are built from,
     vanilla's campfire recipes the Farmer's Delight stove cooks (#177),
     vanilla's Java sounds.json per game version (event references, #356),
@@ -1152,6 +1166,7 @@ def cmd_reference(args) -> int:
     from .data import java_sounds
     from .data import java_items, vanilla_items
     from .data import vanilla_textures
+    from .data import vanilla_block_tags
 
     # Vanilla Java sounds.json (#356): every pinned set, or the one the mod's
     # declared game version needs.
@@ -1162,6 +1177,16 @@ def cmd_reference(args) -> int:
         java_sound_sets = [chosen_sounds] if chosen_sounds else []
 
     from .data import mappings as mapping_data
+
+    # Vanilla's own block tags per game version (#298): what vanilla's
+    # mineable/* and needs_* tags nest, so a mod block only in a vanilla tag
+    # (e.g. #minecraft:logs) gets its tool tag. Every pinned set, or the one
+    # this mod's declared game version needs.
+    if meta is None:
+        block_tag_sets = list(vanilla_block_tags.SETS)
+    else:
+        chosen_block_tags = vanilla_block_tags.select(meta.minecraft or meta.loader_minecraft)
+        block_tag_sets = [chosen_block_tags] if chosen_block_tags else []
 
     # Name mappings (#235): every pinned set, or the one this mod's loader and
     # game version need (none for a Mojang-named jar).
@@ -1217,6 +1242,9 @@ def cmd_reference(args) -> int:
         for tag_set in sets:
             state = "cached" if tags.cached(tag_set, cache) else "missing"
             print(f"{'tags-' + tag_set.id:28} {tag_set.label} {state}")
+        for block_tag_set in block_tag_sets:
+            state = "cached" if vanilla_block_tags.cached(block_tag_set, cache) else "missing"
+            print(f"{block_tag_set.id:28} {block_tag_set.label} {state}")
         return 0
     failed = forge_failed
     try:
@@ -1311,6 +1339,14 @@ def cmd_reference(args) -> int:
             failed += 1
             continue
         print(f"{'fetched' if downloaded else 'cached ':7} tags-{tag_set.id} -> {path}")
+    for block_tag_set in block_tag_sets:
+        try:
+            path, downloaded = vanilla_block_tags.fetch(block_tag_set, cache)
+        except data.ReferenceDataError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} {block_tag_set.id} -> {path}")
     return 1 if failed else 0
 
 

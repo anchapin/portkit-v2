@@ -36,9 +36,17 @@ and gives the mod's members of a Bedrock vanilla item tag that tag
 
 Memberships are read from the jar's own tag files (nested tags expanded through
 the jar's files, Forge/NeoForge ``remove`` applied as
-:func:`portkit.converters.tags.removals` says). Vanilla's and the loader's own
-shares aren't needed: the question is only which of *this* jar's entries are in
-the tag. Nothing here names a mod.
+:func:`portkit.converters.tags.removals` says), plus vanilla's own nesting of
+the tool and tier tags (#298): vanilla's ``minecraft:mineable/axe`` holds
+``#minecraft:logs``, ``#minecraft:planks`` and the other wooden things, so a
+mod block that only sits in ``#minecraft:logs`` (the usual way to make a log
+axe-mineable) is axe-mineable in Java, and the jar's own files never spell that
+nesting out. Vanilla's block tag files are fetched on demand
+(:mod:`portkit.data.vanilla_block_tags`) and cached like the other reference
+data; without them the membership is the jar's own share only, as before, and
+the conversion says so. The loader's own shares are still not needed: the
+question is only which of *this* jar's entries are in the tag. Nothing here
+names a mod.
 """
 from __future__ import annotations
 
@@ -47,6 +55,7 @@ import re
 from pathlib import Path
 
 from .converters.tags import entry_ref, removals
+from .data import vanilla_block_tags
 from .model import Unhandled
 
 UNSHIPPED_REGISTRY = "tag_unshipped_registry"
@@ -150,6 +159,92 @@ def jar_members(root: Path, tag: str, dirs: tuple[str, ...], loader: str | None,
     return members
 
 
+def block_tag_members(root: Path, tag: str, loader: str | None,
+                      vanilla: dict[str, list] | None = None,
+                      read: list[str] | None = None,
+                      _seen: frozenset = frozenset()) -> list[str] | None:
+    """The ids in the block ``tag``: the jar's own share (nested tags expanded
+    through the jar's files) and, when ``vanilla`` holds vanilla's own block
+    tag files, vanilla's nesting of the tag (``minecraft:mineable/axe`` holds
+    ``#minecraft:logs``, so the jar's own additions to that tag count too).
+    Forge/NeoForge ``remove`` is applied as :func:`portkit.converters.tags.removals`
+    says, to the merged membership.
+
+    None when the jar's file removes entries and the jar declares no loader:
+    then what leaves the tag can't be said. ``read`` collects the jar's tag
+    files read, root-relative.
+    """
+    root = Path(root)
+    path = _tag_path(root, tag, _BLOCK_DIRS)
+    data = _read(path) if path is not None else None
+    if not isinstance(data, dict):
+        data = None
+    else:
+        if read is not None:
+            read.append(path.relative_to(root).as_posix())
+    try:
+        removed = removals(data, loader) if data is not None else []
+    except ValueError:
+        return None
+    # A file with "replace": true is the whole tag: vanilla's own share of it
+    # is gone (portkit.converters.tags.TagResolver reads it the same way).
+    replace = bool(data) and data.get("replace") is True
+    entries = list((data or {}).get("values") or [])
+    if vanilla is not None and not replace:
+        entries += list(vanilla.get(tag, []))
+    seen = _seen | {tag}
+    members: list[str] = []
+    for entry in entries:
+        ref = entry_ref(entry)
+        if ref is None:
+            continue
+        if ref.startswith("#"):
+            inner = ref[1:]
+            if inner in seen:
+                continue
+            nested = block_tag_members(root, inner, loader, vanilla, read, seen)
+            if nested is None:
+                return None
+            members.extend(m for m in nested if m not in members)
+        elif ref not in members:
+            members.append(ref)
+    for entry in removed:
+        ref = entry_ref(entry)
+        if ref is None:
+            continue
+        if ref.startswith("#"):
+            gone = block_tag_members(root, ref[1:], loader, vanilla, read, seen) or []
+        else:
+            gone = [ref]
+        members = [m for m in members if m not in gone]
+    return members
+
+
+# The loader declaration files a jar ships (portkit.meta reads them).
+_METADATA_FILES = ("fabric.mod.json", "quilt.mod.json", "META-INF/neoforge.mods.toml",
+                   "META-INF/mods.toml", "mcmod.info")
+
+
+def declared_version(root: Path) -> str | None:
+    """The game version the jar's own metadata declares, or None when it says
+    none: which vanilla block tag files would say what vanilla's tags nest."""
+    from . import meta
+
+    blobs: dict[str, bytes] = {}
+    for name in _METADATA_FILES:
+        path = Path(root) / name
+        if not path.is_file():
+            continue
+        try:
+            blobs[name] = path.read_bytes()
+        except OSError:
+            continue
+    if not blobs:
+        return None
+    parsed = meta.parse(blobs, "")
+    return parsed.minecraft or parsed.loader_minecraft
+
+
 def jar_namespaces(root: Path) -> set[str]:
     """The namespaces the jar ships under assets/ and data/, shared ones excluded."""
     found: set[str] = set()
@@ -173,19 +268,41 @@ def _block_paths(files: dict) -> dict[str, str]:
     return found
 
 
-def tool_tags(root: Path, files: dict, loader: str | None) -> tuple[set[str], list[str]]:
+def _block_tag_files(root: Path) -> list[str]:
+    """The jar's own block tag files, root-relative (a jar with none can't be
+    in a vanilla tag, so vanilla's nesting says nothing about it)."""
+    data = Path(root) / "data"
+    if not data.is_dir():
+        return []
+    found: list[str] = []
+    for folder in _BLOCK_DIRS:
+        for path in sorted((data).rglob(f"tags/{folder}/*.json")):
+            found.append(path.relative_to(root).as_posix())
+    return found
+
+
+def tool_tags(root: Path, files: dict, loader: str | None,
+              minecraft: str | None = None) -> tuple[set[str], list[str]]:
     """Give the pack's blocks the Bedrock tool and tier tags their Java block
-    tags say. Edits ``files`` in place; returns (tag files claimed, notes)."""
+    tags say. Edits ``files`` in place; returns (tag files claimed, notes).
+
+    The membership is the jar's own share of each tag plus vanilla's own
+    nesting of it (#298), read from the fetched vanilla block tag files when
+    they are cached; ``minecraft`` is the game version whose vanilla tag files
+    that is, or None to read it from the jar's own metadata.
+    """
     root = Path(root)
     blocks = _block_paths(files)
     claimed: set[str] = set()
     notes: list[str] = []
     if not blocks:
         return claimed, notes
+    version = minecraft or declared_version(root)
+    vanilla = vanilla_block_tags.vanilla_tags(version)
     per_block: dict[str, list[tuple[str, str]]] = {}
     for java_tag, bedrock_tag in TOOL_TAGS.items():
         read: list[str] = []
-        members = jar_members(root, java_tag, _BLOCK_DIRS, loader, read)
+        members = block_tag_members(root, java_tag, loader, vanilla, read)
         if not members:
             continue
         hit = [m for m in members if m in blocks]
@@ -194,6 +311,10 @@ def tool_tags(root: Path, files: dict, loader: str | None) -> tuple[set[str], li
         for member in hit:
             per_block.setdefault(member, []).append((java_tag, bedrock_tag))
         claimed.update(read)
+    if vanilla is None and _block_tag_files(root):
+        notes.append("vanilla's own block tag nesting isn't cached, so a block that only sits in a "
+                     "vanilla tag (e.g. #minecraft:logs) gets no tool/tier tag; run "
+                     "`portkit reference fetch`")
     skipped: list[str] = []
     tagged = 0
     for ident, pairs in sorted(per_block.items()):
