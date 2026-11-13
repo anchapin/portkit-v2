@@ -31,6 +31,12 @@ Two Java block shapes whose two halves are one block to the player:
   override (:data:`TWO_TALL_BEHAVIOUR`), or when it isn't read (DEFAULT,
   labelled). Survival (a flower's need for dirt) is not carried.
 
+  A two-tall block that draws ``half`` and ``facing`` (a wall-like one: the
+  two halves of one block, turned by the facing) converts the same way, with
+  the facing on Bedrock's ``minecraft:placement_direction`` trait
+  (``minecraft:cardinal_direction``) as a door's is. The halves' models are
+  turned by the blockstate's own turn, as the door's are.
+
 Both are written on ``minecraft:multi_block`` (``direction`` up, 2 parts;
 learn.microsoft.com Block Traits: multi-block, "requires Bedrock Edition
 1.26.10 or higher. For vertical directions if the block format_version is
@@ -186,6 +192,32 @@ def two_tall_variants(blockstate: dict) -> tuple[dict | None, str]:
         if y:
             return None, f"two-tall block: variant {key!r} turns by y={y}"
         out[key.split("=")[1]] = model
+    return out, ""
+
+
+def two_tall_facing_variants(blockstate: dict) -> tuple[dict | None, str]:
+    """{(half, facing): (model, y, uvlock)} for a blockstate drawing ``half``
+    and ``facing`` (a wall-like two-tall block: the two halves of one block,
+    turned by the facing). (None, "") when it isn't shaped like that, (None,
+    why) when it is but can't be read."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict) or not variants:
+        return None, ""
+    out: dict = {}
+    for key, entry in variants.items():
+        states = _parse(key)
+        if states is None or set(states) != {"half", "facing"}:
+            return None, ""
+        half, facing = states["half"], states["facing"]
+        if half not in _HALVES or facing not in _CARDINALS:
+            return None, ""
+        turned, why = _entry(entry, key)
+        if turned is None:
+            return None, f"two-tall block: {why}"
+        out[(half, facing)] = turned
+    wanted = {(h, f) for h in _HALVES for f in _CARDINALS}
+    if set(out) != wanted:
+        return None, ""
     return out, ""
 
 
@@ -660,6 +692,92 @@ def convert_two_tall(mod: SourceMod, result: ConversionResult, rel: str, name: s
     return True
 
 
+def convert_two_tall_facing(mod: SourceMod, result: ConversionResult, rel: str, name: str,
+                            halves: dict) -> bool:
+    """Write one two-tall block with a facing (a wall-like two-tall block);
+    False (with residue) when it can't.
+
+    The two halves are one block on the multi_block trait, as a plain
+    two-tall block is; the facing turns the halves' models, and Bedrock's
+    placement_direction trait sets the cardinal direction the placement
+    gives (as a door's does)."""
+    from . import blocks as B
+
+    ident_by_half: dict[str, tuple[str, dict]] = {}
+    for half in _HALVES:
+        flats: dict[str, dict] = {}
+        parts: list[tuple[str, list]] = []
+        for facing in _CARDINALS:
+            model_ref, y, uvlock = halves[(half, facing)]
+            if model_ref not in flats:
+                flat, why = B._model_elements(mod, result, model_ref)
+                if flat is None:
+                    result.unhandled.append(Unhandled(rel, "block", f"two-tall {half}: {why}"))
+                    return False
+                flats[model_ref] = flat
+            elements, why = B._turn_all(flats[model_ref]["elements"], 0, y, uvlock)
+            if elements is None:
+                result.unhandled.append(Unhandled(rel, "block", f"two-tall {half} {facing}: {why}"))
+                return False
+            parts.append((facing, elements))
+        textures, why = B._merge_textures(list(flats.values()))
+        if textures is None:
+            result.unhandled.append(Unhandled(rel, "block", f"two-tall {half}: {why}"))
+            return False
+        identifier, instances, geo, why = B._shape_geometry(mod, f"{name}_{half}", parts, textures)
+        if identifier is None:
+            result.unhandled.append(Unhandled(rel, "block", f"two-tall {half}: {why}"))
+            return False
+        # One geometry per facing in the one file, each permutation naming
+        # its own (as the door's and the stairs' do).
+        (template,) = geo["minecraft:geometry"]
+        geometries = []
+        for bone in template["bones"]:
+            one = json.loads(json.dumps(template))
+            one["description"]["identifier"] = f"{identifier}.{bone['name']}"
+            one["bones"] = [{**bone, "name": "root"}]
+            geometries.append(one)
+        result.files[f"models/blocks/{name}_{half}.geo.json"] = {**geo, "minecraft:geometry": geometries}
+        ident_by_half[half] = (identifier, instances)
+    lower_id, lower_inst = ident_by_half["lower"]
+    upper_id, upper_inst = ident_by_half["upper"]
+    ns = mod.namespace
+    result.files[f"blocks/{name}.json"] = {
+        "format_version": MULTI_FORMAT,
+        "minecraft:block": {
+            "description": {
+                "identifier": f"{ns}:{name}",
+                "menu_category": {"category": B._MENU_CATEGORY},
+                "traits": {
+                    "minecraft:multi_block": {"enabled_states": ["minecraft:multi_block_part"],
+                                              "direction": "up", "parts": 2},
+                    "minecraft:placement_direction": {"enabled_states": ["minecraft:cardinal_direction"]},
+                },
+            },
+            "components": {
+                "minecraft:movable": {"movement_type": "popped"},
+                "minecraft:geometry": f"{lower_id}.south",
+                "minecraft:material_instances": lower_inst,
+                # Java's tall plants have no collision (DoublePlantBlock via
+                # BushBlock's noCollission Properties is the usual build; read
+                # per block it is not, so the plant shape is the DEFAULT).
+                "minecraft:collision_box": False,
+            },
+            "permutations": [
+                {"condition": f"q.block_state('minecraft:multi_block_part') == {_part(half)} && "
+                              f"q.block_state('minecraft:cardinal_direction') == '{facing}'",
+                 "components": {"minecraft:geometry": f"{ident_by_half[half][0]}.{facing}",
+                                "minecraft:material_instances": ident_by_half[half][1]}}
+                for half in _HALVES for facing in _CARDINALS
+            ],
+        },
+    }
+    # Java's half as Bedrock's part, for the loot converter (#299): the lower
+    # half's table is the one that drops (as for a plain two-tall block).
+    result.paired_halves[f"{ns}:{name}"] = "half"
+    return True
+
+
 def door_table(mod: SourceMod, result: ConversionResult, records: list[dict]) -> None:
     """The door runtime's data table and the runtime, when a scripted door converted."""
     from .station_kit import js_module, runtime_source
@@ -701,7 +819,10 @@ def notes(records: list[dict]) -> list[str]:
                 "the need for a sturdy block below, waterlogging.")
         else:
             how = "read from its code" if r["read"] else f"DEFAULT ({r['why']})"
+            turned = (", turned by the facing Bedrock's placement direction trait sets"
+                      if r.get("facing") else "")
             out.append(
                 f"{r['name']}: two-tall block on Bedrock's multi_block trait (both halves placed and broken "
-                f"together), {how}. Not carried: what it may stand on, bone meal, collision (none, the DEFAULT for plants).")
+                f"together){turned}, {how}. Not carried: what it may stand on, bone meal, collision (none, the "
+                "DEFAULT for plants).")
     return out

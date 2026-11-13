@@ -1676,6 +1676,13 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     dir_readings, dir_why = _read_directional_code(mod, stations or {}, loaded, shared, coded=readings,
                                                    coded_bool=bool_readings)
     paired_specs, paired_readings, paired_why = _read_paired(mod, stations or {}, loaded, shared)
+    # The blocks an adapter stakes (#296): the adapter's own claim wins over
+    # every generic reader, and the block stays residue (the adapter refuses
+    # it, or converts it itself). The station's own blocks are the stations
+    # mapping, which every reader already skips.
+    from ..adapters import block_claims
+    refused = {n: why for n, why in block_claims(mod, loaded).items()
+               if n not in (stations or {})}
     paired_records: list[dict] = []
     directional: list[dict] = []
     directional_bool: list[dict] = []
@@ -1704,6 +1711,12 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             continue
         if name in unregistered:
             result.unhandled.append(Unhandled(rel, UNREGISTERED_BLOCKSTATE, _unregistered_reason(unregistered[name])))
+            continue
+        if name in refused:
+            # An adapter stakes this block (#296): it converts it itself or
+            # refuses it, so no generic reader may convert it behind the
+            # adapter's back. The block stays residue, as it was.
+            result.unhandled.append(Unhandled(rel, "block", refused[name]))
             continue
         vanilla_alias = (_vanilla_alias_reason(mod, name, aliased[name], shared)
                          if name in aliased and name not in (stations or {}) else None)
@@ -4617,8 +4630,16 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
     which the jar's wooden tag doesn't list: the wooden DEFAULT needs the tag."""
     specs: dict[str, tuple] = {}
     why: dict[str, str] = {}
+    # An adapter that stakes blocks in this namespace but claims none for this
+    # jar declines it (#296): the namespace's paired blocks (the shapes such
+    # a runtime makes work) are its business, so the generic paired readers
+    # leave them alone.
+    from ..adapters import declines_blocks
+    declined = declines_blocks(mod)
     for stem, blockstate in loaded.items():
         if stem in stations:
+            continue
+        if declined:
             continue
         variants, reason = doors.door_variants(blockstate)
         if variants is not None:
@@ -4637,6 +4658,15 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
         halves, reason = doors.two_tall_variants(blockstate)
         if halves is not None:
             specs[stem] = ("two_tall", halves)
+            continue
+        if reason:
+            why[stem] = reason
+            continue
+        # A two-tall block with a facing (a wall-like one): the two halves of
+        # one block, turned by the facing (#296).
+        turned, reason = doors.two_tall_facing_variants(blockstate)
+        if turned is not None:
+            specs[stem] = ("two_tall_facing", turned)
             continue
         if reason:
             why[stem] = reason
@@ -4666,10 +4696,11 @@ def _read_paired(mod: SourceMod, stations: dict, loaded: dict,
     # readers run it (#280: a run on one kind's names alone misses names a
     # library's material set builds by concatenation).
     run = (shared or _SharedRun(mod, loaded))()
-    for kind in ("door", "trapdoor", "two_tall", "plate", "gate"):
+    for kind in ("door", "trapdoor", "two_tall", "two_tall_facing", "plate", "gate"):
         names = sorted(n for n, s in specs.items() if s[0] == kind)
         if names:
-            readings.update(doors.read_code(classes, names, kind, run=run))
+            readings.update(doors.read_code(classes, names, "two_tall" if kind == "two_tall_facing" else kind,
+                                            run=run))
     twins = {n: s[1]["prop"] for n, s in specs.items() if s[0] == "twin"}
     if twins:
         for stem, r in twin_blocks.read(classes, twins, run).items():
@@ -4785,6 +4816,12 @@ def _convert_paired(mod: SourceMod, result: ConversionResult, rel: str, name: st
         return {"kind": "door", "name": name, "door": door, "scripted": True,
                 "read": reading.verdict == "vanilla" and reading.door is not None,
                 "from": f"{reading.cls} {reading.door_from}".strip(), "why": why}
+    if kind == "two_tall_facing":
+        if not doors.convert_two_tall_facing(mod, result, rel, name, data):
+            return None
+        return {"kind": "two_tall", "name": name, "facing": True,
+                "read": reading.verdict == "vanilla",
+                "why": "" if reading.verdict == "vanilla" else f"its code isn't read: {reading.why}"}
     if not doors.convert_two_tall(mod, result, rel, name, data):
         return None
     return {"kind": "two_tall", "name": name, "read": reading.verdict == "vanilla",
