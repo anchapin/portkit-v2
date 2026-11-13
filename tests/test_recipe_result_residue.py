@@ -64,14 +64,16 @@ def test_a_vanilla_tag_over_several_slots_past_the_cap_is_explained(tmp_path, re
     assert "covers 2 items" in u.reason  # the ingredient's own reason is kept
 
 
-def test_an_item_list_over_several_slots_stays_recipe(tmp_path, reference):
-    """A list over several slots has no capped form (#302 pick 1 takes vanilla-only
-    tags, not lists), so the cap isn't what refuses it."""
+def test_an_item_list_over_several_slots_past_the_cap_is_explained(tmp_path, reference):
+    """A list over several slots takes the per-combination form (#302 sub-reason 4),
+    so the cap is what refuses it, as for a vanilla-only tag."""
     dirt = [{"item": "minecraft:dirt"}, {"item": "minecraft:coarse_dirt"}, {"item": "minecraft:podzol"}]
     recipe = _shaped(["MMM", "M M", "MMM"], {"M": dirt})
     result = recipes.convert(_mod(tmp_path, recipe), emitted=_item("thing"))
     (u,) = result.unhandled
-    assert u.kind == "recipe" and "filling 8 grid slots" in u.reason
+    assert u.kind == recipes.OVER_CAP
+    assert "filling 8 grid slots" in u.reason
+    assert "6,561 recipes" in u.reason and "over the 16" in u.reason
 
 
 def test_a_member_that_did_not_convert_keeps_it_recipe(tmp_path, reference):

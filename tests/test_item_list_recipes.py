@@ -96,14 +96,97 @@ def test_list_member_not_converted_stays_residue(tmp_path):
     assert "not converted: examplemod:deepslate_tin_ore" in reason
 
 
-def test_list_filling_several_slots_stays_residue(tmp_path):
+def test_list_filling_several_slots_writes_one_recipe_per_combination(tmp_path):
+    """#302 sub-reason 4: a list over several slots is written once per mix.
+
+    The player may put a different item of the list in each slot, so a recipe
+    per item would forbid it; a recipe per combination of the items over the
+    slots is exact, under the same cap and the same rules as a vanilla-only
+    tag's combinations (#302 pick 1)."""
     recipe = {"type": "minecraft:crafting_shaped", "pattern": ["BPB"],
               "key": {"B": ["examplemod:a", "examplemod:b"], "P": "minecraft:sugar"},
               "result": {"id": "examplemod:pie"}}
     result = recipes.convert(_mod(tmp_path, recipe), _emitted("a", "b", "pie"))
+    files = _recipes(result)
+    # (a, a), (a, b) and (b, b): the mirror image of (a, b) is written once.
+    assert sorted(files) == [
+        "recipes/thing__examplemod_a__examplemod_a.json",
+        "recipes/thing__examplemod_a__examplemod_b.json",
+        "recipes/thing__examplemod_b__examplemod_b.json",
+    ]
+    mixed = files["recipes/thing__examplemod_a__examplemod_b.json"]["minecraft:recipe_shaped"]
+    assert mixed["pattern"] == ["APC"]
+    assert mixed["key"] == {"A": {"item": "examplemod:a"},
+                             "C": {"item": "examplemod:b"},
+                             "P": {"item": "minecraft:sugar"}}
+    same = files["recipes/thing__examplemod_a__examplemod_a.json"]["minecraft:recipe_shaped"]
+    assert same["pattern"] == ["BPB"]
+    assert same["key"] == {"B": {"item": "examplemod:a"}, "P": {"item": "minecraft:sugar"}}
+    assert not _reasons(result)
+    assert any("combination" in n for n in result.notes)
+
+
+def test_list_over_several_slots_over_the_cap_stays_residue(tmp_path):
+    """The per-combination form is capped like every other expansion (#302)."""
+    recipe = {"type": "minecraft:crafting_shaped", "pattern": ["BB"],
+              "key": {"B": ["examplemod:a", "examplemod:b", "examplemod:c", "examplemod:d",
+                           "examplemod:e"]},
+              "result": {"id": "examplemod:pie"}}
+    result = recipes.convert(_mod(tmp_path, recipe), _emitted(*"abcde", "pie"))
+    assert not _recipes(result)
+    (u,) = result.unhandled
+    assert u.kind == recipes.OVER_CAP
+    assert "25 recipes" in u.reason and "over the 16" in u.reason
+    assert "filling 2 grid slots" in u.reason
+
+
+def test_list_mixing_item_and_tag_entries_is_their_union(tmp_path):
+    """#302 sub-reason 4: a list may name a tag as well as items."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [[{"item": "minecraft:coal"}, {"tag": "examplemod:ores"}]],
+              "result": {"id": "examplemod:slag"}}
+    mod = _mod(tmp_path, recipe, name="slag")
+    tag = mod.root / "data/examplemod/tags/items/ores.json"
+    tag.parent.mkdir(parents=True, exist_ok=True)
+    tag.write_text(json.dumps({"values": ["examplemod:tin_ore"]}))
+    result = recipes.convert(mod, _emitted("tin_ore", "slag"))
+    files = _recipes(result)
+    assert sorted(files) == ["recipes/slag__examplemod_tin_ore.json",
+                             "recipes/slag__minecraft_coal.json"]
+    body = files["recipes/slag__minecraft_coal.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "minecraft:coal"}]
+    assert not _reasons(result)
+
+
+def test_list_holding_a_tag_whose_membership_is_unknown_stays_residue(tmp_path):
+    """The membership of a tag the jar doesn't know can't be written down."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [[{"item": "minecraft:coal"}, {"tag": "c:ores/tin"}]],
+              "result": {"id": "examplemod:slag"}}
+    result = recipes.convert(_mod(tmp_path, recipe), _emitted("slag"))
     assert not _recipes(result)
     (reason,) = _reasons(result)
-    assert "filling 2 grid slots" in reason
+    assert "list holding a tag" in reason
+
+
+def test_a_list_whose_every_item_did_not_convert_goes_with_them(tmp_path):
+    """#302 pick 3 for lists: the recipe can't match anything until its items do."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [["examplemod:red_ore", "examplemod:blue_ore"]],
+              "result": {"id": "examplemod:slag"}}
+    result = recipes.convert(_mod(tmp_path, recipe), _emitted("slag"))
+    assert not _recipes(result)
+    (u,) = result.unhandled
+    assert u.kind == "recipe"
+    assert result.unshipped_names[u.source] == ["examplemod:blue_ore", "examplemod:red_ore"]
+    residue = [recipes.Unhandled("assets/examplemod/blockstates/red_ore.json", "block", "why"),
+               recipes.Unhandled("assets/examplemod/blockstates/blue_ore.json", "code_drawn_block",
+                                 "why"),
+               u]
+    (owned,) = [x for x in recipes.refine_owned(residue, result.unshipped_names)
+                if x.source == u.source]
+    assert owned.kind == "owned_by_residue"
+    assert u.reason in owned.reason
 
 
 def test_list_beside_another_multi_ingredient_stays_residue(tmp_path):

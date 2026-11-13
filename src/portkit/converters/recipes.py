@@ -622,9 +622,10 @@ def _tag_reason(spec, tags: TagResolver | None = None) -> str:
     listed = _listed_items(spec)
     if listed is not None:
         return (f"ingredient is a list of {len(listed)} items ({', '.join(listed)}); it converts "
-                f"as one recipe per item only when every item is converted, it is the "
-                f"recipe's only such ingredient, it fills one grid slot, and it has at most "
-                f"{EXPANSION_CAP} items")
+                f"as one recipe per item when every item is converted, it is the recipe's only "
+                f"such ingredient and it fills one grid slot, and as one recipe per combination "
+                f"of the items when it fills several grid slots and there are at most "
+                f"{EXPANSION_CAP} of them")
     if isinstance(spec, list):
         return "ingredient is a list holding a tag or a non-item entry"
     return "ingredient uses a tag or item list"
@@ -1006,25 +1007,65 @@ def _listed_items(spec) -> list[str] | None:
     return [i if ":" in i else f"minecraft:{i}" for i in dict.fromkeys(ids)]
 
 
+def _list_ids(spec, tags: TagResolver | None) -> list[str] | None:
+    """The ids a list ingredient names, when every membership in it is known.
+
+    A list is Java's "any of these": each entry is an item or a tag, so the
+    list means the union of what its entries name (minecraft.wiki, Recipe -
+    ingredient: "an ingredient is either a single item, or a list of items,
+    or a tag"). A plain item entry needs nothing more; a tag entry needs its
+    whole membership (:meth:`TagResolver.members`), or the list stays residue:
+    a membership that isn't known can't be written down.
+
+    Unlike :func:`_listed_items` this reads a tag entry too, so a list mixing
+    item and tag entries is a membership as well (#302 sub-reason 4).
+    """
+    if not isinstance(spec, list) or not spec:
+        return None
+    ids: list[str] = []
+    for entry in spec:
+        if isinstance(entry, dict) and set(entry) == {"item"} and isinstance(entry["item"], str):
+            ids.append(entry["item"])
+        elif isinstance(entry, str) and not entry.startswith("#"):
+            ids.append(entry)
+        elif isinstance(entry, dict) and set(entry) == {"tag"} and isinstance(entry["tag"], str):
+            if tags is None:
+                return None
+            found = tags.members(entry["tag"])
+            if found is None:
+                return None  # the tag's membership isn't known: not ours to guess
+            ids.extend(found.members)
+        elif isinstance(entry, str) and entry.startswith("#"):
+            if tags is None:
+                return None
+            found = tags.members(entry[1:])
+            if found is None:
+                return None
+            ids.extend(found.members)
+        else:
+            return None
+    return [i if ":" in i else f"minecraft:{i}" for i in dict.fromkeys(ids)]
+
+
 def _list_label(ids: list[str]) -> str:
     return "[" + ", ".join(ids) + "]"
 
 
-def _list_reason(multi: _Multi, slots: int, others: int) -> str:
+def _list_reason(multi: _Multi, slots: int, others: int, mixes: int | None = None) -> str:
     """Why a fully converted item-list ingredient still can't be written."""
     ids = multi.found.members
     head = f"ingredient is a list of {len(ids)} items ({', '.join(ids)})"
-    if slots != 1:
-        return (f"{head} filling {slots} grid slots; the player may mix items across them, "
-                "which one recipe per item would forbid, and the mod declares no tag to take")
+    if mixes is not None and mixes > EXPANSION_CAP:
+        return (f"{head} filling {slots} grid slots; writing every mix the player can make takes "
+                f"{mixes:,} recipes, over the {EXPANSION_CAP} the expansion is capped at")
     if others > 1:
         return f"{head}, beside another multi-item ingredient; one recipe per item covers only one"
     return f"{head}, more than the {EXPANSION_CAP} recipes one per item is capped at"
 
 
-def _multi_list(spec, emitted: dict | None) -> _Multi | None:
+def _multi_list(spec, emitted: dict | None, tags: TagResolver | None = None) -> _Multi | None:
     """A list-of-items ingredient whose every item this addon holds, or None."""
-    ids = _listed_items(spec)
+    ids = _list_ids(spec, tags)
     if emitted is None or ids is None:
         return None
     if any(not i.startswith("minecraft:") and i not in emitted for i in ids):
@@ -1044,7 +1085,7 @@ _TAGGABLE_KINDS = ("item", "block", "block_and_item")
 def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
     """The tag (or item-list) ingredient as a known, fully emitted membership, or None."""
     if isinstance(spec, list):
-        return _multi_list(spec, emitted)
+        return _multi_list(spec, emitted, tags)
     if emitted is None or not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
         return None
     found = tags.members(spec["tag"])
@@ -1073,10 +1114,10 @@ def _multi_tag(spec, tags: TagResolver, emitted: dict | None) -> _Multi | None:
 
 
 def _not_emitted(spec, tags: TagResolver, emitted: dict | None) -> list[str]:
-    """Members of a known tag ingredient that this conversion did not emit."""
-    listed = _listed_items(spec)
-    if listed is not None:
-        if emitted is None:
+    """Members of a known tag (or item-list) ingredient that this conversion did not emit."""
+    if isinstance(spec, list):
+        listed = _list_ids(spec, tags)
+        if listed is None or emitted is None:
             return []
         return [m for m in listed if not m.startswith("minecraft:") and m not in emitted]
     if emitted is None or not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
@@ -1107,7 +1148,20 @@ def _all_unconverted(failing: list[int], multis: dict, positions: list, mapped: 
     names: list[str] = []
     for i in failing:
         spec = positions[i][0]
-        if multis.get(i) is not None or not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
+        if multis.get(i) is not None:
+            return []
+        if isinstance(spec, list):
+            # A list names its membership outright (#302 sub-reason 4): when
+            # every member is a mod item this conversion didn't emit, the
+            # recipe can't match anything until they do, as for a tag.
+            members = _list_ids(spec, tags)
+            if members is None or not members:
+                return []
+            if any(m.startswith("minecraft:") or m in emitted or ":" not in m for m in members):
+                return []
+            names.extend(members)
+            continue
+        if not isinstance(spec, dict) or not isinstance(spec.get("tag"), str):
             return []
         found = tags.members(spec["tag"])
         if found is None or not found.members:
@@ -1213,6 +1267,25 @@ def _vanilla_only(multi: "_Multi | None") -> bool:
             and all(m.startswith("minecraft:") for m in multi.found.members))
 
 
+def _expandable(multi: "_Multi | None", slots: int = 1) -> bool:
+    """A multi-item ingredient whose membership can be written out item by item.
+
+    A vanilla-only tag (an add-on can't tag a vanilla item, and no Bedrock
+    vanilla tag has the same members) is written as one recipe per combination
+    of members over the slots it fills (#302 pick 1). A list ingredient (it
+    names its membership outright and has no tag of its own) is written that
+    way when it fills several grid slots, the case where the player may mix
+    its items across them (#302 sub-reason 4); in one slot it takes the
+    one-recipe-per-item form, which needs it to be the only multi-item
+    ingredient of the recipe.
+    """
+    if multi is None:
+        return False
+    if multi.listed:
+        return slots > 1
+    return _vanilla_only(multi)
+
+
 def _result_id(recipe: dict) -> str | None:
     """The namespaced id of the one item a recipe makes, or None (#342).
 
@@ -1247,7 +1320,7 @@ def _over_cap(rest: list[int], multis: dict, positions: list, furnace: bool) -> 
     if len(rest) == 1 and positions[rest[0]][1] == 1:
         total = len(multis[rest[0]].found.members)
         form = "one recipe per member"
-    elif not furnace and all(_vanilla_only(multis[i]) for i in rest):
+    elif not furnace and all(_expandable(multis[i], positions[i][1]) for i in rest):
         total = 1
         for i in rest:
             total *= len(multis[i].found.members) ** positions[i][1]
@@ -1276,7 +1349,7 @@ def _over_cap(rest: list[int], multis: dict, positions: list, furnace: bool) -> 
 
 def _combinations(rest: list[int], multis: dict, positions: list, ingredients: list,
                   pattern: list | None, symbols: list | None):
-    """Every combination of the vanilla-only tags in ``rest``, one recipe each (#302 pick 1).
+    """Every combination of the multi-item ingredients in ``rest``, one recipe each.
 
     Alex's pick 1 on #302 (comment 6228435148, approved 2026-10-16): a tag
     ingredient whose members are all vanilla items can't be written as a tag
@@ -1285,6 +1358,12 @@ def _combinations(rest: list[int], multis: dict, positions: list, ingredients: l
     different member in each. Exact only if every such mix is its own recipe,
     so each one is, when there are at most :data:`EXPANSION_CAP` of them
     (n members over k slots: nᵏ; several such tags multiply).
+
+    A list ingredient (Java's "any of these", #302 sub-reason 4) is the same
+    case: it names its membership outright, so it has no tag of its own to
+    take, and when it fills several grid slots the player may mix its items
+    across them. Each mix is written as its own recipe, under the same cap
+    and the same rules as a vanilla-only tag's.
 
     Shaped: each slot of the tag gets its own key symbol, one per member
     (Bedrock: "The key used in the pattern may be any single character
@@ -1297,11 +1376,11 @@ def _combinations(rest: list[int], multis: dict, positions: list, ingredients: l
     combination is written once whatever slot each member is in.
 
     Returns ``(variants, shaped_forms)`` (see the caller), or None when the
-    tags aren't all vanilla-only or the count is over the cap.
+    memberships aren't all expandable or the count is over the cap.
     """
     import itertools
 
-    if not rest or not all(_vanilla_only(multis[i]) for i in rest):
+    if not rest or not all(_expandable(multis[i], positions[i][1]) for i in rest):
         return None
     total = 1
     for i in rest:
@@ -1876,7 +1955,15 @@ def convert(mod: SourceMod, emitted: dict | None = None,
             bad = positions[bad_i][0]
             reason = _tag_reason(bad, tag_resolver)
             if multis.get(bad_i) is not None and multis[bad_i].listed:
-                reason = _list_reason(multis[bad_i], positions[bad_i][1], len(rest))
+                # How many recipes the per-combination form would take (#302
+                # sub-reason 4), when every refused ingredient is one that form
+                # can write.
+                mixes = 1
+                for i in rest:
+                    mixes *= len(multis[i].found.members) ** positions[i][1]
+                if not all(_expandable(multis[i], positions[i][1]) for i in rest):
+                    mixes = None
+                reason = _list_reason(multis[bad_i], positions[bad_i][1], len(rest), mixes)
             missing = _not_emitted(bad, tag_resolver, emitted)
             if missing:
                 reason += f"; not converted: {', '.join(missing)}"
@@ -2030,10 +2117,14 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 f"({name}__<member>) beside the one taking the tag"
             )
         if combos:
-            shown = ", ".join(f"{multis[i].found.tag!r} ({len(multis[i].found.members)} vanilla items, "
+            shown = ", ".join(f"{multis[i].found.tag!r} ({len(multis[i].found.members)} items, "
                               f"{positions[i][1]} slot{'s' if positions[i][1] != 1 else ''})" for i in combos)
+            lists = [i for i in combos if multis[i].listed]
+            why = ("the item list(s) name their membership outright and have no tag of their own to take"
+                   if len(lists) == len(combos)
+                   else "the tag(s) hold only vanilla items, which an add-on can't tag")
             result.notes.append(
-                f"{rel}: tag ingredient(s) {shown} hold only vanilla items, which an add-on can't tag, "
+                f"{rel}: multi-item ingredient(s) {shown}: {why}, "
                 f"so the recipe was written once per combination of members the player can put in "
                 f"those slots ({len(variants)} recipes, {name}__<members>; #302)"
             )
