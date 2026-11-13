@@ -88,6 +88,35 @@ def test_classify_cases(tmp_path):
     }
 
 
+def test_a_file_java_would_reject_stays_unowned(tmp_path):
+    """A criterion that is not an object, a criterion with no trigger and a
+    reward of a shape Java's AdvancementRewards doesn't read are files Java
+    never loads, so they stay ``unowned`` (#340)."""
+    root = tmp_path
+    files = {
+        # a criterion that is not an object
+        "data/examplemod/advancement/story/criterion_string.json": {
+            "criteria": {"tamed": "minecraft:tame_animal"}},
+        # a criterion with no trigger
+        "data/examplemod/advancement/story/criterion_no_trigger.json": {
+            "criteria": {"tamed": {"conditions": {}}}},
+        # experience is not a whole number
+        "data/examplemod/advancement/story/experience_text.json": _story(experience="ten"),
+        # loot is not a list of loot table ids
+        "data/examplemod/advancement/story/loot_text.json": _story(loot="examplemod:chests/x"),
+        # function is not a function id
+        "data/examplemod/advancement/story/function_number.json": _story(function=7),
+        # the same shapes next to a recipe reward
+        "data/examplemod/advancement/recipes/bad_reward.json": {
+            **_recipe_adv("examplemod:refused"), "rewards": {"recipes": ["examplemod:refused"],
+                                                              "experience": "ten"}},
+    }
+    for rel, body in files.items():
+        _write(root, rel, body)
+    got = advancements.classify(root, sorted(files), {}, {})
+    assert got == {}
+
+
 def test_refine_counts_and_reasons(tmp_path):
     root = tmp_path
     _write(root, "data/examplemod/recipe/refused.json", {"type": "examplemod:grinding"})
@@ -108,6 +137,56 @@ def test_refine_counts_and_reasons(tmp_path):
     assert "experience 100" in story.reason and "never gives more than Java" in story.reason
     assert "fixed list" in story.reason
     # Nothing else moved, and the file total is kept.
+    assert sum(u.count for u in out) == sum(u.count for u in unhandled)
+
+
+def test_each_subclass_is_counted_on_a_fixture_jar(tmp_path):
+    """One jar with several advancements of every subclass, so the counts per
+    subclass are pinned at fixture level (the gauntlet jars are not available
+    here): residue recipes -> owned_by_residue, furnace recipes and recipes
+    the jar doesn't define and story advancements -> no_bedrock_advancement,
+    a mix of subclasses and an unreadable file -> unowned."""
+    root = tmp_path
+    recipes = ["data/examplemod/recipe/res1.json", "data/examplemod/recipe/res2.json"]
+    for rel in recipes:
+        _write(root, rel, {"type": "examplemod:grinding"})
+    files = {
+        "data/examplemod/advancement/recipes/res1.json": _recipe_adv("examplemod:res1"),
+        "data/examplemod/advancement/recipes/res2.json": _recipe_adv("examplemod:res2"),
+        "data/examplemod/advancement/recipes/furnace1.json": _recipe_adv("examplemod:furnace1"),
+        "data/examplemod/advancement/recipes/furnace2.json": _recipe_adv("examplemod:furnace2"),
+        "data/examplemod/advancement/recipes/absent.json": _recipe_adv("minecraft:absent"),
+        "data/examplemod/advancement/recipes/mixed.json": {
+            **_recipe_adv("examplemod:res1"),
+            "rewards": {"recipes": ["examplemod:res1", "minecraft:absent"]}},
+        "data/examplemod/advancement/story/plain.json": _story(),
+        "data/examplemod/advancement/story/rich.json": _story(experience=50, loot=["examplemod:chests/x"]),
+        "data/examplemod/advancement/story/broken.json": "{not json",
+    }
+    for rel, body in files.items():
+        _write(root, rel, body)
+    unhandled = [Unhandled(rel, "recipe", "unknown recipe type") for rel in recipes]
+    unhandled.append(Unhandled("data/examplemod/advancement/", "unowned",
+                                f"{len(files)} file(s) no converter claims yet", count=len(files)))
+    bodies = {"data/examplemod/recipe/furnace1.json": {"minecraft:recipe_furnace"},
+              "data/examplemod/recipe/furnace2.json": {"minecraft:recipe_furnace"}}
+    out = advancements.refine(unhandled, root, set(), bodies)
+    counts: dict[tuple[str, str], int] = {}
+    for u in out:
+        if "/advancement/" not in u.source:
+            continue
+        key = (u.kind, u.source)
+        counts[key] = counts.get(key, 0) + u.count
+    assert counts == {
+        ("owned_by_residue", "data/examplemod/advancement/recipes/"): 2,
+        ("no_bedrock_advancement", "data/examplemod/advancement/recipes/"): 3,  # 2 furnace, 1 absent
+        ("no_bedrock_advancement", "data/examplemod/advancement/story/"): 2,
+        ("unowned", "data/examplemod/advancement/"): 2,  # the mix and the unreadable file
+    }
+    # The two no_bedrock_advancement entries under recipes/ say which subclass each file is.
+    reasons = [u.reason for u in out if u.kind == "no_bedrock_advancement"
+               and u.source == "data/examplemod/advancement/recipes/"]
+    assert any("furnace" in r for r in reasons) and any("no data file of the jar defines" in r for r in reasons)
     assert sum(u.count for u in out) == sum(u.count for u in unhandled)
 
 
