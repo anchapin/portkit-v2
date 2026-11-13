@@ -193,6 +193,85 @@ def test_an_invalid_piece_is_not_written(tmp_path, monkeypatch):
     assert result.files == {} and [u.kind for u in result.unhandled] == ["armor"]
 
 
+# --- the core's own reader: no adapter answers for the mod ---------------------
+
+def _code_mod(tmp_path, tags: dict[str, list[str]]) -> SourceMod:
+    """The toy mod, with the classes its armor is built in."""
+    mod = _mod(tmp_path, tags)
+    mod.classes = ClassIndex.from_source(CLASSES)
+    return mod
+
+
+def test_the_core_reads_armor_from_the_mod_s_own_code(tmp_path):
+    """No adapter answers: the mod's own code says what the armor is (#274)."""
+    mod = _code_mod(tmp_path, {"minecraft:trimmable_armor": [
+        "toy:plate_helmet", "toy:heavy_chestplate", "toy:tough_helmet", "toy:code_chestplate"]})
+    files = {f"items/{n}.json": _item(f"toy:{n}") for n in (
+        "plate_helmet", "heavy_chestplate", "tough_helmet", "code_chestplate", "ingot")}
+    result = armor.convert(mod, files)
+    # ToyPlate.PLATE: defense {2, 5, 4, 1}, enchantability 12, toughness 1.5,
+    # knockback 0.0; durability MAX_DAMAGE_ARRAY {11, 16, 15, 13} * factor 15.
+    helmet = result.files["items/plate_helmet.json"]
+    assert helmet["format_version"] == "1.20.30"
+    components = helmet["minecraft:item"]["components"]
+    assert components["minecraft:wearable"] == {"slot": "slot.armor.head", "protection": 2}
+    assert components["minecraft:durability"] == {"max_durability": 165}
+    assert components["minecraft:enchantable"] == {"slot": "armor_head", "value": 12}
+    assert components["minecraft:max_stack_size"] == 1
+    # ToyPlate.HEAVY: defense {3, 8, 6, 3}, enchantability 9, factor 30.
+    chest = result.files["items/heavy_chestplate.json"]["minecraft:item"]["components"]
+    assert chest["minecraft:wearable"] == {"slot": "slot.armor.chest", "protection": 8}
+    assert chest["minecraft:durability"] == {"max_durability": 480}
+    assert chest["minecraft:enchantable"] == {"slot": "armor_torso", "value": 9}
+    # The citation says where each number came from.
+    notes = " ".join(result.notes)
+    assert "ToyArmorItems registers plate_helmet" in notes
+    assert "ToyPlate.PLATE" in notes
+    # A piece whose numbers are decided in code (p.durability(5), an overridden
+    # getDefense) is not read: it stays a plain item and is residue.
+    assert "items/tough_helmet.json" not in result.files
+    assert "items/code_chestplate.json" not in result.files
+    assert {u.source.rsplit("/", 1)[-1] for u in result.unhandled} == {"tough_helmet.json", "code_chestplate.json"}
+    assert all(u.kind == "armor" for u in result.unhandled)
+    # An item that isn't armor is left alone.
+    assert "items/ingot.json" not in result.files
+
+
+def test_the_core_reader_refuses_what_it_cannot_read(tmp_path):
+    mod = _code_mod(tmp_path, {"minecraft:trimmable_armor": ["toy:branch_leggings"]})
+    result = armor.convert(mod, {"items/branch_leggings.json": _item("toy:branch_leggings")})
+    assert result.files == {}
+    (entry,) = result.unhandled
+    assert entry.kind == "armor" and "toy:branch_leggings is armor in Java" in entry.reason
+
+
+def test_the_core_reader_answers_a_wearable_piece_through_convert_all(tmp_path):
+    """#273's path applies to the pieces the core read itself."""
+    from portkit.png import encode_png
+
+    root = tmp_path
+    for name in ("plate_helmet", "leather_cap"):
+        model = root / "assets/toy/models/item" / f"{name}.json"
+        model.parent.mkdir(parents=True, exist_ok=True)
+        model.write_text(json.dumps({"parent": "item/generated", "textures": {"layer0": f"toy:item/{name}"}}))
+        tex = root / "assets/toy/textures/item" / f"{name}.png"
+        tex.parent.mkdir(parents=True, exist_ok=True)
+        tex.write_bytes(encode_png(16, 16, bytes([200, 50, 50, 255]) * 256))
+    recipe = root / "data/toy/recipe/plate_helmet.json"
+    recipe.parent.mkdir(parents=True, exist_ok=True)
+    recipe.write_text(json.dumps({"type": "minecraft:crafting_shapeless", "ingredients": [{"item": "minecraft:iron_ingot"}],
+                                  "result": {"id": "toy:plate_helmet"}}))
+    mod = _code_mod(root, {"minecraft:trimmable_armor": ["toy:plate_helmet", "toy:leather_cap"]})
+    result = convert_all(mod)
+    helmet = result.files["items/plate_helmet.json"]["minecraft:item"]["components"]
+    cap = result.files["items/leather_cap.json"]["minecraft:item"]["components"]
+    assert helmet["minecraft:wearable"] == {"slot": "slot.armor.head", "protection": 2}
+    assert "minecraft:trimmable_armors" in helmet["minecraft:tags"]["tags"]
+    assert "minecraft:wearable" not in cap
+    assert "minecraft:trimmable_armors" not in (cap.get("minecraft:tags") or {}).get("tags", [])
+    assert any(u.kind == "armor" and u.source.endswith("leather_cap.json") for u in result.unhandled)
+
+
 def test_wearable_items_get_the_trim_tag_through_convert_all(tmp_path, toy_adapter):
     """#273's path: a Java #minecraft:trimmable_armor member that is now wearable
     carries minecraft:trimmable_armors; one that isn't does not."""
