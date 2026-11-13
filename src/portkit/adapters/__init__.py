@@ -74,6 +74,13 @@ Hooks, and the core seam that asks each one:
   a vanilla block and the code aliases the item id too (``BlockAlias.item``),
   the mod's recipes naming the old id take the vanilla item instead
   (:func:`portkit.converters.recipes.convert`, ``aliases``).
+- ``block_claims``: ``SourceMod -> {blockstate name: reason}``, the blocks
+  an adapter stakes for a mod (#296): the ones its own code answers for and
+  the ones it refuses. Asked by :func:`portkit.converters.blocks.convert`
+  before every generic reader, so an adapter's claim always wins over a
+  generic conversion (:func:`block_claims` also holds the generic rule: an
+  adapter with a ``station`` hook stakes the blocks of its namespace whose
+  blockstate draws the same states as a block the station claims).
 - ``orientations``: ``(SourceMod, {blockstate name: block class}[,
   sites=[, states=]]) -> {blockstate name: Orientation}``, for a mod whose blocks take ``facing``
   and a second orientation state (AE2's ``spin``) from a placement rule of
@@ -289,6 +296,12 @@ class Adapter:
     # (SourceMod, {blockstate name: block class}) -> {blockstate name:
     # Orientation} (#296), see the module docstring.
     orientations: Callable[["SourceMod", Mapping[str, str]], Mapping[str, Orientation]] | None = None
+    # (SourceMod) -> {blockstate name: reason} (#296): the blocks this
+    # adapter stakes, and why the core's generic readers must leave them
+    # alone (the adapter converts them itself, or refuses them). Asked by
+    # :func:`portkit.converters.blocks.convert` before every generic reader,
+    # so an adapter's claim always wins over a generic conversion.
+    block_claims: Callable[["SourceMod"], Mapping[str, str]] | None = None
     # Model ``loader`` id -> (SourceMod, model dict) -> (model with Java
     # ``elements`` | None, files read, reason) (#296): a mod's own mesh
     # loader, read by its adapter, which hands the mesh to
@@ -463,6 +476,98 @@ def block_aliases(mod: "SourceMod") -> dict[str, BlockAlias]:
                 if alias.target.partition(":")[0] != ns:
                     found.setdefault(name, alias)
     return found
+
+
+def _variant_states(blockstate: dict) -> frozenset[str]:
+    """The states a blockstate's variants draw (the state names of its keys)."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict):
+        return frozenset()
+    out: set[str] = set()
+    for key in variants:
+        for pair in str(key).split(","):
+            name, sep, _value = pair.partition("=")
+            if sep:
+                out.add(name)
+    return frozenset(out)
+
+
+def _jar_blockstates(mod: "SourceMod") -> dict[str, dict]:
+    """The mod's own blockstates, parsed (name -> blockstate)."""
+    import json
+
+    out: dict[str, dict] = {}
+    src = getattr(mod, "assets", None)
+    src = src / "blockstates" if src is not None else None
+    if src is None or not src.is_dir():
+        return out
+    for path in sorted(src.glob("*.json")):
+        try:
+            body = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(body, dict):
+            out[path.stem] = body
+    return out
+
+
+def block_claims(mod: "SourceMod", loaded: Mapping[str, dict] | None = None) -> dict[str, str]:
+    """The blocks an adapter stakes for ``mod``: {blockstate name: reason}.
+
+    An adapter's own answer (its ``block_claims`` hook) wins. Beyond it, an
+    adapter with a ``station`` hook stakes every block of the namespace whose
+    blockstate draws the same states as a block the station claims: the
+    station runtime owns that shape there, and the adapter may refuse such a
+    block (one its jar tags but its code registers no block for), so the
+    core's generic readers leave it alone instead of converting it behind the
+    adapter's back (#296). ``loaded`` is the mod's parsed blockstates when
+    the caller has them (the core's block converter does).
+    """
+    found: dict[str, str] = {}
+    for a in ADAPTERS:
+        if a.block_claims is not None:
+            for name, reason in a.block_claims(mod).items():
+                found.setdefault(name, reason)
+    blockstates = loaded if loaded is not None else _jar_blockstates(mod)
+    for a in ADAPTERS:
+        if a.station is None:
+            continue
+        claimed = a.station.blocks(mod)
+        if not claimed:
+            continue
+        shapes = set()
+        for name in claimed:
+            states = _variant_states(blockstates.get(name) or {})
+            if states:
+                shapes.add(states)
+        if not shapes:
+            continue
+        for name, blockstate in blockstates.items():
+            if name in claimed or name in found:
+                continue
+            if _variant_states(blockstate) in shapes:
+                found.setdefault(
+                    name, f"the {a.name} adapter's station runtime claims that shape in this namespace")
+    return found
+
+
+def declines_blocks(mod: "SourceMod") -> bool:
+    """Whether an adapter that stakes blocks serves ``mod``'s namespace and
+    claims no block for this jar: the adapter declines the jar (it follows
+    only the versions it was read from), and the namespace's blocks are its
+    business all the same (#296). The core's generic readers then leave the
+    namespace's paired blocks (the shapes such a runtime makes work) alone
+    rather than guessing their behaviour."""
+    ns = getattr(mod, "namespace", None)
+    for a in ADAPTERS:
+        if ns not in a.namespaces:
+            continue
+        if a.block_claims is not None and a.block_claims(mod):
+            return False
+        if a.station is not None and a.station.blocks(mod):
+            return False
+    return any(ns in a.namespaces and (a.block_claims is not None or a.station is not None)
+               for a in ADAPTERS)
 
 
 def unregistered_blockstates(mod: "SourceMod", names) -> dict[str, str]:
