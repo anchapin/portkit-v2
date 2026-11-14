@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import advancements, biomecode, codeonly, datatags, guidebooks, ownership, worldgen
+from . import advancements, biomecode, codeonly, damagetypes, datatags, guidebooks, ownership, worldgen
 from .converters import features, lang, loot, recipes
 from .converters import blocks as block_converter
 from .conditions import (ConfigRequest, LoadContext, config_note, config_record, known_flags, known_values,
@@ -659,6 +659,9 @@ def convert(
             unhandled = advancements.refine(
                 unhandled, staged.root, result.consumed,
                 advancements.recipe_bodies(result.files, result.recipe_sources, renames))
+            # And its leftover damage types: Bedrock has no data-driven damage
+            # types, so there is no registry to define one in (#442).
+            unhandled = damagetypes.refine(unhandled, staged.root, result.consumed)
         if outcome is None and (out_dir / codeonly.REPORT_NAME).is_file():
             # An earlier run's report would make this tree read as explained-empty.
             (out_dir / codeonly.REPORT_NAME).unlink()

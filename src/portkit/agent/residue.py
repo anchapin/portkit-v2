@@ -216,6 +216,11 @@ SKIP_KINDS = {
                                "track or show it and its rewards are not given; a recipe advancement whose "
                                "recipe ships as a furnace recipe (no `unlock` field) or that names no recipe of "
                                "the jar has no converted recipe to carry it; the reason says which"),
+    # #442 leftover damage types (portkit.damagetypes).
+    "no_bedrock_damage_type": ("Bedrock has no data-driven damage types (the causes a pack can apply are "
+                               "the fixed EntityDamageCause enum, @minecraft/server 2.0.0), so there is no "
+                               "registry to define a type in and the type's effects are not carried over; "
+                               "the reason names the types"),
     # #342 (Alex, 2026-10-20, pick 2a): a recipe only the #302 expansion cap refuses (portkit.converters.recipes).
     "recipe_over_cap": ("every ingredient is known and converted, but writing every mix Java accepts (one "
                         "recipe per tag member, or per combination of vanilla members across the grid slots, "
