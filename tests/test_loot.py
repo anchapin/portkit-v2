@@ -65,6 +65,113 @@ def test_fortune_is_refused_and_says_so(tmp_path):
     assert "fortune" in reason and "apply_bonus" in reason
 
 
+@pytest.mark.parametrize("function", [
+    "minecraft:copy_name",
+    "minecraft:copy_nbt",
+    "minecraft:copy_components",
+])
+def test_a_table_refused_only_for_a_copy_function_is_loot_copy(tmp_path, function):
+    entry = {
+        "type": "minecraft:item",
+        "name": "examplemod:steel_block",
+        "functions": [{"function": function, "source": "block_entity"}],
+    }
+    result = loot.convert(build(tmp_path, {"steel_block": pool(entry, SURVIVES)}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    residue = result.unhandled[0]
+    assert residue.kind == loot.LOOT_COPY
+    assert function in residue.reason
+
+
+def test_a_loot_copy_reason_names_every_copy_function_in_the_table(tmp_path):
+    entry = {
+        "type": "minecraft:item",
+        "name": "examplemod:steel_block",
+        "functions": [
+            {"function": "minecraft:copy_name", "source": "block_entity"},
+            {"function": "minecraft:copy_nbt", "source": "block_entity"},
+            {"function": "minecraft:copy_components", "source": "block_entity"},
+        ],
+    }
+    result = loot.convert(build(tmp_path, {"steel_block": pool(entry, SURVIVES)}))
+    residue = result.unhandled[0]
+    assert residue.kind == loot.LOOT_COPY
+    for function in ("minecraft:copy_name", "minecraft:copy_nbt", "minecraft:copy_components"):
+        assert function in residue.reason
+
+
+def test_a_multi_pool_table_with_one_copy_function_is_loot_copy(tmp_path):
+    copied = {
+        "type": "minecraft:item",
+        "name": "examplemod:steel_ore",
+        "functions": [{"function": "minecraft:copy_components", "source": "block_entity"}],
+    }
+    table = {"pools": [
+        {"rolls": 1, "entries": [ITEM]},
+        {"rolls": 1, "entries": [copied]},
+    ]}
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    residue = result.unhandled[0]
+    assert residue.kind == loot.LOOT_COPY
+    assert "minecraft:copy_components" in residue.reason
+
+
+def test_a_copy_function_plus_another_refusal_stays_loot(tmp_path):
+    entry = {
+        "type": "minecraft:item",
+        "name": "examplemod:steel_ore",
+        "functions": [
+            {"function": "minecraft:copy_name", "source": "block_entity"},
+            {"function": "minecraft:apply_bonus", "enchantment": "minecraft:fortune"},
+        ],
+    }
+    result = loot.convert(build(tmp_path, {"steel_ore": pool(entry, SURVIVES)}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    residue = result.unhandled[0]
+    assert residue.kind == "loot"
+    # The mixed table keeps the refusal reason the converter had before the
+    # explained kind was introduced.
+    assert residue.reason == "the drop copies the block's custom name (minecraft:copy_name)"
+
+
+def test_a_copy_function_in_one_pool_and_another_refusal_elsewhere_stays_loot(tmp_path):
+    copied = {
+        "type": "minecraft:item",
+        "name": "examplemod:steel_block",
+        "functions": [{"function": "minecraft:copy_nbt", "source": "block_entity"}],
+    }
+    table = {"pools": [
+        {"rolls": 1, "entries": [copied]},
+        {"rolls": 1, "entries": [ITEM], "functions": [{
+            "function": "minecraft:apply_bonus", "enchantment": "minecraft:fortune"}]},
+    ]}
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    assert result.unhandled[0].kind == "loot"
+
+
+def test_a_convertible_table_keeps_its_exact_output_bytes(tmp_path):
+    result = loot.convert(build(tmp_path, {"steel_block": pool(ITEM, SURVIVES)}))
+    table = result.files["loot_tables/blocks/steel_block.json"]
+    expected = {
+        "pools": [{
+            "rolls": 1,
+            "entries": [{
+                "type": "item",
+                "name": "examplemod:steel_block",
+                "functions": [{"function": "explosion_decay"}],
+            }],
+        }],
+    }
+    assert (json.dumps(table, indent=2) + "\n").encode() == (
+        json.dumps(expected, indent=2) + "\n").encode()
+
+
 def test_alternatives_with_no_children_drop_nothing(tmp_path):
     table = {"pools": [{"rolls": 1, "entries": [{"type": "minecraft:alternatives", "children": []}]}]}
     result = loot.convert(build(tmp_path, {"glass_pane": table}))
@@ -172,7 +279,8 @@ def _residue(source, kind, reason="r"):
 def test_a_refused_table_whose_block_is_residue_is_owned_by_residue():
     unhandled = [
         _residue("assets/ex/blockstates/chest.json", "code_drawn_block"),
-        _residue("data/ex/loot_table/blocks/chest.json", "loot", "the drop copies the block's custom name"),
+        _residue("data/ex/loot_table/blocks/chest.json", loot.LOOT_COPY,
+                 "the drop copies the block's custom name (minecraft:copy_name)"),
         _residue("data/ex/loot_tables/blocks/lamp.json", "loot", "the drop depends on the block state"),
         _residue("data/ex/loot_table/blocks/ore.json", "loot", "the drop depends on the tool used"),
         _residue("assets/ex/blockstates/lamp.json", "block"),
@@ -191,6 +299,23 @@ def test_a_refused_table_whose_block_is_residue_is_owned_by_residue():
 def test_a_table_with_no_residue_blockstate_stays_loot():
     unhandled = [_residue("data/ex/loot_table/blocks/ghost.json", "loot")]
     assert loot.refine_owned(unhandled, shipped_blocks=set())[0].kind == "loot"
+
+
+def test_a_loot_copy_table_whose_block_is_residue_is_owned_by_residue():
+    unhandled = [
+        _residue("assets/ex/blockstates/chest.json", "code_drawn_block"),
+        _residue("data/ex/loot_table/blocks/chest.json", loot.LOOT_COPY,
+                 "the drop copies the block's custom name (minecraft:copy_name)"),
+    ]
+    out = loot.refine_owned(unhandled, shipped_blocks=set())
+    table = next(u for u in out if u.source.endswith("blocks/chest.json"))
+    assert table.kind == "owned_by_residue"
+    assert "custom name" in table.reason
+
+    # A block that did ship keeps the explained kind: the table has no
+    # residue owner to go with.
+    shipped = loot.refine_owned(unhandled[1:], shipped_blocks={"ex:chest"})
+    assert shipped[0].kind == loot.LOOT_COPY
 
 
 def test_the_1_21_singular_directory_is_read_too(tmp_path):
