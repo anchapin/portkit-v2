@@ -10,6 +10,7 @@ from the corpus cache and check the numbers against their bytecode.
 from __future__ import annotations
 
 import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -325,8 +326,8 @@ def test_create_armor_from_its_bytecode():
     mod = SourceMod(root=Path("."), namespace="create", classes=_classes("create"))
     found = item_armor(mod, frozenset({
         "cardboard_helmet", "cardboard_chestplate", "cardboard_leggings", "cardboard_boots",
-        "copper_diving_helmet", "copper_diving_boots", "netherite_diving_helmet", "copper_backtank",
-        "andesite_alloy"}))
+        "copper_diving_helmet", "copper_diving_boots", "netherite_diving_helmet", "netherite_diving_boots",
+        "copper_backtank", "andesite_alloy"}))
     pieces = {k: (v.kind, v.protection, v.durability, v.enchantability, v.toughness, v.knockback)
               for k, v in found.items() if isinstance(v, itemcode.ArmorPiece)}
     # AllArmorMaterials: CARDBOARD defense {1,1,1,1}, factor 4; COPPER {2,4,3,1}, factor 7; enchantability 25.
@@ -337,8 +338,11 @@ def test_create_armor_from_its_bytecode():
         "cardboard_boots": ("BOOTS", 1, 52, 25, 0.0, 0.0),
         "copper_diving_helmet": ("HELMET", 2, 77, 25, 0.0, 0.0),
         "copper_diving_boots": ("BOOTS", 1, 91, 25, 0.0, 0.0),
+        # The pieces built on vanilla's own ArmorMaterials.NETHERITE (#438): defense {3,8,6,3},
+        # durability {407,590,555,481}, enchantability 15, toughness 3.0, knockback 0.1.
+        "netherite_diving_helmet": ("HELMET", 3, 407, 15, 3.0, 0.1),
+        "netherite_diving_boots": ("BOOTS", 3, 481, 15, 3.0, 0.1),
     }
-    assert "vanilla's ArmorMaterials.NETHERITE" in found["netherite_diving_helmet"]
     assert "canBeDepleted" in found["copper_backtank"]
     assert "andesite_alloy" not in found
 
@@ -371,3 +375,233 @@ def test_mythicmetals_armor_from_its_bytecode():
     # The durability the #268 reader gives a smithing base is the same number.
     durability = item_durability(mod, names)
     assert all(found[n].durability == d for n, (d, _) in durability.items())
+
+
+# --- the vanilla 1.20 armor materials (#438) -----------------------------------
+
+VANILLA_MATERIAL = "net/minecraft/world/item/ArmorMaterials"
+
+
+class _Pool:
+    """The constant pool of a class file, assembled here."""
+
+    def __init__(self) -> None:
+        self.entries: list[bytes] = []
+        self.index: dict[tuple, int] = {}
+
+    def add(self, key, raw: bytes) -> int:
+        if key not in self.index:
+            self.entries.append(raw)
+            self.index[key] = len(self.entries)
+        return self.index[key]
+
+    def utf(self, text: str) -> int:
+        data = text.encode()
+        return self.add(("utf", text), b"\x01" + struct.pack(">H", len(data)) + data)
+
+    def cls(self, text: str) -> int:
+        return self.add(("class", text), b"\x07" + struct.pack(">H", self.utf(text)))
+
+    def nat(self, name: str, desc: str) -> int:
+        return self.add(("nat", name, desc), b"\x0c" + struct.pack(">HH", self.utf(name), self.utf(desc)))
+
+    def mref(self, owner: str, name: str, desc: str) -> int:
+        return self.add(("mref", owner, name, desc),
+                        b"\x0a" + struct.pack(">HH", self.cls(owner), self.nat(name, desc)))
+
+    def fref(self, owner: str, name: str, desc: str) -> int:
+        return self.add(("fref", owner, name, desc),
+                        b"\x09" + struct.pack(">HH", self.cls(owner), self.nat(name, desc)))
+
+    def string(self, text: str) -> int:
+        return self.add(("str", text), b"\x08" + struct.pack(">H", self.utf(text)))
+
+    def mtype(self, desc: str) -> int:
+        return self.add(("mtype", desc), b"\x10" + struct.pack(">H", self.utf(desc)))
+
+    def mhandle(self, kind: int, owner: str, name: str, desc: str) -> int:
+        return self.add(("mh", kind, owner, name, desc),
+                        b"\x0f" + struct.pack(">BH", kind, self.mref(owner, name, desc)))
+
+    def build(self, name: str, super_name: str, fields, methods, bootstrap: bytes = b"") -> bytes:
+        this, sup = self.cls(name), self.cls(super_name)
+        field_bytes = b"".join(struct.pack(">HHHH", access, self.utf(fname), self.utf(fdesc), 0)
+                               for access, fname, fdesc in fields)
+        method_bytes = b""
+        for access, mname, mdesc, code in methods:
+            body = struct.pack(">HHI", 4, 4, len(code)) + code + struct.pack(">HH", 0, 0)
+            method_bytes += struct.pack(">HHHH", access, self.utf(mname), self.utf(mdesc), 1)
+            method_bytes += struct.pack(">HI", self.utf("Code"), len(body)) + body
+        attrs = b""
+        count = 0
+        if bootstrap:
+            attrs = struct.pack(">HI", self.utf("BootstrapMethods"), len(bootstrap)) + bootstrap
+            count = 1
+        out = b"\xca\xfe\xba\xbe" + struct.pack(">HHH", 0, 61, len(self.entries) + 1) + b"".join(self.entries)
+        out += struct.pack(">HHH", 0x0021, this, sup) + struct.pack(">H", 0)
+        out += struct.pack(">H", len(fields)) + field_bytes
+        out += struct.pack(">H", len(methods)) + method_bytes
+        return out + struct.pack(">H", count) + attrs
+
+
+def _vanilla_item_class(name: str, material: str) -> bytes:
+    """An armor item class built on a constant of vanilla's own
+    ``ArmorMaterials`` enum: ``super(ArmorMaterials.<material>, type, props)``."""
+    pool = _Pool()
+    item_desc = f"(L{itemcode.ARMOR_TYPE};L{itemcode.PROPERTIES};)V"
+    code = (b"\x2a"  # aload_0
+            + b"\xb2" + struct.pack(">H", pool.fref(VANILLA_MATERIAL, material, itemcode.ARMOR_MATERIAL))
+            + b"\x2b\x2c"  # aload_1, aload_2
+            + b"\xb7" + struct.pack(">H", pool.mref(itemcode.ARMOR_ITEM, "<init>", itemcode.ARMOR_ITEM_1_20))
+            + b"\xb1")  # return
+    return pool.build(name, itemcode.ARMOR_ITEM, [], [(0x0001, "<init>", item_desc, code)])
+
+
+def _vanilla_registry(name: str, entries: list[tuple[str, str]]) -> bytes:
+    """The registry that registers each ``(item name, item class)`` with a
+    lambda, the way javac compiles a ``register(name, p -> new Item(type, p))``."""
+    pool = _Pool()
+    fields, methods = [], []
+    clinit, bootstrap = b"", b""
+    item_desc = f"(L{itemcode.ARMOR_TYPE};L{itemcode.PROPERTIES};)V"
+    lambda_desc = f"(L{itemcode.PROPERTIES};)Lnet/minecraft/world/item/Item;"
+    for number, (item, cls) in enumerate(entries):
+        field = f"ITEM{number}"
+        lambda_name = f"lambda$new${number}"
+        fields.append((0x0019, field, "Ljava/lang/Object;"))
+        code = (b"\xbb" + struct.pack(">H", pool.cls(cls))  # new
+                + b"\x59"  # dup
+                + b"\xb2" + struct.pack(">H", pool.fref(itemcode.ARMOR_TYPE, "HELMET", itemcode.ARMOR_TYPE))
+                + b"\x2a"  # aload_0: the properties
+                + b"\xb7" + struct.pack(">H", pool.mref(cls, "<init>", item_desc))
+                + b"\xb0")  # areturn
+        methods.append((0x100A, lambda_name, lambda_desc, code))
+        handle = pool.mhandle(6, name, lambda_name, lambda_desc)
+        args = [pool.mtype("()Ljava/util/function/Function;"), handle, pool.mtype(lambda_desc)]
+        bootstrap += struct.pack(">HH", handle, len(args)) + b"".join(struct.pack(">H", a) for a in args)
+        indy = pool.add(("indy", number), b"\x12" + struct.pack(
+            ">HH", number, pool.nat("apply", "()Ljava/util/function/Function;")))
+        clinit += b"\x12" + bytes([pool.string(item)])  # ldc the item name
+        clinit += b"\xba" + struct.pack(">H", indy) + b"\x00\x00"  # invokedynamic
+        clinit += b"\xb3" + struct.pack(">H", pool.fref(name, field, "Ljava/lang/Object;"))
+    methods.append((0x0008, "<clinit>", "()V", clinit + b"\xb1"))
+    body = struct.pack(">H", len(entries)) + bootstrap
+    return pool.build(name, "java/lang/Object", fields, methods, body)
+
+
+def _vanilla_mod(tmp_path: Path) -> SourceMod:
+    """The synthetic fixture of #438: a mod whose armor is built on vanilla's
+    own ``ArmorMaterials`` (netherite, and a constant the table doesn't have),
+    with the classes assembled here (no javac in the tree)."""
+    classes = tmp_path / "classes" / "com" / "example" / "toy"
+    classes.mkdir(parents=True)
+    helmet = "com/example/toy/ToyVanillaHelmet"
+    mystery = "com/example/toy/ToyVanillaMystery"
+    (classes / "ToyVanillaHelmet.class").write_bytes(_vanilla_item_class(helmet, "NETHERITE"))
+    (classes / "ToyVanillaMystery.class").write_bytes(_vanilla_item_class(mystery, "TOY_ONLY"))
+    (classes / "ToyVanillaItems.class").write_bytes(_vanilla_registry(
+        "com/example/toy/ToyVanillaItems", [("netherite_toy_helmet", helmet),
+                                            ("mystery_toy_helmet", mystery)]))
+    mod = SourceMod(root=tmp_path, namespace="toy", loader="fabric", minecraft="1.20.1")
+    mod.classes = ClassIndex.from_source(tmp_path / "classes")
+    return mod
+
+
+def test_the_vanilla_table_has_the_cited_values():
+    table = itemcode.VANILLA_ARMOR_MATERIALS
+    assert set(table) == {"LEATHER", "CHAINMAIL", "IRON", "GOLD", "DIAMOND", "NETHERITE"}
+    netherite = table["NETHERITE"]
+    assert netherite.defense == {"HELMET": 3, "CHESTPLATE": 8, "LEGGINGS": 6, "BOOTS": 3}
+    assert netherite.durability == {"HELMET": 407, "CHESTPLATE": 590, "LEGGINGS": 555, "BOOTS": 481}
+    assert (netherite.enchantability, netherite.toughness, netherite.knockback) == (15, 3.0, 0.1)
+    assert table["LEATHER"].defense == {"HELMET": 1, "CHESTPLATE": 3, "LEGGINGS": 2, "BOOTS": 1}
+    assert table["LEATHER"].durability == {"HELMET": 55, "CHESTPLATE": 80, "LEGGINGS": 75, "BOOTS": 65}
+    assert table["IRON"].defense == {"HELMET": 2, "CHESTPLATE": 6, "LEGGINGS": 5, "BOOTS": 2}
+    assert table["GOLD"].durability == {"HELMET": 77, "CHESTPLATE": 112, "LEGGINGS": 105, "BOOTS": 91}
+    assert table["DIAMOND"].toughness == 2.0
+    # Enchantability per material (supervisor correction at collection: the
+    # worker's table carried 15 for every material; the cited enum has
+    # leather 15, chainmail 12, iron 9, gold 25, diamond 10, netherite 15).
+    assert {name: stats.enchantability for name, stats in table.items()} == {
+        "LEATHER": 15, "CHAINMAIL": 12, "IRON": 9, "GOLD": 25,
+        "DIAMOND": 10, "NETHERITE": 15}
+    assert table["CHAINMAIL"].toughness == 0.0 and table["CHAINMAIL"].knockback == 0.0
+    # The table says where its numbers come from.
+    assert "0c3ec587af28e5a785c0b4a7b8a30f9a8f78f838" in itemcode.VANILLA_SOURCES["armor_materials_1_20"]
+
+
+def test_only_a_vanilla_material_the_table_has_is_read():
+    assert itemcode.vanilla_armor_material(VANILLA_MATERIAL, "NETHERITE") is not None
+    # A constant the table doesn't have is not answered (no partial entry).
+    assert itemcode.vanilla_armor_material(VANILLA_MATERIAL, "TOY_ONLY") is None
+    # A mod's own material enum is not vanilla's.
+    assert itemcode.vanilla_armor_material(TOY + "ToyPlate", "PLATE") is None
+
+
+def test_a_vanilla_material_piece_converts(tmp_path):
+    """An armor item built on vanilla's own material converts with the
+    numbers of the cited table (#438)."""
+    mod = _vanilla_mod(tmp_path)
+    files = {"items/netherite_toy_helmet.json": _item("toy:netherite_toy_helmet")}
+    result = armor.convert(mod, files)
+    helmet = result.files["items/netherite_toy_helmet.json"]
+    components = helmet["minecraft:item"]["components"]
+    table = itemcode.VANILLA_ARMOR_MATERIALS["NETHERITE"]
+    assert components["minecraft:wearable"] == {"slot": "slot.armor.head", "protection": 3}
+    assert components["minecraft:durability"] == {"max_durability": 407}
+    assert components["minecraft:enchantable"] == {"slot": "armor_head", "value": 15}
+    assert components["minecraft:max_stack_size"] == 1
+    # The numbers are the table's.
+    assert components["minecraft:wearable"]["protection"] == table.defense["HELMET"]
+    assert components["minecraft:durability"]["max_durability"] == table.durability["HELMET"]
+    assert components["minecraft:enchantable"]["value"] == table.enchantability
+    # The citation says where they came from.
+    notes = " ".join(result.notes)
+    assert "ArmorMaterials.NETHERITE" in notes and "ArmorMaterials" in notes
+
+
+def _create_fixture(tmp_path: Path) -> SourceMod:
+    """The synthetic fixture of Create's own registry: an armor item built on
+    vanilla's ``ArmorMaterials``, registered in ``AllItems``."""
+    classes = tmp_path / "classes" / "com" / "simibubi" / "create"
+    classes.mkdir(parents=True)
+    helmet = "com/simibubi/create/DivingHelmetItem"
+    (classes / "DivingHelmetItem.class").write_bytes(_vanilla_item_class(helmet, "NETHERITE"))
+    (classes / "AllItems.class").write_bytes(_vanilla_registry(
+        "com/simibubi/create/AllItems", [("netherite_diving_helmet", helmet)]))
+    mod = SourceMod(root=tmp_path, namespace="create", loader="forge", minecraft="1.20.1")
+    mod.classes = ClassIndex.from_source(tmp_path / "classes")
+    return mod
+
+
+def test_the_create_adapter_answers_a_vanilla_material(tmp_path):
+    """Create's adapter answers a piece built on vanilla's own material (#438)."""
+    from portkit.adapters.create.armor import item_armor
+
+    mod = _create_fixture(tmp_path)
+    found = item_armor(mod, frozenset({"netherite_diving_helmet"}))
+    piece = found["netherite_diving_helmet"]
+    assert isinstance(piece, itemcode.ArmorPiece)
+    table = itemcode.VANILLA_ARMOR_MATERIALS["NETHERITE"]
+    assert (piece.kind, piece.protection, piece.durability, piece.enchantability) == ("HELMET", 3, 407, 15)
+    assert piece.toughness == 3.0 and piece.knockback == pytest.approx(0.1)
+    assert piece.protection == table.defense["HELMET"] and piece.durability == table.durability["HELMET"]
+    assert "ArmorMaterials table" in piece.source
+
+
+def test_a_vanilla_material_the_table_does_not_have_stays_unread(tmp_path):
+    """A constant of vanilla's enum the table doesn't have is not answered."""
+    mod = _vanilla_mod(tmp_path)
+    assert armor.code_armor(mod, frozenset({"mystery_toy_helmet"})) == {}
+    tags = tmp_path / "data" / "minecraft" / "tags" / "item" / "trimmable_armor.json"
+    tags.parent.mkdir(parents=True)
+    tags.write_text(json.dumps({"values": ["toy:mystery_toy_helmet"]}))
+    model = tmp_path / "assets" / "toy" / "models" / "item" / "mystery_toy_helmet.json"
+    model.parent.mkdir(parents=True)
+    model.write_text(json.dumps({"parent": "item/generated"}))
+    files = {"items/mystery_toy_helmet.json": _item("toy:mystery_toy_helmet")}
+    result = armor.convert(mod, files)
+    assert "items/mystery_toy_helmet.json" not in result.files
+    (entry,) = result.unhandled
+    assert entry.kind == "armor" and "toy:mystery_toy_helmet is armor in Java" in entry.reason
+
