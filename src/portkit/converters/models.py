@@ -123,6 +123,21 @@ def model_path(mod: SourceMod, reference: str) -> Path | None:
     return mod.assets / "models" / f"{rel}.json"
 
 
+# The keys a Connected Textures Mod model carries (CTM's own model format:
+# "ctm_version" and "ctm_overrides"), beside the "ctm" sidecar section the
+# textures converter reads (portkit.converters.textures.CTM_SECTION).
+CTM_MODEL_KEYS = ("ctm_overrides", "ctm_version")
+
+
+def is_ctm_model(body) -> bool:
+    """Whether a parsed model file is a Connected Textures Mod model.
+
+    CTM reads a model's "ctm_overrides" to pick the face texture from the
+    block's neighbours; Bedrock's block textures are fixed per face.
+    """
+    return isinstance(body, dict) and any(key in body for key in CTM_MODEL_KEYS)
+
+
 def resolve(mod: SourceMod, model: dict) -> tuple[dict, list[Path], str]:
     """Flatten a model against its parent chain inside this mod.
 

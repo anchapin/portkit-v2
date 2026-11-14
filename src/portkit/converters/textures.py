@@ -208,6 +208,11 @@ def convert(mod: SourceMod, derived=()) -> ConversionResult:
                     # texture goes with it as for any unmapped sidecar.
                     result.unhandled.append(
                         Unhandled(sidecar_rel, CONNECTED_TEXTURE, _ctm_reason(meta[CTM_SECTION])))
+                    # The key this texture would have had (#288): a block or
+                    # item wearing it is withdrawn for a missing texture, and
+                    # that is connected-texture residue, not an unexplained
+                    # one.
+                    result.connected_textures.add(atlas_tile)
                     continue
                 if animation is None:
                     result.unhandled.append(
