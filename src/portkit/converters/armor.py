@@ -29,10 +29,10 @@ The core reads the armor itself when no adapter answers for the mod
 constructor chain up to vanilla ``ArmorItem``, the ``ArmorMaterial`` enum
 constant it is built on and that constant's numbers. The numbers are the
 material's, so a piece is read only when the material is the mod's own enum
-(vanilla's materials are Minecraft's code, not in the jar), the item class
-decides none of them in code and no ``Item.Properties`` call sets one. What
-that reader can't read keeps today's outcome: a plain item, and residue when
-Java's tags call it armor.
+or one of vanilla's own ``ArmorMaterials`` the cited table has (#438), the
+item class decides none of them in code and no ``Item.Properties`` call sets
+one. What that reader can't read keeps today's outcome: a plain item, and
+residue when Java's tags call it armor.
 
 A mod item Java's own data marks as armor (its ``#minecraft:head_armor``,
 ``chest_armor``, ``leg_armor``, ``foot_armor`` or ``trimmable_armor``
@@ -176,9 +176,10 @@ def code_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
     class's registration lambda builds, its constructor chain up to vanilla
     ``ArmorItem`` (:func:`portkit.itemcode.armor_item_args`), the
     ``ArmorMaterial`` enum constant it is built on and that constant's
-    numbers (:func:`portkit.itemcode.armor_material_enum`). The numbers are
-    the material's, so the piece is only read when the material is the mod's
-    own enum (vanilla's materials are Minecraft's code, not in the jar), when
+    numbers (:func:`portkit.itemcode.armor_material_enum`, or the cited
+    vanilla table for a material of vanilla's own ``ArmorMaterials`` enum,
+    #438). The numbers are the material's, so the piece is only read when the
+    material is the mod's own enum or one of vanilla's own the table has, when
     the item class decides none of them in code and when no ``Item.Properties``
     call sets one. Everything else stays unread, and the item keeps today's
     outcome (a plain item, and residue when Java's tags call it armor)."""
@@ -205,15 +206,25 @@ def code_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
             continue
         if itemcode.decides_armor_in_code(index, built.cls) is not False:
             continue
-        stats = itemcode.armor_material_enum(index, material.owner).get(material.name)
+        # A material of vanilla's own enum has its numbers in the cited
+        # ArmorMaterials table (#438); a mod's own enum has them in the jar.
+        vanilla = itemcode.vanilla_armor_material(material.owner, material.name)
+        stats = vanilla if vanilla is not None else itemcode.armor_material_enum(index, material.owner).get(material.name)
         if stats is None:
             continue
         cls = built.cls.rsplit("/", 1)[-1]
-        source = (f"{mod.namespace} jar: {cname} registers {name} as new {cls}(...), whose constructor chain reaches "
-                  f"vanilla's ArmorItem with the material {material.owner.rsplit('/', 1)[-1]}.{material.name} and the "
-                  f"type {getattr(kind, 'name', kind)}; the material's own getters give the armor points, "
-                  "enchantability, toughness, knockback resistance and durability; "
-                  + itemcode.VANILLA_SOURCES["armor_stats_1_20"])
+        if vanilla is not None:
+            source = (f"{mod.namespace} jar: {cname} registers {name} as new {cls}(...), whose constructor chain "
+                      f"reaches vanilla's ArmorItem with the material {material.owner.rsplit('/', 1)[-1]}."
+                      f"{material.name} and the type {getattr(kind, 'name', kind)}; the material is vanilla's own, "
+                      "so its armor points, enchantability, toughness, knockback resistance and durability are the "
+                      "ones of the ArmorMaterials table; " + itemcode.VANILLA_SOURCES["armor_materials_1_20"])
+        else:
+            source = (f"{mod.namespace} jar: {cname} registers {name} as new {cls}(...), whose constructor chain "
+                      f"reaches vanilla's ArmorItem with the material {material.owner.rsplit('/', 1)[-1]}."
+                      f"{material.name} and the type {getattr(kind, 'name', kind)}; the material's own getters give "
+                      "the armor points, enchantability, toughness, knockback resistance and durability; "
+                      + itemcode.VANILLA_SOURCES["armor_stats_1_20"])
         piece = itemcode.armor_piece(stats, kind, None, source)
         if piece is not None:
             found[name] = piece

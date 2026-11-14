@@ -12,13 +12,15 @@ return constructor fields. Vanilla 1.20.1 ``ArmorItem`` takes its armor points,
 toughness, knockback resistance, durability and enchantability from the
 material (:data:`portkit.itemcode.VANILLA_SOURCES`). All of it is read from the
 jar at conversion time with :mod:`portkit.itemcode`; nothing is copied here.
+Armor built on vanilla's own ``ArmorMaterials`` enum (``netherite_diving_helmet``
+/ ``_boots``) has no material of Create's own to read, so its numbers come from
+the cited vanilla table (:data:`portkit.itemcode.VANILLA_ARMOR_MATERIALS`,
+#438).
 
 Not answered (so the core leaves them non-wearable, as residue when Java's tags
 call them armor): an item class that decides a number in code
 (``BacktankItem`` overrides ``canBeDepleted``/``isEnchantable``; the backtanks
-ship as blocks anyway), and armor built on vanilla's ``ArmorMaterials``
-(``netherite_diving_helmet``/``_boots``), whose numbers are vanilla code that
-isn't in Create's jar.
+ship as blocks anyway).
 """
 from __future__ import annotations
 
@@ -58,16 +60,22 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
         if calls is None or desc != itemcode.ARMOR_ITEM_1_20 or not isinstance(material, itemcode.Static):
             continue
         if material.owner.startswith("net/minecraft/"):
-            found[name] = (f"it is built on vanilla's {material.owner.rsplit('/', 1)[-1]}.{material.name}, "
-                           "whose numbers are Minecraft's code, not in Create's jar")
-            continue
+            # A material of vanilla's own ArmorMaterials enum has its numbers
+            # in the cited table (#438); any other vanilla owner has none.
+            vanilla = itemcode.vanilla_armor_material(material.owner, material.name)
+            if vanilla is None:
+                found[name] = (f"it is built on vanilla's {material.owner.rsplit('/', 1)[-1]}.{material.name}, "
+                               "whose numbers are Minecraft's code, not in Create's jar")
+                continue
+        else:
+            vanilla = None
         if itemcode.decides_armor_in_code(index, built.cls) is not False:
             found[name] = (f"its class {built.cls.rsplit('/', 1)[-1]} decides some of its numbers in code "
                            f"({', '.join(itemcode.armor_overrides(index, built.cls)) or 'a superclass not in the jar'})")
             continue
         if set(props + made) & itemcode.ARMOR_PROPERTY_CALLS or set(calls) & _PROPERTY_BUILDERS:
             continue
-        stats = itemcode.armor_material_enum(index, material.owner).get(material.name)
+        stats = vanilla if vanilla is not None else itemcode.armor_material_enum(index, material.owner).get(material.name)
         cls = built.cls.rsplit("/", 1)[-1]
         rules = itemcode.enchantment_overrides(index, built.cls)
         extra = (f"which enchantments it takes, decided by {cls} in code ({', '.join(rules)})",) if rules else ()
@@ -76,9 +84,21 @@ def item_armor(mod: SourceMod, names: frozenset) -> dict[str, object]:
             look = itemcode.ArmorLook(look.kind, look.namespace, look.path, look.suffix,
                                       f"Create mc1.20.1-6.0.8 jar: AllItems.<clinit> registers {name} as new {cls}(...); "
                                       + look.source)
-        piece = itemcode.armor_piece(stats, kind, None, CITE.format(
-            name=name, cls=cls, material=f"{material.owner.rsplit('/', 1)[-1]}.{material.name}",
-            type=getattr(kind, "name", kind)), extra, look=look, material=material.name) if stats else None
+        elif vanilla is not None:
+            # The worn texture is vanilla's own, not Create's.
+            look = (f"its worn texture is vanilla's own minecraft:{material.name.lower()}_layer_"
+                    f"{2 if getattr(kind, 'name', kind) == 'LEGGINGS' else 1}.png, which isn't in Create's jar")
+        if vanilla is not None:
+            source = (f"Create mc1.20.1-6.0.8 jar: AllItems.<clinit> registers {name} as new {cls}(...), which "
+                      f"builds ArmorItem({material.owner.rsplit('/', 1)[-1]}.{material.name}, "
+                      f"{getattr(kind, 'name', kind)}); the material is vanilla's own, so its armor points, "
+                      "enchantability, toughness, knockback resistance and durability are the ones of the "
+                      "ArmorMaterials table; " + itemcode.VANILLA_SOURCES["armor_materials_1_20"])
+        else:
+            source = CITE.format(
+                name=name, cls=cls, material=f"{material.owner.rsplit('/', 1)[-1]}.{material.name}",
+                type=getattr(kind, "name", kind))
+        piece = itemcode.armor_piece(stats, kind, None, source, extra, look=look, material=material.name) if stats else None
         if piece is not None:
             found[name] = piece
     return found

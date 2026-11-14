@@ -20,6 +20,10 @@ that are plain data in a class file, the same way for every mod:
   ``getDurabilityForType(ArmorItem.Type)``, when it is ``ARRAY[type.ordinal()]
   * this.field`` (the shape vanilla's own ``ArmorMaterials`` has), per constant
   and armor piece.
+* :func:`vanilla_armor_material` reads the numbers of a constant of vanilla's
+  own 1.20 ``ArmorMaterials`` enum from the table transcribed from the cited
+  client jar (:data:`VANILLA_ARMOR_MATERIALS`), for the armor a mod builds on
+  it (#438).
 * :func:`registration_lambda` and :func:`constructed` follow a registration
   that names an item by a string and builds it in a lambda (Registrate's
   ``item("name", Factory::new)`` and the like): the lambda's method, then the
@@ -422,6 +426,12 @@ VANILLA_SOURCES.update({
                          "material.getKnockbackResistance(); ArmorItem#getEnchantmentValue() = "
                          "material.getEnchantmentValue() (client jar sha1 "
                          "0c3ec587af28e5a785c0b4a7b8a30f9a8f78f838, Mojang client.txt)"),
+    "armor_materials_1_20": ("Minecraft 1.20.1 net.minecraft.world.item.ArmorMaterials: each constant's "
+                             "constructor arguments are the helmet, chestplate, leggings and boots armor points, "
+                             "the enchantment value, the equip sound, the toughness, the knockback resistance, the "
+                             "repair ingredient, the layers and the four durabilities, e.g. NETHERITE(3, 8, 6, 3, "
+                             "15, ..., 3.0F, 0.1F, ..., 407, 590, 555, 481) (client jar sha1 "
+                             "0c3ec587af28e5a785c0b4a7b8a30f9a8f78f838, Mojang client.txt)"),
     "armor_stats_1_21": ("Minecraft 1.21.1 net.minecraft.world.item.ArmorItem: getDefense() = "
                          "material.value().getDefense(type), getEnchantmentValue() = "
                          "material.value().enchantmentValue(), from the record ArmorMaterial(defense, "
@@ -517,6 +527,49 @@ def _getter_values(cf: ClassFile, name: str, desc: str) -> dict[str, object] | N
     if kind == "const":
         return {k: what for k, v in static_values(cf).items() if isinstance(v, New) and v.cls == cf.name}
     return _per_constant(cf, what)
+
+
+VANILLA_ARMOR_MATERIAL = "net/minecraft/world/item/ArmorMaterials"
+# Vanilla 1.20.1's own armor materials, transcribed from the enum's
+# constructor arguments (Minecraft 1.20.1 net.minecraft.world.item.ArmorMaterials,
+# client jar sha1 0c3ec587af28e5a785c0b4a7b8a30f9a8f78f838, Mojang client.txt,
+# :data:`VANILLA_SOURCES`["armor_materials_1_20"]):
+#
+#   LEATHER   (1, 3, 2, 1, 15, ..., 0.0F, 0.0F, ..., 55, 80, 75, 65)
+#   CHAINMAIL (2, 5, 4, 1, 12, ..., 0.0F, 0.0F, ..., 165, 240, 225, 195)
+#   IRON      (2, 6, 5, 2, 9, ..., 0.0F, 0.0F, ..., 165, 240, 225, 195)
+#   GOLD      (2, 5, 3, 1, 25, ..., 0.0F, 0.0F, ..., 77, 112, 105, 91)
+#   DIAMOND   (3, 8, 6, 3, 10, ..., 2.0F, 0.0F, ..., 363, 528, 495, 429)
+#   NETHERITE (3, 8, 6, 3, 15, ..., 3.0F, 0.1F, ..., 407, 590, 555, 481)
+#
+# that is, the armor points of the helmet, chestplate, leggings and boots, the
+# enchantment value, the toughness, the knockback resistance and the four
+# durabilities, in that order. Nothing here is computed or guessed: a
+# constant the table doesn't have (a 1.21 material, a mod's own material) is
+# not in it, and stays unread.
+VANILLA_ARMOR_MATERIALS: dict[str, ArmorStats] = {
+    "LEATHER": ArmorStats({"HELMET": 1, "CHESTPLATE": 3, "LEGGINGS": 2, "BOOTS": 1}, 15, 0.0, 0.0,
+                           {"HELMET": 55, "CHESTPLATE": 80, "LEGGINGS": 75, "BOOTS": 65}),
+    "CHAINMAIL": ArmorStats({"HELMET": 2, "CHESTPLATE": 5, "LEGGINGS": 4, "BOOTS": 1}, 12, 0.0, 0.0,
+                            {"HELMET": 165, "CHESTPLATE": 240, "LEGGINGS": 225, "BOOTS": 195}),
+    "IRON": ArmorStats({"HELMET": 2, "CHESTPLATE": 6, "LEGGINGS": 5, "BOOTS": 2}, 9, 0.0, 0.0,
+                       {"HELMET": 165, "CHESTPLATE": 240, "LEGGINGS": 225, "BOOTS": 195}),
+    "GOLD": ArmorStats({"HELMET": 2, "CHESTPLATE": 5, "LEGGINGS": 3, "BOOTS": 1}, 25, 0.0, 0.0,
+                       {"HELMET": 77, "CHESTPLATE": 112, "LEGGINGS": 105, "BOOTS": 91}),
+    "DIAMOND": ArmorStats({"HELMET": 3, "CHESTPLATE": 8, "LEGGINGS": 6, "BOOTS": 3}, 10, 2.0, 0.0,
+                          {"HELMET": 363, "CHESTPLATE": 528, "LEGGINGS": 495, "BOOTS": 429}),
+    "NETHERITE": ArmorStats({"HELMET": 3, "CHESTPLATE": 8, "LEGGINGS": 6, "BOOTS": 3}, 15, 3.0, 0.1,
+                            {"HELMET": 407, "CHESTPLATE": 590, "LEGGINGS": 555, "BOOTS": 481}),
+}
+
+
+def vanilla_armor_material(owner: str, name: str) -> ArmorStats | None:
+    """The stats of a vanilla 1.20 ``ArmorMaterials`` constant, when the table
+    above has it; None for anything else (a mod's own material enum, a 1.21
+    ``ArmorMaterial`` record, a constant vanilla's enum doesn't have)."""
+    if owner != VANILLA_ARMOR_MATERIAL:
+        return None
+    return VANILLA_ARMOR_MATERIALS.get(name)
 
 
 def armor_material_enum(index: ClassIndex, owner: str) -> dict[str, ArmorStats]:
