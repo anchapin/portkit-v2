@@ -66,26 +66,44 @@ def test_default_frametime_is_one_tick(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "animation, expected",
+    "animation, kind, expected",
     [
-        ({"frames": [{"index": 0, "time": 5}, 1]}, "per-frame timings"),
-        ({"width": 8, "height": 8}, "custom frame size"),
-        ({"frametime": 0}, "positive tick count"),
+        ({"frames": [{"index": 0, "time": 5}, 1]}, "no_bedrock_frame_timing", "per-frame timings"),
+        ({"width": 8, "height": 8}, "no_bedrock_frame_size", "custom frame size"),
+        ({"frametime": 0}, "unmapped_texture_metadata", "positive tick count"),
     ],
 )
-def test_unmappable_animation_drops_the_texture_too(tmp_path, animation, expected):
+def test_unmappable_animation_drops_the_texture_too(tmp_path, animation, kind, expected):
     mod = build(tmp_path, {"animation": animation})
     result = textures.convert(mod)
-    assert [u.kind for u in result.unhandled] == ["texture_animation"]
+    assert [u.kind for u in result.unhandled] == [kind]
     assert expected in result.unhandled[0].reason
     # the whole point: no static texture, no index entry, nothing that looks converted
+    assert result.files == {}
+
+
+def test_the_unmappable_animation_kinds_are_explained():
+    # #288: the residue agent skips these kinds outright: no session can
+    # express a per-frame timing or a custom frame size in a Bedrock flipbook.
+    from portkit.agent.residue import SKIP_KINDS
+
+    assert {"no_bedrock_frame_timing", "no_bedrock_frame_size",
+            "unreadable_texture_metadata", "unmapped_texture_metadata"} <= set(SKIP_KINDS)
+
+
+def test_an_animation_that_is_not_an_object_is_residue(tmp_path):
+    # A sidecar whose "animation" is not an object: nothing can be read from
+    # it, and it must not raise.
+    mod = build(tmp_path, {"animation": "fast"})
+    result = textures.convert(mod)
+    assert [u.kind for u in result.unhandled] == ["unmapped_texture_metadata"]
     assert result.files == {}
 
 
 def test_sidecar_without_an_animation_block_is_residue(tmp_path):
     mod = build(tmp_path, {"villager": {"type": "toolsmith"}})
     result = textures.convert(mod)
-    assert [u.kind for u in result.unhandled] == ["texture_animation"]
+    assert [u.kind for u in result.unhandled] == ["unmapped_texture_metadata"]
     assert result.files == {}
 
 

@@ -6,8 +6,10 @@ drop_untextured. Before #288 that withdrawal was recorded with the generic
 "block" kind and a reason that said nothing about CTM, so the residue read
 as unexplained. It must carry the connected-texture kind and say why.
 """
-from portkit.converters import models, textures
-from portkit.model import ConversionResult
+import json
+
+from portkit.converters import blocks, models, textures
+from portkit.model import ConversionResult, SourceMod
 from portkit.pipeline import drop_untextured
 
 
@@ -47,3 +49,35 @@ def test_a_block_wearing_a_plain_missing_texture_keeps_the_generic_kind():
     [entry] = result.unhandled
     assert entry.kind == "block"
     assert "Connected Textures Mod" not in entry.reason
+
+
+def _mod(tmp_path, model):
+    assets = tmp_path / "assets" / "examplemod"
+    (assets / "blockstates").mkdir(parents=True, exist_ok=True)
+    (assets / "models" / "block").mkdir(parents=True, exist_ok=True)
+    (assets / "blockstates" / "plate.json").write_text(json.dumps(
+        {"variants": {"": {"model": "examplemod:block/plate"}}}))
+    (assets / "models" / "block" / "plate.json").write_text(json.dumps(model))
+    return SourceMod(root=tmp_path, namespace="examplemod")
+
+
+def test_a_block_whose_model_is_a_ctm_model_is_connected_texture_residue(tmp_path):
+    # #288: the block's own model carries CTM's ctm_overrides, so CTM picks
+    # the face texture from the neighbours. The block converter used to take
+    # it for a plain cube (its parent's textures), which shows a texture
+    # Java never draws; it is connected-texture residue instead.
+    mod = _mod(tmp_path, {"ctm_version": 1, "ctm_overrides": {"all": {"model": "other"}},
+                          "parent": "minecraft:block/cube_all",
+                          "textures": {"all": "examplemod:block/plate"}})
+    result = blocks.convert(mod)
+    assert [u.kind for u in result.unhandled] == [textures.CONNECTED_TEXTURE]
+    assert "Connected Textures Mod model" in result.unhandled[0].reason
+    assert "blocks/plate.json" not in result.files
+
+
+def test_a_plain_block_still_converts(tmp_path):
+    mod = _mod(tmp_path, {"parent": "minecraft:block/cube_all",
+                          "textures": {"all": "examplemod:block/plate"}})
+    result = blocks.convert(mod)
+    assert result.unhandled == []
+    assert "blocks/plate.json" in result.files

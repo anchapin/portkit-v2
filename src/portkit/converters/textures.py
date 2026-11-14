@@ -36,23 +36,55 @@ _LANES = {
 JAVA_DIRS = frozenset(d for dirs, *_ in _LANES.values() for d in dirs)
 
 
-def _flipbook(animation: dict, texture_path: str, atlas_tile: str) -> tuple[dict | None, str | None]:
-    """Map a Java animation block to a Bedrock flipbook entry, or say why not."""
+# The explained kinds the animation residue is filed under (#288). Bedrock's
+# flipbook is a fixed format, so what Java's animation metadata says beyond
+# it has no Bedrock form; the reason names what is missing.
+NO_BEDROCK_FRAME_TIMING = "no_bedrock_frame_timing"
+NO_BEDROCK_FRAME_SIZE = "no_bedrock_frame_size"
+# A sidecar whose sections can't be read at all, and one whose sections are
+# none this converter maps (neither Java's "animation" nor CTM's "ctm").
+UNREADABLE_TEXTURE_METADATA = "unreadable_texture_metadata"
+UNMAPPED_TEXTURE_METADATA = "unmapped_texture_metadata"
+
+
+def _flipbook(animation, texture_path: str, atlas_tile: str) -> tuple[dict | None, str | None, str | None]:
+    """Map a Java animation block to a Bedrock flipbook entry, or say why not.
+
+    Returns ``(entry, kind, reason)``: the kind is the explained residue kind
+    the texture is filed under when there is no entry, and the reason says
+    what Bedrock's flipbook can't carry.
+    """
+    if not isinstance(animation, dict):
+        return None, UNMAPPED_TEXTURE_METADATA, (
+            f"the sidecar's animation section is {type(animation).__name__}, not an object, "
+            "so no animation can be read from it"
+        )
     if "width" in animation or "height" in animation:
-        return None, "animation declares a custom frame size, which Bedrock derives from the strip"
+        return None, NO_BEDROCK_FRAME_SIZE, (
+            "animation declares a custom frame size, which Bedrock derives from the strip"
+        )
 
     frames = animation.get("frames")
     order: list[int] = []
     if frames is not None:
+        if not isinstance(frames, list):
+            return None, UNMAPPED_TEXTURE_METADATA, (
+                f"animation gives frames as {type(frames).__name__}, not a list, so no frame order can be read"
+            )
         for frame in frames:
-            if isinstance(frame, int):
+            if isinstance(frame, int) and not isinstance(frame, bool):
                 order.append(frame)
             else:
-                return None, "animation gives per-frame timings, which Bedrock flipbooks cannot express"
+                return None, NO_BEDROCK_FRAME_TIMING, (
+                    "animation gives per-frame timings, which Bedrock flipbooks cannot express "
+                    "(a Bedrock flipbook has one ticks_per_frame for the whole strip)"
+                )
 
     frametime = animation.get("frametime", 1)
-    if not isinstance(frametime, int) or frametime < 1:
-        return None, f"animation frametime {frametime!r} is not a positive tick count"
+    if not isinstance(frametime, int) or isinstance(frametime, bool) or frametime < 1:
+        return None, UNMAPPED_TEXTURE_METADATA, (
+            f"animation frametime {frametime!r} is not a positive tick count"
+        )
 
     entry = {
         "flipbook_texture": texture_path,
@@ -62,7 +94,7 @@ def _flipbook(animation: dict, texture_path: str, atlas_tile: str) -> tuple[dict
     }
     if order:
         entry["frames"] = order
-    return entry, None
+    return entry, None, None
 
 
 # Anything a texture key can't hold after "/" and "-" are flattened
@@ -188,18 +220,18 @@ def convert(mod: SourceMod, derived=()) -> ConversionResult:
                 try:
                     meta = json.loads(sidecar.read_text())
                 except json.JSONDecodeError as exc:
-                    # Pick 2a (#348): a sidecar that isn't valid JSON stays
-                    # texture_animation residue, never the explained
-                    # connected_texture kind: its sections can't be read, so
-                    # it isn't known to be CTM's, and an unreadable file must
-                    # not be claimed as explained. Java's own reader may be
+                    # Pick 2a (#348): a sidecar that isn't valid JSON is not
+                    # the explained connected_texture kind: its sections can't
+                    # be read, so it isn't known to be CTM's. It is the
+                    # explained unreadable_texture_metadata kind (#288): the
+                    # texture goes with it, because Java's own reader may be
                     # lenient (Gson's JsonParser.parse(Reader) sets its reader
-                    # lenient, gson 2.8.0 JsonParser.java line 82), so some of
-                    # these may still be read by Java; what its animation
-                    # parser makes of them is unchecked, so nothing is claimed
-                    # here either way.
+                    # lenient, gson 2.8.0 JsonParser.java line 82) and so may
+                    # still read an animation from it, which a static Bedrock
+                    # texture would not show. Nothing is claimed about what
+                    # Java makes of it either way.
                     result.unhandled.append(
-                        Unhandled(sidecar_rel, "texture_animation", f"invalid JSON: {exc}")
+                        Unhandled(sidecar_rel, UNREADABLE_TEXTURE_METADATA, f"invalid JSON: {exc}")
                     )
                     continue
                 animation = meta.get("animation") if isinstance(meta, dict) else None
@@ -215,19 +247,26 @@ def convert(mod: SourceMod, derived=()) -> ConversionResult:
                     result.connected_textures.add(atlas_tile)
                     continue
                 if animation is None:
+                    # A sidecar with no animation block (#288): the sections it
+                    # carries are none this converter maps, so the texture's
+                    # look is set by the mod's code or by another mod (Optifine
+                    # and friends read their own sections). The texture goes
+                    # with the sidecar: shipping it as a static image would
+                    # claim a look nothing here can state.
+                    sections = sorted(meta) if isinstance(meta, dict) else []
                     result.unhandled.append(
                         Unhandled(
                             sidecar_rel,
-                            "texture_animation",
-                            f"sidecar has no animation block; {sorted(meta)} is not something we map",
+                            UNMAPPED_TEXTURE_METADATA,
+                            f"sidecar has no animation block; {sections} is not something we map",
                         )
                     )
                     continue
-                entry, why = _flipbook(animation, texture_path, atlas_tile)
+                entry, kind, why = _flipbook(animation, texture_path, atlas_tile)
                 if entry is None:
                     # Shipping the strip as a static texture would look like success
                     # and render wrong, so the texture goes with it.
-                    result.unhandled.append(Unhandled(sidecar_rel, "texture_animation", why))
+                    result.unhandled.append(Unhandled(sidecar_rel, kind, why))
                     continue
                 flipbooks.append(entry)
 
