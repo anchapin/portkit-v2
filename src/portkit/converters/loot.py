@@ -16,6 +16,7 @@ and each approximation is a report note (#299, see the tools section below).
 """
 from __future__ import annotations
 
+import copy
 import itertools
 import json
 import re
@@ -58,6 +59,16 @@ _REFUSED_FUNCTIONS = {
     "minecraft:furnace_smelt": "the drop is smelted when the block burns",
 }
 
+# The three loot functions Bedrock has no equivalent for. Their identity
+# travels with the refusal so the filing site, not a reason string, decides
+# whether a table gets the explained loot_copy kind.
+_COPY_FUNCTIONS = frozenset({
+    "minecraft:copy_name",
+    "minecraft:copy_nbt",
+    "minecraft:copy_components",
+})
+LOOT_COPY = "loot_copy"
+
 _SUPPORTED_ENTRY_TYPES = {"minecraft:item", "item"}
 
 
@@ -75,6 +86,83 @@ def _reason_for_function(function: dict) -> str:
     if known:
         return f"{known} ({name})"
     return f"function {name!r} has no Bedrock equivalent"
+
+
+def _copy_function_names(data: dict) -> set[str]:
+    """Every copy function at a function site in the table.
+
+    This walks pool and entry function lists (including alternative children),
+    so a copy function is identified by the Java function id at its refusal
+    site, never by matching the text of a reason.
+    """
+    names: set[str] = set()
+
+    def functions(items) -> None:
+        if not isinstance(items, list):
+            return
+        for function in items:
+            if not isinstance(function, dict):
+                continue
+            name = function.get("function")
+            if isinstance(name, str) and name in _COPY_FUNCTIONS:
+                names.add(name)
+
+    def entry(item) -> None:
+        if not isinstance(item, dict):
+            return
+        functions(item.get("functions"))
+        children = item.get("children")
+        if isinstance(children, list):
+            for child in children:
+                entry(child)
+
+    pools = data.get("pools")
+    if isinstance(pools, list):
+        for pool in pools:
+            if not isinstance(pool, dict):
+                continue
+            functions(pool.get("functions"))
+            entries = pool.get("entries")
+            if isinstance(entries, list):
+                for item in entries:
+                    entry(item)
+    return names
+
+
+def _without_copy_functions(data: dict) -> dict:
+    """A copy of ``data`` with every copy function removed from its sites."""
+    out = copy.deepcopy(data)
+
+    def clean_functions(item: dict) -> None:
+        functions = item.get("functions")
+        if isinstance(functions, list):
+            item["functions"] = [
+                function for function in functions
+                if not (isinstance(function, dict)
+                        and isinstance(function.get("function"), str)
+                        and function.get("function") in _COPY_FUNCTIONS)
+            ]
+
+    def entry(item) -> None:
+        if not isinstance(item, dict):
+            return
+        clean_functions(item)
+        children = item.get("children")
+        if isinstance(children, list):
+            for child in children:
+                entry(child)
+
+    pools = out.get("pools")
+    if isinstance(pools, list):
+        for pool in pools:
+            if not isinstance(pool, dict):
+                continue
+            clean_functions(pool)
+            entries = pool.get("entries")
+            if isinstance(entries, list):
+                for item in entries:
+                    entry(item)
+    return out
 
 
 def _constant_count(function: dict) -> int | None:
@@ -163,7 +251,7 @@ def _function_guard(function: dict, block: str | None,
     return wanted, None
 
 
-def _table_for(name: str, functions: list[dict], explosion_decay: bool) -> tuple[dict | None, str | None]:
+def _table_for(name: str, functions: list[dict], explosion_decay: bool) -> dict:
     """The Bedrock table for one item entry and the functions that apply to it, in order."""
     count = None
     for function in functions:
@@ -171,15 +259,16 @@ def _table_for(name: str, functions: list[dict], explosion_decay: bool) -> tuple
         if fname in ("minecraft:set_count", "set_count"):
             value = _constant_count(function)
             if value is None:
-                return None, "the drop count is a range rather than a fixed number"
+                raise _Refused("the drop count is a range rather than a fixed number")
             if function.get("add") is True:
-                return None, "the drop count is added to (set_count add) rather than set"
+                raise _Refused("the drop count is added to (set_count add) rather than set")
             count = value
             continue
         if fname in ("minecraft:explosion_decay", "explosion_decay"):
             explosion_decay = True
             continue
-        return None, _reason_for_function(function)
+        raise _Refused(_reason_for_function(function),
+                       function.get("function") if function.get("function") in _COPY_FUNCTIONS else None)
 
     out: list[dict] = []
     if count is not None:
@@ -189,7 +278,7 @@ def _table_for(name: str, functions: list[dict], explosion_decay: bool) -> tuple
     bedrock_entry: dict = {"type": "item", "name": name}
     if out:
         bedrock_entry["functions"] = out
-    return {"pools": [{"rolls": 1, "entries": [bedrock_entry]}]}, None
+    return {"pools": [{"rolls": 1, "entries": [bedrock_entry]}]}
 
 
 # -- tools (#299) -----------------------------------------------------------
@@ -239,7 +328,22 @@ _ALWAYS: list = []
 
 
 class _Refused(Exception):
-    pass
+    """A conversion refusal, with the function that caused it when known.
+
+    ``function`` is the refusal site's function id, not text copied from a
+    reason.  It lets the filing code distinguish a copy-function refusal
+    from every other refusal without matching reason strings.
+    """
+
+    def __init__(self, reason: str, function: str | None = None):
+        super().__init__(reason)
+        self.function = function
+
+
+def _record_refusal(refused_functions: set[str] | None, exc: _Refused) -> None:
+    """Keep the identity of a copy-function refusal for the filing site."""
+    if refused_functions is not None and exc.function in _COPY_FUNCTIONS:
+        refused_functions.add(exc.function)
 
 
 def _silk(predicate: dict) -> bool:
@@ -448,7 +552,8 @@ def _plain_function(function: dict, where: str) -> tuple[int | None, bool]:
         return value, False
     if fname in ("minecraft:explosion_decay", "explosion_decay"):
         return None, True
-    raise _Refused(f"{where} has a function the drop can't keep ({_reason_for_function(function)})")
+    raise _Refused(f"{where} has a function the drop can't keep ({_reason_for_function(function)})",
+                   fname if fname in _COPY_FUNCTIONS else None)
 
 
 def _plain_drop(pool: dict, index: int, total: int) -> tuple[str, int | None, bool] | None:
@@ -509,13 +614,15 @@ def _plain_drop(pool: dict, index: int, total: int) -> tuple[str, int | None, bo
     return name, count, decay
 
 
-def _plain_table(pools: list) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
+def _plain_table(pools: list, refused_functions: set[str] | None = None
+                ) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
     """The Bedrock table for a table of several plain pools: one Bedrock pool
     per Java pool, so every pool's item drops, as in Java. (None, why) when a
     pool is not a plain drop."""
     try:
         drops = [_plain_drop(pool, i + 1, len(pools)) for i, pool in enumerate(pools)]
     except _Refused as exc:
+        _record_refusal(refused_functions, exc)
         return None, f"the table has {len(pools)} pools; {exc}"
     entries = []
     for drop in drops:
@@ -633,7 +740,9 @@ def fold_paired_half(data: dict, block: str, prop: str) -> dict:
 
 def convert_table(data: dict, block: str | None = None,
                   states: dict | None = None,
-                  approx: list[str] | None = None) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
+                  approx: list[str] | None = None,
+                  refused_functions: set[str] | None = None
+                  ) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
     """Return ([(permutation condition or None, Bedrock table), ...], None), or
     (None, why the table is refused). ``[]`` is a table that drops nothing.
 
@@ -652,6 +761,10 @@ def convert_table(data: dict, block: str | None = None,
     A table with several pools converts when every pool is a plain drop (#299):
     one Bedrock pool per Java pool, so every pool's item drops, as in Java. A
     pool that is not a plain drop keeps the table refused, naming what isn't.
+
+    ``refused_functions`` is an optional collector for the identity of a
+    copy-function refusal.  It does not change the public two-item return
+    shape: callers that do not need the identity can ignore it.
     """
     approx = [] if approx is None else approx
     pools = data.get("pools")
@@ -666,10 +779,11 @@ def convert_table(data: dict, block: str | None = None,
     if live > 1:
         # Several pools: a plain one per pool converts (#299), anything else
         # keeps the table refused.
-        return _plain_table(pools)
+        return _plain_table(pools, refused_functions)
     try:
         drop = _drop(data, False, approx)
     except _Refused as exc:
+        _record_refusal(refused_functions, exc)
         return None, str(exc)
     if drop is None:
         return [], None
@@ -704,9 +818,11 @@ def convert_table(data: dict, block: str | None = None,
     for case in itertools.product(*choices):
         state = dict(case)
         active = [f for f, wanted in guarded if all(state.get(p) == v for p, v in wanted.items())]
-        table, why = _table_for(name, active, explosion_decay)
-        if table is None:
-            return None, why
+        try:
+            table = _table_for(name, active, explosion_decay)
+        except _Refused as exc:
+            _record_refusal(refused_functions, exc)
+            return None, str(exc)
         if test:
             table["pools"][0]["entries"][0]["conditions"] = [_match_tool(tags) for tags in test]
         key = " && ".join(states[p][v] for p, v in case)
@@ -799,6 +915,48 @@ def _wire_refusal(cases: list[tuple[str | None, dict]], obtainable: set[str]) ->
                     return (f"the block drops {name}, which this pack doesn't define (see that identifier's own "
                             f"residue entry), so the table can't be wired onto the block")
     return None
+
+
+def _copy_only_convertible(data: dict, block_id: str, states: dict | None,
+                           block_path: str | None, blocks: dict | None,
+                           tiers: dict, obtainable: set[str]) -> bool:
+    """Whether the table has no refusal other than its copy functions.
+
+    Removing the copy functions and converting the whole table checks every
+    pool, entry and function, rather than only the first refusal met.  The
+    checks after conversion (Bedrock item names, tool tiers and wiring) are
+    repeated too: any one of them refusing means this is a mixed table.
+    """
+    clean = _without_copy_functions(data)
+    cases, _ = convert_table(clean, block_id if block_path else None,
+                             states if block_path else None, [], set())
+    if cases is None:
+        return False
+    cases, _ = _bedrock_names(cases)
+    if cases is None:
+        return False
+    if cases == []:
+        # With no converted block there is nowhere to point at Bedrock's
+        # empty table, which is the converter's other refusal for this case.
+        return block_path is not None
+
+    gate = tiers.get(block_id) if block_path else None
+    if gate is not None and not gate[1]:
+        return False
+
+    if block_path is None:
+        return True
+    block = (blocks or {}).get(block_path)
+    if len(cases) == 1 and _drops_itself(cases[0][1], block_id):
+        return True
+    if _has_loot(block):
+        return True
+    return _wire_refusal(cases, obtainable) is None
+
+
+def _copy_refusal_reason(names: set[str]) -> str:
+    """The refusal reason, naming every copy function at the table's sites."""
+    return "; ".join(f"{_REFUSED_FUNCTIONS[name]} ({name})" for name in sorted(names))
 
 
 def _wire(block: dict, name: str, cases: list[tuple[str | None, dict]], files: dict) -> dict:
@@ -957,13 +1115,22 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
             approx: list[str] = []
             if block_path and block_id in (paired or {}):
                 data = fold_paired_half(data, block_id, paired[block_id])
+            states = (java_states or {}).get(block_id, {}) if block_path else None
+            refused_functions: set[str] = set()
             cases, reason = convert_table(data, block_id if block_path else None,
-                                          (java_states or {}).get(block_id, {}) if block_path else None,
-                                          approx)
+                                          states, approx, refused_functions)
             if cases:
                 cases, reason = _bedrock_names(cases)
             if cases is None:
-                result.unhandled.append(Unhandled(rel, "loot", reason or "unsupported loot table"))
+                kind = "loot"
+                if refused_functions:
+                    copy_names = _copy_function_names(data)
+                    if (copy_names
+                            and _copy_only_convertible(data, block_id, states, block_path,
+                                                       blocks or {}, tiers, obtainable)):
+                        kind = LOOT_COPY
+                        reason = _copy_refusal_reason(copy_names)
+                result.unhandled.append(Unhandled(rel, kind, reason or "unsupported loot table"))
                 continue
             block = (blocks or {}).get(block_path) if block_path else None
 
@@ -1048,8 +1215,9 @@ _BLOCK_TABLE = re.compile(r"^data/([^/]+)/(?:loot_tables|loot_table)/blocks/(.+)
 def refine_owned(unhandled: list[Unhandled], shipped_blocks: set[str]) -> list[Unhandled]:
     """Re-file a refused block loot table whose block is itself residue (#299).
 
-    A ``loot`` entry for ``data/<ns>/loot_table[s]/blocks/<path>.json`` names
-    the block ``<ns>:<path>``. When the pack doesn't ship that block and its
+    A ``loot`` or ``loot_copy`` entry for
+    ``data/<ns>/loot_table[s]/blocks/<path>.json`` names the block
+    ``<ns>:<path>``. When the pack doesn't ship that block and its
     blockstate ``assets/<ns>/blockstates/<path>.json`` has a residue entry of
     its own (the block converter refused it, or it is a ``code_drawn_block``),
     the table has no block to drop from (its item may still ship: a Java
@@ -1058,10 +1226,10 @@ def refine_owned(unhandled: list[Unhandled], shipped_blocks: set[str]) -> list[U
     keeping why the table itself was refused. It goes with its block when that
     converts. A table whose block shipped, or has no blockstate, stays ``loot``.
     """
-    residue = {u.source: u.kind for u in unhandled if u.kind not in ("loot", OWNED)}
+    residue = {u.source: u.kind for u in unhandled if u.kind not in ("loot", LOOT_COPY, OWNED)}
     out: list[Unhandled] = []
     for u in unhandled:
-        match = _BLOCK_TABLE.match(u.source) if u.kind == "loot" else None
+        match = _BLOCK_TABLE.match(u.source) if u.kind in ("loot", LOOT_COPY) else None
         if match:
             ns, path = match.groups()
             blockstate = f"assets/{ns}/blockstates/{path}.json"

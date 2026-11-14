@@ -103,6 +103,9 @@ SKIP_KINDS = {
                            "can't be decided), so converting it would ship content the mod doesn't have"),
     "conditional_loot_table": ("Java doesn't load this loot table with only this mod (or whether it "
                                "does can't be decided), so converting it would ship content the mod doesn't have"),
+    "loot_copy": ("the table asks the drop to copy the block's custom name, block entity data or components, "
+                  "and Bedrock has no loot function that carries them; no session can make the copy, and the "
+                  "reason names each copy function"),
     "conditional_item": ("Java doesn't register this item with the mod config this conversion holds "
                          "(a config flag gates it), so converting it would ship content the mod doesn't have"),
     "conditional_block": ("Java registers this block only when another mod is loaded (or whether it does "
