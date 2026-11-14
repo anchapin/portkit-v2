@@ -155,6 +155,22 @@ def test_a_loot_copy_group_is_skipped_without_a_session(tmp_path):
     assert not any(tmp_path.iterdir())  # scaffolds cleaned up
 
 
+def test_a_damage_type_group_is_skipped_without_a_session(tmp_path):
+    from portkit.agent.residue import SKIP_KINDS
+
+    assert "no_bedrock_damage_type" in SKIP_KINDS
+    client = FakeLLM([])
+    run = ResidueAgent(client).run(
+        RESIDUE, tmp_path,
+        [Unhandled("data/examplemod/damage_type/lightning.json", "no_bedrock_damage_type",
+                   "1 damage type(s): Bedrock has no data-driven damage types", 1)],
+        "examplemod",
+    )
+    assert run.outcomes[0].status == "skipped" and client.seen == []
+    assert len(run.remaining) == 1
+    assert not any(tmp_path.iterdir())  # scaffolds cleaned up
+
+
 def test_cli_convert_agent(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "_residue_agent", lambda args: ResidueAgent(FakeLLM(_good_script())))
     code = cli.main(["convert", str(RESIDUE), str(tmp_path / "out"), "--agent"])
