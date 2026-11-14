@@ -16,6 +16,7 @@ from .conditions import (ConfigRequest, LoadContext, config_note, config_record,
                          resolve_config)
 from .converters import convert_all
 from .converters.blocks import EXPERIMENTS
+from .converters.textures import CONNECTED_TEXTURE
 from .converters.recipes import (
     drop_unshipped_recipes,
     equip_smithing_bases,
@@ -127,6 +128,7 @@ def merge_namespaces(results: dict[str, "ConversionResult"]) -> "ConversionResul
         merged.unhandled.extend(result.unhandled)
         merged.notes.extend(result.notes)
         merged.stations.update(result.stations)
+        merged.connected_textures |= result.connected_textures
         for path, source in result.recipe_sources.items():
             merged.recipe_sources.setdefault(path, source)
         for source, names in result.unshipped_names.items():
@@ -289,14 +291,28 @@ def drop_untextured(result: ConversionResult, namespace: str) -> None:
         del result.files[path]
         if kind == "block":
             withdrawn |= _block_geometries(body)
+        # A texture the Connected Textures Mod draws (#288) is in no atlas
+        # because the textures converter refused it, so the block or item
+        # wearing it is connected-texture residue: the kind the residue agent
+        # skips, and the one the board counts as explained. The generic
+        # "block"/"item" kind says nothing about why.
+        connected = [t for t in missing if t in result.connected_textures]
+        if connected:
+            kind = CONNECTED_TEXTURE
+            reason = (
+                f"uses texture {', '.join(connected)}, which the Connected Textures Mod draws from its "
+                "neighbours, so it did not convert (see that texture's own residue entry)"
+            )
+        else:
+            reason = (
+                f"uses texture {', '.join(missing)}, which did not convert "
+                "(see that texture's own residue entry)"
+            )
         result.unhandled.append(
             Unhandled(
                 source=source,
                 kind=kind,
-                reason=(
-                    f"uses texture {', '.join(missing)}, which did not convert "
-                    "(see that texture's own residue entry)"
-                ),
+                reason=reason,
             )
         )
 

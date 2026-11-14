@@ -141,6 +141,12 @@ class ConversionResult:
     # aliased_blockstate (#296): Java resolves the id to the vanilla item, so
     # the recipe converter writes a recipe naming it with the vanilla id.
     vanilla_aliases: dict[str, str] = field(default_factory=dict)
+    # Atlas keys of the textures the Connected Textures Mod draws (#288): the
+    # textures converter refuses them because their sidecar carries a "ctm"
+    # section, so they are in no atlas. A block or item wearing one is
+    # connected-texture residue, not an unexplained one: the pipeline says so
+    # when it withdraws it for the missing texture.
+    connected_textures: set[str] = field(default_factory=set)
 
     def claim(self, mod: "SourceMod", path: Path) -> str:
         """Record a source file as looked at and return its relative path."""
@@ -208,6 +214,7 @@ class ConversionResult:
         merged.recipe_results = {**other.recipe_results, **self.recipe_results}
         merged.paired_halves = {**self.paired_halves, **other.paired_halves}
         merged.vanilla_aliases = {**self.vanilla_aliases, **other.vanilla_aliases}
+        merged.connected_textures = {*self.connected_textures, *other.connected_textures}
         return merged
 
     @property

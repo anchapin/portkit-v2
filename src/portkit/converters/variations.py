@@ -81,7 +81,7 @@ def _ctm(mod: SourceMod, model: dict) -> str:
             body = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             continue
-        if isinstance(body, dict) and ("ctm_overrides" in body or "ctm_version" in body):
+        if models.is_ctm_model(body):
             return (f"its model {path.relative_to(mod.assets).as_posix()} is a Connected Textures Mod model "
                     "(ctm_version/ctm_overrides), which picks faces from the neighbours")
     for slot, ref in sorted((flat.get("textures") or {}).items()):
