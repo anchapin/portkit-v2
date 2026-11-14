@@ -251,6 +251,24 @@ SKIP_KINDS = {
                           "(pattern, random) or only sets its render layer; a Bedrock block texture is "
                           "fixed per face with no neighbour lookup, so a stand-in png would draw a "
                           "pattern sheet or connection layout wrong; the reason names the CTM type"),
+    # #288: an animation Java's .mcmeta declares and Bedrock's flipbook can't
+    # carry, and a sidecar whose sections are none this converter maps
+    # (portkit.converters.textures).
+    "no_bedrock_frame_timing": ("the animation gives every frame its own timing, and a Bedrock flipbook has "
+                                "one ticks_per_frame for the whole strip: the frames would play at a speed "
+                                "Java never gave them, so nothing is converted"),
+    "no_bedrock_frame_size": ("the animation declares its own frame size, and Bedrock derives the frame grid "
+                              "from the strip itself: the frames would be cut at the wrong size, so nothing "
+                              "is converted"),
+    "unreadable_texture_metadata": ("the .mcmeta sidecar isn't valid JSON, so no animation can be read from it; "
+                                    "Java's own reader may be lenient (Gson's JsonParser.parse(Reader) sets "
+                                    "its reader lenient) and so may still read an animation from it, which a "
+                                    "static Bedrock texture would not show, so the texture goes with the "
+                                    "sidecar"),
+    "unmapped_texture_metadata": ("the .mcmeta sidecar has no animation block (its sections are none this "
+                                  "converter maps, so the texture's look is the mod's code's or another "
+                                  "mod's): shipping the texture as a static image would claim a look nothing "
+                                  "here can state, so the texture goes with the sidecar"),
     # #358 (pending Alex, picks 1a-3a): a recipe whose type the mod's own code registers
     # (portkit.converters.recipes.mod_recipe_type, portkit.recipetypes).
     "mod_recipe_type": ("the recipe's type is a recipe serializer the mod's own code registers (Java has no "

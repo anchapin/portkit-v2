@@ -35,6 +35,7 @@ from .. import blockcode, rendershape
 from ..model import ConversionResult, SourceMod, Unhandled
 from . import buttons, doors, fence_gates, held_states, models, multilayer, objmodel, plates, trapdoors, twin_blocks, \
     variations
+from .textures import CONNECTED_TEXTURE
 
 _MENU_CATEGORY = "construction"
 
@@ -1753,6 +1754,19 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
             # models either, so only the reason changes (#296).
             result.unhandled.append(Unhandled(rel, "block", loader_why))
             continue
+        ctm_why = ("" if name in (stations or {}) or name in variation_sets
+                   else _ctm_models_why(mod, loaded[name]))
+        if ctm_why:
+            # A model of the block's is a Connected Textures Mod model
+            # (#288): CTM picks the face texture from the neighbours, and a
+            # Bedrock block texture is fixed per face. The block is
+            # connected-texture residue, not an unexplained one; the models
+            # are claimed as the code-drawn path claims them, so they are
+            # accounted for by this entry.
+            for model_file in _model_chain_files(mod, _blockstate_models(loaded[name])):
+                result.claim(mod, model_file)
+            result.unhandled.append(Unhandled(rel, CONNECTED_TEXTURE, ctm_why))
+            continue
         if name in water_why:
             result.unhandled.append(Unhandled(rel, "block", water_why[name]))
             continue
@@ -3172,6 +3186,31 @@ def refine_outside_atlas(unhandled: list[Unhandled]) -> list[Unhandled]:
                     f"face can name it, and the pack doesn't carry Mojang's art (#24); the block stays "
                     f"unconverted rather than drawn with a stand-in texture (#87)")))
     return out
+
+
+def _ctm_models_why(mod: SourceMod, blockstate: dict) -> str:
+    """Why one of the blockstate's models is drawn by the Connected Textures
+    Mod, or "" (none of them is).
+
+    CTM's own model format carries ``ctm_version``/``ctm_overrides``
+    (:func:`portkit.converters.models.is_ctm_model`): the model picks the
+    face texture from the block's neighbours. A Bedrock block texture is
+    fixed per face, so a block drawn that way is connected-texture residue
+    (#288), not an unexplained one.
+    """
+    for ref in _blockstate_models(blockstate):
+        path = models.model_path(mod, ref)
+        if path is None or not path.is_file():
+            continue
+        try:
+            body = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if models.is_ctm_model(body):
+            return (f"its model {path.relative_to(mod.assets).as_posix()} is a Connected Textures Mod model "
+                    "(ctm_version/ctm_overrides), which picks the face texture from the neighbours; a Bedrock "
+                    "block texture is fixed per face, so the block is not converted")
+    return ""
 
 
 def _blockstate_models(blockstate: dict) -> list[str]:

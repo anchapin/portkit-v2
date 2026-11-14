@@ -5,8 +5,10 @@ Connected Textures Mod sidecar is the explained ``connected_texture`` residue.
    always did); the file keeps its path; two textures on one key stay residue.
 2. A ``.png.mcmeta`` with a ``"ctm"`` section and no ``animation`` is
    ``connected_texture`` (pick 1a), skipped by the residue agent (pick 5a); the
-   texture still goes with it (pick 3a). Invalid JSON stays ``texture_animation``
-   (pick 2a); an animation beside a ctm section still converts (pick 4a).
+   texture still goes with it (pick 3a). Invalid JSON is the explained
+   ``unreadable_texture_metadata`` kind and a sidecar with other sections
+   only the explained ``unmapped_texture_metadata`` kind (#288); an animation
+   beside a ctm section still converts (pick 4a).
 
 Offline, ``examplemod`` only; no mod names (#220).
 """
@@ -130,22 +132,23 @@ def test_animation_beside_a_ctm_section_still_converts(tmp_path):
     '{"animation": {"frames": [0, 1, ]}}',                     # trailing comma
     '{"ctm": {"ctm_version": 1, }}',                           # even with a ctm section
 ])
-def test_invalid_json_stays_texture_animation(tmp_path, text):
-    # pick 2a: an unreadable sidecar isn't known to be CTM's, so it stays
-    # residue; it is never claimed as explained (its sections can't be read).
-    # Java's own reader may be lenient (gson 2.8.0 JsonParser.parse(Reader)
-    # sets its reader lenient), so some of these may still be read by Java;
-    # what its animation parser makes of them is unchecked, so nothing is
-    # claimed here either way.
+def test_invalid_json_is_unreadable_texture_metadata(tmp_path, text):
+    # #288: an unreadable sidecar isn't known to be CTM's, so it is never
+    # claimed as connected_texture; it is the explained
+    # unreadable_texture_metadata kind. Java's own reader may be lenient
+    # (gson 2.8.0 JsonParser.parse(Reader) sets its reader lenient), so
+    # some of these may still be read by Java; what its animation parser
+    # makes of them is unchecked, so nothing is claimed here either way.
     mod = _mod(tmp_path, {"block/strobe.png": png_bytes(16, 32), "block/strobe.png.mcmeta": text})
     result = textures.convert(mod)
-    assert [u.kind for u in result.unhandled] == ["texture_animation"]
+    assert [u.kind for u in result.unhandled] == ["unreadable_texture_metadata"]
     assert result.unhandled[0].reason.startswith("invalid JSON")
     assert result.files == {}
 
 
-def test_other_sections_stay_texture_animation(tmp_path):
+def test_other_sections_are_unmapped_texture_metadata(tmp_path):
     mod = _mod(tmp_path, {"block/x.png": png_bytes(16, 16),
                           "block/x.png.mcmeta": {"texture": {"blur": True}}})
     result = textures.convert(mod)
-    assert [u.kind for u in result.unhandled] == ["texture_animation"]
+    assert [u.kind for u in result.unhandled] == ["unmapped_texture_metadata"]
+    assert result.files == {}
