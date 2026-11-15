@@ -33,8 +33,8 @@ from portkit import png as png_reader
 
 from .. import blockcode, rendershape
 from ..model import ConversionResult, SourceMod, Unhandled
-from . import buttons, doors, fence_gates, held_states, models, multilayer, objmodel, plates, trapdoors, twin_blocks, \
-    variations
+from . import buttons, doors, fence_gates, held_states, levers, models, multilayer, objmodel, plates, trapdoors, \
+    twin_blocks, variations
 from .textures import CONNECTED_TEXTURE
 
 _MENU_CATEGORY = "construction"
@@ -2042,6 +2042,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
     result.notes.extend(fence_gates.notes([r for r in paired_records if r["kind"] == "gate"]))
     result.notes.extend(r["note"] for r in paired_records if r["kind"] == "twin")
     result.notes.extend(buttons.notes([r for r in directional_bool if r.get("button")]))
+    result.notes.extend(levers.notes([r for r in directional_bool if r.get("lever")]))
     result.notes.extend(later)
     result.notes.extend(stateless_notes)
     result.notes.extend(containers.pop("", []))
@@ -5969,13 +5970,23 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
     ns = mod.namespace
     label = (f"facing and {spin['second']}" if spin else _DIR_LABEL[kind]) + (" and booleans" if bools else "")
     button = None
+    lever = None
     if bools and reading.vanilla_parent:
-        if reading.vanilla_parent.replace(".", "/") == buttons.block_set_types.BUTTON_CLASS \
+        vanilla = reading.vanilla_parent.replace(".", "/")
+        if vanilla == buttons.block_set_types.BUTTON_CLASS \
                 and kind == "attach" and tuple(bools) == ("powered",):
             # #280: vanilla ButtonBlock's press and release are ported
             # (converters/buttons.py) when its constructor is read.
             button, why = buttons.read(reading)
             if button is None:
+                result.unhandled.append(Unhandled(rel, "block", f"{label}: {why}"))
+                return None
+        elif vanilla == levers.block_set_types.LEVER_CLASS \
+                and kind == "attach" and tuple(bools) == ("powered",):
+            # #237: vanilla LeverBlock's persistent use toggle and signal
+            # are ported (converters/levers.py) when its constructor is read.
+            lever, why = levers.read(reading)
+            if lever is None:
                 result.unhandled.append(Unhandled(rel, "block", f"{label}: {why}"))
                 return None
         else:
@@ -6236,6 +6247,11 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         from .station_kit import SCRIPT_FORMAT
         components[toggle_component(ns)] = {}
         fmt = SCRIPT_FORMAT
+    if lever is not None:
+        # LeverBlock#useWithoutItem flips powered and leaves it flipped; the
+        # fixed toggle runtime carries that persistent use toggle.
+        toggle = "powered"
+        components.setdefault(toggle_component(ns), {})
     if button is not None:
         # Java's getSignal (15 every side while powered) and getDirectSignal
         # (15 into the block it hangs on), per attachment (buttons.py).
@@ -6251,6 +6267,18 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
                 "condition": condition(keys, (1,)),
                 "components": {"minecraft:redstone_producer": {"power": 15, "strongly_powered_face": face}}})
         fmt = buttons.BUTTON_FORMAT
+    if lever is not None:
+        # Java's getSignal (15 every side while powered) and getDirectSignal
+        # (15 into the block it hangs on), per attachment (levers.py).
+        components["minecraft:redstone_producer"] = {"power": 0}
+        by_face: dict = {}
+        for key in reachable:
+            by_face.setdefault(levers.attached_face(key), []).append(key)
+        for face, keys in by_face.items():
+            block.setdefault("permutations", []).append({
+                "condition": condition(keys, (1,)),
+                "components": {"minecraft:redstone_producer": {"power": 15, "strongly_powered_face": face}}})
+        fmt = levers.LEVER_FORMAT
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = {"format_version": fmt, "minecraft:block": block}
     if kind == "vslab":
@@ -6302,6 +6330,8 @@ def _convert_directional(mod: SourceMod, result: ConversionResult, rel: str, nam
         record["climbable"] = _climbable(mod, name)
     if button is not None:
         record["button"] = button
+    if lever is not None:
+        record["lever"] = lever
     if bools:
         record.update({
             "bools": bools,

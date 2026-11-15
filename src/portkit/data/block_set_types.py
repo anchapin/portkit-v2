@@ -245,6 +245,10 @@ BUTTON_CTORS: dict[str, tuple[int | None, int, int]] = {
 # The one-argument constructor's button: arrows press it, wooden clicks.
 ONE_ARG_BUTTON = (True, "WOODEN")
 BUTTON_CLASS = "net/minecraft/world/level/block/ButtonBlock"
+# LeverBlock's vanilla constructor takes only its Properties (#237).  Its
+# behaviour (the persistent use toggle, signal and click) doesn't depend on
+# a BlockSetType.
+LEVER_CLASS = "net/minecraft/world/level/block/LeverBlock"
 # ButtonBlock's constructors (client.txt): 1.21.1 / 1.21.8
 # ``(BlockSetType, int ticksToStayPressed, Properties)``; 1.20.1
 # ``(Properties, BlockSetType, int ticksToStayPressed, boolean arrowsCanPress)``.
@@ -253,4 +257,9 @@ _PROPS = "Lnet/minecraft/world/level/block/state/BlockBehaviour$Properties;"
 BUTTON_BLOCK_CTORS: dict[str, tuple[int, int, int | None]] = {
     f"(L{CLASS};I{_PROPS})V": (0, 1, None),
     f"({_PROPS}L{CLASS};IZ)V": (1, 2, 3),
+}
+# LeverBlock's vanilla constructor (client.txt, 1.21.1 and 1.20.1):
+# ``LeverBlock(Properties)``.
+LEVER_BLOCK_CTORS: dict[str, tuple[()]] = {
+    f"({_PROPS})V": (),
 }
