@@ -44,7 +44,7 @@ Rules C and D skip :data:`AMBIGUOUS` namespaces that are also ordinary words
 only.
 
 :data:`MOD_NAMESPACES` is every ``assets/<ns>`` / ``data/<ns>`` folder in the
-13 corpus jars (``fixtures/real/mods.toml``) and the 13 deco-set jars
+15 corpus jars (``fixtures/real/mods.toml``) and the 13 deco-set jars
 (``deco-mods.toml`` of the 2026-10-14 deco spike), less the platform
 namespaces and two Axiom folders named ``color``/``material``, plus
 ``citadel`` (the library behind Alex's Mobs' book, read from bytecode).
@@ -87,6 +87,8 @@ MOD_NAMESPACES = frozenset({
     "alloy_forgery", "cicada", "custom_piglin_bartering", "mythicmetals", "piglib", "swordblockingmechanics",
     "mmorpg", "silentgear", "silents_mechanisms",
     "storagedrawers",
+    # the corpus's VeinMiner and Nature's Compass pins (#289, added 2026-11-14)
+    "veinminer", "naturescompass",
     "amendments", "dynamictrees", "neapolitan", "supplementaries", "vslab_compat",
     "ceramics", "headlight", "mantle", "parry", "trimmed", "twilightforest",
     # deco set (2026-10-14 deco spike)

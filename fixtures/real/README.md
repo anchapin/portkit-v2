@@ -65,13 +65,15 @@ demand, with the jars cached on the manifest's hash; a manual dispatch with
 | `silent_gear_1165` | Silent Gear | 2.6.36 | Forge | 1.16.5 | MIT | [SilentChaos512/Silent-Gear](https://github.com/SilentChaos512/Silent-Gear) |
 | `storage_drawers_1192` | Storage Drawers | 11.4.1 | Forge | 1.19.2 | MIT | [jaquadro/StorageDrawers](https://github.com/jaquadro/StorageDrawers) |
 | `storage_drawers_1122` | Storage Drawers | 1.12-5.5.2 | Forge | 1.12.2 | MIT | [jaquadro/StorageDrawers](https://github.com/jaquadro/StorageDrawers) |
+| `veinminer` | VeinMiner | 2.11.2 | NeoForge | 1.21.1 | AGPL-3.0-only | [modrinth.com/mod/veinminer](https://modrinth.com/mod/veinminer) |
+| `natures_compass` | Nature's Compass | 1.21.1-3.4.0-neoforge | NeoForge | 1.21.1 | CC-BY-NC-SA-4.0 | [MattCzyr/NaturesCompass](https://github.com/MattCzyr/NaturesCompass) |
 
 The license column is the mod's declared license on Modrinth. Several aren't
 open source (Create, Supplementaries, Waystones), and some mods license their
 art separately. That's fine here because nothing is redistributed; we only
 download from Modrinth's CDN and measure.
 
-Six of the ten come from PortKit v1's own failure audits (#26): Create,
+Six of the twelve come from PortKit v1's own failure audits (#26): Create,
 Supplementaries and Waystones from portkit#971 (4 to 8% coverage), and Silent
 Gear and Storage Drawers from portkit#1105 (zero output). Storage Drawers
 1.19.2 also covers the game version in portkit#1938. The two Storage Drawers
