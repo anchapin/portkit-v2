@@ -566,6 +566,19 @@ def _state_only_variants(blockstate: dict, java_state: str, values: tuple) -> di
     return by_value
 
 
+def _tint_dropped_note(result: ConversionResult, label: str, model: dict) -> None:
+    """Label a Java tint Bedrock cannot carry, in the existing tint wording."""
+    reason = model.get(models.TINT_DROPPED_MARK)
+    if not isinstance(reason, str) or not reason:
+        return
+    note = (
+        f"{label}: {reason}; it isn't applied, so the texture shows as the jar "
+        "has it (untinted)."
+    )
+    if note not in result.notes:
+        result.notes.append(note)
+
+
 def _tinted(element: dict) -> bool:
     """Whether any face of ``element`` is tinted (has a ``tintindex``)."""
     return any(isinstance(spec, dict) and "tintindex" in spec for spec in (element.get("faces") or {}).values())
@@ -1076,7 +1089,10 @@ def _flat_model(mod: SourceMod, result: ConversionResult, model_ref: str) -> tup
         return None, why
     # A model that only names a vanilla parent (stairs, a wall post, a cube)
     # gets that parent's boxes from the fetched templates.
-    return models.expand_template(flat, mod.minecraft)
+    expanded, why = models.expand_template(flat, mod.minecraft)
+    if expanded is not None:
+        _tint_dropped_note(result, model_ref, expanded)
+    return expanded, why
 
 
 def _convert_palisade(
@@ -1508,6 +1524,7 @@ def _model_dict_block(
                 )
             flat = expanded
             textures = flat.get("textures") or {}
+            _tint_dropped_note(result, geo_name, flat)
         turned = []
         for element in flat["elements"]:
             moved, why = models.turn_rigid(element, turn[0], turn[1])
@@ -1526,6 +1543,7 @@ def _model_dict_block(
         if expanded is not None:
             flat = expanded
             textures = flat.get("textures") or {}
+            _tint_dropped_note(result, geo_name, flat)
         elif models.is_template(parent):
             return None, None, None, why
 

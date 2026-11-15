@@ -102,6 +102,11 @@ PIVOT_IS_MIRRORED = True
 _CENTRE_ORIGIN = (8.0, 8.0, 8.0)
 _AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
 
+# Internal marker on an expanded model when Java's tint could not be carried.
+# Its value says why the tint was lost, so the block converter can label the
+# reduction instead of presenting the geometry as exact.
+TINT_DROPPED_MARK = "portkit_tint_dropped"
+
 # A cube in Bedrock geometry is centred on the block: Java's 0..16 becomes
 # -8..8 on X and Z, while Y stays as-is.
 _HALF = 8.0
@@ -1466,8 +1471,15 @@ def expand_template(model: dict, minecraft: str | None = None) -> tuple[dict | N
     if not isinstance(parent, str):
         return None, "model has no parent and no elements"
     from ..data import FETCH_COMMAND
-    from ..data.models import SINCE, templates
+    from ..data.models import SINCE, TINTED_TEMPLATES, templates
     from ..data.tags import version_key
+
+    # These parents are tinted in Java code (a biome or colour handler), not
+    # by a Bedrock equivalent. Their geometry still converts, but the loss is
+    # marked on the expanded model for the block converter's note.
+    tint_reason = ""
+    if parent.partition(":")[2] in TINTED_TEMPLATES:
+        tint_reason = "the model's colour comes from a biome or colour handler in code"
 
     known = templates()
     if known is None:
@@ -1515,10 +1527,11 @@ def expand_template(model: dict, minecraft: str | None = None) -> tuple[dict | N
                 except (KeyError, TypeError, ValueError):
                     return None, f"vanilla template {parent!r} has an element without usable from/to"
             if isinstance(spec, dict) and "tintindex" in spec:
-                return None, (
-                    f"vanilla template {parent!r} tints its {face} face, a colour Java's "
-                    "code computes"
-                )
+                # Bedrock has no equivalent of Java's tintindex. Drop the
+                # field, keep the geometry and texture, and mark the loss so
+                # the block converter labels it rather than calling it exact.
+                spec.pop("tintindex")
+                tint_reason = "the model's faces carry a tintindex, a colour the mod's client code computes"
         if not _apply_rescale(element):
             return None, f"vanilla template {parent!r} has an unreadable rescaled rotation"
 
@@ -1529,7 +1542,10 @@ def expand_template(model: dict, minecraft: str | None = None) -> tuple[dict | N
             seen.add(value[1:])
             value = textures[value[1:]]
         resolved[key] = value
-    return {**model, "elements": elements, "textures": resolved}, ""
+    expanded = {**model, "elements": elements, "textures": resolved}
+    if tint_reason:
+        expanded[TINT_DROPPED_MARK] = tint_reason
+    return expanded, ""
 
 
 def _apply_rescale(element: dict) -> bool:

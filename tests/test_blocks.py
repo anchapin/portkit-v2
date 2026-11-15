@@ -123,14 +123,38 @@ def test_a_rotated_variant_is_refused(tmp_path):
     assert "rotates" in result.unhandled[0].reason
 
 
-@pytest.mark.parametrize("parent", ["minecraft:block/tinted_cross", "minecraft:block/template_wall_sign",
-                                    "block/lily_pad"])
+@pytest.mark.parametrize("parent", ["minecraft:block/template_wall_sign"])
 def test_a_model_that_is_not_a_cube_is_refused(tmp_path, parent):
-    """A vanilla parent outside the fetched template set (tinted, entity-drawn)."""
+    """A vanilla parent outside the fetched template set (entity-drawn)."""
     model = {"parent": parent, "textures": {"all": "examplemod:block/steel_block"}}
     result = blocks.convert(build(tmp_path, CUBE, model))
     assert result.files == {}
     assert "not a full cube" in result.unhandled[0].reason
+
+
+def test_a_tinted_cross_parent_converts_when_the_templates_are_cached(tmp_path, monkeypatch):
+    """#283: the old residue case now keeps the geometry and labels the tint."""
+    reference = tmp_path / "model-reference.json"
+    reference.write_text(json.dumps({"models": {
+        "minecraft:block/tinted_cross": {"elements": [
+            {"from": [2, 0, 8], "to": [14, 16, 8],
+             "rotation": {"origin": [8, 8, 8], "axis": "y", "angle": 45, "rescale": True},
+             "faces": {"north": {"uv": [0, 0, 16, 16], "texture": "#cross", "tintindex": 0},
+                       "south": {"uv": [0, 0, 16, 16], "texture": "#cross", "tintindex": 0}}},
+            {"from": [8, 0, 2], "to": [8, 16, 14],
+             "rotation": {"origin": [8, 8, 8], "axis": "y", "angle": 45, "rescale": True},
+             "faces": {"west": {"uv": [0, 0, 16, 16], "texture": "#cross", "tintindex": 0},
+                       "east": {"uv": [0, 0, 16, 16], "texture": "#cross", "tintindex": 0}}},
+        ]},
+    }}))
+    monkeypatch.setenv("PORTKIT_MODEL_REFERENCE", str(reference))
+    model = {"parent": "minecraft:block/tinted_cross",
+             "textures": {"cross": "examplemod:block/steel_block"}}
+    result = blocks.convert(build(tmp_path, CUBE, model))
+    assert result.unhandled == []
+    geo = next(v for k, v in result.files.items() if k.endswith(".geo.json"))
+    assert len(geo["minecraft:geometry"][0]["bones"][0]["cubes"]) == 2
+    assert any("isn't applied" in note and "untinted" in note for note in result.notes)
 
 
 @pytest.mark.parametrize("parent", ["minecraft:block/cross", "minecraft:block/stairs", "block/slab"])

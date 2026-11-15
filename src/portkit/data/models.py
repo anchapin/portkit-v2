@@ -34,9 +34,11 @@ turned the button's top-face uv (1.19.4 and older write [5, 10, 11, 6]), and
 1.17 mirrored the ladder's back-face uv (1.16.5 writes [0, 0, 16, 16]). 26.3
 replaces ``shade: false`` on the cross, flower pot and ladder planes with
 ``shade_direction_override``, a lighting hint the converter doesn't read; no
-26.x release moves any of these onto new template names. Templates whose faces
-are tinted (tinted_cross, leaves, lily_pad: their colour comes from a biome or
-colour handler in code) are deliberately not in the set.
+26.x release moves any of these onto new template names. The tinted
+parents (``tinted_cross``, ``leaves`` and ``lily_pad``) are included too:
+Bedrock carries their geometry and the mod's own texture, but not Java's
+biome/colour-handler tint, so the converter must label that tint loss rather
+than present the result as exact.
 
 Without the set, :func:`templates` returns None and the block converter keeps
 these shapes as residue, saying to run the fetch. ``PORTKIT_MODEL_REFERENCE``
@@ -65,6 +67,12 @@ SET_ID = "models-vanilla-1.20.1"
 
 # The vanilla parents whose elements the block converter reads. Their parent
 # chains (block/cube, block/block) come along.
+# The tinted parents keep their geometry in the fetched set, but their colour
+# comes from Java code and is dropped with a labelled note by the converter.
+TINTED_TEMPLATES = (
+    "block/tinted_cross", "block/leaves", "block/lily_pad",
+)
+
 TEMPLATES = (
     "block/stairs", "block/inner_stairs", "block/outer_stairs",
     "block/slab", "block/slab_top",
@@ -81,6 +89,9 @@ TEMPLATES = (
     "block/orientable", "block/orientable_with_bottom", "block/orientable_vertical",
     "block/template_glazed_terracotta", "block/dried_kelp_block",
     "block/cross", "block/flower_pot_cross", "block/carpet",
+    # Tinted geometry (issue #283): Java's biome/colour-handler tint has no
+    # Bedrock equivalent, so the converter keeps the shape and labels the loss.
+    *TINTED_TEMPLATES,
     "block/button", "block/button_pressed",
     "block/template_fence_gate", "block/template_fence_gate_open",
     "block/template_fence_gate_wall", "block/template_fence_gate_wall_open",
@@ -122,7 +133,7 @@ SINCE = {
 
 # sha256 of the derived JSON (see derive). `python -m portkit.data.models --pin`
 # prints it; bump it together with COMMIT.
-SHA256 = "8416ed31901491af94ca433c253732efa94ed83ef8d337d5f02d08e3eb54a4e8"
+SHA256 = "de2573457435b891efc3942f969f33dc1adfd1e0b912af40b28c6cb133c90aeb"
 
 
 def derive(summary: bytes) -> bytes:

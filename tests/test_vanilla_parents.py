@@ -22,6 +22,10 @@ SHAPES = {
         "elements": [{"from": [0, 0, 0], "to": [16, 16, 16], "faces": {
             f: {"texture": f"#{f}"} for f in ("down", "up", "north", "south", "west", "east")}}],
     },
+    "minecraft:block/cube_all": {
+        "parent": "minecraft:block/cube",
+        "textures": {f: "#all" for f in ("down", "up", "north", "south", "west", "east")},
+    },
     "minecraft:block/orientable_with_bottom": {
         "parent": "minecraft:block/cube",
         "textures": {"down": "#bottom", "up": "#top", "north": "#front",
@@ -55,6 +59,29 @@ SHAPES = {
              "faces": {"west": {"uv": [0, 0, 16, 16], "texture": "#cross"},
                        "east": {"uv": [0, 0, 16, 16], "texture": "#cross"}}},
         ],
+    },
+    # The three tinted parents (#283), hand-written in the same shapes as the
+    # vanilla models: two cross planes, a full cube keyed "all", and a flat pad.
+    "minecraft:block/tinted_cross": {
+        "elements": [
+            {"from": [2, 0, 8], "to": [14, 16, 8],
+             "rotation": {"origin": [8, 8, 8], "axis": "y", "angle": 45, "rescale": True},
+             "faces": {"north": {"uv": [0, 0, 16, 16], "texture": "#cross", "tintindex": 0},
+                       "south": {"uv": [0, 0, 16, 16], "texture": "#cross", "tintindex": 0}}},
+            {"from": [8, 0, 2], "to": [8, 16, 14],
+             "rotation": {"origin": [8, 8, 8], "axis": "y", "angle": 45, "rescale": True},
+             "faces": {"west": {"uv": [0, 0, 16, 16], "texture": "#cross", "tintindex": 0},
+                       "east": {"uv": [0, 0, 16, 16], "texture": "#cross", "tintindex": 0}}},
+        ],
+    },
+    "minecraft:block/leaves": {
+        "parent": "minecraft:block/cube_all",
+        "textures": {"all": "#all"},
+    },
+    "minecraft:block/lily_pad": {
+        "elements": [{"from": [0, 0, 0], "to": [16, 0.0625, 16], "faces": {
+            f: {"uv": [0, 0, 16, 16], "texture": "#lily_pad"}
+            for f in ("down", "up", "north", "south", "west", "east")}}],
     },
     "minecraft:block/button": {
         "elements": [{"from": [4, 0, 5], "to": [12, 2, 11], "faces": {
@@ -103,16 +130,18 @@ def test_version_gated_templates_are_in_the_set():
         assert since[0].isdigit()
 
 
-def test_no_tinted_template_is_fetched():
-    """Tinted faces take their colour from code (biome or colour handler)."""
-    for name in ("block/tinted_cross", "block/leaves", "block/lily_pad"):
-        assert name not in model_data.TEMPLATES
+def test_the_three_tinted_templates_are_fetched():
+    """#283: their geometry converts; only Java's code-driven tint is lost."""
+    assert set(model_data.TINTED_TEMPLATES) == {
+        "block/tinted_cross", "block/leaves", "block/lily_pad"}
+    for name in model_data.TINTED_TEMPLATES:
+        assert name in model_data.TEMPLATES
 
 
 def test_is_template_names_only_the_fetched_parents():
     assert models.is_template("minecraft:block/cross")
     assert not models.is_template("minecraft:block/block")  # a chain parent, not fetched by name
-    assert not models.is_template("minecraft:block/tinted_cross")
+    assert models.is_template("minecraft:block/tinted_cross")
     assert not models.is_template("examplemod:block/cross")
 
 
@@ -158,11 +187,14 @@ def test_a_cross_expands_with_its_planes_stretched_and_uvs_kept(shapes):
     assert flat["textures"]["cross"] == "examplemod:block/rose"
 
 
-def test_a_template_with_a_tinted_face_is_refused(shapes):
+def test_a_template_with_a_tinted_face_keeps_geometry_and_marks_the_loss(shapes):
     flat, why = models.expand_template({"parent": "minecraft:block/tinted_thing",
                                          "textures": {"all": "examplemod:block/x"}})
-    assert flat is None
-    assert "tints" in why
+    assert why == ""
+    assert flat["elements"][0]["from"] == [0, 0, 0]
+    assert "tintindex" not in flat["elements"][0]["faces"]["up"]
+    assert flat[models.TINT_DROPPED_MARK] == (
+        "the model's faces carry a tintindex, a colour the mod's client code computes")
 
 
 @pytest.mark.parametrize("minecraft", [None, "1.16.5", "1.19.4"])
@@ -209,6 +241,29 @@ def test_a_cross_parent_becomes_two_stretched_planes(tmp_path, shapes):
     k = 1 / math.cos(math.radians(45))
     assert cubes[0]["size"][0] == pytest.approx(12 * k, abs=1e-3)
     assert cubes[0]["rotation"] == [0.0, -45.0, 0.0]  # ROTATION_SIGN y = -1
+
+
+@pytest.mark.parametrize(
+    "parent,texture,cubes,size",
+    [
+        ("minecraft:block/tinted_cross", "cross", 2, None),
+        ("minecraft:block/leaves", "all", 1, [16.0, 16.0, 16.0]),
+        ("minecraft:block/lily_pad", "lily_pad", 1, [16.0, 0.0625, 16.0]),
+    ],
+)
+def test_a_tinted_parent_converts_with_its_geometry_and_a_tint_note(
+        tmp_path, shapes, parent, texture, cubes, size):
+    mod = _mod(tmp_path, {"parent": parent,
+                          "textures": {texture: "examplemod:block/rose"}},
+               textures=("rose",))
+    result = blocks.convert(mod)
+    assert result.unhandled == []
+    geo = next(v for k, v in result.files.items() if k.endswith(".geo.json"))
+    boxes = geo["minecraft:geometry"][0]["bones"][0]["cubes"]
+    assert len(boxes) == cubes
+    if size is not None:
+        assert boxes[0]["size"] == size
+    assert any("isn't applied" in note and "untinted" in note for note in result.notes)
 
 
 def test_cube_top_is_a_full_block(tmp_path, shapes):
