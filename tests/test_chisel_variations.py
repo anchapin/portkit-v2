@@ -22,7 +22,11 @@ from portkit.adapters import chisel, unregistered_blockstates
 from portkit.agent.residue import SKIP_KINDS
 from portkit.bytecode import ClassIndex
 from portkit.converters import blocks
-from portkit.converters.blocks import UNREGISTERED_BLOCKSTATE
+from portkit.converters.blocks import (
+    NAMED_VARIANT_BLOCKSTATE,
+    UNREGISTERED_BLOCKSTATE,
+    UNREGISTERED_VARIATIONS,
+)
 from portkit.converters.variations import CONDITIONAL_BLOCK
 from portkit.model import SourceMod
 from portkit.png import encode_png
@@ -167,7 +171,7 @@ def test_left_variations(converted):
     [blood] = _residue(converted, "bloodmagic")
     assert blood.kind == CONDITIONAL_BLOCK and "'bloodmagic'" in blood.reason
     [carpet] = _residue(converted, "carpet_white")
-    assert carpet.kind == "block" and "BlockCarvableCarpet" in carpet.reason
+    assert carpet.kind == UNREGISTERED_VARIATIONS and "no look" in carpet.reason
     # A registered variation the blockstate lacks is said; the file still converts.
     assert "blocks/marble_raw.json" in files and _residue(converted, "marble") == []
     [note] = [n for n in converted.notes if n.startswith("marble:")]
@@ -180,7 +184,8 @@ def test_no_chisel_classes_no_variations(tmp_path):
     result = blocks.convert(plain)
     assert not any(p.startswith("blocks/andesite_") for p in result.files)
     [res] = _residue(result, "andesite")
-    assert "blockstate variant(s)" in res.reason
+    assert res.kind == NAMED_VARIANT_BLOCKSTATE
+    assert "named looks" in res.reason
 
 
 def test_registry_reading_names_every_registered_blockstate():
@@ -206,10 +211,12 @@ def test_unregistered_blockstates_are_explained_residue(converted):
         assert "Chisel's Features#addBlocks" in res.reason and "Java never loads it" in res.reason
         assert not any(p.startswith(f"blocks/{name}") for p in converted.files)
     # A block registered straight on the registry is a real block: its
-    # blockstate keeps the residue it had.
+    # blockstate keeps the residue it had, under the named-look kind (#288).
     [auto] = _residue(converted, "auto_chisel")
-    assert auto.kind == "block" and "blockstate variant(s)" in auto.reason
+    assert auto.kind == NAMED_VARIANT_BLOCKSTATE and "named looks" in auto.reason
     assert UNREGISTERED_BLOCKSTATE in SKIP_KINDS
+    assert NAMED_VARIANT_BLOCKSTATE in SKIP_KINDS
+    assert UNREGISTERED_VARIATIONS in SKIP_KINDS
 
 
 def test_no_claim_from_an_incomplete_reading(tmp_path):
