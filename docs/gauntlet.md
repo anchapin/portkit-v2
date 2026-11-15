@@ -128,7 +128,7 @@ Coverage is the share of the jar's source files the converter wrote output for. 
 | 47 | Better Advancements | UI/info | forge 1.20.1 | ok | 0.0% | 0 | 42 | java_code 37, code_only 5 | explained-empty | no pack | yes |
 | 48 | Comforts | content | neoforge 1.21.1 | ok | 21.3% | 85 | 314 | owned_by_residue 101, conditional_recipe 66, java_code 64 | clean | 0/35 | yes |
 | 49 | Cooking for Blockheads | content | neoforge 1.21.1 | ok | 44.0% (+4.6) | 703 | 893 | java_only_asset 240, java_code 229, owned_by_residue 122 | clean | 0/336 | unexplained: block, loot, recipe |
-| 50 | Chisel | content | forge 1.12.2 | ok | 68.7% (+8.6) | 3733 | 1699 | connected_texture 870, java_only_asset 367, java_code 244 | clean | 0/2626 | unexplained: block, texture_animation, unowned |
+| 50 | Chisel | content | forge 1.12.2 | ok | 68.7% (+8.6) | 3733 | 1699 | connected_texture 870, java_only_asset 367, java_code 244 | clean | 0/2626 | unexplained: block |
 
 ## Class evidence
 

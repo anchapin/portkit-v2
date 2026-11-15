@@ -165,6 +165,16 @@ SKIP_KINDS = {
                         "(screens, entity and block-entity renderers, effect icons, armor layers, custom model "
                         "loaders) or, for atlases, Java's texture stitcher reads them; nothing in a Bedrock "
                         "pack would draw them"),
+    # #288 unowned: the client-only Java rendering assets a Bedrock add-on has
+    # no counterpart for (portkit.ownership).
+    "java_particle_asset": ("the file is a Java particle definition: Java's particle engine reads it (its "
+                             "texture list and render type) and the mod's Java code spawns the particle type it "
+                             "names; Bedrock's particle effects are declared in a resource pack in another "
+                             "format (a .particle.json of emitters and Molang) and are spawned by Bedrock's own "
+                             "effects, not by a Java particle type, so there is nothing to convert"),
+    "java_shader_asset": ("the file is a Java shader program (a core, post or the mod's own): Java's renderer "
+                           "compiles it into its own pipeline, and a Bedrock pack has no shader program to put "
+                           "it in (the game draws with its own shaders), so there is nothing to convert"),
     # #293 leftover data tags (portkit.datatags).
     "tag_unshipped_registry": ("a tag of a registry portkit converts nothing of (fluids, biomes, structures, "
                                "enchantments, damage types, entity types, ...), so the pack holds nothing it "
