@@ -42,6 +42,12 @@
       "residue": 1340,
       "errors": 0
     },
+    "natures_compass": {
+      "coverage": 52.1,
+      "files": 50,
+      "residue": 46,
+      "errors": 0
+    },
     "silent_gear_1165": {
       "coverage": 36.9,
       "files": 1113,
@@ -70,6 +76,12 @@
       "coverage": 52.5,
       "files": 16702,
       "residue": 15095,
+      "errors": 0
+    },
+    "veinminer": {
+      "coverage": 0.0,
+      "files": 0,
+      "residue": 337,
       "errors": 0
     },
     "waystones": {
