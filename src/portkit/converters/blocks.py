@@ -1778,9 +1778,17 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
         blockstate = loaded[name]
 
         if name in variation_sets and name not in (stations or {}):
-            variation_records.append(variations.convert(
-                mod, result, rel, name, blockstate, variation_sets[name], variation_lang,
-                _model_dict_block, _block_definition, variation_terrain))
+            vset = variation_sets[name]
+            record = variations.convert(
+                mod, result, rel, name, blockstate, vset, variation_lang,
+                _model_dict_block, _block_definition, variation_terrain)
+            variation_records.append(record)
+            if not vset.variations and not record["converted"]:
+                # The mod's code registers no look of this blockstate as a
+                # block of its own (#288): the named looks in the file are
+                # never blocks Java loads, so there is no Java block to port.
+                # Explained residue, not unexplained.
+                _file_unregistered_variations(result, rel, vset.why)
             continue
 
         if name in bool_readings:
@@ -1954,6 +1962,18 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
         if model_ref is None:
             if why.startswith("block has ") and name in aliased:
                 why = aliased_reason(name, why)
+            looks = _named_looks(blockstate)
+            if looks:
+                # The variants are named looks, not block states (#288): the
+                # converter writes one Bedrock block per look the mod's code
+                # registers as a block of its own, and a named look has no
+                # Bedrock state it could be drawn in. Explained residue.
+                reason = _named_looks_reason(looks)
+                alias = aliased_reason(name, "") if name in aliased else ""
+                if alias:
+                    reason = f"{reason}; {alias}"
+                result.unhandled.append(Unhandled(rel, NAMED_VARIANT_BLOCKSTATE, reason))
+                continue
             result.unhandled.append(Unhandled(rel, "block", why))
             continue
         random_entry = (blockstate.get("variants") or {}).get("")
@@ -3047,6 +3067,70 @@ AIR_BLOCK = "air_block"
 # their own, as they were), so no count moves.
 UNREGISTERED_BLOCKSTATE = "unregistered_blockstate"
 ALIASED_BLOCKSTATE = "aliased_blockstate"
+
+# A blockstate whose variants are named looks rather than block states (#288):
+# a Forge-style variation set, where the mod's code registers a block per
+# look it draws (portkit.converters.variations writes one Bedrock block per
+# registered look). Bedrock's block states are the fixed ones the game knows,
+# so a named look that no registered block carries has no state it could be
+# drawn in: the block stays residue, and it is explained residue.
+NAMED_VARIANT_BLOCKSTATE = "named_variant_blockstate"
+
+# A blockstate the mod's code registers no look of as a block of its own
+# (#288): the named looks in the file are never blocks Java loads, so there
+# is no Java block to port. It is explained residue.
+UNREGISTERED_VARIATIONS = "unregistered_variations"
+
+
+def _named_looks(blockstate: dict) -> list[str]:
+    """The variant keys of ``blockstate`` that name a look rather than a block
+    state ("cracked", "legacy"), not a property ("facing=north").
+
+    Empty when the blockstate has no variants, when one of them names a
+    property (a Java blockstate states its properties), or when it holds only
+    the empty key (a stateless block)."""
+    variants = blockstate.get("variants")
+    if not isinstance(variants, dict):
+        return []
+    keys = [k for k in variants if k]
+    if not keys or any("=" in k for k in keys):
+        return []
+    return sorted(keys)
+
+
+def _named_looks_reason(looks: list[str]) -> str:
+    """The residue reason of a blockstate whose variants are named looks."""
+    return (f"the blockstate's {len(looks)} variant(s) ({', '.join(looks[:3])}) are named looks, not block "
+            "states: the converter writes one Bedrock block per look the mod's code registers as a block of "
+            "its own (portkit.converters.variations), and Bedrock's block states are the fixed ones the game "
+            "knows, so a named look that no registered block carries has no state it could be drawn in")
+
+
+def _unregistered_variations_reason(why: str) -> str:
+    """The residue reason of a blockstate the reading found no registered look of."""
+    return ("the reading found no look of this blockstate registered as a block of its own, so the named looks "
+            "in the file are never blocks Java loads: there is no Java block to port, and the converter writes "
+            "one Bedrock block per registered look, of which there is none"
+            + (f"; what the reading found: {why}" if why else ""))
+
+
+def _file_unregistered_variations(result, rel: str, why: str) -> None:
+    """File the residue entry the variations path just wrote under the
+    explained kind ``unregistered_variations`` (#288).
+
+    The entry is the last one the variations path wrote for ``rel``; nothing
+    else writes residue between the call and this."""
+    if not result.unhandled:
+        return
+    entry = result.unhandled[-1]
+    if entry.source != rel or entry.kind != "block":
+        return
+    if not entry.reason.startswith("no registered variation converts"):
+        # Another refusal (a blockstate that isn't a Forge blockstate, say):
+        # it says its own thing, and it isn't about the looks.
+        return
+    entry.kind = UNREGISTERED_VARIATIONS
+    entry.reason = (f"{_unregistered_variations_reason(why)}; what the variations path said: {entry.reason}")
 
 
 def _unregistered_reason(where: str) -> str:

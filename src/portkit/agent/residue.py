@@ -200,6 +200,21 @@ SKIP_KINDS = {
                                 "source has commented out, a file left from an older version), so Java never "
                                 "loads it; there is no Java block to port, and a Bedrock block definition "
                                 "would add one"),
+    # #288: a blockstate whose variants are named looks rather than block
+    # states, and one the mod's code registers no look of (portkit.converters.blocks).
+    "named_variant_blockstate": ("the blockstate's variants are named looks (a Forge-style variation set: "
+                                 "'cracked', 'legacy'), not block states: the converter writes one Bedrock "
+                                 "block per look the mod's code registers as a block of its own "
+                                 "(portkit.converters.variations), and Bedrock's block states are the fixed "
+                                 "ones the game knows (facing, half, ...), so a named look that no registered "
+                                 "block carries has no state it could be drawn in; the reason names the looks"),
+    "unregistered_variations": ("the blockstate's looks are blocks the mod's code registers one by one (a "
+                                "Forge-style variation set: portkit.converters.variations writes one Bedrock "
+                                "block per registered look), and the reading found none of them registered, so "
+                                "the looks in the file are never blocks Java loads: there is no Java block to "
+                                "port, and a Bedrock block definition would add a block the Java mod doesn't "
+                                "have; the reason says what the reading found, and whether the mod's code "
+                                "could be read at all"),
     # #296: a blockstate under an id the mod's code aliases to a vanilla block (portkit.converters.blocks).
     "aliased_blockstate": ("the mod's code aliases the blockstate's block id to a vanilla block (an adapter read "
                            "the registry alias) and registers no block of its own under it: Java loads the "
