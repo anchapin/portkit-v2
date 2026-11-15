@@ -81,9 +81,74 @@ def test_particle_sprites_go_with_their_definition(tmp_path):
                  Unhandled("assets/m/textures/", "unowned", "2 file(s) no converter claims yet", 2)]
     out = ownership.refine(unhandled, root, consumed=set())
     kinds = sorted((u.kind, u.source, u.count) for u in out)
-    assert kinds == [("owned_by_residue", "assets/m/textures/particle/", 2),
-                     ("unowned", "assets/m/particles/", 1)]
+    # The particle definition is a client-only Java asset (#288); its sprites
+    # still go with its entry.
+    assert kinds == [("java_particle_asset", "assets/m/particles/", 1),
+                     ("owned_by_residue", "assets/m/textures/particle/", 2)]
     assert "assets/m/particles/spark.json" in next(u for u in out if u.kind == "owned_by_residue").reason
+
+
+def test_a_particle_definition_is_explained_not_unowned(tmp_path):
+    # #288: Java's particle engine reads the definition and the mod's Java
+    # code spawns the particle type it names; a Bedrock add-on has no
+    # counterpart, so it is explained, not unowned residue.
+    root = _jar(tmp_path, {
+        "assets/m/particles/spark.json": {"textures": ["m:spark_0"]},
+        "assets/m/particles/smoke.json": {"textures": ["m:smoke_0"]},
+    })
+    unhandled = [Unhandled("assets/m/particles/", "unowned", "2 file(s) no converter claims yet", 2)]
+    out = ownership.refine(unhandled, root, consumed=set())
+    assert [(u.kind, u.source, u.count) for u in out] == [
+        ("java_particle_asset", "assets/m/particles/", 2)]
+    reason = out[0].reason
+    assert "particle definition" in reason and "spark.json" in reason
+    # The reason says why there is nothing to convert, not that it is work.
+    assert "Bedrock's particle effects" in reason
+
+
+def test_a_shader_program_is_explained_not_unowned(tmp_path):
+    # #288: Java's own renderer compiles the shader program; a Bedrock pack
+    # has no shader program to put it in.
+    root = _jar(tmp_path, {
+        "assets/m/shaders/core/rendertype_text.json": {"vertex": "m:shaders/core/text", "fragment": "m:shaders/core/text"},
+        "assets/m/shaders/post/blur.json": {},
+    })
+    unhandled = [Unhandled("assets/m/shaders/", "unowned", "2 file(s) no converter claims yet", 2)]
+    out = ownership.refine(unhandled, root, consumed=set())
+    assert [(u.kind, u.source, u.count) for u in out] == [
+        ("java_shader_asset", "assets/m/shaders/", 2)]
+    reason = out[0].reason
+    assert "shader file(s)" in reason and "rendertype_text.json" in reason
+    assert "no shader program to put it in" in reason
+
+
+def test_the_client_asset_kinds_are_explained():
+    from portkit.agent.residue import SKIP_KINDS
+
+    assert ownership.CLIENT_KINDS <= set(SKIP_KINDS)
+    assert ownership.PARTICLE in SKIP_KINDS and ownership.SHADER in SKIP_KINDS
+
+
+def test_the_pipeline_files_particles_and_shaders_as_explained(tmp_path, fixtures_dir):
+    # The classification is wired into the pipeline, not only defined: the
+    # residue of a converted mod names no unowned particle or shader file.
+    import shutil
+
+    from portkit.pipeline import convert
+
+    source = tmp_path / "mod"
+    shutil.copytree(fixtures_dir / "simple_block_mod" / "input", source)
+    particles = source / "assets/examplemod/particles"
+    particles.mkdir(parents=True)
+    (particles / "spark.json").write_text(json.dumps({"textures": ["examplemod:spark_0"]}))
+    shaders = source / "assets/examplemod/shaders/core"
+    shaders.mkdir(parents=True)
+    (shaders / "rendertype_text.json").write_text(json.dumps({"vertex": "examplemod:shaders/core/text"}))
+    result = convert(source, tmp_path / "out")
+    kinds = {u.kind: u for u in result.unhandled}
+    assert kinds["java_particle_asset"].source == "assets/examplemod/particles/"
+    assert kinds["java_shader_asset"].source == "assets/examplemod/shaders/"
+    assert not [u for u in result.unhandled if u.kind == "unowned"]
 
 
 def test_refine_keeps_what_it_cannot_explain_as_unowned(tmp_path):

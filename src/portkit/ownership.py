@@ -21,6 +21,12 @@ sprites. Following those references back gives one of three answers:
 Only the first two are re-filed; both are explained kinds (the residue agent's
 SKIP_KINDS). Nothing here is mod-specific: the answers come from the jar's own
 references.
+
+Two more asset folders hold client-only Java rendering assets a Bedrock add-on
+has no counterpart for (#288), and are re-filed as explained kinds of their
+own: a particle definition (``assets/<ns>/particles/``), which Java's particle
+engine reads and the mod's Java code spawns, and a shader program
+(``assets/<ns>/shaders/``), which Java's own renderer compiles.
 """
 from __future__ import annotations
 
@@ -33,6 +39,26 @@ from .model import Unhandled
 OWNED = "owned_by_residue"
 JAVA_ONLY = "java_only_asset"
 KINDS = frozenset({OWNED, JAVA_ONLY})
+
+# #288: the client-only Java rendering assets a Bedrock add-on has no
+# counterpart for.
+PARTICLE = "java_particle_asset"
+SHADER = "java_shader_asset"
+CLIENT_KINDS = frozenset({PARTICLE, SHADER})
+
+# The Java asset folders whose files are client-only rendering assets, and the
+# explained kind each one is filed under.
+_CLIENT_LANES = {"particles": PARTICLE, "shaders": SHADER}
+
+# Why each one has no Bedrock counterpart. The Bedrock side is named, so the
+# reason says what a conversion would have to invent (#87).
+_PARTICLE_REASON = ("Java's particle engine reads it (its texture list and render type) and the mod's Java "
+                    "code spawns the particle type it names; Bedrock's particle effects are declared in a "
+                    "resource pack in another format (a .particle.json of emitters and Molang) and are spawned "
+                    "by Bedrock's own effects, not by a Java particle type, so there is nothing to convert")
+_SHADER_REASON = ("Java's renderer compiles it into its own pipeline (a core, post or the mod's own shader "
+                  "program); a Bedrock pack has no shader program to put it in (the game draws with its own "
+                  "shaders), so there is nothing to convert")
 
 _ASSET_DIRS = ("models", "textures", "atlases")
 _REFERRERS = re.compile(r"^assets/([^/]+)/(blockstates|models|items|particles)/(.+)\.json$")
@@ -222,16 +248,42 @@ def _group(rel: str) -> str:
     return "/".join(parts[:4]) + "/" if len(parts) > 4 else "/".join(parts[:3]) + "/"
 
 
+def _client_lane(source: str) -> str | None:
+    """The explained kind of a client-only Java rendering asset folder
+    (``assets/<ns>/particles``, ``assets/<ns>/shaders``), or None."""
+    parts = source.strip("/").split("/")
+    if len(parts) == 3 and parts[0] == "assets":
+        return _CLIENT_LANES.get(parts[2])
+    return None
+
+
+def classify_client(files: list[str]) -> dict[str, str]:
+    """file -> the explained kind of the client-only Java rendering asset it
+    is, for every particle definition and shader program of the jar."""
+    out: dict[str, str] = {}
+    for rel in files:
+        parts = rel.split("/")
+        if len(parts) < 4 or parts[0] != "assets":
+            continue
+        kind = _CLIENT_LANES.get(parts[2])
+        if kind is not None:
+            out[rel] = kind
+    return out
+
+
 def refine(unhandled: list[Unhandled], root: Path, consumed: set[str],
            shipped: set[str] | None = None) -> list[Unhandled]:
     """Re-file the unowned models, textures and atlases the jar's references
-    explain; the rest of the residue is returned unchanged."""
+    explain, and the client-only Java rendering assets (particle definitions
+    and shader programs) a Bedrock add-on has no counterpart for (#288); the
+    rest of the residue is returned unchanged."""
     groups = [u for u in unhandled if u.kind == "unowned" and _subject(u.source.rstrip("/") + "/x") is not None]
-    if not groups:
+    client_groups = [u for u in unhandled if u.kind == "unowned" and _client_lane(u.source) is not None]
+    if not groups and not client_groups:
         return unhandled
     root = Path(root)
     leftover: list[str] = []
-    for u in groups:
+    for u in groups + client_groups:
         base = root / u.source.rstrip("/")
         if base.is_dir():
             leftover += [str(p.relative_to(root)) for p in sorted(base.rglob("*"))
@@ -241,6 +293,9 @@ def refine(unhandled: list[Unhandled], root: Path, consumed: set[str],
     sources |= {f for f in (str(p.relative_to(root)) for p in (root / "assets").glob("*/particles/*.json"))
                 if f not in consumed} if (root / "assets").is_dir() else set()
     found = classify(root, leftover, consumed, sources, shipped)
+    # The client-only Java rendering assets: a particle definition and a
+    # shader program have no Bedrock counterpart (#288).
+    client = classify_client(leftover)
 
     entries: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for rel, (kind, owner) in sorted(found.items()):
@@ -264,10 +319,22 @@ def refine(unhandled: list[Unhandled], root: Path, consumed: set[str],
                       f"model loaders); nothing in a Bedrock pack would draw them (e.g. {sample})")
         refiled.append(Unhandled(source=group, kind=kind, reason=reason, count=n))
 
-    gone = set(found)
+    client_entries: dict[tuple[str, str], list[str]] = {}
+    for rel, kind in sorted(client.items()):
+        client_entries.setdefault((kind, "/".join(rel.split("/")[:3]) + "/"), []).append(rel)
+    for (kind, group), members in sorted(client_entries.items()):
+        n = len(members)
+        sample = ", ".join(m.rsplit("/", 1)[-1] for m in members[:3])
+        if kind == PARTICLE:
+            reason = f"{n} particle definition(s) (e.g. {sample}): {_PARTICLE_REASON}"
+        else:
+            reason = f"{n} shader file(s) (e.g. {sample}): {_SHADER_REASON}"
+        refiled.append(Unhandled(source=group, kind=kind, reason=reason, count=n))
+
+    gone = set(found) | set(client)
     out: list[Unhandled] = []
     for u in unhandled:
-        if u not in groups:
+        if u not in groups and u not in client_groups:
             out.append(u)
             continue
         left = sum(1 for f in leftover if f.startswith(u.source) and f not in gone)
