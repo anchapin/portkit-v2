@@ -378,3 +378,40 @@ def test_attach_uses_the_table_from_the_override_dir(block_raw, tmp_path, monkey
     assert renamed.get("com/example/deco/LampBlock").method("getStateForPlacement") is not None
     # Names as compiled stay reachable.
     assert renamed.get("com/example/deco/LampBlock", remap=False).method("getStateForPlacement") is None
+
+
+# --- the whole conversion, on a renamed build ---------------------------------
+
+@pytest.mark.parametrize("scheme", ["srg", "intermediary"])
+def test_a_renamed_build_converts_to_the_same_blocks(block_raw, tmp_path, scheme):
+    """The converter, not only the readers: a Forge 1.20.1 build (SRG member
+    names) or a Fabric build (intermediary names) of the same fixture gives
+    the same block definitions and the same notes as its Mojang-named build
+    (#235). Without the remapper the same build reads no facing at all."""
+    import test_coded_facing as coded
+
+    want = coded.blocks.convert(coded._mod(tmp_path / "mojang"))
+
+    renaming = _Scheme(block_raw, scheme)
+    index = ClassIndex({k: _rewrite_utf8(v, renaming.rename) for k, v in block_raw.items()})
+    index.set_remapper(renaming.remapper())
+    mod = coded._mod(tmp_path / scheme, classes=False)
+    mod.classes = index
+    got = coded.blocks.convert(mod)
+    assert got.files == want.files
+    assert got.notes == want.notes
+    # The facts are the ones the Mojang-named build gives: the lamp's coded
+    # facing (180) and its box, read from getStateForPlacement.
+    lamp = got.files["blocks/lamp.json"]["minecraft:block"]
+    assert lamp["description"]["traits"]["minecraft:placement_direction"] == {
+        "enabled_states": ["minecraft:cardinal_direction"], "y_rotation_offset": 180}
+    assert any("LampBlock#getStateForPlacement" in note for note in got.notes)
+
+    # The same renamed build, read without the remapper, converts to less:
+    # the facing stays the default and the note says so.
+    blind = ClassIndex({k: _rewrite_utf8(v, renaming.rename) for k, v in block_raw.items()})
+    blind_mod = coded._mod(tmp_path / (scheme + "-blind"), classes=False)
+    blind_mod.classes = blind
+    blind_result = coded.blocks.convert(blind_mod)
+    assert blind_result.files != want.files
+    assert "not read from code" in "\n".join(blind_result.notes)
