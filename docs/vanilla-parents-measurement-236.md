@@ -94,7 +94,21 @@ mekanism, …) are not cached and cannot be downloaded here (§4).
 | storage_drawers | 1020 → 1020 | 511 → 511 | 66.62% → 66.62% | 0 → 0 | 0 |
 
 Biomes o' Plenty is the mod in the cached corpus that names the vanilla parents.
-Its 180 residue entries that disappear (1518 → 1338) break down as:
+Its residue drops by 180 files (1518 → 1338). The per-reason table below counts
+residue *entries*, a different unit — one entry can cover many files — and the
+entries drop by 121 net (422 → 301). The table itemises that 121, not the 180:
+
+> Supervisor reconciliation note (added after an independent re-run of both
+> variants reproduced the headline exactly — 1358/1518/47.22% without,
+> 1522/1338/53.22% with, 0 validator errors both ways): the table's rows are
+> entry counts and sum to 121, as they should; the original text presented
+> them as a breakdown of the 180, which mixes units. One smaller count does
+> not reconcile: the by-parent tally in the §3.1 table (96 = cross 57 +
+> flower_pot_cross 28 + template_fence_gate 10 + carpet 1) differs by one
+> from the by-reason tally of parent-named entries in the without run
+> (74 + 10 + 9 + 4 = 97). The discrepancy is recorded here rather than
+> silently adjusted — the by-parent cut is not derivable from the
+> name-blanked reason strings alone.
 
 | residue reason | entries without → with |
 |---|---|
