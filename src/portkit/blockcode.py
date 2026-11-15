@@ -8790,6 +8790,7 @@ def _read_dir_shapes(machine: Machine, obj: Obj, r: DirReading) -> None:
 
 _DIR_STATE_PLAIN = _PLAIN_VANILLA | {_FACE_ATTACHED}
 _BUTTON = "net/minecraft/world/level/block/ButtonBlock"
+_LEVER = "net/minecraft/world/level/block/LeverBlock"
 # Methods whose override in a mod class between the block and vanilla
 # ButtonBlock makes the button the mod's own code (#280; Mojang names,
 # 1.20.1 / 1.21.1 ButtonBlock: use / useWithoutItem, press, playSound,
@@ -8801,6 +8802,19 @@ BUTTON_BEHAVIOUR = frozenset({
     "getDirectSignal", "isSignalSource", "tick", "entityInside", "checkPressed", "updateNeighbours",
     "onExplosionHit", "getShape", "getCollisionShape", "getStateForPlacement", "canSurvive", "updateShape",
     "neighborChanged", "setPlacedBy", "onPlace", "randomTick", "attack", "stepOn", "newBlockEntity", "getTicker",
+})
+# Methods whose override in a mod class between the block and vanilla
+# LeverBlock makes the lever the mod's own code (#237; Mojang names,
+# 1.20.1 / 1.21.1 LeverBlock: use / useWithoutItem, getSignal,
+# getDirectSignal, isSignalSource, getShape, getStateForPlacement,
+# canSurvive, updateShape, neighborChanged, onRemove; plus BlockBehaviour's
+# other hooks a block's behaviour runs through).
+LEVER_BEHAVIOUR = frozenset({
+    "use", "useWithoutItem", "useItemOn", "playSound", "getSound", "onRemove", "getSignal",
+    "getDirectSignal", "isSignalSource", "getShape", "getCollisionShape", "getStateForPlacement",
+    "canSurvive", "updateShape", "neighborChanged", "setPlacedBy", "onPlace", "randomTick", "tick",
+    "entityInside", "stepOn", "attack", "newBlockEntity", "getTicker", "onExplosionHit",
+    "getConnectedDirection",
 })
 
 
@@ -8829,6 +8843,10 @@ class DirStateReading(DirReading):
     button_ctors: list = field(default_factory=list)
     button_overrides: list = field(default_factory=list)
     button_why: str = ""
+    lever_ctor: tuple | None = None
+    lever_ctors: list = field(default_factory=list)
+    lever_overrides: list = field(default_factory=list)
+    lever_why: str = ""
     defaults: dict = field(default_factory=dict)
     toggle: str | None = None
     toggle_from: str = ""
@@ -8874,13 +8892,15 @@ def read_directional_states(classes: ClassIndex | None,
     ``run`` is a ``_registered`` result already made over every blockstate of
     the mod (#280: a run on these names alone misses names a library's
     material set builds by concatenation, as BetterEnd's wood buttons were).
-    A block read as vanilla ``ButtonBlock`` keeps ``vanilla_parent`` and is
-    read like a plain attach-face block too (its placement is
-    FaceAttachedHorizontalDirectionalBlock's, supplied); ``button_ctor`` is
-    the vanilla constructor call its object was built with and
-    ``button_overrides`` the button behaviour its own classes override;
-    ``button_ctors`` holds the constructor call of every object its
-    registration can build (converters/buttons.py judges them)."""
+    A block read as vanilla ``ButtonBlock`` or ``LeverBlock`` keeps
+    ``vanilla_parent`` and is read like a plain attach-face block too (its
+    placement is FaceAttachedHorizontalDirectionalBlock's, supplied);
+    ``button_ctor`` / ``lever_ctor`` are the vanilla constructor call its
+    object was built with and ``button_overrides`` / ``lever_overrides``
+    the respective vanilla behaviour its own classes override;
+    ``button_ctors`` / ``lever_ctors`` hold the constructor call of every
+    object its registration can build (converters/buttons.py and
+    converters/levers.py judge them)."""
     readings = {n: DirStateReading(n, kind=k, bools=tuple(sorted(b))) for n, (k, b) in specs.items()}
     if classes is None or not len(classes):
         for r in readings.values():
@@ -8900,14 +8920,22 @@ def read_directional_states(classes: ClassIndex | None,
         base = machine.vanilla_base(obj.cls)
         if base not in _DIR_STATE_PLAIN:
             r.vanilla_parent = base.replace("/", ".")
-            if base != _BUTTON:
+            if base == _BUTTON:
+                # Every object the registration can build (one per way through
+                # branches the reader can't decide): buttons.py reads each and
+                # takes the button only when all ways agree.
+                r.button_ctor = obj.fields.get("__vanilla_ctor")
+                r.button_ctors = [o.fields.get("__vanilla_ctor") for o in objs]
+                r.button_overrides = sorted({x for o in objs for x in _own_overrides(machine, o.cls, BUTTON_BEHAVIOUR)})
+            elif base == _LEVER:
+                # Every object the registration can build (one per way through
+                # branches the reader can't decide): levers.py reads each and
+                # takes the lever only when all ways agree.
+                r.lever_ctor = obj.fields.get("__vanilla_ctor")
+                r.lever_ctors = [o.fields.get("__vanilla_ctor") for o in objs]
+                r.lever_overrides = sorted({x for o in objs for x in _own_overrides(machine, o.cls, LEVER_BEHAVIOUR)})
+            else:
                 continue
-            # Every object the registration can build (one per way through
-            # branches the reader can't decide): buttons.py reads each and
-            # takes the button only when all ways agree.
-            r.button_ctor = obj.fields.get("__vanilla_ctor")
-            r.button_ctors = [o.fields.get("__vanilla_ctor") for o in objs]
-            r.button_overrides = sorted({x for o in objs for x in _own_overrides(machine, o.cls, BUTTON_BEHAVIOUR)})
         _read_states(machine, obj, r)
         r.behaviour = _behaviour(machine, obj.cls)
         _read_rule(machine, obj, r)
@@ -8918,6 +8946,13 @@ def read_directional_states(classes: ClassIndex | None,
         _read_shape_collision(machine, obj, r)
         cells = [_dir_cell(r.kind, key) for key in directional_keys(r.kind)]
         _read_toggle(machine, obj, r, cells)
+        if base == _LEVER and r.bools == ("powered",):
+            # LeverBlock#useWithoutItem flips powered and leaves it flipped.
+            # The mod classes' own use was checked above (lever_overrides),
+            # so the vanilla use is the one carried.
+            r.toggle = "powered"
+            r.toggle_from = "net.minecraft.world.level.block.LeverBlock#useWithoutItem"
+            r.toggle_why = ""
         r.changed_by = _changed_by(machine, obj.cls, r.bools)
         _read_state_light(machine, obj, r, placed, unknown=_PLACED_KEYS)
         if len(objs) > 1:
