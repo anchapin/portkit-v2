@@ -764,3 +764,97 @@ def test_the_validator_reads_match_tool_conditions(tmp_path):
     report = validate_pack(pack)
     found = {f.path.rsplit("/", 1)[-1] for f in report.findings if f.rule == "loot.condition"}
     assert found == {"bad0.json", "bad1.json", "bad2.json"}
+
+
+# --- #299: a function's own conditions are honoured or refused, never dropped --
+
+def test_a_table_level_function_is_refused_rather_than_dropped(tmp_path):
+    """Java applies the table's own functions to every drop; the converter
+    carries none, so the table is refused instead of dropping the function."""
+    table = {"functions": [{"function": "minecraft:set_count", "count": 2}],
+             "pools": [{"rolls": 1, "conditions": SURVIVES, "entries": [ITEM]}]}
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "table-level function" in reason and "minecraft:set_count" in reason
+
+
+def test_a_table_level_function_with_conditions_names_the_condition(tmp_path):
+    table = {"functions": [{"function": "minecraft:set_count", "count": 2,
+                            "conditions": [{"condition": "minecraft:block_state_property",
+                                            "block": "examplemod:steel_block",
+                                            "properties": {"type": "double"}}]}],
+             "pools": [{"rolls": 1, "conditions": SURVIVES, "entries": [ITEM]}]}
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "table-level function" in reason and "minecraft:block_state_property" in reason
+
+
+def test_a_table_level_copy_function_is_loot_copy(tmp_path):
+    table = {"functions": [{"function": "minecraft:copy_name"}],
+             "pools": [{"rolls": 1, "conditions": SURVIVES, "entries": [ITEM]}]}
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert result.files == {}
+    assert result.unhandled[0].kind == loot.LOOT_COPY
+    assert "minecraft:copy_name" in result.unhandled[0].reason
+
+
+def test_a_conditional_count_in_a_multi_pool_table_is_refused(tmp_path):
+    """A count Java applies only to some block states is not written as a
+    constant count for every pool."""
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:stick"}],
+         "functions": [{"function": "minecraft:set_count", "count": 2,
+                        "conditions": [{"condition": "minecraft:block_state_property",
+                                        "properties": {"type": "double"}}]}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:twig"}]},
+    ]}
+    result = loot.convert(build(tmp_path, {"twig": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "set_count" in reason and "block_state_property" in reason
+
+
+def test_a_conditional_explosion_decay_is_not_applied_unconditionally(tmp_path):
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:stick"}],
+         "functions": [{"function": "minecraft:explosion_decay",
+                        "conditions": [{"condition": "minecraft:block_state_property",
+                                        "properties": {"type": "double"}}]}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:twig"}]},
+    ]}
+    result = loot.convert(build(tmp_path, {"twig": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "explosion_decay" in reason and "block_state_property" in reason
+
+
+def test_an_alternatives_entry_with_its_own_functions_is_refused(tmp_path):
+    table = {"type": "minecraft:block", "pools": [{"rolls": 1, "conditions": SURVIVES, "entries": [
+        {"type": "minecraft:alternatives",
+         "functions": [{"function": "minecraft:set_count", "count": 2}],
+         "children": [{"type": "minecraft:item", "name": "minecraft:diamond"}]}]}]}
+    result = loot.convert(build(tmp_path, {"ore": table}))
+    assert result.files == {}
+    assert "alternatives" in result.unhandled[0].reason
+
+
+def test_a_conditional_count_is_never_written_as_an_unconditional_count(tmp_path):
+    """Java's set_count 2 applies only when the block is double: the count is
+    written for that state only, and never for the others."""
+    block = "examplemod:sand"
+    states = {"type": {"single": "q.block_state('examplemod:type') == 'single'",
+                       "double": "q.block_state('examplemod:type') == 'double'"}}
+    table = pool({"type": "minecraft:item", "name": block}, SURVIVES, functions=[
+        {"function": "minecraft:set_count", "count": 2,
+         "conditions": [{"condition": "minecraft:block_state_property", "block": block,
+                         "properties": {"type": "double"}}]}])
+    blocks = {"blocks/sand.json": _block(block)}
+    result = loot.convert(build(tmp_path, {"sand": table}), blocks=blocks, java_states={block: states})
+    assert result.unhandled == []
+    single = result.files["loot_tables/blocks/sand.json"]["pools"][0]["entries"][0]
+    double = result.files["loot_tables/blocks/sand.state1.json"]["pools"][0]["entries"][0]
+    assert {"function": "set_count", "count": 2} not in single.get("functions", [])
+    assert double["functions"] == [{"function": "set_count", "count": 2},
+                                    {"function": "explosion_decay"}]
