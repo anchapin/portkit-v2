@@ -61,6 +61,26 @@ A jar whose code differs gets the reason it isn't read, never a guess. The
 rule given is the facing per clicked face; the core converts it as a rule read
 from getStateForPlacement (Bedrock ``minecraft:block_face`` and, where the
 player's facing decides, ``minecraft:cardinal_direction``).
+
+**Recipe types** (#285): IE registers its own recipe types, so a recipe of
+one of them is read only by IE's Java code: Bedrock's recipe types are a
+fixed list an add-on can't extend (#358). The types this slice owns are the
+IE ones the committed record names (docs/decisions.md:1100 reads them off the
+gauntlet jars): ``immersiveengineering:shaped_fluid``,
+``immersiveengineering:shapeless_fluid``,
+``immersiveengineering:turn_and_copy`` and
+``immersiveengineering:no_container_item``.
+
+This adapter claims none of them, and that is the point: the shared
+``mod_recipe_type`` path (:func:`portkit.converters.recipes.mod_recipe_type`)
+refuses them with the explained kind and, with the jar in hand, names the
+registering class, the serializer and the recipe class it reads from
+bytecode. A ``recipe_reasons`` entry here would be asked first and would take
+that path away, including the pick-2a conversion of a crafting-like IE recipe
+whose recipe class is plain vanilla (docs/decisions.md:1098-1100 records the
+pick-2a split and the IE variants that keep their residue because Java reads
+more than their shape). The types' outcome is pinned in
+``tests/adapters/immersiveengineering/test_ie_recipes.py``.
 """
 from __future__ import annotations
 
