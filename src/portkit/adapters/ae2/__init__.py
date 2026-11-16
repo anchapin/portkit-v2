@@ -43,6 +43,24 @@ Bedrock has no pitch threshold: ``minecraft:placement_direction``'s
 up/down cut not documented (MicrosoftDocs minecraft-creator, Block Traits:
 placement_direction). It stands in for AE2's 65-degree pitch rule as a
 labelled **DEFAULT** (#296).
+
+**Recipe types** (#284): AE2 registers its own recipe types, so a recipe of
+one of them is read only by AE2's Java code: Bedrock's recipe types are a
+fixed list an add-on can't extend (#358). The types this slice owns are
+``ae2:inscriber``, ``ae2:entropy``, ``ae2:transform``,
+``ae2:storage_cell_upgrade`` and ``ae2:storage_cell_disassembly`` (the type's
+own name in AE2's namespace).
+
+This adapter claims none of them, and that is the point: the shared
+``mod_recipe_type`` path (:func:`portkit.converters.recipes.mod_recipe_type`)
+refuses them with the explained kind and, with the jar in hand, names the
+registering class, the serializer and the recipe class it reads from
+bytecode. A ``recipe_reasons`` entry here would be asked first and would take
+that path away, including the pick-2a conversion of a crafting-like AE2
+recipe whose recipe class is plain vanilla (docs/decisions.md:708 records
+AE2's ``recipes/inscribers.json`` converting, so the shared path stays open
+for it). The types' outcome is pinned in
+``tests/adapters/ae2/test_ae2_recipes.py``.
 """
 from __future__ import annotations
 
