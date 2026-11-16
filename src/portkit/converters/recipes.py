@@ -383,14 +383,30 @@ _SHAPE_WORDS = {
 
 
 def _json_shape(recipe: dict) -> str | None:
-    """The vanilla type whose shape the recipe's JSON has, or None."""
+    """The vanilla type whose shape the recipe's JSON has, or None.
+
+    A body has a vanilla shape only when the shape's own fields are shaped
+    the way the vanilla recipe reads them: a shaped recipe's ``pattern`` is a
+    list of rows and its ``key`` a dict of symbols, a shapeless recipe's
+    ``ingredients`` a list of slots, a stonecutting recipe's ``ingredient``
+    one slot. A body that only carries the field names (an ``ingredients``
+    that is a dict, a ``pattern`` that is a string) is not a vanilla recipe,
+    and calling it one would name a shape Java never reads: the reason would
+    claim the body has vanilla crafting's ingredients and result when it
+    hasn't (#87). It also keeps the pick-2a conversion (a mod's own type
+    read as the vanilla type whose class it extends) from firing for a body
+    Java itself would reject under that class.
+    """
     if all(k in recipe for k in _SHAPES["minecraft:crafting_shaped"]):
-        return "minecraft:crafting_shaped"
+        if isinstance(recipe.get("pattern"), list) and isinstance(recipe.get("key"), dict):
+            return "minecraft:crafting_shaped"
+        return None
     if "pattern" in recipe:
         return None
-    for vt in ("minecraft:crafting_shapeless", "minecraft:stonecutting"):
-        if all(k in recipe for k in _SHAPES[vt]):
-            return vt
+    if all(k in recipe for k in _SHAPES["minecraft:crafting_shapeless"]):
+        return "minecraft:crafting_shapeless" if isinstance(recipe.get("ingredients"), list) else None
+    if all(k in recipe for k in _SHAPES["minecraft:stonecutting"]):
+        return "minecraft:stonecutting" if not isinstance(recipe.get("ingredient"), list) else None
     return None
 
 

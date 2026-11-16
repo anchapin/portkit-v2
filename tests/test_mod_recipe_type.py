@@ -123,6 +123,35 @@ def test_without_classes_nothing_converts(tmp_path):
     assert refused["bricks"].kind == "mod_recipe_type"
 
 
+def test_a_body_that_only_carries_the_field_names_is_not_a_vanilla_shape(tmp_path):
+    # The shape a body has is the shape of its fields, not of their names: a
+    # body whose "ingredients" is a dict (or whose "pattern" is a string) is
+    # no vanilla recipe, and saying it is would name a shape Java never
+    # reads (#87).
+    _, refused = _convert(tmp_path, {
+        "dict_ingredients": {"type": "rmod:unregistered",
+                             "ingredients": {"item": "minecraft:stone"}, "result": {"item": "minecraft:gravel"}},
+        "string_pattern": {"type": "rmod:unregistered", "pattern": "##", "key": {"#": {"item": "minecraft:stone"}},
+                           "result": {"item": "minecraft:gravel"}},
+        "list_ingredient": {"type": "rmod:unregistered",
+                            "ingredient": [{"item": "minecraft:stone"}], "result": {"item": "minecraft:gravel"}},
+    })
+    for name in ("dict_ingredients", "string_pattern", "list_ingredient"):
+        assert refused[name].kind == "mod_recipe_type"
+        assert "its JSON has no vanilla recipe shape" in refused[name].reason
+        assert "crafting-like" not in refused[name].reason
+
+
+def test_a_vanilla_shaped_body_still_reads_as_that_shape(tmp_path):
+    _, refused = _convert(tmp_path, {
+        "shapeless": {"type": "rmod:unregistered", "ingredients": [{"item": "minecraft:stone"}],
+                      "result": {"item": "minecraft:gravel"}},
+    })
+    assert refused["shapeless"].kind == "mod_recipe_type"
+    assert "crafting-like: its JSON has vanilla shapeless crafting's ingredients and result" in \
+        refused["shapeless"].reason
+
+
 def test_kind_is_explained_and_skipped_by_the_agent():
     assert recipes.MOD_RECIPE_TYPE == "mod_recipe_type"
     assert "mod_recipe_type" in SKIP_KINDS
