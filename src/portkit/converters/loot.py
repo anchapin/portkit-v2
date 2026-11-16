@@ -88,6 +88,54 @@ def _reason_for_function(function: dict) -> str:
     return f"function {name!r} has no Bedrock equivalent"
 
 
+def _condition_names(conditions) -> list[str]:
+    """The names of the conditions of a function or entry, as Java spells them.
+
+    A condition that isn't an object has no name to give; it is shown as it
+    was written, so the reason still points at the offending site.
+    """
+    if not isinstance(conditions, list):
+        return [str(conditions)]
+    names = []
+    for condition in conditions:
+        if isinstance(condition, dict):
+            names.append(str(condition.get("condition")))
+        else:
+            names.append(str(condition))
+    return names
+
+
+def _table_function_reason(functions: list) -> str:
+    """Why the table's own functions can't be carried (#299).
+
+    Java applies a table's own functions to every drop the table gives. The
+    converter carries no table-level function at all, so a table that has one
+    is refused rather than converted with the function (and its conditions)
+    dropped.
+    """
+    names = []
+    details = []
+    for function in functions:
+        if not isinstance(function, dict):
+            names.append("an unreadable function")
+            continue
+        fname = str(function.get("function"))
+        names.append(fname)
+        conditions = _condition_names(function.get("conditions"))
+        if conditions:
+            details.append(f"{fname} applies only when {', '.join(conditions)} holds")
+    listed = ", ".join(names)
+    if len(names) == 1:
+        reason = (f"the table has a table-level function ({listed}) that Java applies to every drop, "
+                  "and it can't be carried")
+    else:
+        reason = (f"the table has table-level functions ({listed}) that Java applies to every drop, "
+                  "and they can't be carried")
+    if details:
+        reason += " (" + "; ".join(details) + ")"
+    return reason
+
+
 def _copy_function_names(data: dict) -> set[str]:
     """Every copy function at a function site in the table.
 
@@ -106,6 +154,8 @@ def _copy_function_names(data: dict) -> set[str]:
             name = function.get("function")
             if isinstance(name, str) and name in _COPY_FUNCTIONS:
                 names.add(name)
+
+    functions(data.get("functions"))
 
     def entry(item) -> None:
         if not isinstance(item, dict):
@@ -152,6 +202,7 @@ def _without_copy_functions(data: dict) -> dict:
             for child in children:
                 entry(child)
 
+    clean_functions(out)
     pools = out.get("pools")
     if isinstance(pools, list):
         for pool in pools:
@@ -495,6 +546,11 @@ def _drop(data: dict, silk_world: bool, approx: list[str]):
 def _entry_drops(entry: dict, test, decay: bool, silk_world: bool, approx: list[str]) -> list:
     entry_type = entry.get("type")
     if entry_type in ("minecraft:alternatives", "alternatives"):
+        if entry.get("functions"):
+            # The converter carries no function on an alternatives entry: it
+            # would be dropped, and with it the conditions that say when it
+            # applies (#299).
+            raise _Refused("the alternatives entry has its own functions, which aren't carried")
         own, own_decay = _conditions(entry.get("conditions"), silk_world, approx)
         test = _and(test, own)
         if test is None:
@@ -541,9 +597,14 @@ def _plain_function(function: dict, where: str) -> tuple[int | None, bool]:
     if not isinstance(function, dict):
         raise _Refused(f"{where} has an unreadable function")
     fname = function.get("function")
+    if function.get("conditions"):
+        # A function Java applies only when its own conditions hold (#299):
+        # this path writes the function unconditionally, so the conditions
+        # would be dropped and the function applied to every drop.
+        conditions = ", ".join(_condition_names(function.get("conditions")))
+        raise _Refused(f"{where} has a {fname} that applies only when {conditions} holds, "
+                       "which isn't translated here")
     if fname in ("minecraft:set_count", "set_count"):
-        if function.get("conditions"):
-            raise _Refused(f"{where} has a set_count that applies only to some block states")
         if function.get("add") is True:
             raise _Refused(f"{where} adds to the drop count (set_count add) rather than setting it")
         value = _constant_count(function)
@@ -770,6 +831,18 @@ def convert_table(data: dict, block: str | None = None,
     pools = data.get("pools")
     if not isinstance(pools, list) or not pools:
         return [], None
+    table_functions = data.get("functions")
+    if table_functions:
+        # Java applies the table's own functions to every drop the table
+        # gives (#299). The converter carries no table-level function, so a
+        # table that has one is refused rather than converted with the
+        # function (and its conditions) dropped.
+        if not isinstance(table_functions, list):
+            return None, "the table's own functions are unreadable"
+        for function in table_functions:
+            if isinstance(function, dict) and function.get("function") in _COPY_FUNCTIONS:
+                _record_refusal(refused_functions, _Refused("", function["function"]))
+        return None, _table_function_reason(table_functions)
     live = 0
     for pool in pools:
         try:
