@@ -63,6 +63,18 @@ def test_modded_recipe_with_data_is_a_mod_recipe_type(tmp_path):
     assert reason.startswith("recipe type 'examplemod:grinding' is in the mod's own namespace")
 
 
+def test_library_namespace_recipe_type_is_explained(tmp_path):
+    # #302 (Alex, 2026-11-17): a recipe type in a library's namespace (Mantle
+    # serves Tinkers' Construct) is registered by the library's code, so it is
+    # the explained mod_recipe_type kind, not ordinary recipe residue.
+    body = {"type": "mantle:casting", "ingredient": {"item": "minecraft:stone"},
+            "result": {"item": "minecraft:gravel"}}
+    result = recipes.convert(build(tmp_path, {"r": body}))
+    ((kind, reason),) = residue(result).values()
+    assert kind == "mod_recipe_type"
+    assert "library 'mantle'" in reason
+
+
 def test_vanilla_special_type_is_not_claimed(tmp_path):
     # minecraft: special types (armour dye, map cloning...) are Bedrock's own
     # crafting; they stay ordinary unsupported residue, not code_recipe.

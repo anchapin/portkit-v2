@@ -428,11 +428,30 @@ def _ingredient_types(spec, out: set) -> None:
             out.add(t)
 
 
+def _library_namespace(namespace: str) -> str | None:
+    """The name of the library that serves ``namespace``, or None.
+
+    A library (code many mods share, shipped beside them as a dependency) has
+    its own namespace and registers its own recipe types in it, so a recipe of
+    one of them is read only by that library's code, exactly like a recipe of
+    the mod's own type (#302's decision, 2026-11-17). The core asks the
+    adapters which namespaces are libraries' and names no mod itself (#220).
+    """
+    from ..adapters import ADAPTERS
+
+    for a in ADAPTERS:
+        if a.library and namespace in a.namespaces:
+            return a.name
+    return None
+
+
 def mod_recipe_type(java_type: object, recipe: dict, mod, cache: dict | None = None):
     """``(reason, vanilla type to convert as or None)`` for a recipe whose
     type the mod's own code registers (#358), or None when it isn't one:
     a type outside ``minecraft:`` that the jar's code is read registering, or
-    one in the mod's own namespace (only code registers recipe types)."""
+    one in the mod's own namespace (only code registers recipe types), or one
+    in a library's namespace (#302's decision, 2026-11-17: a library's code
+    registers its types too, so Bedrock's fixed list can't carry them)."""
     from .. import recipetypes
 
     if not isinstance(java_type, str) or ":" not in java_type or java_type.startswith("minecraft:"):
@@ -443,7 +462,8 @@ def mod_recipe_type(java_type: object, recipe: dict, mod, cache: dict | None = N
     if java_type not in cache:
         cache[java_type] = recipetypes.read(getattr(mod, "classes", None), java_type, own)
     reading = cache[java_type]
-    if reading is None and ns != own:
+    library = None if reading is not None or ns == own else _library_namespace(ns)
+    if reading is None and ns != own and library is None:
         return None
     if reading is not None:
         parts = [f"{recipetypes.short(reading.registering)} registers it"]
@@ -453,6 +473,10 @@ def mod_recipe_type(java_type: object, recipe: dict, mod, cache: dict | None = N
             parts.append(f"recipe class {recipetypes.short(reading.recipe)}")
         who = (f"recipe type {java_type!r} is registered by the mod's own code "
                f"({_dotted(reading.registering)}: " + ", ".join(parts) + ")")
+    elif library is not None:
+        who = (f"recipe type {java_type!r} is in the namespace of the library {library!r}, whose code "
+               "registers recipe types (Java has no data-driven ones); no class of the jar was read "
+               "registering it")
     else:
         who = (f"recipe type {java_type!r} is in the mod's own namespace and only code registers recipe "
                "types (Java has no data-driven ones); no class of the jar was read registering it")
