@@ -176,13 +176,17 @@ Supervisor-completed after the worker hit its step cap (the measurement above
 is the worker's; the commands below were re-run by the supervisor on this
 same tree):
 
-- `fixtures/coverage-baseline.json` — REBANKED with the repo's own command
-  (`portkit eval --fixtures fixtures --update-baseline`). Only
-  `block_defs_mod` moved: coverage 69.2 → 85.7, files 9 → 12, residue 4 → 2.
-  Note the committed baseline predated more than #236 (the worker's
-  with/without delta for this fixture was 10 → 12 files, §3.2); the rebank
-  banks the current measured state, of which the #236-attributable part is
-  the §3.2 delta.
+- `fixtures/coverage-baseline.json` — NOT rebanked. A rebank run with the
+  repo's own command (`portkit eval --fixtures fixtures --update-baseline`)
+  moved only `block_defs_mod`: coverage 69.2 → 85.7, files 9 → 12,
+  residue 4 → 2. That 85.7% was observed in the worker environment against
+  a locally cached model reference, and the rebank was reverted on
+  2026-11-17 because the numbers are not reproducible in CI (the CI eval
+  lands at 69.2% / 9 files / 4 residue). The ratchet stays at the
+  CI-reproducible values and moves only when the eval is reproducible in
+  CI. Note the committed baseline predated more than #236 (the worker's
+  with/without delta for this fixture was 10 → 12 files, §3.2); the
+  #236-attributable part of the measured state is the §3.2 delta.
 - `fixtures/real/coverage-baseline.json` and
   `fixtures/real/gauntlet-baseline.json` — NOT rebanked: the real-mod
   baselines are recorded over the full corpus, and only 7 cached mods could
