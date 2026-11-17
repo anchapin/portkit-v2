@@ -260,6 +260,14 @@ SKIP_KINDS = {
                            "selection, so nothing in a pack can follow it and a frozen frame could "
                            "state a false reading (#169); the reason names each property and the class "
                            "that builds it"),
+    # #282 (part of #277): an item model that stacks more than one texture layer
+    # (portkit.converters.items).
+    "stacked_texture_layers": ("the item's model names more than one texture layer (layer0, layer1, ...), "
+                               "which Java draws stacked, one over the next, so the item's look is the "
+                               "composition of all of them: a Bedrock item icon is a single texture with no "
+                               "layering, so no pack can state that composition, and shipping one layer "
+                               "alone would drop the others and misstate the item's look (#87); the reason "
+                               "names how many layers the model stacks"),
     # #346 (pending Alex, pick 2a): a block whose model borrows a vanilla texture outside
     # block/ and item/ (portkit.converters.blocks.refine_outside_atlas).
     "vanilla_texture_outside_atlas": ("the block's model borrows a vanilla texture from outside Java's "
