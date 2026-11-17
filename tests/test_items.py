@@ -171,6 +171,7 @@ def test_a_two_layer_handheld_icon_is_refused_like_a_generated_one(tmp_path):
     result = items.convert(build(tmp_path, {"steel_pickaxe": model}))
     assert result.files == {}
     assert "2 texture layers" in result.unhandled[0].reason
+    assert result.unhandled[0].kind == items.STACKED_TEXTURE_LAYERS
 
 
 def test_a_two_layer_icon_is_refused(tmp_path):
@@ -180,6 +181,15 @@ def test_a_two_layer_icon_is_refused(tmp_path):
     result = items.convert(build(tmp_path, {"steel_helmet": model}))
     assert result.files == {}
     assert "2 texture layers" in result.unhandled[0].reason
+    assert result.unhandled[0].kind == items.STACKED_TEXTURE_LAYERS
+
+
+def test_the_stacked_layers_kind_is_an_explained_one():
+    """The kind the residue agent skips, so the refusal is explained (#282)."""
+    from portkit.agent.residue import SKIP_KINDS
+
+    assert items.STACKED_TEXTURE_LAYERS == "stacked_texture_layers"
+    assert items.STACKED_TEXTURE_LAYERS in SKIP_KINDS
 
 
 def test_a_model_overriding_on_an_unknown_property_is_refused(tmp_path):
@@ -238,6 +248,7 @@ def test_the_fixture_converts_the_icons_and_refuses_the_rest(tmp_path, fixtures_
     assert "examplemod:steel_pickaxe" in index["texture_data"]
     reasons = [u.reason for u in out.unhandled]
     assert len(reasons) == 1 and "texture layers" in reasons[0]
+    assert [u.kind for u in out.unhandled] == [items.STACKED_TEXTURE_LAYERS]
 
 
 # -- item models that are not items (#158) ---------------------------------

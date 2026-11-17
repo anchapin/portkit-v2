@@ -191,6 +191,15 @@ _READOUT_PREDICATES = {
 # to read vanilla's own property, so the name alone isn't the mod's.
 LIVE_ITEM_PROPERTY = "live_item_property"
 
+# An item model that names more than one texture (``layer0``, ``layer1``, ...)
+# stacks them: Java draws every layer the model names, one over the next, so
+# the item's look is the composition of all of them. A Bedrock item's
+# ``minecraft:icon`` names one texture (learn.microsoft.com, "minecraft:icon"),
+# so nothing in a pack can state that composition: shipping ``layer0`` alone
+# would drop the overlay layers silently and misstate the item's look (#87).
+# Nothing is converted; the residue agent skips the kind.
+STACKED_TEXTURE_LAYERS = "stacked_texture_layers"
+
 # Forge's and NeoForge's ``separate_transforms`` loader: one item model whose
 # look is picked per render context. Java bakes ``base`` for every context and
 # ``perspectives[<context>]`` where one is given, keyed by
@@ -945,7 +954,7 @@ def convert(mod: SourceMod, context: LoadContext | None = None,
             result.unhandled.append(
                 Unhandled(
                     rel,
-                    "item",
+                    STACKED_TEXTURE_LAYERS,
                     f"model stacks {len(layers)} texture layers; Bedrock icons are one texture",
                 )
             )

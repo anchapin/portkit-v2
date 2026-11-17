@@ -63,7 +63,8 @@ def _u(source, kind, reason="why"):
 def test_a_recipe_whose_unshipped_items_are_all_residue_is_owned_by_residue():
     unhandled = [
         _u("assets/ex/blockstates/portal.json", "block", "three blockstate variants"),
-        _u("assets/ex/models/item/rod.json", "item", "item model stacks 2 texture layers"),
+        _u("assets/ex/models/item/rod.json", "stacked_texture_layers",
+           "model stacks 2 texture layers; Bedrock icons are one texture"),
         _u("data/ex/recipes/portal.json", "recipe", "names ex:portal, ex:rod, which the pack doesn't ship"),
         _u("data/ex/recipes/ghost.json", "recipe", "names ex:ghost, which the pack doesn't ship"),
         _u("data/ex/recipes/mixed.json", "recipe", "names ex:portal, other:gear, which the pack doesn't ship"),
@@ -85,7 +86,7 @@ def test_a_recipe_whose_unshipped_items_are_all_residue_is_owned_by_residue():
     assert kinds["data/ex/recipes/tagged.json"] == "recipe"
     portal = next(u for u in out if u.source == "data/ex/recipes/portal.json")
     assert "assets/ex/blockstates/portal.json: block" in portal.reason
-    assert "assets/ex/models/item/rod.json: item" in portal.reason
+    assert "assets/ex/models/item/rod.json: stacked_texture_layers" in portal.reason
     assert "which the pack doesn't ship" in portal.reason  # the original reason is kept
     assert len(out) == len(unhandled)
 
