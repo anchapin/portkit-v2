@@ -39,6 +39,11 @@ portkit gaps board s*.json --previous last/gap-leaderboard.json \
 Without `portkit reference fetch`, recipes on shared tags and blocks built
 from vanilla templates stay residue and the numbers differ from CI's.
 
+How much residue the vanilla parent models take off, per mod, measured with
+and without them, is in
+[`docs/vanilla-parents-measurement-236.md`](vanilla-parents-measurement-236.md)
+(#236).
+
 ## Reading it
 
 Each row is one **normalized reason**: a residue entry's kind plus its reason
