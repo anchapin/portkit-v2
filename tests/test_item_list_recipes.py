@@ -332,6 +332,69 @@ def test_list_holding_a_tag_stays_residue(tmp_path):
     assert _reasons(result) == ["ingredient is a list holding a tag or a non-item entry"]
 
 
+def test_list_holding_a_tag_of_one_member_is_that_item(tmp_path):
+    """#302 sub-reason 4: a list naming one item is that item.
+
+    A list holding a tag whose membership is one item means exactly that item,
+    so there is no membership left to expand and the recipe takes the item."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [[{"tag": "examplemod:ores"}]],
+              "result": {"id": "examplemod:slag"}}
+    mod = _mod(tmp_path, recipe, name="slag", tags={"ores": ["examplemod:tin_ore"]},
+               items=["tin_ore"])
+    result = recipes.convert(mod, _emitted("tin_ore", "slag"))
+    files = _recipes(result)
+    assert list(files) == ["recipes/slag.json"]
+    body = files["recipes/slag.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "examplemod:tin_ore"}]
+    assert not _reasons(result)
+    assert any("exactly one item" in n for n in result.notes)
+
+
+def test_list_naming_the_same_item_twice_is_that_item(tmp_path):
+    """#302 sub-reason 4: the same, when the entries name one item between them."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [[{"item": "minecraft:coal"}, {"tag": "examplemod:coals"}]],
+              "result": {"id": "examplemod:slag"}}
+    mod = _mod(tmp_path, recipe, name="slag", tags={"coals": ["minecraft:coal"]})
+    result = recipes.convert(mod, _emitted("slag"))
+    files = _recipes(result)
+    assert list(files) == ["recipes/slag.json"]
+    body = files["recipes/slag.json"]["minecraft:recipe_shapeless"]
+    assert body["ingredients"] == [{"item": "minecraft:coal"}]
+    assert not _reasons(result)
+
+
+def test_a_one_item_list_whose_item_was_not_converted_stays_residue(tmp_path):
+    """The one item of the list isn't in the pack, so the recipe can't match it."""
+    recipe = {"type": "minecraft:crafting_shapeless",
+              "ingredients": [[{"tag": "examplemod:ores"}]],
+              "result": {"id": "examplemod:slag"}}
+    mod = _mod(tmp_path, recipe, name="slag", tags={"ores": ["examplemod:tin_ore"]},
+               items=["tin_ore"])
+    result = recipes.convert(mod, _emitted("slag"))
+    assert not _recipes(result)
+    (reason,) = _reasons(result)
+    assert "not converted: examplemod:tin_ore" in reason
+
+
+def test_a_list_in_a_shaped_key_the_pattern_does_not_use_is_ignored(tmp_path):
+    """#302 sub-reason 4: Java reads a shaped key by the pattern's symbols.
+
+    A key the pattern never names takes no part in the recipe, so a list
+    there is no ingredient and must not stop the recipe (it used to raise)."""
+    recipe = {"type": "minecraft:crafting_shaped", "pattern": ["P"],
+              "key": {"P": "minecraft:sugar", "X": ["examplemod:a", "examplemod:b"]},
+              "result": {"id": "examplemod:thing"}}
+    result = recipes.convert(_mod(tmp_path, recipe), _emitted("a", "b", "thing"))
+    files = _recipes(result)
+    assert list(files) == ["recipes/thing.json"]
+    body = files["recipes/thing.json"]["minecraft:recipe_shaped"]
+    assert body["pattern"] == ["P"]
+    assert body["key"] == {"P": {"item": "minecraft:sugar"}}
+    assert not _reasons(result)
+
+
 def test_list_over_the_cap_stays_residue(tmp_path):
     names = [f"m{i}" for i in range(recipes.EXPANSION_CAP + 1)]
     recipe = dict(FURNACE, ingredient=[{"item": f"examplemod:{n}"} for n in names])

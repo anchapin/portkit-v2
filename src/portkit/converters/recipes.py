@@ -94,7 +94,13 @@ the only such ingredient, one slot, at most :data:`EXPANSION_CAP` items. A list
 gets no tag of its own (the mod declared none). Vanilla Bedrock writes its
 "armour piece -> nugget" furnace recipes the same way, one per piece
 (bedrock-samples ``behavior_pack/recipes/furnace_iron_helmet.json``). A list
-holding a tag, or anything but plain item ids, stays residue.
+holding a tag names the union of what its entries name (the tag's membership
+when the jar says it, :func:`_list_ids`), so it takes the same forms as a list
+of plain ids. A list that means exactly one item (a tag whose membership is
+one item, or entries naming the same item twice) is that item, and is written
+as it (#302 sub-reason 4, :func:`_one_item_list`). A list whose membership
+isn't knowable (a tag whose membership the jar doesn't say), or anything but
+plain item ids and tags, stays residue.
 
 Anything else stays residue, and the reason names any members this conversion
 did not emit. A recipe is never narrowed to part of a tag.
@@ -1152,6 +1158,30 @@ def _list_label(ids: list[str]) -> str:
     return "[" + ", ".join(ids) + "]"
 
 
+def _one_item_list(spec, tags: TagResolver | None, emitted: dict | None) -> str | None:
+    """The one item a list ingredient means, when it means exactly one (#302 sub-reason 4).
+
+    A list is Java's "any of these", so it means the union of what its entries
+    name (see :func:`_list_ids`). A list holding a tag whose membership is one
+    item, or entries that name the same item twice, means exactly that item,
+    so it is written as the item itself: there is no membership left to expand.
+
+    None when the list means more than one item, when its membership isn't
+    knowable (a tag whose membership the jar doesn't say), or when its one
+    item is a mod item this conversion did not emit (the recipe can't match
+    anything until it does, #302 pick 3).
+    """
+    if not isinstance(spec, list) or not spec or emitted is None:
+        return None
+    ids = _list_ids(spec, tags)
+    if ids is None or len(ids) != 1:
+        return None
+    only = ids[0]
+    if not only.startswith("minecraft:") and only not in emitted:
+        return None
+    return only
+
+
 def _list_reason(multi: _Multi, slots: int, others: int, mixes: int | None = None) -> str:
     """Why a fully converted item-list ingredient still can't be written."""
     ids = multi.found.members
@@ -1985,7 +2015,12 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         if java_type == "minecraft:crafting_shaped":
             pattern = recipe.get("pattern", [])
             used = "".join(row for row in pattern if isinstance(row, str))
-            key_specs = list((recipe.get("key") or {}).items())
+            # A key the pattern doesn't use takes no part in the recipe: Java
+            # reads the key by the symbols the pattern holds, so an entry no
+            # pattern symbol names is ignored there (#302 sub-reason 4: an
+            # item list in such a key must not stop the recipe).
+            key_specs = [(symbol, spec) for symbol, spec in (recipe.get("key") or {}).items()
+                         if used.count(symbol)]
             positions = [(_ingredient(spec), used.count(symbol)) for symbol, spec in key_specs]
         elif java_type == "minecraft:crafting_shapeless":
             positions = [(_ingredient(spec), 1) for spec in recipe.get("ingredients", [])]
@@ -1994,6 +2029,17 @@ def convert(mod: SourceMod, emitted: dict | None = None,
         furnace = java_type in _FURNACE_TYPES
 
         mapped = [_item(spec, tag_resolver) for spec, _ in positions]
+        # A list that means exactly one item is that item (#302 sub-reason 4):
+        # a list holding a tag whose membership is one item, or entries that
+        # name the same item twice, has no membership left to expand.
+        one_item_lists: list[tuple[int, str]] = []
+        for i, (spec, _) in enumerate(positions):
+            if mapped[i] is not None:
+                continue
+            one = _one_item_list(spec, tag_resolver, emitted)
+            if one is not None:
+                mapped[i] = {"item": one}
+                one_item_lists.append((i, one))
         failing = [i for i, m in enumerate(mapped) if m is None]
         multis = {i: _multi_tag(positions[i][0], tag_resolver, emitted) for i in failing}
         variants: list[tuple[str, list]] = [("", mapped)]  # (file suffix, ingredients)
@@ -2250,6 +2296,10 @@ def convert(mod: SourceMod, emitted: dict | None = None,
                 "format_version": "1.20.10",
                 bedrock_type: variant,
             })
+        for _i, one in one_item_lists:
+            result.notes.append(
+                f"{rel}: ingredient list means exactly one item ({one}), so it is written as "
+                f"that item (#302 sub-reason 4)")
         for i, multi in multis.items():
             if multi is None or multi.listed:
                 continue
