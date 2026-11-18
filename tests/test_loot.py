@@ -830,14 +830,84 @@ def test_a_conditional_explosion_decay_is_not_applied_unconditionally(tmp_path):
     assert "explosion_decay" in reason and "block_state_property" in reason
 
 
-def test_an_alternatives_entry_with_its_own_functions_is_refused(tmp_path):
+def test_an_alternatives_entry_with_a_fixed_count_converts_and_counts(tmp_path):
+    """Java applies the alternatives entry's own functions to the child it
+    selects, so the count it sets is the count the drop has."""
     table = {"type": "minecraft:block", "pools": [{"rolls": 1, "conditions": SURVIVES, "entries": [
         {"type": "minecraft:alternatives",
          "functions": [{"function": "minecraft:set_count", "count": 2}],
          "children": [{"type": "minecraft:item", "name": "minecraft:diamond"}]}]}]}
     result = loot.convert(build(tmp_path, {"ore": table}))
+    assert result.unhandled == []
+    entry = result.files["loot_tables/blocks/ore.json"]["pools"][0]["entries"][0]
+    assert entry == {"type": "item", "name": "minecraft:diamond",
+                     "functions": [{"function": "set_count", "count": 2},
+                                   {"function": "explosion_decay"}]}
+
+
+def test_an_alternatives_entry_with_explosion_decay_converts_and_decays(tmp_path):
+    table = {"type": "minecraft:block", "pools": [{"rolls": 1, "entries": [
+        {"type": "minecraft:alternatives",
+         "functions": [{"function": "minecraft:explosion_decay"}],
+         "children": [{"type": "minecraft:item", "name": "minecraft:diamond"}]}]}]}
+    result = loot.convert(build(tmp_path, {"ore": table}))
+    assert result.unhandled == []
+    entry = result.files["loot_tables/blocks/ore.json"]["pools"][0]["entries"][0]
+    assert entry["functions"] == [{"function": "explosion_decay"}]
+
+
+def test_the_alternatives_count_wins_over_the_child_s_own_count(tmp_path):
+    """The child's own functions run first, the alternatives entry's own
+    functions run on the stack the child left, so the alternatives count is
+    the count that counts."""
+    table = {"type": "minecraft:block", "pools": [{"rolls": 1, "entries": [
+        {"type": "minecraft:alternatives",
+         "functions": [{"function": "minecraft:set_count", "count": 2}],
+         "children": [{"type": "minecraft:item", "name": "minecraft:diamond",
+                       "functions": [{"function": "minecraft:set_count", "count": 5}]}]}]}]}
+    result = loot.convert(build(tmp_path, {"ore": table}))
+    assert result.unhandled == []
+    entry = result.files["loot_tables/blocks/ore.json"]["pools"][0]["entries"][0]
+    assert entry["functions"] == [{"function": "set_count", "count": 2}]
+
+
+def test_an_alternatives_entry_with_a_conditional_function_is_refused(tmp_path):
+    """This path writes the functions unconditionally, so a function Java
+    applies only under its own conditions would be applied to every drop."""
+    table = {"type": "minecraft:block", "pools": [{"rolls": 1, "entries": [
+        {"type": "minecraft:alternatives",
+         "functions": [{"function": "minecraft:set_count", "count": 2,
+                        "conditions": [{"condition": "minecraft:block_state_property",
+                                        "properties": {"type": "double"}}]}],
+         "children": [{"type": "minecraft:item", "name": "minecraft:diamond"}]}]}]}
+    result = loot.convert(build(tmp_path, {"ore": table}))
     assert result.files == {}
-    assert "alternatives" in result.unhandled[0].reason
+    reason = result.unhandled[0].reason
+    assert "set_count" in reason and "double" in reason
+
+
+def test_an_alternatives_entry_with_a_copy_function_is_refused(tmp_path):
+    table = {"type": "minecraft:block", "pools": [{"rolls": 1, "entries": [
+        {"type": "minecraft:alternatives",
+         "functions": [{"function": "minecraft:copy_name", "source": "block_entity"}],
+         "children": [{"type": "minecraft:item", "name": "minecraft:diamond"}]}]}]}
+    result = loot.convert(build(tmp_path, {"ore": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "copy_name" in reason and "custom name" in reason
+
+
+def test_an_alternatives_entry_with_its_own_functions_is_refused(tmp_path):
+    """A function the converter can't keep keeps the table refused, naming
+    the function."""
+    table = {"type": "minecraft:block", "pools": [{"rolls": 1, "conditions": SURVIVES, "entries": [
+        {"type": "minecraft:alternatives",
+         "functions": [{"function": "minecraft:apply_bonus", "enchantment": "minecraft:fortune"}],
+         "children": [{"type": "minecraft:item", "name": "minecraft:diamond"}]}]}]}
+    result = loot.convert(build(tmp_path, {"ore": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "alternatives" in reason and "apply_bonus" in reason and "fortune" in reason
 
 
 def test_a_conditional_count_is_never_written_as_an_unconditional_count(tmp_path):
