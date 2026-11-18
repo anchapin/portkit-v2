@@ -45,7 +45,8 @@ ROOT = Path(__file__).resolve().parents[1]
     ("texture assets/x/textures/block/a.png is missing", "texture <path> is missing"),
     ("chunky-ffcbedca6a0b.jar has no assets/<namespace> or data/<namespace> tree; nothing to convert",
      "<file> has no <path><namespace> or <path><namespace> tree; nothing to convert"),
-    ("unknown load condition forge:mod_loaded, forge:not", "unknown load condition <ids>"),
+    ("unknown load condition farmersdelight:vanilla_crates_enabled: defaults are cited for "
+     "version 1.3.4 only", "unknown load condition <id>: defaults are cited for version N only"),
     ("but this jar adds to c:a, c:b, c:d and 3 more, which", "but this jar adds to <ids>, which"),
     ("blockstate covers only ['x', 'z'] of the three axes (missing ['y'])",
      "blockstate covers only […] of the three axes (missing […])"),
