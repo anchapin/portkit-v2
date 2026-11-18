@@ -1,0 +1,5 @@
+name = "variant_family_mod"
+description = "One material shipped as a family of shapes, the way Quark ships its stone families: the full block, stairs, a slab, a wall and a vertical slab, all wearing one texture. The full block and the vertical slab (explicit model geometry) convert. The slab, stairs and wall models extend vanilla parents (minecraft:block/slab, minecraft:block/stairs, minecraft:block/template_wall_post) whose boxes live in vanilla's models, and the vanilla model templates are not cached in the test environment, so those three blockstates plus their 5 dependent model files are explained residue with that reason cited, the same classification as block_defs_mod's stairs. With a populated vanilla template cache the same fixture converts all five shapes (verified by the supervisor's direct convert() run at collection)."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 4
