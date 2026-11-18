@@ -858,3 +858,71 @@ def test_a_conditional_count_is_never_written_as_an_unconditional_count(tmp_path
     assert {"function": "set_count", "count": 2} not in single.get("functions", [])
     assert double["functions"] == [{"function": "set_count", "count": 2},
                                     {"function": "explosion_decay"}]
+
+
+def test_a_pool_count_is_not_swallowed_by_the_entries_count(tmp_path):
+    """Java applies an entry's functions to the stack the entry makes and the
+    pool's functions to the stack the pool makes, so the pool's count is the
+    count: a count Java applies only to some block states is not dropped by
+    the entry's count."""
+    table = {"type": "minecraft:block", "pools": [{
+        "rolls": 1,
+        "entries": [{"type": "minecraft:item", "name": SLAB,
+                     "functions": [{"function": "minecraft:set_count", "add": False, "count": 3}]}],
+        "functions": [{"function": "minecraft:set_count", "add": False, "count": 2,
+                       "conditions": [{"condition": "minecraft:block_state_property", "block": SLAB,
+                                       "properties": {"type": "bottom"}}]}]}]}
+    blocks = {"blocks/steel_slab.json": _block(SLAB)}
+    result = loot.convert(build(tmp_path, {"steel_slab": table}), blocks=blocks,
+                          java_states={SLAB: SLAB_STATES})
+    assert result.unhandled == []
+    bottom = result.files["loot_tables/blocks/steel_slab.json"]["pools"][0]["entries"][0]
+    top = result.files["loot_tables/blocks/steel_slab.state1.json"]["pools"][0]["entries"][0]
+    # The pool's count of 2 counts for the bottom slab; the top slab keeps the
+    # entry's count of 3, as in Java.
+    assert bottom["functions"] == [{"function": "set_count", "count": 2}]
+    assert top["functions"] == [{"function": "set_count", "count": 3}]
+    block = result.files["blocks/steel_slab.json"]["minecraft:block"]
+    assert block["permutations"] == [{"condition": SLAB_STATES["type"]["top"],
+                                      "components": {"minecraft:loot": "loot_tables/blocks/steel_slab.state1.json"}}]
+
+
+def test_the_pool_count_is_the_count_java_gives(tmp_path):
+    """The pool's functions run after the entry's, so the pool's count is the
+    count, as the multi-pool path already does."""
+    table = {"type": "minecraft:block", "pools": [{
+        "rolls": 1,
+        "entries": [{"type": "minecraft:item", "name": SLAB,
+                     "functions": [{"function": "minecraft:set_count", "add": False, "count": 3}]}],
+        "functions": [{"function": "minecraft:set_count", "add": False, "count": 5}]}]}
+    result = loot.convert(build(tmp_path, {"steel_slab": table}))
+    entry = result.files["loot_tables/blocks/steel_slab.json"]["pools"][0]["entries"][0]
+    assert entry["functions"] == [{"function": "set_count", "count": 5}]
+
+
+def test_a_refusal_names_the_state_the_count_depends_on(tmp_path):
+    """A refused count says which state it depends on, so the author knows
+    what the drop is tied to."""
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:stick"}],
+         "functions": [{"function": "minecraft:set_count", "count": 2,
+                        "conditions": [{"condition": "minecraft:block_state_property",
+                                        "properties": {"type": "double"}}]}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:twig"}]},
+    ]}
+    result = loot.convert(build(tmp_path, {"twig": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "type=double" in reason and "minecraft:block_state_property" in reason
+
+
+def test_a_table_level_function_reason_names_the_state(tmp_path):
+    table = {"functions": [{"function": "minecraft:set_count", "count": 2,
+                            "conditions": [{"condition": "minecraft:block_state_property",
+                                            "block": "examplemod:steel_block",
+                                            "properties": {"type": "double"}}]}],
+             "pools": [{"rolls": 1, "conditions": SURVIVES, "entries": [ITEM]}]}
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "type=double" in reason and "minecraft:block_state_property" in reason

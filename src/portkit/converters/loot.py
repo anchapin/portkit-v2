@@ -105,6 +105,28 @@ def _condition_names(conditions) -> list[str]:
     return names
 
 
+def _condition_phrases(conditions) -> list[str]:
+    """What each condition tests, in the words the author wrote it in.
+
+    A block-state condition names the state it asks for (``type=double``), so
+    a reason says which state the drop depends on; any other condition is
+    named as Java spells it.
+    """
+    if not isinstance(conditions, list):
+        return [str(conditions)]
+    phrases = []
+    for condition in conditions:
+        if isinstance(condition, dict) and condition.get("condition") in _BLOCK_STATE:
+            properties = condition.get("properties")
+            if isinstance(properties, dict) and properties:
+                shown = ", ".join(f"{prop}={_state_value(value)}"
+                                  for prop, value in properties.items())
+                phrases.append(f"the block state is {shown} ({condition.get('condition')})")
+                continue
+        phrases.append(f"{_condition_names([condition])[0]} holds")
+    return phrases
+
+
 def _table_function_reason(functions: list) -> str:
     """Why the table's own functions can't be carried (#299).
 
@@ -121,9 +143,9 @@ def _table_function_reason(functions: list) -> str:
             continue
         fname = str(function.get("function"))
         names.append(fname)
-        conditions = _condition_names(function.get("conditions"))
+        conditions = _condition_phrases(function.get("conditions"))
         if conditions:
-            details.append(f"{fname} applies only when {', '.join(conditions)} holds")
+            details.append(f"{fname} applies only when {', '.join(conditions)}")
     listed = ", ".join(names)
     if len(names) == 1:
         reason = (f"the table has a table-level function ({listed}) that Java applies to every drop, "
@@ -601,8 +623,8 @@ def _plain_function(function: dict, where: str) -> tuple[int | None, bool]:
         # A function Java applies only when its own conditions hold (#299):
         # this path writes the function unconditionally, so the conditions
         # would be dropped and the function applied to every drop.
-        conditions = ", ".join(_condition_names(function.get("conditions")))
-        raise _Refused(f"{where} has a {fname} that applies only when {conditions} holds, "
+        conditions = ", ".join(_condition_phrases(function.get("conditions")))
+        raise _Refused(f"{where} has a {fname} that applies only when {conditions}, "
                        "which isn't translated here")
     if fname in ("minecraft:set_count", "set_count"):
         if function.get("add") is True:
@@ -740,7 +762,9 @@ def _java_silk_drop(data: dict, block_id: str) -> str | None:
     if name in AIR:
         return "nothing"
     count = 1
-    for function in list(functions) + list(entry.get("functions") or []):
+    # The pool's functions run after the entry's (see convert_table), so the
+    # pool's count is the count Java gives.
+    for function in list(entry.get("functions") or []) + list(functions):
         fname = function.get("function")
         if fname in ("minecraft:explosion_decay", "explosion_decay"):
             continue
@@ -870,7 +894,14 @@ def convert_table(data: dict, block: str | None = None,
         return [], None
 
     guarded: list[tuple[dict, dict[str, str]]] = []
-    for function in list(pool_functions) + list(entry.get("functions") or []):
+    # Java applies an entry's functions to the stack the entry makes and the
+    # pool's functions to the stack the pool makes, so the pool's functions
+    # run last (LootPool#createItemStack applies the pool's LootItemFunction
+    # to the stack its entries left). A count the pool sets is therefore the
+    # count that counts, and a count Java applies only to some block states
+    # is not swallowed by the entry's count (#299): the same order the
+    # multi-pool path uses.
+    for function in list(entry.get("functions") or []) + list(pool_functions):
         wanted: dict[str, str] | None = {}
         if function.get("conditions"):
             wanted, why = _function_guard(function, block, states)
