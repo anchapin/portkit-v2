@@ -148,7 +148,8 @@ def test_false_beats_undecidable_under_and_and_true_beats_it_under_or(tmp_path):
     result, _ = _recipe(tmp_path / "b", [{"type": "forge:or", "values": [unknown, {"type": "forge:true"}]}])
     assert "recipes/thing.json" in result.files
     result, _ = _recipe(tmp_path / "c", [unknown])
-    assert _residue(result) == ["unknown load condition othermod:whatever"]
+    assert _residue(result) == ["unknown load condition othermod:whatever: "
+                                 "no cited default for this condition type"]
 
 
 # -- config flags ---------------------------------------------------------------
@@ -186,19 +187,38 @@ def test_negated_flag_follows_the_default(tmp_path):
 
 def test_uncited_flag_and_uncited_version_are_unknown(tmp_path):
     result, _ = _recipe(tmp_path / "a", [{"type": "examplemod:flag", "flag": "never_cited"}])
-    assert _residue(result) == ["unknown load condition examplemod:flag/never_cited"]
+    assert _residue(result) == ["unknown load condition examplemod:flag/never_cited: "
+                                 "no cited default for this flag in examplemod 1.2.3"]
     other = {"mods": ("examplemod",)}
     root = tmp_path / "b"
     mod = _mod(root, {"data/examplemod/recipes/thing.json": {**SHAPED, "conditions": [
         {"type": "examplemod:flag", "flag": "on_thing"}]}}, **other)
     mod.mods = {"examplemod": "1.2.4"}  # a version nobody cited
     result, _ = _convert(mod)
-    assert _residue(result) == ["unknown load condition examplemod:flag/on_thing"]
+    assert _residue(result) == ["unknown load condition examplemod:flag/on_thing: "
+                                 "defaults are cited for version 1.2.3 only"]
+
+
+def test_an_unknown_condition_says_why_it_is_unknown(tmp_path):
+    # The reason names the condition and what is missing for it, not only
+    # which condition is unknown (#463).
+    result, _ = _recipe(tmp_path / "a", [{"type": "examplemod:flag", "flag": "never_cited"}])
+    [reason] = _residue(result)
+    assert reason == ("unknown load condition examplemod:flag/never_cited: "
+                      "no cited default for this flag in examplemod 1.2.3")
+    # Every unknown condition of a file gets its own why.
+    result, _ = _recipe(tmp_path / "b", [{"type": "examplemod:flag", "flag": "never_cited"},
+                                         {"type": "othermod:whatever"}])
+    [reason] = _residue(result)
+    assert reason == ("unknown load condition examplemod:flag/never_cited: "
+                      "no cited default for this flag in examplemod 1.2.3; "
+                      "othermod:whatever: no cited default for this condition type")
 
 
 def test_another_mods_condition_type_is_unknown_not_guessed(tmp_path):
     result, _ = _recipe(tmp_path, [{"type": "inspirations:config", "prop": "cauldron_dyeing"}])
-    assert _residue(result) == ["unknown load condition inspirations:config/cauldron_dyeing"]
+    assert _residue(result) == ["unknown load condition inspirations:config/cauldron_dyeing: "
+                                 "no cited default for this condition type"]
 
 
 # -- tags and items ---------------------------------------------------------------
@@ -268,7 +288,8 @@ def test_wrapper_with_an_undecidable_entry_first_is_residue(tmp_path):
                     ([{"type": "forge:true"}], SHAPED))
     result, _ = _convert(_mod(tmp_path, {"data/examplemod/recipes/w.json": body}))
     assert "recipes/w.json" not in result.files
-    assert _residue(result) == ["unknown load condition othermod:config/x"]
+    assert _residue(result) == ["unknown load condition othermod:config/x: "
+                                 "no cited default for this condition type"]
 
 
 # -- loot tables, and conditions that are not load conditions ---------------------

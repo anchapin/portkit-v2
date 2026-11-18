@@ -29,8 +29,9 @@ not load. This module decides each file against the conversion context:
   with a citation in ``portkit/data/config_flag_defaults.json``. A cited
   ``true`` passes (the conversion assumes the default config, and says so in
   one note per mod); a cited ``false`` fails ("disabled by default config");
-  a flag or version with no citation is undecidable ("unknown load condition"),
-  never guessed. See docs/decisions.md, 2026-10-13.
+  a flag or version with no citation is undecidable ("unknown load condition
+  <type>/<flag>: <why>", the why saying what is missing), never guessed. See
+  docs/decisions.md, 2026-10-13.
 - **User config** (``portkit convert --config <mod>.<flag>=<true|false>``,
   ``--config-file``): the conversion-time stand-in for a Java player editing
   the mod's config file. A flag the user sets is decided by that setting instead
@@ -184,6 +185,11 @@ class Verdict:
     absent: list[str] = field(default_factory=list)  # absent mods a false verdict rests on
     disabled: list[str] = field(default_factory=list)  # flags off by default that make it false
     unknown: list[str] = field(default_factory=list)  # "<type>/<flag>" with no cited default
+    # Why each unknown condition is unknown, by its label ("<type>/<flag>" ->
+    # "no cited default for this flag in <mod> <version>"): the reason cites
+    # it, so an unknown condition says why it is unknown and not only which
+    # condition it is.
+    unknown_why: dict[str, str] = field(default_factory=dict)
     assumed: list[FlagDefault] = field(default_factory=list)  # cited defaults a true verdict uses
     user_disabled: list[str] = field(default_factory=list)  # flags the user's config turned off
     # For a gated registration (:meth:`LoadContext.gated_item`): the flag that
@@ -207,7 +213,14 @@ class Verdict:
                         f"conversion holds only this mod ({self.why})")
             return f"load condition is false here: {self.why}"
         if self.unknown:
-            return f"unknown load condition {', '.join(dict.fromkeys(self.unknown))}"
+            said = []
+            cited = False
+            for label in dict.fromkeys(self.unknown):
+                why = self.unknown_why.get(label, "")
+                cited = cited or bool(why)
+                said.append(f"{label}: {why}" if why else label)
+            sep = "; " if cited and len(said) > 1 else ", "
+            return f"unknown load condition {sep.join(said)}"
         return f"load condition can't be decided here: {self.why}"
 
 
@@ -379,6 +392,7 @@ class LoadContext:
             out = Verdict(None, unknown[0].why)
             for p in unknown:
                 out.unknown += p.unknown
+                out.unknown_why.update(p.unknown_why)
             return out
         out = Verdict(how != "or", parts[0].why if len(parts) == 1 else
                       (" and " if how == "and" else " or ").join(p.why for p in parts))
@@ -394,7 +408,8 @@ class LoadContext:
             return Verdict(None, f"condition {cond!r} is not an object")
         kind = _kind(cond)
         if kind is None:
-            return Verdict(None, "condition has no type", unknown=["<no type>"])
+            return Verdict(None, "condition has no type", unknown=["<no type>"],
+                           unknown_why={"<no type>": "it has no type"})
         ns, local = kind.partition(":")[0], _local(kind)
         builtin = ns in ("forge", "neoforge", "fabric", "minecraft")
         if builtin and local in ("true", "false"):
@@ -448,7 +463,8 @@ class LoadContext:
             if handler is not None:
                 return handler(self, kind, cond)
         if builtin:
-            return Verdict(None, f"{kind} isn't evaluated", unknown=[kind])
+            return Verdict(None, f"{kind} isn't evaluated", unknown=[kind],
+                           unknown_why={kind: "it isn't evaluated"})
         return self._flag(kind, cond)
 
     def _mods(self, kind: str, mods: list, every: bool) -> Verdict:
@@ -487,7 +503,8 @@ class LoadContext:
         args = {k: v for k, v in cond.items() if k not in ("type", "condition")}
         if len(args) > 1 or (args and not all(isinstance(v, str) for v in args.values())):
             label = f"{kind}/{json.dumps(args, sort_keys=True)}"
-            return Verdict(None, f"{label}: not a single named flag", unknown=[label])
+            return Verdict(None, f"{label}: not a single named flag", unknown=[label],
+                           unknown_why={label: "it isn't a single named flag"})
         flag = next(iter(args.values()), "") if args else ""
         label = f"{kind}/{flag}" if flag else kind
         if (kind, flag) in self.overrides:
@@ -501,7 +518,7 @@ class LoadContext:
                            assumed=[found])
         found = self.flag(kind, flag)
         if isinstance(found, str):
-            return Verdict(None, f"{label}: {found}", unknown=[label])
+            return Verdict(None, f"{label}: {found}", unknown=[label], unknown_why={label: found})
         if found.default:
             return Verdict(True, f"{label} (on by default)", assumed=[found])
         return Verdict(False, f"{label} (off by default)", disabled=[label], assumed=[found])
