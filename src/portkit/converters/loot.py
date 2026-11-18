@@ -565,14 +565,50 @@ def _drop(data: dict, silk_world: bool, approx: list[str]):
     return found[0] if found else None
 
 
+def _carried_functions(functions, where: str) -> list:
+    """The functions of an entry that can be carried onto its drop.
+
+    They are the ones the converter already writes (a fixed ``set_count`` and
+    ``explosion_decay``), checked by the same rules the plain path uses
+    (:func:`_plain_function`): a function Java applies only under its own
+    conditions, a count range or an add, a copy function or any other
+    function refuses the table, naming the function.
+    """
+    if not functions:
+        return []
+    if not isinstance(functions, list):
+        raise _Refused(f"{where} has unreadable functions")
+    for function in functions:
+        _plain_function(function, where)
+    return list(functions)
+
+
+def _with_functions(entry: dict, functions: list) -> dict:
+    """A copy of the entry with ``functions`` appended to its own.
+
+    The parsed table is never changed: the copy is what the converter reads
+    the drop's functions from, so the child's own functions come first and
+    the ones of the enclosing entry come after them, as Java applies them.
+    """
+    if not functions:
+        return entry
+    merged = copy.deepcopy(entry)
+    merged["functions"] = list(entry.get("functions") or []) + list(functions)
+    return merged
+
+
 def _entry_drops(entry: dict, test, decay: bool, silk_world: bool, approx: list[str]) -> list:
     entry_type = entry.get("type")
     if entry_type in ("minecraft:alternatives", "alternatives"):
-        if entry.get("functions"):
-            # The converter carries no function on an alternatives entry: it
-            # would be dropped, and with it the conditions that say when it
-            # applies (#299).
-            raise _Refused("the alternatives entry has its own functions, which aren't carried")
+        # Java applies the alternatives entry's own functions to the stack the
+        # selected child made (#299): the child's own functions run first, the
+        # alternatives entry's functions run on the stack the child left, and
+        # the pool's functions run last (the same order the plain path uses,
+        # see _plain_drop and convert_table).  Only the functions the
+        # converter already writes can be carried; a function it can't keep
+        # (a conditional one, a count range or an add, a copy function, any
+        # other function) keeps the table refused, naming the function.
+        carried = _carried_functions(entry.get("functions"), "the alternatives entry")
         own, own_decay = _conditions(entry.get("conditions"), silk_world, approx)
         test = _and(test, own)
         if test is None:
@@ -592,7 +628,8 @@ def _entry_drops(entry: dict, test, decay: bool, silk_world: bool, approx: list[
                     for c in children[i + 1:]):
                 raise _Refused("the drop picks between alternatives (usually silk touch): a tool-specific drop "
                                "and another one, and Bedrock can't test that a tool is absent")
-            return [(_and(test, child_test), child, decay or own_decay or child_decay)]
+            return [(_and(test, child_test), _with_functions(child, carried),
+                     decay or own_decay or child_decay)]
         return []
     if entry_type not in _SUPPORTED_ENTRY_TYPES:
         raise _Refused(f"entry type {entry_type!r} is not a plain item drop")
