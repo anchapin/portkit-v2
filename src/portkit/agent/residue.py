@@ -93,6 +93,10 @@ from .tools import SYSTEM_PROMPT, ToolBox
 # convert. They stay residue, skipped with a reason rather than burning a
 # session.
 SKIP_KINDS = {
+    # A mod's gameplay code, whatever else the mod ships: a content mod's QoL
+    # features (a keybind that sorts an inventory, a reach-around placement)
+    # are Java code with no convertible content, so they land here and count
+    # as explained (the #279 pattern: nothing Bedrock can hold), not as work.
     "java_code": "compiled bytecode; the agent's tools read text files only",
     "armor": ("the item is armor whose slot and numbers are the mod's code (#274), which the agent's tools "
               "can't read; writing minecraft:wearable without them would invent its stats"),
