@@ -58,7 +58,81 @@ def test_other_multiparts_are_refused_naming_their_states():
         {"apply": {"model": "m:post"}, "when": {"attached": "true"}},
     ]}
     reason = blocks._multipart_reason(seat)
-    assert "2 part(s) keyed on attached, facing" in reason
+    # The states are named with the values they take, not only by name (#56).
+    assert "2 part(s) keyed on attached=true, facing=north" in reason
+
+
+def _seat_multipart():
+    """A seat-shaped multipart: a model per facing, plus an attached part."""
+    parts = []
+    for d, y in (("north", 0), ("east", 90), ("south", 180), ("west", 270)):
+        parts.append({"apply": {"model": "m:seat", "y": y}, "when": {"facing": d}})
+    parts.append({"apply": {"model": "m:post"}, "when": {"attached": "true"}})
+    return {"multipart": parts}
+
+
+def _wall_multipart():
+    """A vanilla-wall-shaped multipart: a post, and a low and tall side per direction."""
+    parts = [{"apply": {"model": "m:post"}, "when": {"up": "true"}}]
+    for d, y in (("north", 0), ("east", 90), ("south", 180), ("west", 270)):
+        for height in ("low", "tall"):
+            parts.append({"apply": {"model": f"m:side-{height}", "y": y}, "when": {d: height}})
+    return {"multipart": parts}
+
+
+def _pane_multipart():
+    """A connection-shaped multipart: a post, and a side per direction."""
+    parts = [{"apply": {"model": "m:post"}}]
+    for d, y in (("north", 0), ("east", 90), ("south", 180), ("west", 270)):
+        parts.append({"apply": {"model": "m:side", "y": y}, "when": {d: "true"}})
+        parts.append({"apply": {"model": "m:noside", "y": y}, "when": {d: "false"}})
+    return {"multipart": parts}
+
+
+def test_a_seat_shaped_multipart_is_refused_naming_its_shape_and_values():
+    reason = blocks._multipart_reason(_seat_multipart())
+    assert "shape: seat-shaped" in reason
+    assert "keyed on attached=true, facing=east|north|south|west" in reason
+
+
+def test_a_fence_shaped_multipart_is_refused_naming_its_shape_and_values():
+    reason = blocks._multipart_reason(_palisade())
+    assert "shape: fence-shaped" in reason
+    assert "keyed on east=true, north=true, south=true, west=true" in reason
+
+
+def test_a_wall_shaped_multipart_is_refused_naming_its_shape_and_values():
+    reason = blocks._multipart_reason(_wall_multipart())
+    assert "shape: wall-shaped" in reason
+    assert "keyed on east=low|tall, north=low|tall, south=low|tall, up=true, west=low|tall" in reason
+
+
+def test_a_connection_shaped_multipart_is_refused_naming_its_shape_and_values():
+    reason = blocks._multipart_reason(_pane_multipart())
+    assert "shape: connection-shaped" in reason
+    assert "keyed on east=false|true, north=false|true, south=false|true, west=false|true" in reason
+
+
+def test_a_multipart_no_detector_reads_says_so():
+    state = {"multipart": [
+        {"apply": {"model": "m:a"}, "when": {"lit": "true"}},
+        {"apply": {"model": "m:b"}, "when": {"facing": "north"}},
+    ]}
+    reason = blocks._multipart_reason(state)
+    assert "shape: unrecognised shape" in reason
+    assert "keyed on facing=north, lit=true" in reason
+
+
+def test_a_connection_multipart_that_names_no_model_says_which_shape_it_is():
+    state = {"multipart": [
+        {"apply": {"model": "m:a"}},
+        {"apply": {"y": 90}, "when": {"north": "true"}},
+    ]}
+    parts, why = blocks._connection_parts(state)
+    assert parts is None
+    assert "connection multipart: a part names no model" in why
+    assert "shape: connection-shaped" in why
+    assert "keyed on north=true" in why
 
 
 def test_the_floor_stays_low_without_a_newer_block():

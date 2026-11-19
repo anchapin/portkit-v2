@@ -18,6 +18,11 @@ one (see "Facing-only blocks" below). Anything else goes to the residue with
 its state names, because approximating one produces a block that loads and
 behaves wrong, which is worse than one that never shipped.
 
+A multipart that no converter reads is refused with the shape it has (the
+fence, wall, seat or connection shape, or an unrecognised shape) and the
+states it keys on with the values each takes across its parts, so the
+refusal says what was there and what was read.
+
 Destroy time is deliberately absent: it is not in the Java JSON at all, and
 inventing numbers for it is the failure mode this project exists to prevent.
 Light emission isn't in the JSON either; it is read from the block's compiled
@@ -297,12 +302,76 @@ def _multipart_states(blockstate: dict) -> list[str]:
     return sorted(states)
 
 
+def _multipart_clause_values(clause: dict, values: dict[str, set[str]]) -> None:
+    """The values a ``when`` clause gives each of its states."""
+    for name, value in clause.items():
+        if name in ("OR", "AND"):
+            continue
+        values.setdefault(name, set()).update(
+            v.strip().lower() for v in str(value).split("|") if v.strip())
+
+
+def _multipart_state_values(blockstate: dict) -> list[tuple[str, list[str]]]:
+    """Each state a multipart keys on, with the values it takes across parts.
+
+    The same walk as :func:`_multipart_states`: a part's ``when`` names the
+    states it draws on, an ``OR``/``AND`` clause names theirs, and a
+    condition naming either value names both (``north=true|false``). The
+    values are the ones the parts spell out, so a boolean that only adds a
+    part lists the value that adds it (``attached=true``).
+    """
+    values: dict[str, set[str]] = {}
+    for part in blockstate.get("multipart") or []:
+        when = part.get("when") if isinstance(part, dict) else None
+        if isinstance(when, dict):
+            for key, value in when.items():
+                if key in ("OR", "AND") and isinstance(value, list):
+                    for clause in value:
+                        if isinstance(clause, dict):
+                            _multipart_clause_values(clause, values)
+                else:
+                    _multipart_clause_values({key: value}, values)
+    return [(name, sorted(values[name])) for name in sorted(values)]
+
+
+def _multipart_states_text(blockstate: dict) -> str:
+    """The states a multipart keys on, with their values: ``facing=north|south``."""
+    return ", ".join(f"{name}={'|'.join(values)}"
+                     for name, values in _multipart_state_values(blockstate)) or "nothing"
+
+
+def _multipart_shape(blockstate: dict) -> str:
+    """The shape a multipart has, as the detector that reads it names it.
+
+    The labels come from the detectors themselves (the wall, fence, seat and
+    connection shapes), never from a mod's or a block's name (#87). A
+    multipart none of them reads is an unrecognised shape.
+    """
+    if _wall_parts(blockstate) is not None:
+        return "wall-shaped"
+    if _palisade_parts(blockstate)[0] is not None:
+        return "fence-shaped"
+    if _facing_parts(blockstate)[0] is not None:
+        return "seat-shaped"
+    parts, why = _connection_parts(blockstate)
+    if parts is not None or why:
+        # The connection check reads a multipart keyed only on the cardinal
+        # booleans, so a multipart it complains about has that shape too.
+        return "connection-shaped"
+    return "unrecognised shape"
+
+
+def _multipart_note(blockstate: dict) -> str:
+    """What a multipart refusal names besides its reason: its shape and states."""
+    return f"(shape: {_multipart_shape(blockstate)}; keyed on {_multipart_states_text(blockstate)})"
+
+
 def _multipart_reason(blockstate: dict) -> str:
     parts = blockstate.get("multipart") or []
-    states = _multipart_states(blockstate)
     return (
         f"multipart blockstate with {len(parts)} part(s) keyed on "
-        f"{', '.join(states) or 'nothing'}; Java computes those states in block "
+        f"{_multipart_states_text(blockstate)} "
+        f"(shape: {_multipart_shape(blockstate)}); Java computes those states in block "
         "code and no Bedrock trait sets them, so the block would sit in its "
         "default shape forever"
     )
@@ -1290,12 +1359,16 @@ def _connection_parts(blockstate: dict) -> tuple[list[dict] | None, str]:
         choices = apply if isinstance(apply, list) else [apply]
         choices = [c for c in choices if isinstance(c, dict) and isinstance(c.get("model"), str)]
         if not choices:
-            return None, "connection multipart: a part names no model"
+            return None, ("connection multipart: a part names no model "
+                          "(shape: connection-shaped; "
+                          f"keyed on {_multipart_states_text(blockstate)})")
         first = choices[0]
         try:
             x, y = int(first.get("x") or 0), int(first.get("y") or 0)
         except (TypeError, ValueError):
-            return None, "connection multipart: a part's x/y turn isn't a number"
+            return None, ("connection multipart: a part's x/y turn isn't a number "
+                          "(shape: connection-shaped; "
+                          f"keyed on {_multipart_states_text(blockstate)})")
         out.append({
             "model": first["model"], "x": x, "y": y, "uvlock": bool(first.get("uvlock")),
             "test": _connection_molang(clauses),
@@ -1343,8 +1416,9 @@ def _keyed_textures(flat: dict, index: int, merged: dict) -> dict:
 
 
 def _convert_connection_multipart(mod: SourceMod, result: ConversionResult, rel: str,
-                                  name: str, parts: list[dict]) -> None:
+                                  name: str, parts: list[dict], blockstate: dict) -> None:
     """One bone per multipart part, shown while its connection test holds."""
+    note = _multipart_note(blockstate)
     textures: dict = {}
     bones: list[tuple[str, list]] = []
     visibility: dict[str, str] = {}
@@ -1356,7 +1430,7 @@ def _convert_connection_multipart(mod: SourceMod, result: ConversionResult, rel:
         if flat is None:
             flat, why = _flat_model(mod, result, part["model"])
             if flat is None:
-                result.unhandled.append(Unhandled(rel, "block", f"{label}: {why}"))
+                result.unhandled.append(Unhandled(rel, "block", f"{label}: {why} {note}"))
                 return
             flats[part["model"]] = flat
         flat = _keyed_textures(flat, index, textures)
@@ -1377,7 +1451,7 @@ def _convert_connection_multipart(mod: SourceMod, result: ConversionResult, rel:
                 turned.append(moved)
             elements = turned
         if elements is None:
-            result.unhandled.append(Unhandled(rel, "block", f"{label}: {why}"))
+            result.unhandled.append(Unhandled(rel, "block", f"{label}: {why} {note}"))
             return
         bone = f"part_{index}"
         bones.append((bone, elements))
@@ -1389,13 +1463,14 @@ def _convert_connection_multipart(mod: SourceMod, result: ConversionResult, rel:
                 result.claim(mod, path)
             random_models.append(ref)
     if not any(els for _, els in bones):
-        result.unhandled.append(Unhandled(rel, "block", "connection multipart: its models have no elements"))
+        result.unhandled.append(Unhandled(rel, "block",
+                                          f"connection multipart: its models have no elements {note}"))
         return
     bones = [(b, els) for b, els in bones if els]
     visibility = {b: t for b, t in visibility.items() if any(b == n for n, _ in bones)}
     identifier, instances, geo, why = _shape_geometry(mod, name, bones, textures)
     if identifier is None:
-        result.unhandled.append(Unhandled(rel, "block", f"connection multipart: {why}"))
+        result.unhandled.append(Unhandled(rel, "block", f"connection multipart: {why} {note}"))
         return
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = {
@@ -1939,7 +2014,7 @@ def _convert_blocks(mod: SourceMod, stations: dict | None = None,
 
         connection, why = _connection_parts(blockstate)
         if connection is not None:
-            _convert_connection_multipart(mod, result, rel, name, connection)
+            _convert_connection_multipart(mod, result, rel, name, connection, blockstate)
             continue
         if why:
             result.unhandled.append(Unhandled(rel, "block", why))
@@ -5102,7 +5177,8 @@ def _drop_waterlogged(blockstate: dict) -> tuple[dict | None, str]:
         out["variants"] = {rest: groups[rest]["false"] for rest in order}
         return out, ""
     if "waterlogged" in _drawn_states(blockstate):
-        return None, "waterlogged: a multipart part depends on it, which isn't read"
+        return None, ("waterlogged: a multipart part depends on it, which isn't read "
+                      f"{_multipart_note(blockstate)}")
     return None, ""
 
 
@@ -5442,12 +5518,14 @@ def _directional_bool_variants(blockstate: dict) -> tuple[str | None, tuple, dic
             for part in parts:
                 ok = _when_matches(part.get("when") if isinstance(part, dict) else None, cell)
                 if ok is None:
-                    return None, (), None, f"{label}: a multipart condition isn't one this reads"
+                    return None, (), None, (f"{label}: a multipart condition isn't one this reads "
+                                            f"{_multipart_note(blockstate)}")
                 if ok:
                     hits.append(part)
             if len(hits) != 1:
                 return None, (), None, (f"{label}: the multipart draws {len(hits)} parts at "
-                                        f"{_key_label(jkey)}, not exactly one")
+                                        f"{_key_label(jkey)}, not exactly one "
+                                        f"{_multipart_note(blockstate)}")
             got, why = _dir_entry(hits[0].get("apply"), label, _key_label(jkey))
             if got is None:
                 return None, (), None, why
