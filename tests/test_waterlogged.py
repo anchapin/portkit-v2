@@ -75,7 +75,10 @@ def test_does_not_drop_what_it_cannot():
     mixed = {"variants": {"waterlogged=false": {"model": "m"}, "": {"model": "m"}}}
     assert blocks._drop_waterlogged(mixed)[1] == "waterlogged: some variants don't name it"
     multipart = {"multipart": [{"when": {"waterlogged": "false"}, "apply": {"model": "m"}}]}
-    assert blocks._drop_waterlogged(multipart)[1] == "waterlogged: a multipart part depends on it, which isn't read"
+    reason = blocks._drop_waterlogged(multipart)[1]
+    assert reason.startswith("waterlogged: a multipart part depends on it, which isn't read")
+    # The refusal names the multipart's shape and the states it keys on (#56).
+    assert "(shape: unrecognised shape; keyed on waterlogged=false)" in reason
     # Not drawn at all: nothing to do, no reason.
     assert blocks._drop_waterlogged({"variants": {"facing=north": {"model": "m"}}}) == (None, "")
     assert blocks._drop_waterlogged({"multipart": [{"apply": {"model": "m"}}]}) == (None, "")
