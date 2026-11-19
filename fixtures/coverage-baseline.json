@@ -104,6 +104,11 @@
       "coverage": 100.0,
       "files": 14,
       "residue": 0
+    },
+    "variant_family_mod": {
+      "coverage": 46.7,
+      "files": 7,
+      "residue": 8
     }
   }
 }
