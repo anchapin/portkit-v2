@@ -83,6 +83,25 @@ STEPS: dict[str, str] = {
     "underground_decoration": "underground_pass",
 }
 
+# Java's generation steps (GenerationStep.Decoration) in declaration order.
+#
+# A Java biome file writes its features as one list per generation step, in
+# this order, so the position of a list names the step: the step's own name
+# is never written in the file. Citation: the enum's declaration order in
+# Mojang's 1.20.1 client mappings,
+# net.minecraft.world.level.levelgen.GenerationStep$Decoration -- the same
+# source GEODE_STEPS below cites ("raw_generation, lakes, local_modifications,
+# underground_structures, surface_structures, strongholds, underground_ores,
+# ..."). The two ore steps this slice reads are the sixth and the seventh
+# (index 6 and 7): both are in STEPS above, and both map to Bedrock's
+# underground_pass.
+GENERATION_STEPS: tuple[str, ...] = (
+    "raw_generation", "lakes", "local_modifications", "underground_structures",
+    "surface_structures", "strongholds", "underground_ores", "underground_decoration",
+    "fluid_springs", "vegetal_decoration", "top_layer_modification", "frozen_ice",
+    "special",
+)
+
 # Lowest and highest block y per dimension.
 # Java: mcmeta dimension_type/<dim>.json min_y and min_y + height - 1, the same
 # in 1.20.1 and 1.21.1 (overworld -64/384, the_nether 0/256, the_end 0/256).
