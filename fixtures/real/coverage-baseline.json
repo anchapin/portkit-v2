@@ -12,6 +12,18 @@
       "residue": 4993,
       "errors": 0
     },
+    "comforts": {
+      "coverage": 21.3,
+      "files": 85,
+      "residue": 314,
+      "errors": 0
+    },
+    "cooking_for_blockheads": {
+      "coverage": 44.0,
+      "files": 703,
+      "residue": 893,
+      "errors": 0
+    },
     "create": {
       "coverage": 43.1,
       "files": 4160,
@@ -28,6 +40,12 @@
       "coverage": 49.8,
       "files": 902,
       "residue": 910,
+      "errors": 0
+    },
+    "iron_chests": {
+      "coverage": 17.4,
+      "files": 41,
+      "residue": 194,
       "errors": 0
     },
     "mekanism": {
