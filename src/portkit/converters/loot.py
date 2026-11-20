@@ -570,15 +570,30 @@ def _carried_functions(functions, where: str) -> list:
 
     They are the ones the converter already writes (a fixed ``set_count`` and
     ``explosion_decay``), checked by the same rules the plain path uses
-    (:func:`_plain_function`): a function Java applies only under its own
-    conditions, a count range or an add, a copy function or any other
-    function refuses the table, naming the function.
+    (:func:`_plain_function`): a count range or an add, a copy function or
+    any other function refuses the table, naming the function.
+
+    A function Java applies only under its own conditions is not refused
+    here: its conditions are decided per Bedrock state later, with the
+    entry's other functions (:func:`_function_guard`, the same decision a
+    child's own conditional function gets), so the function itself is checked
+    without its conditions and the conditions travel with it.
     """
     if not functions:
         return []
     if not isinstance(functions, list):
         raise _Refused(f"{where} has unreadable functions")
     for function in functions:
+        if isinstance(function, dict) and function.get("conditions"):
+            # The conditions are decided per Bedrock state later (#299), so
+            # the function itself is checked without them; a refusal about the
+            # function still names the conditions that decide it.
+            try:
+                _plain_function({k: v for k, v in function.items() if k != "conditions"}, where)
+            except _Refused as exc:
+                phrases = ", ".join(_condition_phrases(function.get("conditions")))
+                raise _Refused(f"{exc} (the function applies only when {phrases})", exc.function)
+            continue
         _plain_function(function, where)
     return list(functions)
 
@@ -606,8 +621,10 @@ def _entry_drops(entry: dict, test, decay: bool, silk_world: bool, approx: list[
         # the pool's functions run last (the same order the plain path uses,
         # see _plain_drop and convert_table).  Only the functions the
         # converter already writes can be carried; a function it can't keep
-        # (a conditional one, a count range or an add, a copy function, any
-        # other function) keeps the table refused, naming the function.
+        # (a count range or an add, a copy function, any other function)
+        # keeps the table refused, naming the function.  A conditional
+        # function is carried with its conditions and decided per Bedrock
+        # state by _function_guard, like a child's own conditional function.
         carried = _carried_functions(entry.get("functions"), "the alternatives entry")
         own, own_decay = _conditions(entry.get("conditions"), silk_world, approx)
         test = _and(test, own)

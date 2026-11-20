@@ -872,8 +872,9 @@ def test_the_alternatives_count_wins_over_the_child_s_own_count(tmp_path):
 
 
 def test_an_alternatives_entry_with_a_conditional_function_is_refused(tmp_path):
-    """This path writes the functions unconditionally, so a function Java
-    applies only under its own conditions would be applied to every drop."""
+    """The carried function's conditions are decided per Bedrock state
+    downstream; a block with no state to decide them against keeps the
+    table refused, naming the function and the state it depends on."""
     table = {"type": "minecraft:block", "pools": [{"rolls": 1, "entries": [
         {"type": "minecraft:alternatives",
          "functions": [{"function": "minecraft:set_count", "count": 2,
@@ -884,6 +885,28 @@ def test_an_alternatives_entry_with_a_conditional_function_is_refused(tmp_path):
     assert result.files == {}
     reason = result.unhandled[0].reason
     assert "set_count" in reason and "double" in reason
+
+
+def test_an_alternatives_conditional_count_is_written_for_its_state_only(tmp_path):
+    """An alternatives entry's own conditional set_count is carried with its
+    conditions and decided per Bedrock state (#299): count 2 for the double
+    slab state only, never as an unconditional count."""
+    block = "examplemod:sand"
+    states = {"type": {"single": "q.block_state('examplemod:type') == 'single'",
+                       "double": "q.block_state('examplemod:type') == 'double'"}}
+    table = {"type": "minecraft:block", "pools": [{"rolls": 1, "entries": [
+        {"type": "minecraft:alternatives",
+         "functions": [{"function": "minecraft:set_count", "count": 2,
+                        "conditions": [{"condition": "minecraft:block_state_property",
+                                        "properties": {"type": "double"}}]}],
+         "children": [{"type": "minecraft:item", "name": block}]}]}]}
+    blocks = {"blocks/sand.json": _block(block)}
+    result = loot.convert(build(tmp_path, {"sand": table}), blocks=blocks, java_states={block: states})
+    assert result.unhandled == []
+    single = result.files["loot_tables/blocks/sand.json"]["pools"][0]["entries"][0]
+    double = result.files["loot_tables/blocks/sand.state1.json"]["pools"][0]["entries"][0]
+    assert {"function": "set_count", "count": 2} not in single.get("functions", [])
+    assert {"function": "set_count", "count": 2} in double["functions"]
 
 
 def test_an_alternatives_entry_with_a_copy_function_is_refused(tmp_path):
