@@ -111,9 +111,9 @@
       "residue": 8
     },
     "worldgen_biome_mod": {
-      "coverage": 0.0,
-      "files": 0,
-      "residue": 4
+      "coverage": 62.5,
+      "files": 5,
+      "residue": 3
     }
   }
 }
