@@ -57,6 +57,17 @@ Fabric adds features to biomes in code (``BiomeModifications``): those calls
 are read from the bytecode by :mod:`portkit.biomecode` (pick 5a) and come in
 as ``code`` rows shaped like a modifier, decided the same way; a call that
 can't be read exactly leaves its ore ``unowned`` or residue with the reason.
+
+A third attachment path needs no loader file at all: a Java biome file
+(``data/<ns>/worldgen/biome/<biome>.json``) lists, per generation step, the
+placed features that biome generates (#281 pick C.1, the "ore features from
+data files" slice). Those references are read here and the ores they name are
+decided exactly like the ones a biome modifier adds -- but the biome set
+comes from the biome file itself, and a Java biome *id* has no Bedrock biome
+map in this design (pick A.6a: only the vanilla dimension tags have one), so
+such an ore is residue with that reason rather than a rule naming a biome
+the pack's terrain never produces. The files the path reads are consumed
+either way: they are explained, not ``unowned``.
 """
 from __future__ import annotations
 
@@ -73,6 +84,7 @@ FEATURE_FORMAT = "1.13.0"
 RULE_FORMAT = "1.13.0"
 
 _MODIFIER = re.compile(r"^data/([^/]+)/(forge|neoforge)/biome_modifier/(.+)\.json$")
+_BIOME = re.compile(r"^data/([^/]+)/worldgen/biome/(.+)\.json$")
 _ADD = {"forge:add_features", "neoforge:add_features"}
 _REMOVE = {"forge:remove_features", "neoforge:remove_features"}
 _VANILLA_PLACEMENTS = {"minecraft:count", "minecraft:in_square", "minecraft:height_range",
@@ -144,6 +156,43 @@ def _read_placed(root: Path, ident) -> tuple[str, str, dict, dict] | None:
     if not isinstance(cf, dict):
         return None
     return prel, crel, pf, cf
+
+
+def _biome_documents(root: Path, namespaces: set[str]) -> list[tuple[str, str, dict]]:
+    """(rel path, biome id, document) for the jar's own biome files.
+
+    A biome file is ``data/<ns>/worldgen/biome/<path>.json`` and defines the
+    biome ``<ns>:<path>`` (Java's biome registry path: e.g.
+    ``data/examplemod/worldgen/biome/cave.json`` is ``examplemod:cave``)."""
+    data = root / "data"
+    out = []
+    for path in sorted(data.glob("*/worldgen/biome/**/*.json")) if data.is_dir() else []:
+        rel = path.relative_to(root).as_posix()
+        m = _BIOME.match(rel)
+        if not m or m.group(1) not in namespaces:
+            continue
+        doc = _read(path)
+        if isinstance(doc, dict):
+            out.append((rel, f"{m.group(1)}:{m.group(2)}", doc))
+    return out
+
+
+def _generation_steps(doc: dict) -> list[tuple[str, list[str]]]:
+    """(step name, placed feature ids) per generation step of a biome file.
+
+    Java writes a biome's features as one list per generation step, in
+    ``GenerationStep.Decoration``'s order (``ref.GENERATION_STEPS``): the
+    step is never named in the file, so its position names it. A step
+    written as an object holding a ``features`` list is read the same way."""
+    value = doc.get("features")
+    if not isinstance(value, list):
+        return []
+    out = []
+    for index, step in enumerate(value):
+        name = ref.GENERATION_STEPS[index] if index < len(ref.GENERATION_STEPS) else None
+        ids = step.get("features") if isinstance(step, dict) else step
+        out.append((name, [i for i in _as_list(ids) if isinstance(i, str)]))
+    return out
 
 
 def _vanilla_placements(placements) -> bool:
@@ -576,7 +625,7 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
         found = [_classify(root, f) for f in feats]
         if not feats or any(x is None for x in found):
             continue  # not wholly ores, geodes and patches: left for the other passes
-        plans.append((rel, doc, list(zip(feats, found)), None))
+        plans.append((rel, doc, list(zip(feats, found)), None, "modifier"))
         for f in feats:
             adds_per_pf[f] = adds_per_pf.get(f, 0) + 1
     for c in code:
@@ -585,8 +634,33 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
         found = _classify(root, c.feature)
         if found is None:
             continue  # not a feature this module reads: left for the other passes
-        plans.append((c.source, c.doc, [(c.feature, found)], c))
+        plans.append((c.source, c.doc, [(c.feature, found)], c, "code"))
         adds_per_pf[c.feature] = adds_per_pf.get(c.feature, 0) + 1
+    # The ores a data-file biome lists for itself (#281 pick C.1): the biome
+    # file's generation steps name the placed features that biome generates.
+    # The biome set is the biome file's own biome, so the rule's filter would
+    # have to name one Java biome -- which has no Bedrock map (pick A.6a).
+    biomes: dict[str, str] = {}
+    for rel, biome_id, doc in _biome_documents(root, namespaces):
+        for step, ids in _generation_steps(doc):
+            if step is None:
+                continue  # a step past the ones this slice knows: not read
+            own = [i for i in ids if _split(i)[0] in namespaces]
+            if not own:
+                continue  # only vanilla features: nothing of the jar's here
+            entries = []
+            for ident in own:
+                found = _classify(root, ident)
+                if found is None or found[0] != "ore":
+                    continue  # not an ore this module reads: left for the other passes
+                entries.append((ident, found))
+            if not entries:
+                continue
+            biomes[rel] = biome_id
+            plans.append((rel, {"type": "biome_file", "features": own, "step": step,
+                                 "biomes": [biome_id]}, entries, None, "biome"))
+            for f in own:
+                adds_per_pf[f] = adds_per_pf.get(f, 0) + 1
     # A remove modifier naming only features read here is residue of its own:
     # the Bedrock rule can't subtract the biomes it names (pick 6).
     removals = []
@@ -597,11 +671,19 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
 
     converted_cf: set[str] = set()
     refused: dict[str, tuple[str, str, set[str], str]] = {}  # placed rel -> (reason, configured rel, nested, kind)
+    # The data-file path: placed rel -> (the Java biomes listing it, configured
+    # rel, nested files, kind). Filed after the loop, one row per placed
+    # feature, naming every biome that lists it.
+    biome_refusals: dict[str, tuple[list[str], str, set[str], str]] = {}
     empty_modifiers: list[str] = []
-    for rel, doc, entries, from_code in plans:
-        if from_code is None:
+    produced: dict[str, bool] = {}  # biome file -> wrote a rule
+    for rel, doc, entries, from_code, origin in plans:
+        if origin == "modifier":
             out.consumed.add(rel)
             mod_name = _MODIFIER.match(rel).group(3)
+        elif origin == "biome":
+            out.consumed.add(rel)
+            mod_name = re.sub(r"[^a-z0-9_]", "_", doc["biomes"][0].split(":", 1)[1].split("/")[-1].lower())
         else:
             mod_name = re.sub(r"[^a-z0-9_]", "_", from_code.source.split(" ")[0].rsplit(".", 1)[-1].lower())
         rules_before = len(out.files)
@@ -614,6 +696,18 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
                                    "can't subtract (#281 pick 6)")
                 if from_code is not None and from_code.refused:
                     raise _Refused(f"attached in code by {from_code.source}: {from_code.refused}")
+                if origin == "biome":
+                    if crel in converted_cf:
+                        # The same ore a biome modifier already attached: the
+                        # rule is written, this biome's own attachment isn't
+                        # expressible, and the ore isn't residue.
+                        out.notes.append(f"Ore `{ident}`: the Java biome `{doc['biomes'][0]}` lists it too, and "
+                                         "one Java biome has no Bedrock biome map here (#281 pick A.6a), so that "
+                                         "biome isn't in the rule.")
+                        continue
+                    raise _Refused(f"attached to the Java biome `{doc['biomes'][0]}`: only vanilla biome tags "
+                                   "with a Bedrock biome tag map, so a Bedrock feature rule can't be attached to "
+                                   "one Java biome (#281 pick A.6a)")
                 step = doc.get("step")
                 if kind == "patch" and coded:
                     raise _Refused(f"it places features through the mod's own types ({', '.join(sorted(coded))}), "
@@ -640,7 +734,13 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
                 if lo < b_lo or hi > b_hi:
                     raise _Refused(f"heights {lo}..{hi} reach outside Bedrock's {dimension} ({b_lo}..{b_hi})")
             except _Refused as why:
-                refused[prel] = (str(why), crel, nested, kind)
+                if origin == "biome":
+                    names, crel_, nested_, kind_ = biome_refusals.get(prel, ([], crel, nested, kind))
+                    if doc["biomes"][0] not in names:
+                        names = names + [doc["biomes"][0]]
+                    biome_refusals[prel] = (names, crel_, nested_, kind_)
+                else:
+                    refused[prel] = (str(why), crel, nested, kind)
                 continue
             if crel not in feature_names:
                 fname = _file_name(pf["feature"], taken_features)
@@ -690,8 +790,20 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
                                            for p in _placements(pf)):
                 out.notes.append(f"{kind.capitalize()} `{ident}`: Java's trapezoid height range written as Bedrock's "
                                  f"triangle distribution over {lo}..{hi} (#281 pick 2).")
-        if len(out.files) == rules_before and from_code is None:
+        if origin == "biome":
+            produced[rel] = produced.get(rel, False) or len(out.files) > rules_before
+        elif len(out.files) == rules_before and from_code is None:
             empty_modifiers.append(rel)
+    # The data-file refusals: one row per placed feature, naming every Java
+    # biome that lists it (#281 pick A.6a).
+    for prel, (names, crel, nested, kind) in sorted(biome_refusals.items()):
+        if prel in refused:
+            continue
+        listed = ", ".join(f"`{n}`" for n in names)
+        plural = "s" if len(names) > 1 else ""
+        refused[prel] = (f"attached to the Java biome{plural} {listed}: only vanilla biome tags with a Bedrock "
+                         "biome tag map, so a Bedrock feature rule can't be attached to one Java biome "
+                         "(#281 pick A.6a)", crel, nested, kind)
     # Each file counted once, even when several placed features refuse it.
     counted: set[str] = set()
     for prel, (reason, crel, nested, kind) in sorted(refused.items()):
@@ -708,6 +820,16 @@ def convert(root: Path, files: dict, namespaces: set[str], code: list | None = N
         out.unhandled.append(Unhandled(source=rel, kind=KIND, count=1,
                                        reason="biome modifier adding only features that didn't convert (their "
                                               "placed features are residue of their own)"))
+    # A biome file whose ores no rule could carry: the file is read (and so
+    # claimed), but the Java biome it defines has no Bedrock biome map
+    # (#281 pick A.6a).
+    for rel, biome_id in biomes.items():
+        if produced.get(rel):
+            continue
+        out.unhandled.append(Unhandled(source=rel, kind=KIND, count=1,
+                                       reason=f"the Java biome `{biome_id}` it defines has no Bedrock biome map "
+                                              "(only the vanilla dimension tags have one), so the ores it lists "
+                                              "can't be attached to a Bedrock feature rule (#281 pick A.6a)"))
     for rel in removals:
         out.consumed.add(rel)
         out.unhandled.append(Unhandled(source=rel, kind=KIND, count=1,

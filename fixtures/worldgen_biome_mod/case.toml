@@ -1,0 +1,5 @@
+name = "worldgen_biome_mod"
+description = "An ore block shipped as a mod, placed by a Java data-file biome: the ore itself is #281 residue (a Java biome has no Bedrock biome map), but the block converts and the pack validates."
+namespace = "examplemod"
+expect_valid = true
+expect_unhandled = 2
