@@ -1129,6 +1129,14 @@ def _is_wide(desc_char: str) -> bool:
     return desc_char in "JD"
 
 
+def _registration_style(name: str) -> bool:
+    """Whether a method name is a registration-style one: ``register`` or
+    ``register`` followed by a word (``registerBlock``, ``registerItem``,
+    ``registerBlockWithItem``): the API form the helpers that register a
+    block or an item use, whatever the jar they are in calls them."""
+    return name == "register" or (name.startswith("register") and name[8:9].isupper())
+
+
 @dataclass
 class Registration:
     name: str
@@ -2119,7 +2127,8 @@ class Machine:
             # registry is known).
             handed = args[1:] if recv is not None and isinstance(recv, Obj) and self.is_mod(recv.cls) \
                 and not self.is_block_class(recv.cls) else args
-            self._record(handed)
+            if not self._helper_registration(owner, name, desc, handed, static):
+                self._record(handed)
         if self.is_mod(start):
             if static:
                 self.init_class(start)
@@ -2173,7 +2182,8 @@ class Machine:
             # A java.util Map#put stores a pair in a map; it registers
             # nothing (#280: a library's ``colorProviderNames.put(crystal,
             # "<stone>")`` had filed a crystal block under a stone's name).
-            self._record(args)
+            if not self._helper_registration(owner, name, desc, args if static else args[1:], static):
+                self._record(args)
         _n, returns = _arg_count(desc)
         for a in args:
             if isinstance(a, Arr):
@@ -2572,6 +2582,54 @@ class Machine:
                 f"its registration passes {len(values)} lambdas and {len(suppliers)} of them take no arguments "
                 "and return a block class (by the lambda's dynamicMethodType; exactly one must), so which "
                 "one builds the block can't be told")))
+
+    def _helper_registration(self, owner: str, name: str, desc: str, args: list, static: bool) -> bool:
+        """Whether the call is a library helper's registration call, and the
+        registration it makes when it is (#280).
+
+        The shape is a static call on a dependency jar's class whose method
+        name is a registration-style one (``register``, ``registerBlock``,
+        ``registerItem``, ...: see :func:`_registration_style`) and which is
+        handed the name the objects are registered under and the objects
+        themselves. What such a helper is handed is what the game
+        registers, so the machine records it the way it records a direct
+        registration (:meth:`_record`): one object as the direct path
+        records it, and several (a helper registering a block and its item
+        in one call) one registration each, which the direct path can't do
+        (it reads one value per name).
+
+        Only a call the machine executes counts: an object is recorded
+        only when the bytecode really handed it over (#87)."""
+        if self.registrations is None or not static or not self._library(owner):
+            return False
+        if not _registration_style(name):
+            return False
+        names = [a for a in args if isinstance(a, (str, RL, Tail))
+                 or (isinstance(a, Obj) and "__rl" in a.fields)]
+        values = [a for a in args if isinstance(a, Lam) or (isinstance(a, Obj) and "__rl" not in a.fields)]
+        if len(names) != 1 or not values:
+            return False
+        if len(values) == 1:
+            # What the direct path records (see _record).
+            self._record(args)
+            return True
+        # Several objects in one call: each is registered under the name.
+        # A lambda builds its object when the game asks for it (the direct
+        # path reads that, see _record), so it is left to it.
+        full = names[0]
+        if isinstance(full, RL):
+            full = full.path
+        elif isinstance(full, Obj):
+            full = full.fields["__rl"]
+        full = full.text if isinstance(full, Tail) else full
+        name = full.rsplit(":", 1)[-1]
+        for value in values:
+            if not isinstance(value, Obj):
+                continue
+            self.registrations.append(Registration(name, value))
+            if _RESOURCE_NAME.fullmatch(full):
+                self.names_of.setdefault(id(value), (value, set()))[1].add(full)
+        return True
 
     def _factory_applied(self, lam: Lam, built: list, forked: bool) -> None:
         """A dependency jar's code called ``lam``, the value of a
