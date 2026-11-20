@@ -924,24 +924,53 @@ SAMPLE_MANIFEST = Path(__file__).resolve().parents[2] / "fixtures" / "sample" / 
 
 
 def cmd_sample(args) -> int:
-    """``portkit sample build``: the random-sample manifest from Modrinth (#234)."""
+    """``portkit sample build|fetch|list``: the random-sample manifest and its
+    jars (#234)."""
     from datetime import date
 
-    from . import sample
+    from . import corpus, sample
 
+    if args.action == "build":
+        try:
+            entries, skipped = sample.build(args.count, args.licences)
+        except sample.SampleError as exc:
+            print(f"cannot build the sample: {exc}", file=sys.stderr)
+            return 1
+        today = date.today().isoformat()
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(sample.render(entries, args.count, args.licences, today))
+        for note in skipped:
+            print(f"skipped {note}")
+        print(f"sample written: {out} ({len(entries)} mods)")
+        return 0
+
+    # fetch|list: the sample's jars, pinned and hash-checked like the corpus's.
+    manifest = Path(args.manifest) if args.manifest else SAMPLE_MANIFEST
     try:
-        entries, skipped = sample.build(args.count, args.licences)
-    except sample.SampleError as exc:
-        print(f"cannot build the sample: {exc}", file=sys.stderr)
-        return 1
-    today = date.today().isoformat()
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(sample.render(entries, args.count, args.licences, today))
-    for note in skipped:
-        print(f"skipped {note}")
-    print(f"sample written: {out} ({len(entries)} mods)")
-    return 0
+        mods = corpus.load(manifest)
+    except (OSError, corpus.CorpusError) as exc:
+        print(f"cannot read the sample manifest: {exc}", file=sys.stderr)
+        return 2
+    cache = corpus.cache_dir()
+    if args.action == "list":
+        for mod in mods:
+            state = "cached" if corpus.cached(mod, cache) else "missing"
+            print(f"{mod.name:28} {mod.loader:9} {mod.minecraft:8} {mod.license:28} {state}")
+        print(f"({len(mods)} mods; cache {cache})")
+        return 0
+    failed = 0
+    for mod in mods:
+        try:
+            path, downloaded = corpus.fetch(mod, cache)
+        except corpus.CorpusError as exc:
+            print(f"FAILED {exc}", file=sys.stderr)
+            failed += 1
+            continue
+        print(f"{'fetched' if downloaded else 'cached ':7} {mod.name} -> {path}")
+    if failed:
+        print(f"{failed} of {len(mods)} mods could not be fetched or verified", file=sys.stderr)
+    return 1 if failed else 0
 
 
 def cmd_gaps(args) -> int:
@@ -1655,13 +1684,15 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_corpus)
 
     p = sub.add_parser("sample", help="build the random-sample manifest from Modrinth's most-downloaded mods (#234)")
-    p.add_argument("action", choices=["build"])
+    p.add_argument("action", choices=["build", "fetch", "list"])
     p.add_argument("--count", type=int, default=50, help="how many content mods to pin (default 50)")
     p.add_argument("--licences", choices=["all", "open"], default="all",
                    help="all: every licence (default, as the corpus); open: SPDX ids only, "
                         "no LicenseRef-* (All Rights Reserved, custom)")
     p.add_argument("--out", default=str(SAMPLE_MANIFEST), metavar="PATH",
-                   help="manifest to write (default fixtures/sample/mods.toml)")
+                   help="build: manifest to write (default fixtures/sample/mods.toml)")
+    p.add_argument("--manifest", metavar="PATH",
+                   help="fetch|list: the sample manifest to read (default fixtures/sample/mods.toml)")
     p.set_defaults(func=cmd_sample)
 
     p = sub.add_parser("gaps", help="convert the sample and rank residue reasons across it (#234)")

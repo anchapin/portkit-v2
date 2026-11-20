@@ -22,6 +22,7 @@ returns (the same entries it writes to ``unhandled.json``).
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -147,6 +148,17 @@ def _child_cmd(jar: Path, out: Path, result: Path, libraries=()) -> list[str]:
             *(str(p) for p in libraries)]
 
 
+def _child_env() -> dict:
+    """The environment for the child process: it has to import portkit, which
+    a source checkout keeps in ``src/`` (an installed package is importable
+    already, and this changes nothing for it)."""
+    env = dict(os.environ)
+    src = str(Path(__file__).resolve().parents[1])
+    existing = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = f"{src}{os.pathsep}{existing}" if existing else src
+    return env
+
+
 def convert_one(jar: Path, workdir: Path, timeout: float = DEFAULT_TIMEOUT, runner=subprocess.run,
                 libraries=()) -> dict:
     """Convert one jar in a child process. Returns the mod's record (without
@@ -156,7 +168,7 @@ def convert_one(jar: Path, workdir: Path, timeout: float = DEFAULT_TIMEOUT, runn
     started = time.monotonic()
     try:
         proc = runner(_child_cmd(jar, out, result, libraries), capture_output=True, text=True,
-                      timeout=timeout)
+                      timeout=timeout, env=_child_env())
     except subprocess.TimeoutExpired:
         return {"status": "timeout", "seconds": round(time.monotonic() - started, 1),
                 "detail": f"conversion took longer than {timeout:g}s"}
@@ -221,6 +233,13 @@ def run_shard(mods, *, shard: str | None = None, manifest: str = "", fetch=None,
     for mod in chosen:
         meta = {"project": mod.project, "version": mod.version, "loader": mod.loader,
                 "minecraft": mod.minecraft, "license": mod.license}
+        # Kid relevance (#234): the manifest's score, or 1.0 (neutral) when
+        # none is published. The source of a published score travels with it.
+        relevance = getattr(mod, "relevance", 1.0)
+        if relevance is not None:
+            meta["relevance"] = float(relevance or 1.0)
+        if getattr(mod, "relevance_source", ""):
+            meta["relevance_source"] = mod.relevance_source
         for extra in ("rank", "title", "host", "rule", "listed_lib"):
             if getattr(mod, extra, None):
                 meta[extra] = getattr(mod, extra)
@@ -324,19 +343,27 @@ def leaderboard(shards: list[dict], previous: dict | None = None) -> dict:
             kind, reason = status
             items[f"{kind}: {reason}"] = {"kind": kind, "reason": reason, "entries": 1,
                                           "files": 0, "examples": [{"source": name, "reason": record.get("detail", "")}]}
+        # Kid relevance of the mod (#234): 1.0 when no score is published, so
+        # the neutral default weighs nothing extra.
+        relevance = float(record.get("relevance") or 1.0)
         for key, slot in items.items():
             agg = reasons.setdefault(key, {"key": key, "kind": slot["kind"], "reason": slot["reason"],
-                                           "mods": 0, "entries": 0, "files": 0,
+                                           "mods": 0, "entries": 0, "files": 0, "relevance": 0.0,
                                            "mod_names": [], "examples": []})
             agg["mods"] += 1
             agg["entries"] += slot["entries"]
             agg["files"] += slot["files"]
+            # the reason's relevance is the most relevant mod it blocks
+            agg["relevance"] = max(agg["relevance"], relevance)
             agg["mod_names"].append((slot["files"], name))
             for ex in slot.get("examples", []):
                 if len(agg["examples"]) < _EXAMPLES:
                     agg["examples"].append({"mod": name, **ex})
 
-    ranked = sorted(reasons.values(), key=lambda r: (-r["mods"], -r["files"], r["key"]))
+    for r in reasons.values():
+        # The prioritization signal (#234): mods blocked x kid relevance.
+        r["score"] = round(r["mods"] * r["relevance"], 4)
+    ranked = sorted(reasons.values(), key=lambda r: (-r["score"], -r["mods"], -r["files"], r["key"]))
     prev = {r["key"]: r for r in (previous or {}).get("reasons", [])}
     for rank, r in enumerate(ranked, 1):
         r["rank"] = rank
@@ -358,11 +385,21 @@ def leaderboard(shards: list[dict], previous: dict | None = None) -> dict:
         "mods_total": len(mods),
         "statuses": dict(sorted(statuses.items())),
         "mean_coverage": round(sum(r["coverage"] for r in ok) / len(ok), 2) if ok else None,
+        # The ranking, stated in the output (#234): score first, then the
+        # plain mods-blocked order, so the board reads the same when no
+        # relevance score is published.
+        "ranking": {
+            "sort": ["score", "mods", "files", "key"],
+            "score": "mods blocked x kid relevance (relevance 1.0 = no score published)",
+            "fields": ["rank", "score", "relevance", "mods", "files", "entries"],
+        },
         "reasons": ranked,
         "mods": [
             {"name": name, "status": rec.get("status"), "project": rec.get("project"),
              "loader": rec.get("loader"), "minecraft": rec.get("minecraft"),
              "license": rec.get("license"), "coverage": rec.get("coverage"),
+             "relevance": float(rec.get("relevance") or 1.0),
+             "relevance_source": rec.get("relevance_source"),
              "files": rec.get("files"), "residue": rec.get("residue"),
              "errors": rec.get("errors"), "mct": rec.get("mct"),
              "seconds": rec.get("seconds"), "detail": rec.get("detail")}
@@ -418,18 +455,21 @@ def render_markdown(board: dict, top: int = 50) -> str:
     if prev:
         lines.append(f"Trend against the run of {prev.get('generated')} "
                      f"({prev.get('mods_total')} mods, mean coverage {prev.get('mean_coverage')}%).")
-    lines += ["", "Ranked by mods blocked, then source files covered. A reason is a residue "
-              "reason with ids, paths, quoted names and numbers blanked (see docs/gap-leaderboard.md).",
+    lines += ["", "Ranked by score (mods blocked x kid relevance), then mods blocked, then source "
+              "files covered. A reason is a residue reason with ids, paths, quoted names and "
+              "numbers blanked (see docs/gap-leaderboard.md).",
               "", f"## Top {min(top, len(board['reasons']))} reasons", ""]
     has_trend = prev is not None
-    head = "| # | mods | files | entries | kind | reason | e.g. |" + (" trend |" if has_trend else "")
-    lines += [head, "|---:|---:|---:|---:|---|---|---|" + ("---|" if has_trend else "")]
+    head = ("| # | mods | files | entries | kind | reason | e.g. |" + (" trend |" if has_trend else "")
+            + " score |")
+    lines += [head, "|---:|---:|---:|---:|---|---|---|" + ("---|" if has_trend else "") + "---:|"]
     for r in board["reasons"][:top]:
         ex = r["mod_names"][0] if r["mod_names"] else ""
         row = (f"| {r['rank']} | {r['mods']} | {r['files']} | {r['entries']} | {_md_cell(r['kind'])} "
                f"| {_md_cell(r['reason'])} | {_md_cell(ex)} |")
         if has_trend:
             row += f" {_trend_cell(r)} |"
+        row += f" {r.get('score', r['mods'])} |"
         lines.append(row)
     if prev and prev.get("gone"):
         lines += ["", f"## Gone since the previous run ({len(prev['gone'])})", ""]

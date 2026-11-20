@@ -12,8 +12,9 @@ It is report-only. It never fails a build and never changes a conversion.
 
 | Piece | What it is |
 |---|---|
-| `fixtures/sample/mods.toml` | The sample: Modrinth mods pinned by version id, primary file url and sha512, in the corpus manifest format. Generated, not hand-edited. |
+| `fixtures/sample/mods.toml` | The sample: Modrinth mods pinned by version id, primary file url, sha512 (and sha256 when the manifest carries one), licence and source page, in the corpus manifest format. Generated, not hand-edited. |
 | `portkit sample build` | Rebuilds the sample from Modrinth's API (`src/portkit/sample.py`). |
+| `portkit sample fetch` | Downloads the sample's jars into the cache (`~/.cache/portkit/mods`, or `$PORTKIT_CORPUS_CACHE`), checking the pinned hashes and refusing a file whose hash differs. `portkit sample list` says which jars are cached. |
 | `portkit gaps run` | Fetches (sha512-checked, cached) and converts one shard of the sample, each mod in a child process with a timeout, and writes a shard file (`src/portkit/gaps.py`). |
 | `portkit gaps board` | Merges shard files into the leaderboard JSON + markdown, with a trend against a previous leaderboard. |
 | `.github/workflows/gap-leaderboard.yml` | Nightly and on demand: four shard jobs, then the board job, which uploads the `gap-leaderboard` artifact (kept 90 days) and writes the markdown to the run summary. |
@@ -66,7 +67,6 @@ also carries the directory shape, such as `[data/<ns>/advancement/]`.
 Columns:
 
 - **mods**: how many sample mods have at least one entry with this reason.
-  The ranking is by this, then by files.
 - **files**: source files the entries stand for (an entry grouping 200
   unclaimed models counts 200).
 - **entries**: residue entries.
@@ -76,6 +76,43 @@ Columns:
   in mods and files, or `new`. Reasons that disappeared are listed under
   "Gone since the previous run". The mods table shows each mod's coverage
   change.
+- **score**: the prioritization signal, `mods blocked x kid relevance` (see
+  below).
+
+### How the rows are ranked
+
+The ranking is by **score**, then by mods blocked, then by source files
+covered. The score is the number of mods the reason blocks times the reason's
+**kid relevance**; a reason's relevance is the highest relevance among the
+mods it blocks, and a mod with no published score counts as neutral (1.0).
+So with no scores published the score is the mods count and the board reads
+exactly as before; with scores published, a reason that blocks three
+kid-relevant mods outranks one that blocks a single mod nobody cares about.
+
+The leaderboard JSON states the ranking, so a reader never has to guess:
+
+```json
+"ranking": {
+  "sort": ["score", "mods", "files", "key"],
+  "score": "mods blocked x kid relevance (relevance 1.0 = no score published)",
+  "fields": ["rank", "score", "relevance", "mods", "files", "entries"]
+}
+```
+
+Every reason in the JSON carries `rank`, `score`, `relevance`, `mods`,
+`files` and `entries`; every mod carries its `relevance`.
+
+No relevance score is published yet: there is no sourced score to multiply
+by, and an unsourced number would be a guess (#87). A score can be added per
+mod in the sample manifest, and it must say where it comes from:
+
+```toml
+relevance = 0.5
+relevance_source = "https://example.invalid/kid-safe-mods"
+```
+
+The manifest loader refuses a `relevance` without a `relevance_source`, so a
+score can never be an unsourced number.
 
 With mct (on the nightly schedule, and on a manual run unless unticked) the
 mods table also gives Mojang's validator's error and warning counts per mod,
@@ -92,8 +129,9 @@ behaviour in bytecode), and lang and unclaimed-tag rows are in most. They are
 true but not where the next win is; read past them to the first row a
 converter could take on.
 
-The leaderboard doesn't weigh "kid relevance" yet (#234 proposes mods blocked
-× kid relevance); there is no sourced relevance score to multiply by.
+The leaderboard weighs "kid relevance" when a relevance score is published for
+a mod (#234: mods blocked x kid relevance); with no scores published the
+weight is neutral and the ranking is by mods blocked.
 
 ## Adding or changing mods
 
@@ -112,6 +150,26 @@ beta). Every field comes from the API; the notes record the download rank and
 count on the build date. `--licences open` drops `LicenseRef-*` licences (All
 Rights Reserved and custom ones).
 
+Each entry in the manifest records, per entry: the mod's name and project
+slug, the pinned version id and version number, the loader and the Minecraft
+version, the **licence** the project declares on Modrinth, the file's url,
+the **sha512** pin (sha256 too when the manifest carries one; Modrinth
+publishes sha1 and sha512 only), the **source page** (the project's page on
+Modrinth, where the licence and the versions are read from, #87) and the
+notes with the download rank and count on the build date.
+
+To get the jars:
+
+```bash
+portkit sample list     # which jars are already in the cache
+portkit sample fetch    # download the missing ones and check the pins
+```
+
+The jars land in `~/.cache/portkit/mods` (or `$PORTKIT_CORPUS_CACHE`) and are
+never committed. A jar whose hash differs from the pin is refused and
+deleted, so a re-uploaded file fails loudly instead of quietly changing what
+the sample measures.
+
 A one-off mod you want measured belongs in the corpus manifest
 (`fixtures/real/mods.toml`, see its README), not here: the sample is the
 download ranking, and a new build replaces it.
@@ -124,7 +182,8 @@ new (no coverage delta).
 
 - The sample is Modrinth only. (The gauntlet, below, has two CurseForge-only mods, fetched only through CurseForge's official API with a key.)
 - Fifty mods, not ~200; the workflow's shard count would need to grow with it.
-- The ranking is by mods blocked, not weighted by relevance.
+- The ranking is by mods blocked, weighted by kid relevance only where a
+  relevance score is published; none is yet.
 - Normalization is pattern-based and tuned on the first run's 447 reasons; a
   reason text that keeps a mod-specific word unblanked will split into
   several rows until a rule covers it.

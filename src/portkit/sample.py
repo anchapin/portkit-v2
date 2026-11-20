@@ -151,6 +151,10 @@ def build(count: int, policy: str = "all", opener=urllib.request.urlopen,
             "license": hit.get("license") or "unknown",
             "url": file["url"],
             "sha512": file["hashes"]["sha512"],
+            # The source page of the entry: the project's page on Modrinth,
+            # where the licence and the versions are published (#87: every
+            # entry says where it came from, not just a bare CDN url).
+            "source": f"https://modrinth.com/mod/{hit['slug']}",
             "notes": (f"download rank {rank} on Modrinth ({hit.get('downloads', 0)} downloads, "
                       f"{today or date.today().isoformat()}); categories: "
                       f"{', '.join(c for c in hit.get('categories', []) if c not in LOADERS)}"),
@@ -171,14 +175,15 @@ def render(entries: list[dict], count: int, policy: str, today: str) -> str:
         f"# Built {today} from api.modrinth.com/v2/search?index=downloads (project_type:mod),",
         "# keeping content mods (a content category, not a library, not client-only) and",
         "# pinning each one's newest release with a Fabric/Forge/NeoForge/Quilt .jar.",
-        "# license is the project's declared licence on Modrinth.",
+        "# license is the project's declared licence on Modrinth; source is the project's",
+        "# page on Modrinth, the page every pin and licence is read from (#87).",
         "",
     ]
     body = []
     for e in entries:
         body.append("[[mod]]")
         for key in ("name", "project", "version_id", "version", "loader", "minecraft",
-                    "license", "url", "sha512", "notes"):
+                    "license", "url", "sha512", "source", "notes"):
             body.append(f"{key} = {_toml_str(e[key])}")
         body.append("")
     return "\n".join(head + body)

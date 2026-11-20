@@ -57,6 +57,15 @@ class Mod:
     listed_lib: bool = False  # #277 marks it [lib]
     cf_mod_id: int = 0  # CurseForge project id, for host = "curseforge" (official API only, #278 pick 2)
     unfetchable: str = ""  # the reason, when the jar can't be fetched (then url/sha512/version_id may be empty)
+    # A second pin, verified when the manifest carries one (#234): sha256 of the
+    # jar, checked after sha512. Modrinth publishes sha1 and sha512 only, so
+    # most entries pin sha512 alone.
+    sha256: str = ""
+    # Kid relevance (0..1) for the gap leaderboard's prioritization signal
+    # (#234: mods blocked x kid relevance). 1.0 is the neutral default: no
+    # score is published, so nothing is weighted. A score needs its source.
+    relevance: float = 1.0
+    relevance_source: str = ""
 
     def path(self, cache: Path) -> Path:
         return Path(cache) / f"{self.name}-{self.sha512[:12]}.jar"
@@ -96,9 +105,19 @@ def load(manifest: Path = MANIFEST) -> list[Mod]:
             raise CorpusError(f"{manifest}: mod {entry['name']!r} cf_mod_id must be an integer")
         if not isinstance(entry.get("rank", 0), int):
             raise CorpusError(f"{manifest}: mod {entry['name']!r} rank must be an integer")
-        entry = {"version_id": "", "url": "", "sha512": "", **entry}
+        entry = {"version_id": "", "url": "", "sha512": "", "sha256": "",
+                 "relevance": 1.0, "relevance_source": "", **entry}
         if not entry.get("unfetchable") and len(entry["sha512"]) != 128:
             raise CorpusError(f"{manifest}: mod {entry['name']!r} sha512 must be 128 hex chars")
+        if entry["sha256"] and len(entry["sha256"]) != 64:
+            raise CorpusError(f"{manifest}: mod {entry['name']!r} sha256 must be 64 hex chars")
+        if not isinstance(entry["relevance"], (int, float)) or isinstance(entry["relevance"], bool):
+            raise CorpusError(f"{manifest}: mod {entry['name']!r} relevance must be a number")
+        if not 0.0 <= float(entry["relevance"]) <= 1.0:
+            raise CorpusError(f"{manifest}: mod {entry['name']!r} relevance must be between 0 and 1")
+        if float(entry["relevance"]) != 1.0 and not entry["relevance_source"]:
+            raise CorpusError(f"{manifest}: mod {entry['name']!r} relevance needs a relevance_source")
+        entry["relevance"] = float(entry["relevance"])
         seen.add(entry["name"])
         mods.append(Mod(**entry))
     return mods
@@ -125,10 +144,22 @@ def _sha512(path: Path) -> str:
     return h.hexdigest()
 
 
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def cached(mod: Mod, cache: Path | None = None) -> Path | None:
     """The verified jar if it is already in the cache, else None."""
     path = mod.path(cache or cache_dir())
-    return path if path.is_file() and _sha512(path) == mod.sha512 else None
+    if not path.is_file() or _sha512(path) != mod.sha512:
+        return None
+    if mod.sha256 and _sha256(path) != mod.sha256:
+        return None
+    return path
 
 
 def fetch(mod: Mod, cache: Path | None = None, opener=urllib.request.urlopen) -> tuple[Path, bool]:
@@ -157,5 +188,13 @@ def fetch(mod: Mod, cache: Path | None = None, opener=urllib.request.urlopen) ->
             f"{mod.name}: sha512 mismatch for {mod.url} (got {digest[:16]}..., "
             f"pinned {mod.sha512[:16]}...); the file changed upstream, so re-pin it on purpose"
         )
+    if mod.sha256:
+        digest256 = _sha256(partial)
+        if digest256 != mod.sha256:
+            partial.unlink(missing_ok=True)
+            raise CorpusError(
+                f"{mod.name}: sha256 mismatch for {mod.url} (got {digest256[:16]}..., "
+                f"pinned {mod.sha256[:16]}...); the file changed upstream, so re-pin it on purpose"
+            )
     partial.replace(target)
     return target, True
