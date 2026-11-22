@@ -110,6 +110,9 @@ SKIP_KINDS = {
     "loot_copy": ("the table asks the drop to copy the block's custom name, block entity data or components, "
                   "and Bedrock has no loot function that carries them; no session can make the copy, and the "
                   "reason names each copy function"),
+    "loot_copy_name": ("the table asks the drop to copy the block's custom name, and Bedrock's loot functions "
+                       "carry no name onto a drop (a Bedrock drop is named by its own item file, not by the block "
+                       "it came from); no session can make the copy, and the reason names the copy function"),
     "loot_state": ("the drop depends on the block's state (which state the block is in when it is broken), "
                    "and Bedrock's loot tables have no condition that reads the block's state, so the drop "
                    "cannot be carried; the reason names the state the drop depends on"),
