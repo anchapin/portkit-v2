@@ -13,6 +13,10 @@ test is refused with the condition or function that defeated it named in the
 reason.
 Silk Touch, shears and tool tier are approximated with Bedrock's match_tool
 and each approximation is a report note (#299, see the tools section below).
+A table that asks the drop to copy the block's custom name has no Bedrock
+form either: Bedrock names a drop by its own item file, not by the block it
+came from, so such a table is refused and claimed as the explained
+loot_copy_name kind, the copy_name sub-reason counted on its own (#299).
 """
 from __future__ import annotations
 
@@ -61,13 +65,32 @@ _REFUSED_FUNCTIONS = {
 
 # The three loot functions Bedrock has no equivalent for. Their identity
 # travels with the refusal so the filing site, not a reason string, decides
-# whether a table gets the explained loot_copy kind.
+# whether a table gets the explained loot_copy kind (loot_copy_name for the
+# copy_name one, below).
 _COPY_FUNCTIONS = frozenset({
     "minecraft:copy_name",
     "minecraft:copy_nbt",
     "minecraft:copy_components",
 })
 LOOT_COPY = "loot_copy"
+
+# ``minecraft:copy_name`` is the copy function this slice owns (#299): a
+# table refused for it and for nothing else is the explained loot_copy_name
+# kind, so the copy_name sub-reason is counted on its own instead of hiding
+# in the lumped loot_copy kind.
+#
+# There is no Bedrock form for it: the Bedrock loot features this port uses
+# (the functions in the table above, and the match_tool condition of the
+# 2026-10-16 #299 decision, docs/decisions.md) carry no name, and the only
+# name a Bedrock drop can have is the one its own item file gives it
+# (``minecraft:display_name``, which items.py writes for a block's own item).
+# That is the item's name, not the block's: the custom name a block entity
+# carries is set by the mod's code and has no Bedrock form, so a drop that
+# copies it cannot be written. The table is therefore refused, the refusal
+# names the function, and the table is claimed as explained rather than
+# converted with a name that is not the one Java gives.
+COPY_NAME = "minecraft:copy_name"
+LOOT_COPY_NAME = "loot_copy_name"
 
 # The explained kind for a table whose drop the block's state decides. Its
 # identity travels with the refusal the way the copy functions' does, so the
@@ -1634,7 +1657,9 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
                     if (copy_names
                             and _copy_only_convertible(data, block_id, states, block_path,
                                                        blocks or {}, tiers, obtainable)):
-                        kind = LOOT_COPY
+                        # copy_name is claimed by its own explained kind; the
+                        # other copy functions keep the lumped one.
+                        kind = LOOT_COPY_NAME if COPY_NAME in copy_names else LOOT_COPY
                         reason = _copy_refusal_reason(copy_names)
                 if kind == "loot" and refused_states:
                     if _state_only_convertible(data, block_id, states, java_values, block_path,
@@ -1725,7 +1750,7 @@ _BLOCK_TABLE = re.compile(r"^data/([^/]+)/(?:loot_tables|loot_table)/blocks/(.+)
 def refine_owned(unhandled: list[Unhandled], shipped_blocks: set[str]) -> list[Unhandled]:
     """Re-file a refused block loot table whose block is itself residue (#299).
 
-    A ``loot`` or ``loot_copy`` entry for
+    A ``loot``, ``loot_copy``, ``loot_copy_name`` or ``loot_state`` entry for
     ``data/<ns>/loot_table[s]/blocks/<path>.json`` names the block
     ``<ns>:<path>``. When the pack doesn't ship that block and its
     blockstate ``assets/<ns>/blockstates/<path>.json`` has a residue entry of
@@ -1736,10 +1761,12 @@ def refine_owned(unhandled: list[Unhandled], shipped_blocks: set[str]) -> list[U
     keeping why the table itself was refused. It goes with its block when that
     converts. A table whose block shipped, or has no blockstate, stays ``loot``.
     """
-    residue = {u.source: u.kind for u in unhandled if u.kind not in ("loot", LOOT_COPY, LOOT_STATE, OWNED)}
+    residue = {u.source: u.kind for u in unhandled
+               if u.kind not in ("loot", LOOT_COPY, LOOT_COPY_NAME, LOOT_STATE, OWNED)}
     out: list[Unhandled] = []
     for u in unhandled:
-        match = _BLOCK_TABLE.match(u.source) if u.kind in ("loot", LOOT_COPY, LOOT_STATE) else None
+        match = (_BLOCK_TABLE.match(u.source)
+                 if u.kind in ("loot", LOOT_COPY, LOOT_COPY_NAME, LOOT_STATE) else None)
         if match:
             ns, path = match.groups()
             blockstate = f"assets/{ns}/blockstates/{path}.json"

@@ -155,6 +155,22 @@ def test_a_loot_copy_group_is_skipped_without_a_session(tmp_path):
     assert not any(tmp_path.iterdir())  # scaffolds cleaned up
 
 
+def test_a_loot_copy_name_group_is_skipped_without_a_session(tmp_path):
+    from portkit.agent.residue import SKIP_KINDS
+
+    assert "loot_copy_name" in SKIP_KINDS
+    client = FakeLLM([])
+    run = ResidueAgent(client).run(
+        RESIDUE, tmp_path,
+        [Unhandled("data/examplemod/loot_tables/blocks/steel_block.json", "loot_copy_name",
+                   "the drop copies the block's custom name (minecraft:copy_name)", 1)],
+        "examplemod",
+    )
+    assert run.outcomes[0].status == "skipped" and client.seen == []
+    assert len(run.remaining) == 1
+    assert not any(tmp_path.iterdir())  # scaffolds cleaned up
+
+
 def test_a_damage_type_group_is_skipped_without_a_session(tmp_path):
     from portkit.agent.residue import SKIP_KINDS
 

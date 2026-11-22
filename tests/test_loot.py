@@ -66,7 +66,6 @@ def test_fortune_is_refused_and_says_so(tmp_path):
 
 
 @pytest.mark.parametrize("function", [
-    "minecraft:copy_name",
     "minecraft:copy_nbt",
     "minecraft:copy_components",
 ])
@@ -84,6 +83,25 @@ def test_a_table_refused_only_for_a_copy_function_is_loot_copy(tmp_path, functio
     assert function in residue.reason
 
 
+def test_a_table_refused_only_for_copy_name_is_loot_copy_name(tmp_path):
+    """copy_name is claimed by an explained kind of its own (#299), so the
+    copy_name sub-reason is counted on its own and not inside the lumped
+    loot_copy kind."""
+    entry = {
+        "type": "minecraft:item",
+        "name": "examplemod:steel_block",
+        "functions": [{"function": "minecraft:copy_name", "source": "block_entity"}],
+    }
+    result = loot.convert(build(tmp_path, {"steel_block": pool(entry, SURVIVES)}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    residue = result.unhandled[0]
+    assert residue.kind == loot.LOOT_COPY_NAME
+    # The reason is the one the converter gave before the kind was split:
+    # the name is what the table asks for, and it is named.
+    assert residue.reason == "the drop copies the block's custom name (minecraft:copy_name)"
+
+
 def test_a_loot_copy_reason_names_every_copy_function_in_the_table(tmp_path):
     entry = {
         "type": "minecraft:item",
@@ -96,7 +114,9 @@ def test_a_loot_copy_reason_names_every_copy_function_in_the_table(tmp_path):
     }
     result = loot.convert(build(tmp_path, {"steel_block": pool(entry, SURVIVES)}))
     residue = result.unhandled[0]
-    assert residue.kind == loot.LOOT_COPY
+    # copy_name takes the table: the other copy functions have their own
+    # slice, but the reason still names every one of them.
+    assert residue.kind == loot.LOOT_COPY_NAME
     for function in ("minecraft:copy_name", "minecraft:copy_nbt", "minecraft:copy_components"):
         assert function in residue.reason
 
@@ -316,6 +336,52 @@ def test_a_loot_copy_table_whose_block_is_residue_is_owned_by_residue():
     # residue owner to go with.
     shipped = loot.refine_owned(unhandled[1:], shipped_blocks={"ex:chest"})
     assert shipped[0].kind == loot.LOOT_COPY
+
+
+def test_a_loot_copy_name_table_whose_block_is_residue_is_owned_by_residue():
+    unhandled = [
+        _residue("assets/ex/blockstates/chest.json", "code_drawn_block"),
+        _residue("data/ex/loot_table/blocks/chest.json", loot.LOOT_COPY_NAME,
+                 "the drop copies the block's custom name (minecraft:copy_name)"),
+    ]
+    out = loot.refine_owned(unhandled, shipped_blocks=set())
+    table = next(u for u in out if u.source.endswith("blocks/chest.json"))
+    assert table.kind == "owned_by_residue"
+    assert "custom name" in table.reason
+
+    # A block that did ship keeps the explained kind.
+    shipped = loot.refine_owned(unhandled[1:], shipped_blocks={"ex:chest"})
+    assert shipped[0].kind == loot.LOOT_COPY_NAME
+
+
+def test_the_copy_functions_are_counted_on_their_own_kinds(tmp_path):
+    """The copy_name sub-reason is counted on its own kind; the other copy
+    functions keep the lumped one until their own slice."""
+    def table_with(*functions):
+        entry = dict(ITEM)
+        entry["functions"] = [{"function": f, "source": "block_entity"} for f in functions]
+        return pool(entry, SURVIVES)
+
+    tables = {
+        "copied_name": table_with("minecraft:copy_name"),
+        "copied_name_and_data": table_with("minecraft:copy_name", "minecraft:copy_nbt"),
+        "copied_data": table_with("minecraft:copy_nbt"),
+        "copied_components": table_with("minecraft:copy_components"),
+    }
+    result = loot.convert(build(tmp_path, tables))
+    kinds = {}
+    for residue in result.unhandled:
+        kinds[residue.source] = residue.kind
+    assert kinds["data/examplemod/loot_tables/blocks/copied_name.json"] == loot.LOOT_COPY_NAME
+    assert kinds["data/examplemod/loot_tables/blocks/copied_name_and_data.json"] == loot.LOOT_COPY_NAME
+    assert kinds["data/examplemod/loot_tables/blocks/copied_data.json"] == loot.LOOT_COPY
+    assert kinds["data/examplemod/loot_tables/blocks/copied_components.json"] == loot.LOOT_COPY
+    # The copy_name kind holds the two tables that ask for the name; the
+    # other two keep the lumped kind.
+    counts = {}
+    for kind in kinds.values():
+        counts[kind] = counts.get(kind, 0) + 1
+    assert counts == {loot.LOOT_COPY_NAME: 2, loot.LOOT_COPY: 2}
 
 
 def test_the_1_21_singular_directory_is_read_too(tmp_path):
@@ -791,12 +857,12 @@ def test_a_table_level_function_with_conditions_names_the_condition(tmp_path):
     assert "table-level function" in reason and "minecraft:block_state_property" in reason
 
 
-def test_a_table_level_copy_function_is_loot_copy(tmp_path):
+def test_a_table_level_copy_function_is_loot_copy_name(tmp_path):
     table = {"functions": [{"function": "minecraft:copy_name"}],
              "pools": [{"rolls": 1, "conditions": SURVIVES, "entries": [ITEM]}]}
     result = loot.convert(build(tmp_path, {"steel_block": table}))
     assert result.files == {}
-    assert result.unhandled[0].kind == loot.LOOT_COPY
+    assert result.unhandled[0].kind == loot.LOOT_COPY_NAME
     assert "minecraft:copy_name" in result.unhandled[0].reason
 
 
