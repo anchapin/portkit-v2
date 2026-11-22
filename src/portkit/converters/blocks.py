@@ -2783,6 +2783,67 @@ def _template_flat(mod: SourceMod, result: ConversionResult, model_ref: str,
     return flat, ""
 
 
+def _element_shape(elements) -> list | None:
+    """The boxes of a list of elements, for comparing two shapes: every box's
+    corners and its rotation. None when an element has no usable corners."""
+    out = []
+    for element in elements or []:
+        if not isinstance(element, dict):
+            return None
+        start, end = element.get("from"), element.get("to")
+        if not (isinstance(start, list) and isinstance(end, list)):
+            return None
+        rotation = element.get("rotation")
+        if rotation is not None and not isinstance(rotation, dict):
+            return None
+        out.append((tuple(start), tuple(end),
+                    json.dumps(rotation, sort_keys=True) if rotation else ""))
+    return sorted(out)
+
+
+def _vanilla_shape(template: str) -> list | None:
+    """The boxes of a vanilla template, or None when the reference set isn't
+    read or the template's boxes changed between game versions (then portkit
+    reads only the newer model and the old boxes are unknown)."""
+    from ..data.models import SINCE, templates
+
+    if template in SINCE:
+        return None
+    known = templates()
+    if not known:
+        return None
+    body = known.get(template)
+    if not isinstance(body, dict):
+        return None
+    return _element_shape(body.get("elements") or [])
+
+
+def _wall_part(mod: SourceMod, result: ConversionResult, model_ref: str,
+               template: str, what: str) -> tuple[dict | None, str]:
+    """A wall part's model: one extending the vanilla template, or one that
+    draws the same shape itself (#286).
+
+    Mods that draw their own wall shapes (Botania's ``block/shapes/wall_post``
+    and the two side shapes beside it) don't extend vanilla's templates, and
+    only the templates were read, so every such wall was refused. Java draws
+    the model's own boxes either way, so a part whose boxes are the vanilla
+    wall shape's converts like one extending the template; a part drawn any
+    other way is still refused, with the same reason as before.
+    """
+    flat, why = _flat_model(mod, result, model_ref)
+    if flat is None:
+        return None, f"{what} model {model_ref!r}: {why}"
+    if flat.get("parent") == template:
+        return flat, ""
+    wanted = _vanilla_shape(template)
+    if wanted is None or not wanted or _element_shape(flat.get("elements") or []) != wanted:
+        parent = flat.get("parent")
+        extends = f"extends {parent!r}" if isinstance(parent, str) else "has no vanilla parent"
+        name = template.rsplit("/", 1)[-1]
+        return None, f"{what} model {model_ref!r} {extends}, not the vanilla {name} template"
+    return flat, ""
+
+
 def _merge_textures(flats: list[dict]) -> tuple[dict | None, str]:
     textures: dict = {}
     for flat in flats:
@@ -3011,12 +3072,12 @@ def _slab_definition(namespace: str, name: str, geometry: str, instances: dict,
 def _convert_wall(mod: SourceMod, result: ConversionResult, rel: str, name: str,
                   post_ref: str, side_ref: str, tall_ref: str, uvlock: bool) -> None:
     """Walls: a post and four low sides, joined through the connection trait."""
-    post, why = _template_flat(mod, result, post_ref, {_WALL_TEMPLATES["post"]}, "wall post")
+    post, why = _wall_part(mod, result, post_ref, _WALL_TEMPLATES["post"], "wall post")
     side = tall = None
     if post is not None:
-        side, why = _template_flat(mod, result, side_ref, {_WALL_TEMPLATES["side"]}, "wall side")
+        side, why = _wall_part(mod, result, side_ref, _WALL_TEMPLATES["side"], "wall side")
     if side is not None:
-        tall, why = _template_flat(mod, result, tall_ref, {_WALL_TEMPLATES["tall"]}, "tall wall side")
+        tall, why = _wall_part(mod, result, tall_ref, _WALL_TEMPLATES["tall"], "tall wall side")
     if post is None or side is None or tall is None:
         result.unhandled.append(Unhandled(rel, "block", why))
         return
@@ -3040,6 +3101,7 @@ def _convert_wall(mod: SourceMod, result: ConversionResult, rel: str, name: str,
         return
     result.files[f"models/blocks/{name}.geo.json"] = geo
     result.files[f"blocks/{name}.json"] = _wall_definition(mod.namespace, name, identifier, instances)
+    own_shapes = post.get("parent") != _WALL_TEMPLATES["post"]
     result.notes.append(
         f"{name}: wall sides join through Bedrock's connection trait, which decides on its "
         "own which neighbours connect. Shown: the post and the low sides, the post raised "
@@ -3047,6 +3109,8 @@ def _convert_wall(mod: SourceMod, result: ConversionResult, rel: str, name: str,
         f"the tall sides ({tall_ref}) and the post raised by the block above, which Java "
         "works out from the block above and no Bedrock trait reports; collision stays a "
         "full block. Needs Bedrock 1.26.0 or newer."
+        + (" Its post and side models draw the vanilla wall shape themselves, and their boxes "
+           "are the vanilla ones." if own_shapes else "")
     )
 
 
