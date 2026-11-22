@@ -1019,3 +1019,82 @@ def test_a_table_level_function_reason_names_the_state(tmp_path):
     assert result.files == {}
     reason = result.unhandled[0].reason
     assert "type=double" in reason and "minecraft:block_state_property" in reason
+
+
+# --- #299: a block-state test that decides nothing converts; one that
+# --- decides between drops is the explained loot_state kind.
+
+
+def blockstate(tmp_path, name, body):
+    """The Java blockstate of a block (assets/<ns>/blockstates/<name>.json)."""
+    root = tmp_path / "assets" / "examplemod" / "blockstates"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"{name}.json").write_text(json.dumps(body))
+
+
+def state_cond(properties, block="examplemod:steel_block"):
+    return {"condition": "minecraft:block_state_property",
+            "block": block, "properties": properties}
+
+
+def two_state_table():
+    """type=lower drops the block, type=upper drops a twig: the state decides."""
+    return {"type": "minecraft:block", "pools": [
+        {"rolls": 1, "conditions": [state_cond({"type": "lower"})],
+         "entries": [{"type": "minecraft:item", "name": "examplemod:steel_block"}]},
+        {"rolls": 1, "conditions": [state_cond({"type": "upper"})],
+         "entries": [{"type": "minecraft:item", "name": "examplemod:twig"}]},
+    ]}
+
+
+def test_a_block_state_test_that_always_holds_converts(tmp_path):
+    blockstate(tmp_path, "steel_block",
+               {"variants": {"type=lower": {"model": "examplemod:block/steel_block"}}})
+    table = pool(ITEM, [state_cond({"type": "lower"})] + SURVIVES)
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert result.unhandled == []
+    entry = result.files["loot_tables/blocks/steel_block.json"]["pools"][0]["entries"][0]
+    assert entry["name"] == "examplemod:steel_block"
+
+
+def test_a_block_state_test_that_decides_between_drops_is_loot_state(tmp_path):
+    blockstate(tmp_path, "steel_block",
+               {"variants": {"type=lower": {"model": "examplemod:block/steel_block"},
+                             "type=upper": {"model": "examplemod:block/steel_block_top"}}})
+    result = loot.convert(build(tmp_path, {"steel_block": two_state_table()}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    residue = result.unhandled[0]
+    assert residue.kind == loot.LOOT_STATE
+    assert "type=lower" in residue.reason
+
+
+def test_every_state_dropping_the_same_item_converts(tmp_path):
+    blockstate(tmp_path, "steel_block",
+               {"variants": {"type=lower": {"model": "examplemod:block/steel_block"},
+                             "type=upper": {"model": "examplemod:block/steel_block_top"}}})
+    table = two_state_table()
+    table["pools"][1]["entries"] = [{"type": "minecraft:item", "name": "examplemod:steel_block"}]
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert result.unhandled == []
+    dropped = _dropped_names(result.files["loot_tables/blocks/steel_block.json"])
+    assert dropped == ["examplemod:steel_block"]
+
+
+def test_a_block_state_test_without_a_blockstate_is_loot_state(tmp_path):
+    result = loot.convert(build(tmp_path, {"steel_block": two_state_table()}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    assert result.unhandled[0].kind == loot.LOOT_STATE
+
+
+def test_a_state_test_plus_another_refusal_stays_loot(tmp_path):
+    table = two_state_table()
+    table["pools"][0]["entries"][0]["functions"] = [
+        {"function": "minecraft:apply_bonus", "enchantment": "minecraft:fortune"}]
+    blockstate(tmp_path, "steel_block",
+               {"variants": {"type=lower": {"model": "examplemod:block/steel_block"},
+                             "type=upper": {"model": "examplemod:block/steel_block_top"}}})
+    result = loot.convert(build(tmp_path, {"steel_block": table}))
+    assert result.files == {}
+    assert result.unhandled[0].kind == "loot"
