@@ -286,3 +286,19 @@ def test_an_empty_reply_is_unresolved_not_declined(tmp_path):
     result = convert(RESIDUE, tmp_path / "out", agent=ResidueAgent(FakeLLM([Message("assistant", "")] * 2)))
     assert [o.status for o in result.agent.outcomes] == ["unresolved", "unresolved"]
     assert result.agent.summary()["status"] == "failed" and result.report.ok
+
+
+def test_a_loot_state_group_is_skipped_without_a_session(tmp_path):
+    from portkit.agent.residue import SKIP_KINDS
+
+    assert "loot_state" in SKIP_KINDS
+    client = FakeLLM([])
+    run = ResidueAgent(client).run(
+        RESIDUE, tmp_path,
+        [Unhandled("data/examplemod/loot_tables/blocks/steel_block.json", "loot_state",
+                   "the drop depends on the block state (type=lower; minecraft:block_state_property)", 1)],
+        "examplemod",
+    )
+    assert run.outcomes[0].status == "skipped" and client.seen == []
+    assert len(run.remaining) == 1
+    assert not any(tmp_path.iterdir())  # scaffolds cleaned up

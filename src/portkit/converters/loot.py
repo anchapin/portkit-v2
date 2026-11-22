@@ -69,6 +69,11 @@ _COPY_FUNCTIONS = frozenset({
 })
 LOOT_COPY = "loot_copy"
 
+# The explained kind for a table whose drop the block's state decides. Its
+# identity travels with the refusal the way the copy functions' does, so the
+# filing site, not a reason string, decides the kind.
+LOOT_STATE = "loot_state"
+
 _SUPPORTED_ENTRY_TYPES = {"minecraft:item", "item"}
 
 
@@ -271,6 +276,277 @@ def _state_value(value) -> str | None:
     if isinstance(value, (str, int)):
         return str(value)
     return None
+
+
+# -- block state conditions (#299) ------------------------------------------
+#
+# Java's block_state_property condition tests the state of the block being
+# broken: it names a property and the value it asks for. Bedrock's block loot
+# tables have no condition that reads the block's state (learn.microsoft.com,
+# Loot and Trade Table Conditions: the conditions a loot table accepts are
+# match_tool, survives_explosion, random_chance, random_chance_with_looting,
+# killed_by_player, table_bonus, weather_check, time_check and
+# entity_properties, and none of them names a block state), so a test that
+# decides between two drops cannot be carried.
+#
+# A test that decides nothing can be: when the block's own blockstate gives
+# the property one value, the test holds whatever state the block is in; and
+# when every state of the block drops the same item, the test changes nothing
+# about what is dropped. Both convert (#299).
+
+
+def _state_properties(blockstate: dict) -> dict[str, set[str]]:
+    """{property: values} the Java blockstate names for the block.
+
+    The blockstate file is the mod's own list of the states it draws, so a
+    property it names with one value has that one value in the states the
+    block is in. Java's own property values come from the block's code, so a
+    property the blockstate doesn't name (or a value it doesn't list) is not
+    decided here: the test on it stays refused rather than guessed.
+    """
+    found: dict[str, set[str]] = {}
+
+    def when(clause, into: dict[str, set[str]]) -> None:
+        if not isinstance(clause, dict):
+            return
+        for key, value in clause.items():
+            if key in ("OR", "AND"):
+                if isinstance(value, list):
+                    for entry in value:
+                        when(entry, into)
+                continue
+            if not isinstance(value, str):
+                continue
+            for one in value.split("|"):
+                one = one.strip().lower()
+                if one:
+                    into.setdefault(key.strip().lower(), set()).add(one)
+
+    variants = blockstate.get("variants")
+    if isinstance(variants, dict):
+        for key in variants:
+            for part in str(key).split(","):
+                name, sep, value = part.partition("=")
+                if sep and name.strip():
+                    found.setdefault(name.strip().lower(), set()).add(value.strip().lower())
+    for part in blockstate.get("multipart") or []:
+        if isinstance(part, dict):
+            when(part.get("when"), found)
+    # A boolean property the blockstate names with one value has the other one
+    # too: the blockstate only spells the value that adds a part.
+    for values in found.values():
+        if values and values <= {"true", "false"}:
+            values.update({"true", "false"})
+    return found
+
+
+def _block_state_values(mod: SourceMod, name: str) -> dict[str, set[str]] | None:
+    """{property: values} the Java blockstate of the block named ``name``
+    (the block's own path under the loot tables) gives, or None when the mod
+    ships no blockstate for it."""
+    path = mod.assets / "blockstates" / f"{name}.json"
+    try:
+        body = json.loads(path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    return _state_properties(body)
+
+
+def _state_tests(site: dict) -> list[dict]:
+    """The block_state_property conditions one site (a pool or an entry)
+    carries."""
+    return [c for c in site.get("conditions") or []
+            if isinstance(c, dict) and c.get("condition") in _BLOCK_STATE]
+
+
+def _state_test(condition: dict, block: str | None,
+                values: dict[str, set[str]] | None) -> tuple[str, list[tuple[str, str]]]:
+    """What a block_state_property test means for the table's own block.
+
+    ("always", pairs) (it holds whatever state the block is in), ("never",
+    pairs) (it cannot hold: it names another block), ("maybe", pairs) (the
+    state decides) or ("unknown", pairs) (the block's states are not known,
+    so the test cannot be decided here). ``pairs`` are the (property, value)
+    the test asks for.
+    """
+    properties = condition.get("properties")
+    pairs = [(str(prop).strip().lower(), _state_value(raw))
+             for prop, raw in (properties.items() if isinstance(properties, dict) else [])]
+    cblock = condition.get("block")
+    if isinstance(cblock, str) and cblock.startswith("#"):
+        # A tag test: whether the block is in the tag isn't decided here.
+        return "unknown", pairs
+    if block is not None and isinstance(cblock, str) and cblock != block:
+        # Java's test names the block it applies to, and a test naming another
+        # block never holds for the block being broken.
+        return "never", pairs
+    if not pairs or values is None:
+        return "unknown", pairs
+    kinds = set()
+    for prop, value in pairs:
+        have = values.get(prop)
+        if value is None or have is None or value not in have:
+            # The blockstate doesn't name this value of this property: Java's
+            # block may still have it (its properties come from its code), so
+            # the test isn't decided here.
+            return "unknown", pairs
+        kinds.add("always" if len(have) == 1 else "maybe")
+    return ("maybe" if "maybe" in kinds else "always"), pairs
+
+
+def _state_live(tests: list, case: dict) -> bool:
+    """Whether the site's block-state tests hold in this state."""
+    for kind, pairs in tests:
+        if kind == "never":
+            return False
+        if kind == "maybe":
+            for prop, value in pairs:
+                if case.get(prop) != value:
+                    return False
+    return True
+
+
+def _without_state(conditions):
+    """A condition list with every block-state test dropped."""
+    if not isinstance(conditions, list):
+        return conditions
+    return [c for c in conditions
+            if not (isinstance(c, dict) and c.get("condition") in _BLOCK_STATE)]
+
+
+def _state_outcome(pools: list, pool_tests: list, entry_tests: list, case: dict) -> list[str]:
+    """What the table drops in this state, as a sorted list of its drops."""
+    out = []
+    for pool, ptests, etests in zip(pools, pool_tests, entry_tests):
+        if not isinstance(pool, dict) or not _state_live(ptests, case):
+            continue
+        for entry, etests_list in zip(pool.get("entries") or [], etests):
+            if not isinstance(entry, dict) or not _state_live(etests_list, case):
+                continue
+            out.append(json.dumps(
+                {"entry": {k: v for k, v in entry.items() if k != "conditions"},
+                 "pool": pool.get("functions") or []}, sort_keys=True))
+    return sorted(out)
+
+
+def _state_table(data: dict, pools: list, pool_tests: list, entry_tests: list,
+                 case: dict) -> dict:
+    """The table as it is in this state: the pools and entries the state keeps
+    out are gone, and the block-state tests are dropped."""
+    out = copy.deepcopy(data)
+    new_pools = []
+    for pool, ptests, etests in zip(out.get("pools") or [], pool_tests, entry_tests):
+        if not isinstance(pool, dict):
+            new_pools.append(pool)
+            continue
+        if not _state_live(ptests, case):
+            continue
+        pool["conditions"] = _without_state(pool.get("conditions"))
+        entries = []
+        for entry, etests_list in zip(pool.get("entries") or [], etests):
+            if not isinstance(entry, dict):
+                entries.append(entry)
+                continue
+            if not _state_live(etests_list, case):
+                continue
+            entry["conditions"] = _without_state(entry.get("conditions"))
+            entries.append(entry)
+        pool["entries"] = entries
+        new_pools.append(pool)
+    out["pools"] = new_pools
+    return out
+
+
+def _strip_state_conditions(data: dict) -> dict:
+    """The table with every block-state test dropped, the pools and entries
+    the test may keep out kept."""
+    out = copy.deepcopy(data)
+    for pool in out.get("pools") or []:
+        if not isinstance(pool, dict):
+            continue
+        pool["conditions"] = _without_state(pool.get("conditions"))
+        for entry in pool.get("entries") or []:
+            if isinstance(entry, dict):
+                entry["conditions"] = _without_state(entry.get("conditions"))
+    return out
+
+
+def _state_analysis(data: dict, block: str | None, values: dict[str, set[str]] | None):
+    """(verdict, table, tests, always) for the table's block-state tests.
+
+    "none": the table has no block-state test. "same": the test cannot change
+    what the table drops, and ``table`` is the table as it is in one state
+    (the pools and entries the test keeps out are gone), which drops the same
+    in every state. "state": the test decides between different drops, and
+    ``table`` is the table without its tests, which tells the filing site
+    whether the test is the table's only refusal. ``tests`` are the
+    (property, value) pairs the table tests and ``always`` the ones that hold
+    whatever state the block is in.
+    """
+    pools = data.get("pools")
+    if not isinstance(pools, list):
+        return "none", data, [], []
+    pool_tests: list[list] = []
+    entry_tests: list[list[list]] = []
+    tests: list[tuple[str, str]] = []
+    always: list[tuple[str, str]] = []
+    decided = True
+    for pool in pools:
+        if not isinstance(pool, dict):
+            pool_tests.append([])
+            entry_tests.append([])
+            continue
+        ptests = []
+        for condition in _state_tests(pool):
+            kind, pairs = _state_test(condition, block, values)
+            ptests.append((kind, pairs))
+            tests += pairs
+            always += [pair for pair in pairs if kind == "always"]
+            decided = decided and kind != "unknown"
+        etests = []
+        for entry in pool.get("entries") or []:
+            if not isinstance(entry, dict):
+                etests.append([])
+                continue
+            etests_list = []
+            for condition in _state_tests(entry):
+                kind, pairs = _state_test(condition, block, values)
+                etests_list.append((kind, pairs))
+                tests += pairs
+                always += [pair for pair in pairs if kind == "always"]
+                decided = decided and kind != "unknown"
+            etests.append(etests_list)
+        pool_tests.append(ptests)
+        entry_tests.append(etests)
+    if not tests:
+        return "none", data, [], []
+    # The properties the state decides, and the values each of them takes.
+    props: dict[str, set[str]] = {}
+    for ptests, etests in zip(pool_tests, entry_tests):
+        for kind, pairs in ptests + [t for ets in etests for t in ets]:
+            if kind != "maybe":
+                continue
+            for prop, value in pairs:
+                have = (values or {}).get(prop) or set()
+                decided = decided and bool(have)
+                props.setdefault(prop, set()).update(have)
+    if not decided:
+        return "state", _strip_state_conditions(data), tests, always
+    names = sorted(props)
+    cases = [dict(zip(names, combo))
+             for combo in itertools.product(*[sorted(props[p]) for p in names])] or [{}]
+    outcomes = [_state_outcome(pools, pool_tests, entry_tests, case) for case in cases]
+    if any(outcome != outcomes[0] for outcome in outcomes):
+        return "state", _strip_state_conditions(data), tests, always
+    return "same", _state_table(data, pools, pool_tests, entry_tests, cases[0]), tests, always
+
+
+def _state_reason(tests: list[tuple[str, str]]) -> str:
+    """Why the table is refused: the state its drop depends on."""
+    shown = ", ".join(f"{prop}={value}" for prop, value in dict.fromkeys(tests))
+    return f"the drop depends on the block state ({shown}; minecraft:block_state_property)"
 
 
 def _function_guard(function: dict, block: str | None,
@@ -880,7 +1156,10 @@ def fold_paired_half(data: dict, block: str, prop: str) -> dict:
 def convert_table(data: dict, block: str | None = None,
                   states: dict | None = None,
                   approx: list[str] | None = None,
-                  refused_functions: set[str] | None = None
+                  refused_functions: set[str] | None = None,
+                  java_values: dict[str, set[str]] | None = None,
+                  java_block: str | None = None,
+                  refused_states: set[str] | None = None
                   ) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
     """Return ([(permutation condition or None, Bedrock table), ...], None), or
     (None, why the table is refused). ``[]`` is a table that drops nothing.
@@ -904,6 +1183,13 @@ def convert_table(data: dict, block: str | None = None,
     ``refused_functions`` is an optional collector for the identity of a
     copy-function refusal.  It does not change the public two-item return
     shape: callers that do not need the identity can ignore it.
+
+    ``java_values`` are the (property, values) the Java blockstate of the
+    table's own block names, ``java_block`` that block's id (whether or not
+    it converted) and ``refused_states`` an optional collector for the
+    block-state tests a refusal is about. A block-state test that cannot
+    change what the table drops is dropped with the table (#299); one that
+    decides between drops refuses the table, naming the state it depends on.
     """
     approx = [] if approx is None else approx
     pools = data.get("pools")
@@ -921,6 +1207,24 @@ def convert_table(data: dict, block: str | None = None,
             if isinstance(function, dict) and function.get("function") in _COPY_FUNCTIONS:
                 _record_refusal(refused_functions, _Refused("", function["function"]))
         return None, _table_function_reason(table_functions)
+    verdict, table, tests, always = _state_analysis(data, java_block or block, java_values)
+    if verdict == "state":
+        # The block state decides what the table drops, and Bedrock's loot
+        # tables have no condition that reads the block's state (see the
+        # block state section above), so the table stays refused. The filing
+        # site decides whether this is the explained loot_state kind.
+        if refused_states is not None:
+            refused_states.update(tests)
+        return None, _state_reason(tests)
+    if verdict == "same":
+        # The test cannot change what the table drops (#299), so it is dropped
+        # with the table and the table converts as it is.
+        data = table
+        for prop, value in dict.fromkeys(always):
+            approx.append(
+                f"the block's blockstate names one value only for {prop}={value}, so Java's test on it is "
+                f"taken as always holding; a state the blockstate doesn't name would drop differently")
+    pools = data.get("pools")
     live = 0
     for pool in pools:
         try:
@@ -1117,6 +1421,47 @@ def _copy_refusal_reason(names: set[str]) -> str:
     return "; ".join(f"{_REFUSED_FUNCTIONS[name]} ({name})" for name in sorted(names))
 
 
+def _state_only_convertible(data: dict, block_id: str, states: dict | None,
+                            java_values: dict[str, set[str]] | None,
+                            block_path: str | None, blocks: dict | None,
+                            tiers: dict, obtainable: set[str]) -> bool:
+    """Whether the table has no refusal other than its block-state tests.
+
+    Dropping the tests and converting the whole table checks every pool,
+    entry and function, rather than only the first refusal met.  The checks
+    after conversion (Bedrock item names, tool tiers and wiring) are repeated
+    too: any one of them refusing means this is a mixed table.
+    """
+    verdict, table, _, _ = _state_analysis(data, block_id, java_values)
+    if verdict != "state":
+        return False
+    cases, _ = convert_table(table, block_id if block_path else None,
+                             states if block_path else None, [], set(), java_values,
+                             block_id)
+    if cases is None:
+        return False
+    cases, _ = _bedrock_names(cases)
+    if cases is None:
+        return False
+    if cases == []:
+        # With no converted block there is nowhere to point at Bedrock's
+        # empty table, which is the converter's other refusal for this case.
+        return block_path is not None
+
+    gate = tiers.get(block_id) if block_path else None
+    if gate is not None and not gate[1]:
+        return False
+
+    if block_path is None:
+        return True
+    block = (blocks or {}).get(block_path)
+    if len(cases) == 1 and _drops_itself(cases[0][1], block_id):
+        return True
+    if _has_loot(block):
+        return True
+    return _wire_refusal(cases, obtainable) is None
+
+
 def _wire(block: dict, name: str, cases: list[tuple[str | None, dict]], files: dict) -> dict:
     """``block`` with ``minecraft:loot`` naming its table(s); the tables go in ``files``.
 
@@ -1274,9 +1619,12 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
             if block_path and block_id in (paired or {}):
                 data = fold_paired_half(data, block_id, paired[block_id])
             states = (java_states or {}).get(block_id, {}) if block_path else None
+            java_values = _block_state_values(mod, name)
             refused_functions: set[str] = set()
+            refused_states: set[str] = set()
             cases, reason = convert_table(data, block_id if block_path else None,
-                                          states, approx, refused_functions)
+                                          states, approx, refused_functions,
+                                          java_values, block_id, refused_states)
             if cases:
                 cases, reason = _bedrock_names(cases)
             if cases is None:
@@ -1288,6 +1636,10 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
                                                        blocks or {}, tiers, obtainable)):
                         kind = LOOT_COPY
                         reason = _copy_refusal_reason(copy_names)
+                if kind == "loot" and refused_states:
+                    if _state_only_convertible(data, block_id, states, java_values, block_path,
+                                               blocks or {}, tiers, obtainable):
+                        kind = LOOT_STATE
                 result.unhandled.append(Unhandled(rel, kind, reason or "unsupported loot table"))
                 continue
             block = (blocks or {}).get(block_path) if block_path else None
@@ -1384,10 +1736,10 @@ def refine_owned(unhandled: list[Unhandled], shipped_blocks: set[str]) -> list[U
     keeping why the table itself was refused. It goes with its block when that
     converts. A table whose block shipped, or has no blockstate, stays ``loot``.
     """
-    residue = {u.source: u.kind for u in unhandled if u.kind not in ("loot", LOOT_COPY, OWNED)}
+    residue = {u.source: u.kind for u in unhandled if u.kind not in ("loot", LOOT_COPY, LOOT_STATE, OWNED)}
     out: list[Unhandled] = []
     for u in unhandled:
-        match = _BLOCK_TABLE.match(u.source) if u.kind in ("loot", LOOT_COPY) else None
+        match = _BLOCK_TABLE.match(u.source) if u.kind in ("loot", LOOT_COPY, LOOT_STATE) else None
         if match:
             ns, path = match.groups()
             blockstate = f"assets/{ns}/blockstates/{path}.json"
