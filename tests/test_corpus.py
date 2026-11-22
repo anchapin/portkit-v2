@@ -78,6 +78,20 @@ def test_the_three_gauntlet_content_mods_are_in_the_corpus_with_the_same_build()
         assert not real[name].optional  # all three run in the default set
 
 
+def test_the_three_re_pinned_gauntlet_mods_are_in_the_corpus_on_the_gauntlet_build():
+    """Waystones, Tinkers' Construct and Storage Drawers (#289) are re-pinned
+    on the builds the top-50 gauntlet (#278) measured, so both manifests
+    measure the same jar and their numbers can be compared."""
+    real = {m.name: m for m in corpus.load()}
+    gauntlet = {m.name: m for m in corpus.load(corpus.ROOT / "fixtures" / "real" / "gauntlet.toml")}
+    for name in ("waystones", "tinkers_construct", "storage_drawers"):
+        assert name in real and name in gauntlet
+        assert real[name].version_id == gauntlet[name].version_id
+        assert real[name].sha512 == gauntlet[name].sha512
+        assert real[name].url == gauntlet[name].url
+    assert real["tinkers_construct"].optional  # it stays out of the default set (#122)
+
+
 def test_tinkers_is_optional_and_mythic_metals_replaces_it():
     """2026-10-12: Tinkers' 11,752 tool sprites made it a file-count outlier (#122)."""
     mods = {m.name: m for m in corpus.load()}

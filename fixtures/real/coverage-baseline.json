@@ -72,16 +72,16 @@
       "residue": 1900,
       "errors": 0
     },
+    "storage_drawers": {
+      "coverage": 66.6,
+      "files": 1020,
+      "residue": 511,
+      "errors": 0
+    },
     "storage_drawers_1122": {
       "coverage": 28.1,
       "files": 159,
       "residue": 407,
-      "errors": 0
-    },
-    "storage_drawers_1192": {
-      "coverage": 73.6,
-      "files": 726,
-      "residue": 260,
       "errors": 0
     },
     "supplementaries": {
@@ -91,9 +91,9 @@
       "errors": 0
     },
     "tinkers_construct": {
-      "coverage": 52.5,
-      "files": 16702,
-      "residue": 15095,
+      "coverage": 53.4,
+      "files": 15432,
+      "residue": 13466,
       "errors": 0
     },
     "veinminer": {
@@ -103,9 +103,9 @@
       "errors": 0
     },
     "waystones": {
-      "coverage": 37.1,
+      "coverage": 37.4,
       "files": 328,
-      "residue": 557,
+      "residue": 550,
       "errors": 0
     }
   }

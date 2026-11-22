@@ -60,10 +60,10 @@ demand, with the jars cached on the manifest's hash; a manual dispatch with
 | `betterend` | BetterEnd | 21.800.2 | Fabric | 1.21.8 | MIT | [quiqueck/BetterEnd](https://github.com/quiqueck/BetterEnd) |
 | `create` | Create | mc1.20.1-6.0.8 | Forge | 1.20.1 | Create Mod License | [Creators-of-Create/Create](https://github.com/Creators-of-Create/Create) |
 | `supplementaries` | Supplementaries | 1.20-3.1.43-forge | Forge | 1.20.1 | Supplementaries Team License | [MehVahdJukaar/Supplementaries](https://github.com/MehVahdJukaar/Supplementaries) |
-| `waystones` | Waystones | 21.1.46+fabric-1.21.1 | Fabric | 1.21.1 | All Rights Reserved | [TwelveIterations/Waystones](https://github.com/TwelveIterations/Waystones) |
+| `waystones` | Waystones | 21.1.46+neoforge-1.21.1 | NeoForge | 1.21.1 | All Rights Reserved | [TwelveIterations/Waystones](https://github.com/TwelveIterations/Waystones) |
 | `mythicmetals` | Mythic Metals | 0.24.6+1.21 | Fabric | 1.21.1 | MIT | [Noaaan/MythicMetals](https://github.com/Noaaan/MythicMetals) |
 | `silent_gear_1165` | Silent Gear | 2.6.36 | Forge | 1.16.5 | MIT | [SilentChaos512/Silent-Gear](https://github.com/SilentChaos512/Silent-Gear) |
-| `storage_drawers_1192` | Storage Drawers | 11.4.1 | Forge | 1.19.2 | MIT | [jaquadro/StorageDrawers](https://github.com/jaquadro/StorageDrawers) |
+| `storage_drawers` | Storage Drawers | 1.21.1-13.11.4 | NeoForge | 1.21.1 | MIT | [jaquadro/StorageDrawers](https://github.com/jaquadro/StorageDrawers) |
 | `storage_drawers_1122` | Storage Drawers | 1.12-5.5.2 | Forge | 1.12.2 | MIT | [jaquadro/StorageDrawers](https://github.com/jaquadro/StorageDrawers) |
 | `veinminer` | VeinMiner | 2.11.2 | NeoForge | 1.21.1 | AGPL-3.0-only | [modrinth.com/mod/veinminer](https://modrinth.com/mod/veinminer) |
 | `natures_compass` | Nature's Compass | 1.21.1-3.4.0-neoforge | NeoForge | 1.21.1 | CC-BY-NC-SA-4.0 | [MattCzyr/NaturesCompass](https://github.com/MattCzyr/NaturesCompass) |
@@ -75,12 +75,25 @@ download from Modrinth's CDN and measure.
 
 Six of the twelve come from PortKit v1's own failure audits (#26): Create,
 Supplementaries and Waystones from portkit#971 (4 to 8% coverage), and Silent
-Gear and Storage Drawers from portkit#1105 (zero output). Storage Drawers
-1.19.2 also covers the game version in portkit#1938. The two Storage Drawers
-pins and the two Farmer's Delight pins are the same mod across eras and
-loaders. Mythic Metals (since 2026-10-12) brings armor, tools and ores, which
-the rest of the set lacks. It publishes only beta builds on Modrinth, so its
-pin is the newest 1.21.1 beta.
+Gear and Storage Drawers from portkit#1105 (zero output). The two Storage
+Drawers pins and the two Farmer's Delight pins are the same mod across eras
+and loaders: Storage Drawers 1.21.1 is the build the top-50 gauntlet measured,
+1.12.2 keeps the pre-flattening layout measured. Mythic Metals (since
+2026-10-12) brings armor, tools and ores, which the rest of the set lacks. It
+publishes only beta builds on Modrinth, so its pin is the newest 1.21.1 beta.
+
+### Pinned on the gauntlet's builds (#289)
+
+These mods were already in the corpus, and are pinned again on the build the
+top-50 gauntlet (#278) measured, so both manifests measure the same jar and
+their numbers can be compared. The work each needs already landed, so they are
+ticked off:
+
+| mod | gauntlet rank | corpus pin | done by |
+| --- | ---: | --- | --- |
+| `waystones` | 30 | 21.1.46+neoforge-1.21.1 | [#178](https://github.com/anchapin/portkit-v2/issues/178) (the Waystones adapter) |
+| `tinkers_construct` | 35 | 3.11.2.166 | [#174](https://github.com/anchapin/portkit-v2/issues/174), [#175](https://github.com/anchapin/portkit-v2/issues/175) (fluids and tool stats) |
+| `storage_drawers` | 39 | 1.21.1-13.11.4 | [#179](https://github.com/anchapin/portkit-v2/issues/179) (the drawers convert) |
 
 ## Optional mods
 
@@ -91,7 +104,7 @@ when they're skipped, so re-banking the default set keeps them.
 
 | name | mod | version | loader | Minecraft | license | source | why |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `tinkers_construct` | Tinkers' Construct | 3.12.1.231 | Forge | 1.20.1 | MIT | [SlimeKnights/TinkersConstruct](https://github.com/SlimeKnights/TinkersConstruct) | v1 audit portkit#1105 (zero output); custom recipe types, fluids. Optional since 2026-10-12: 11,752 generated tool sprites, ~13.5k files (#122) |
+| `tinkers_construct` | Tinkers' Construct | 3.11.2.166 | Forge | 1.20.1 | MIT | [SlimeKnights/TinkersConstruct](https://github.com/SlimeKnights/TinkersConstruct) | the top-50 gauntlet's build (#278, rank 35); custom recipe types, fluids (#174, #175). Optional since 2026-10-12: 11,752 generated tool sprites, ~13.5k files (#122) |
 | `alexs_mobs` | Alex's Mobs | 1.22.9 | Forge | 1.20.1 | GPL-3.0-only | [AlexModGuy/AlexsMobs](https://github.com/AlexModGuy/AlexsMobs) | entities: models, animations, spawns, loot |
 | `mekanism` | Mekanism | 10.7.19.85 | NeoForge | 1.21.1 | MIT | [mekanism/Mekanism](https://github.com/mekanism/Mekanism) | fluids and chemicals, machines, custom recipe types (main jar only) |
 
