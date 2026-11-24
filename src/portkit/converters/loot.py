@@ -1018,11 +1018,58 @@ def _entry_drops(entry: dict, test, decay: bool, silk_world: bool, approx: list[
 # condition of its own, a function the converter can't keep, alternatives,
 # nested children, a roll count other than one) keeps the table refused: a
 # drop that isn't the one Java makes is worse than no drop at all.
+#
+# A function's own conditions are decided here too, against the converted
+# block's states (:func:`_function_guard`): a condition that holds in every
+# state the block can be in applies to every drop, one that holds in no state
+# is dropped, and one that holds in some states only keeps the table refused
+# (the per-state tables are the single-pool path's job, #299).
 
-def _plain_function(function: dict, where: str) -> tuple[int | None, bool]:
+# The two functions a plain drop's own conditions may decide (#299).
+_PLAIN_CONDITIONAL = ("minecraft:set_count", "set_count",
+                      "minecraft:explosion_decay", "explosion_decay")
+
+
+def _guard_verdict(wanted: dict[str, str], states: dict | None) -> str:
+    """How a resolved guard reads over the converted block's states: "always",
+    "never" or "mixed".
+
+    A guard's wanted value is a Java state value; the converted block's
+    states map each Java value to the Bedrock state test that reaches it
+    (None for a value Bedrock can't reach, a Java double slab). The function
+    applies in every state the block can be in when the wanted value is the
+    only reachable value of every property the guard tests, in no state at
+    all when a wanted value isn't reachable, and in some states only
+    otherwise (#299).
+    """
+    reachable: dict[str, set[str]] = {}
+    for prop in wanted:
+        reachable[prop] = {value for value, test in ((states or {}).get(prop) or {}).items()
+                           if test is not None}
+    for prop, value in wanted.items():
+        if value not in reachable[prop]:
+            return "never"
+    for prop, value in wanted.items():
+        if reachable[prop] != {value}:
+            return "mixed"
+    return "always"
+
+
+def _plain_function(function: dict, where: str, block: str | None = None,
+                    states: dict | None = None) -> tuple[int | None, bool]:
     """(count, explosion decay) for one function a plain drop may carry: the
     two the converter already writes (a fixed ``set_count`` and
-    ``explosion_decay``). Anything else refuses the table."""
+    ``explosion_decay``). Anything else refuses the table.
+
+    A function Java applies only under its own conditions is decided here
+    when those conditions test the converted block's own state (#299): a
+    condition that holds in every state the block can be in is applied as if
+    it had no conditions, one that holds in no state is dropped (the drop
+    goes on without it, as in Java), and one that holds in some states only
+    keeps the table refused, because the per-state tables are the
+    single-pool path's work. A condition that isn't a block-state condition
+    on this block keeps the table refused too.
+    """
     if not isinstance(function, dict):
         raise _Refused(f"{where} has an unreadable function")
     fname = function.get("function")
@@ -1031,8 +1078,24 @@ def _plain_function(function: dict, where: str) -> tuple[int | None, bool]:
         # this path writes the function unconditionally, so the conditions
         # would be dropped and the function applied to every drop.
         conditions = ", ".join(_condition_phrases(function.get("conditions")))
-        raise _Refused(f"{where} has a {fname} that applies only when {conditions}, "
-                       "which isn't translated here")
+        if fname not in _PLAIN_CONDITIONAL:
+            raise _Refused(f"{where} has a {fname} that applies only when {conditions}, "
+                           "which isn't translated here")
+        wanted, why = _function_guard(function, block, states)
+        if wanted is None:
+            raise _Refused(f"{where} has a {fname} that applies only when {conditions}, "
+                           f"which isn't translated here ({why})")
+        verdict = _guard_verdict(wanted, states)
+        if verdict == "never":
+            # The function never applies to this block: the drop goes on
+            # without it, as in Java.
+            return None, False
+        if verdict == "mixed":
+            raise _Refused(f"{where} has a {fname} that applies only when {conditions}, "
+                           "which isn't translated here")
+        # "always": the function applies in every state the block can be in,
+        # so it is written as if it had no conditions at all.
+        function = {k: v for k, v in function.items() if k != "conditions"}
     if fname in ("minecraft:set_count", "set_count"):
         if function.get("add") is True:
             raise _Refused(f"{where} adds to the drop count (set_count add) rather than setting it")
@@ -1046,11 +1109,16 @@ def _plain_function(function: dict, where: str) -> tuple[int | None, bool]:
                    fname if fname in _COPY_FUNCTIONS else None)
 
 
-def _plain_drop(pool: dict, index: int, total: int) -> tuple[str, int | None, bool] | None:
+def _plain_drop(pool: dict, index: int, total: int, block: str | None = None,
+                states: dict | None = None) -> tuple[str, int | None, bool] | None:
     """(item name, count, explosion decay) for a pool that is a plain drop: one
     roll of one item entry, no condition but ``survives_explosion``, and only
     the functions the converter already writes. None for a pool with no entry
-    at all: it drops nothing, as in Java."""
+    at all: it drops nothing, as in Java.
+
+    ``block`` and ``states`` are the converted block and its Java->Bedrock
+    state map, as :func:`_function_guard` takes them: a function's own
+    block-state conditions are decided against them (#299)."""
     where = f"pool {index} of {total}"
     if not isinstance(pool, dict):
         raise _Refused(f"{where} is unreadable")
@@ -1068,7 +1136,7 @@ def _plain_drop(pool: dict, index: int, total: int) -> tuple[str, int | None, bo
         raise _Refused(f"{where} has a condition ({name}); only a plain drop converts")
     count = None
     for function in pool.get("functions") or []:
-        value, decayed = _plain_function(function, where)
+        value, decayed = _plain_function(function, where, block, states)
         count = value if value is not None else count
         decay = decay or decayed
     entries = pool.get("entries") or []
@@ -1092,7 +1160,7 @@ def _plain_drop(pool: dict, index: int, total: int) -> tuple[str, int | None, bo
         raise _Refused(f"{where} has an entry with a condition ({name}); only a plain drop converts")
     entry_count = None
     for function in entry.get("functions") or []:
-        value, decayed = _plain_function(function, where)
+        value, decayed = _plain_function(function, where, block, states)
         entry_count = value if value is not None else entry_count
         decay = decay or decayed
     # Java applies the entry's functions before the pool's, so the pool's
@@ -1104,13 +1172,19 @@ def _plain_drop(pool: dict, index: int, total: int) -> tuple[str, int | None, bo
     return name, count, decay
 
 
-def _plain_table(pools: list, refused_functions: set[str] | None = None
+def _plain_table(pools: list, refused_functions: set[str] | None = None,
+                block: str | None = None, states: dict | None = None
                 ) -> tuple[list[tuple[str | None, dict]] | None, str | None]:
     """The Bedrock table for a table of several plain pools: one Bedrock pool
     per Java pool, so every pool's item drops, as in Java. (None, why) when a
-    pool is not a plain drop."""
+    pool is not a plain drop.
+
+    ``block`` and ``states`` are the converted block and its Java->Bedrock
+    state map, as :func:`_function_guard` takes them: a pool's function
+    conditions are decided against them (#299)."""
     try:
-        drops = [_plain_drop(pool, i + 1, len(pools)) for i, pool in enumerate(pools)]
+        drops = [_plain_drop(pool, i + 1, len(pools), block, states)
+                 for i, pool in enumerate(pools)]
     except _Refused as exc:
         _record_refusal(refused_functions, exc)
         return None, f"the table has {len(pools)} pools; {exc}"
@@ -1311,7 +1385,7 @@ def convert_table(data: dict, block: str | None = None,
     if live > 1:
         # Several pools: a plain one per pool converts (#299), anything else
         # keeps the table refused.
-        return _plain_table(pools, refused_functions)
+        return _plain_table(pools, refused_functions, block, states)
     try:
         drop = _drop(data, False, approx)
     except _Refused as exc:
