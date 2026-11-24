@@ -22,6 +22,10 @@ form either: Bedrock's loot functions carry no component onto a drop and a
 Bedrock item's components are fixed per item type, so such a table is
 refused and claimed as the explained loot_copy_components kind, the
 copy_components sub-reason counted on its own (#299).
+A table that asks the drop to copy the block's entity data has no Bedrock
+form either: Bedrock's loot functions carry no block entity data onto a
+drop, so such a table is refused and claimed as the explained
+loot_copy_nbt kind, the copy_nbt sub-reason counted on its own (#299).
 """
 from __future__ import annotations
 
@@ -71,8 +75,8 @@ _REFUSED_FUNCTIONS = {
 # The three loot functions Bedrock has no equivalent for. Their identity
 # travels with the refusal so the filing site, not a reason string, decides
 # whether a table gets the explained loot_copy kind (loot_copy_name for the
-# copy_name one and loot_copy_components for the copy_components one,
-# below).
+# copy_name one, loot_copy_components for the copy_components one and
+# loot_copy_nbt for the copy_nbt one, below).
 _COPY_FUNCTIONS = frozenset({
     "minecraft:copy_name",
     "minecraft:copy_nbt",
@@ -119,6 +123,28 @@ LOOT_COPY_NAME = "loot_copy_name"
 # a drop that carries neither the block's name nor its data.
 COPY_COMPONENTS = "minecraft:copy_components"
 LOOT_COPY_COMPONENTS = "loot_copy_components"
+
+# ``minecraft:copy_nbt`` is the copy function this slice owns (#299): a
+# table refused for it and for nothing else is the explained loot_copy_nbt
+# kind, so the copy_nbt sub-reason is counted on its own instead of hiding
+# in the lumped loot_copy kind.
+#
+# There is no Bedrock form for it: Java's copy_nbt copies the block
+# entity's own NBT (its custom data, its inventory, its identity) onto the
+# drop, which is how such a drop keeps the block's data (the 2026-10-16
+# #299 decision names schematicannon's copy_nbt loot as residue,
+# docs/decisions.md). Bedrock's loot table functions
+# carry no block entity data off the broken block: the ones a Bedrock loot
+# table may use are set_count, explosion_decay, set_data and looting_enchant
+# (validate/rules.py), plus the match_tool condition of the 2026-10-16
+# #299 decision (docs/decisions.md), and a Bedrock item's data is fixed per
+# item type in its own JSON file (converters/recipes.py), so the drop can
+# only be the item the table names, with the data that item's file gives
+# it. The table is therefore refused, the refusal names the function, and
+# the table is claimed as explained rather than converted with a drop that
+# carries none of the block's data.
+COPY_NBT = "minecraft:copy_nbt"
+LOOT_COPY_NBT = "loot_copy_nbt"
 
 # The explained kind for a table whose drop the block's state decides. Its
 # identity travels with the refusal the way the copy functions' does, so the
@@ -1685,16 +1711,19 @@ def convert(mod: SourceMod, context: LoadContext | None = None, deferred: list |
                     if (copy_names
                             and _copy_only_convertible(data, block_id, states, block_path,
                                                        blocks or {}, tiers, obtainable)):
-                        # copy_name and copy_components are claimed by their
-                        # own explained kinds; copy_name comes first (its
-                        # slice claimed the table that carries it), and
-                        # copy_components is claimed only when it is the
-                        # table's only copy function, so a table that also
-                        # asks for another copy keeps the lumped one.
+                        # copy_name, copy_components and copy_nbt are claimed
+                        # by their own explained kinds; copy_name comes first
+                        # (its slice claimed the table that carries it), and
+                        # copy_components and copy_nbt are claimed only when
+                        # they are the table's only copy function, so a table
+                        # that also asks for another copy keeps the lumped
+                        # one.
                         if COPY_NAME in copy_names:
                             kind = LOOT_COPY_NAME
                         elif copy_names == {COPY_COMPONENTS}:
                             kind = LOOT_COPY_COMPONENTS
+                        elif copy_names == {COPY_NBT}:
+                            kind = LOOT_COPY_NBT
                         else:
                             kind = LOOT_COPY
                         reason = _copy_refusal_reason(copy_names)
@@ -1787,8 +1816,8 @@ _BLOCK_TABLE = re.compile(r"^data/([^/]+)/(?:loot_tables|loot_table)/blocks/(.+)
 def refine_owned(unhandled: list[Unhandled], shipped_blocks: set[str]) -> list[Unhandled]:
     """Re-file a refused block loot table whose block is itself residue (#299).
 
-    A ``loot``, ``loot_copy``, ``loot_copy_name``, ``loot_copy_components``
-    or ``loot_state`` entry for
+    A ``loot``, ``loot_copy``, ``loot_copy_name``, ``loot_copy_components``,
+    ``loot_copy_nbt`` or ``loot_state`` entry for
     ``data/<ns>/loot_table[s]/blocks/<path>.json`` names the block
     ``<ns>:<path>``. When the pack doesn't ship that block and its
     blockstate ``assets/<ns>/blockstates/<path>.json`` has a residue entry of
@@ -1801,12 +1830,12 @@ def refine_owned(unhandled: list[Unhandled], shipped_blocks: set[str]) -> list[U
     """
     residue = {u.source: u.kind for u in unhandled
                if u.kind not in ("loot", LOOT_COPY, LOOT_COPY_NAME, LOOT_COPY_COMPONENTS,
-                                 LOOT_STATE, OWNED)}
+                                 LOOT_COPY_NBT, LOOT_STATE, OWNED)}
     out: list[Unhandled] = []
     for u in unhandled:
         match = (_BLOCK_TABLE.match(u.source)
                  if u.kind in ("loot", LOOT_COPY, LOOT_COPY_NAME, LOOT_COPY_COMPONENTS,
-                               LOOT_STATE) else None)
+                               LOOT_COPY_NBT, LOOT_STATE) else None)
         if match:
             ns, path = match.groups()
             blockstate = f"assets/{ns}/blockstates/{path}.json"

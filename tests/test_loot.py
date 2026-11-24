@@ -65,23 +65,6 @@ def test_fortune_is_refused_and_says_so(tmp_path):
     assert "fortune" in reason and "apply_bonus" in reason
 
 
-@pytest.mark.parametrize("function", [
-    "minecraft:copy_nbt",
-])
-def test_a_table_refused_only_for_a_copy_function_is_loot_copy(tmp_path, function):
-    entry = {
-        "type": "minecraft:item",
-        "name": "examplemod:steel_block",
-        "functions": [{"function": function, "source": "block_entity"}],
-    }
-    result = loot.convert(build(tmp_path, {"steel_block": pool(entry, SURVIVES)}))
-    assert result.files == {}
-    assert len(result.unhandled) == 1
-    residue = result.unhandled[0]
-    assert residue.kind == loot.LOOT_COPY
-    assert function in residue.reason
-
-
 def test_a_table_refused_only_for_copy_name_is_loot_copy_name(tmp_path):
     """copy_name is claimed by an explained kind of its own (#299), so the
     copy_name sub-reason is counted on its own and not inside the lumped
@@ -155,6 +138,60 @@ def test_a_table_refused_for_copy_components_and_another_refusal_stays_loot(tmp_
     assert result.unhandled[0].kind == "loot"
 
 
+def test_a_table_refused_only_for_copy_nbt_is_loot_copy_nbt(tmp_path):
+    """copy_nbt is claimed by an explained kind of its own (#299), so the
+    copy_nbt sub-reason is counted on its own and not inside the lumped
+    loot_copy kind."""
+    entry = {
+        "type": "minecraft:item",
+        "name": "examplemod:steel_block",
+        "functions": [{"function": "minecraft:copy_nbt", "source": "block_entity"}],
+    }
+    result = loot.convert(build(tmp_path, {"steel_block": pool(entry, SURVIVES)}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    residue = result.unhandled[0]
+    assert residue.kind == loot.LOOT_COPY_NBT
+    # The reason is the one the converter gave before the kind was split:
+    # the block entity data is what the table asks for, and it is named.
+    assert residue.reason == "the drop copies block entity data (minecraft:copy_nbt)"
+
+
+def test_a_table_refused_for_copy_nbt_and_another_copy_function_stays_loot_copy(tmp_path):
+    """A table that asks for copy_nbt and another copy function keeps the
+    lumped kind: only copy_nbt alone is claimed on its own."""
+    entry = {
+        "type": "minecraft:item",
+        "name": "examplemod:steel_block",
+        "functions": [
+            {"function": "minecraft:copy_nbt", "source": "block_entity"},
+            {"function": "minecraft:copy_components", "source": "block_entity"},
+        ],
+    }
+    result = loot.convert(build(tmp_path, {"steel_block": pool(entry, SURVIVES)}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    residue = result.unhandled[0]
+    assert residue.kind == loot.LOOT_COPY
+    for function in ("minecraft:copy_nbt", "minecraft:copy_components"):
+        assert function in residue.reason
+
+
+def test_a_table_refused_for_copy_nbt_and_another_refusal_stays_loot(tmp_path):
+    entry = {
+        "type": "minecraft:item",
+        "name": "examplemod:steel_ore",
+        "functions": [
+            {"function": "minecraft:copy_nbt", "source": "block_entity"},
+            {"function": "minecraft:apply_bonus", "enchantment": "minecraft:fortune"},
+        ],
+    }
+    result = loot.convert(build(tmp_path, {"steel_ore": pool(entry, SURVIVES)}))
+    assert result.files == {}
+    assert len(result.unhandled) == 1
+    assert result.unhandled[0].kind == "loot"
+
+
 def test_a_loot_copy_reason_names_every_copy_function_in_the_table(tmp_path):
     entry = {
         "type": "minecraft:item",
@@ -174,7 +211,7 @@ def test_a_loot_copy_reason_names_every_copy_function_in_the_table(tmp_path):
         assert function in residue.reason
 
 
-def test_a_multi_pool_table_with_one_copy_function_is_loot_copy(tmp_path):
+def test_a_multi_pool_table_with_one_copy_function_is_loot_copy_nbt(tmp_path):
     copied = {
         "type": "minecraft:item",
         "name": "examplemod:steel_ore",
@@ -188,7 +225,7 @@ def test_a_multi_pool_table_with_one_copy_function_is_loot_copy(tmp_path):
     assert result.files == {}
     assert len(result.unhandled) == 1
     residue = result.unhandled[0]
-    assert residue.kind == loot.LOOT_COPY
+    assert residue.kind == loot.LOOT_COPY_NBT
     assert "minecraft:copy_nbt" in residue.reason
 
 
@@ -423,9 +460,25 @@ def test_a_loot_copy_components_table_whose_block_is_residue_is_owned_by_residue
     assert shipped[0].kind == loot.LOOT_COPY_COMPONENTS
 
 
+def test_a_loot_copy_nbt_table_whose_block_is_residue_is_owned_by_residue():
+    unhandled = [
+        _residue("assets/ex/blockstates/chest.json", "code_drawn_block"),
+        _residue("data/ex/loot_table/blocks/chest.json", loot.LOOT_COPY_NBT,
+                 "the drop copies block entity data (minecraft:copy_nbt)"),
+    ]
+    out = loot.refine_owned(unhandled, shipped_blocks=set())
+    table = next(u for u in out if u.source.endswith("blocks/chest.json"))
+    assert table.kind == "owned_by_residue"
+    assert "block entity data" in table.reason
+
+    # A block that did ship keeps the explained kind.
+    shipped = loot.refine_owned(unhandled[1:], shipped_blocks={"ex:chest"})
+    assert shipped[0].kind == loot.LOOT_COPY_NBT
+
+
 def test_the_copy_functions_are_counted_on_their_own_kinds(tmp_path):
-    """The copy_name and copy_components sub-reasons are counted on their own
-    kinds; copy_nbt keeps the lumped one until its own slice."""
+    """The copy_name, copy_components and copy_nbt sub-reasons are counted on
+    their own kinds."""
     def table_with(*functions):
         entry = dict(ITEM)
         entry["functions"] = [{"function": f, "source": "block_entity"} for f in functions]
@@ -444,7 +497,7 @@ def test_the_copy_functions_are_counted_on_their_own_kinds(tmp_path):
         kinds[residue.source] = residue.kind
     assert kinds["data/examplemod/loot_tables/blocks/copied_name.json"] == loot.LOOT_COPY_NAME
     assert kinds["data/examplemod/loot_tables/blocks/copied_name_and_data.json"] == loot.LOOT_COPY_NAME
-    assert kinds["data/examplemod/loot_tables/blocks/copied_data.json"] == loot.LOOT_COPY
+    assert kinds["data/examplemod/loot_tables/blocks/copied_data.json"] == loot.LOOT_COPY_NBT
     assert kinds["data/examplemod/loot_tables/blocks/copied_components.json"] == loot.LOOT_COPY_COMPONENTS
     # A table that asks for copy_components and another copy function keeps
     # the lumped kind.
@@ -454,7 +507,8 @@ def test_the_copy_functions_are_counted_on_their_own_kinds(tmp_path):
     counts = {}
     for kind in kinds.values():
         counts[kind] = counts.get(kind, 0) + 1
-    assert counts == {loot.LOOT_COPY_NAME: 2, loot.LOOT_COPY_COMPONENTS: 1, loot.LOOT_COPY: 2}
+    assert counts == {loot.LOOT_COPY_NAME: 2, loot.LOOT_COPY_COMPONENTS: 1,
+                       loot.LOOT_COPY_NBT: 1, loot.LOOT_COPY: 1}
 
 
 def test_the_1_21_singular_directory_is_read_too(tmp_path):
