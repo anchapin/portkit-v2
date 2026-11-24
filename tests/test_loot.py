@@ -1009,6 +1009,89 @@ def test_a_conditional_count_in_a_multi_pool_table_is_refused(tmp_path):
     assert "set_count" in reason and "block_state_property" in reason
 
 
+def test_a_conditional_count_that_holds_in_every_state_is_applied(tmp_path):
+    """A count Java applies only when the block state is one the converted
+    block can only be in applies to every drop, so it is written as a plain
+    count (#299)."""
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:steel_block"}],
+         "functions": [{"function": "minecraft:set_count", "count": 2,
+                        "conditions": [{"condition": "minecraft:block_state_property",
+                                        "block": "examplemod:steel_block",
+                                        "properties": {"type": "bottom"}}]}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:stick"}]},
+    ]}
+    blocks = {"blocks/steel_block.json": _block("examplemod:steel_block")}
+    states = {"examplemod:steel_block": {"type": {
+        "bottom": "q.block_state('minecraft:vertical_half') == 'bottom'"}}}
+    result = loot.convert(build(tmp_path, {"steel_block": table}), blocks=blocks, java_states=states)
+    assert result.unhandled == []
+    written = result.files["loot_tables/blocks/steel_block.json"]
+    assert _dropped_names(written) == ["examplemod:steel_block", "minecraft:stick"]
+    block = [entry for pool in written["pools"] for entry in pool["entries"]
+             if entry["name"] == "examplemod:steel_block"][0]
+    assert block["functions"] == [{"function": "set_count", "count": 2}]
+
+
+def test_a_conditional_count_that_never_holds_is_dropped(tmp_path):
+    """Java's set_count 2 only applies when type=double; the converted slab
+    is never double, so the count is dropped and the drop goes on without it
+    (#299)."""
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": SLAB}],
+         "functions": [{"function": "minecraft:set_count", "count": 2,
+                        "conditions": [{"condition": "minecraft:block_state_property", "block": SLAB,
+                                        "properties": {"type": "double"}}]},
+                       {"function": "minecraft:explosion_decay",
+                        "conditions": [{"condition": "minecraft:block_state_property", "block": SLAB,
+                                        "properties": {"type": "double"}}]}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:stick"}]},
+    ]}
+    blocks = {"blocks/steel_slab.json": _block(SLAB)}
+    result = loot.convert(build(tmp_path, {"steel_slab": table}), blocks=blocks,
+                          java_states={SLAB: SLAB_STATES})
+    assert result.unhandled == []
+    written = result.files["loot_tables/blocks/steel_slab.json"]
+    assert _dropped_names(written) == [SLAB, "minecraft:stick"]
+    slab = [entry for pool in written["pools"] for entry in pool["entries"]
+            if entry["name"] == SLAB][0]
+    assert slab.get("functions", []) == []
+
+
+def test_a_conditional_count_that_holds_in_some_states_is_refused(tmp_path):
+    """The count applies in some states and not in others, which the plain
+    path cannot write; the per-state tables are the single-pool path's job."""
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": SLAB}],
+         "functions": [{"function": "minecraft:set_count", "count": 2,
+                        "conditions": [{"condition": "minecraft:block_state_property", "block": SLAB,
+                                        "properties": {"type": "bottom"}}]}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:stick"}]},
+    ]}
+    blocks = {"blocks/steel_slab.json": _block(SLAB)}
+    result = loot.convert(build(tmp_path, {"steel_slab": table}), blocks=blocks,
+                          java_states={SLAB: SLAB_STATES})
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "set_count" in reason and "type=bottom" in reason
+
+
+def test_a_multi_pool_condition_that_is_not_a_block_state_is_refused(tmp_path):
+    """A condition the converted block's states cannot decide keeps the table
+    refused."""
+    table = {"pools": [
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:steel_block"}],
+         "functions": [{"function": "minecraft:set_count", "count": 2,
+                        "conditions": [{"condition": "minecraft:random_chance", "chance": 0.5}]}]},
+        {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "minecraft:stick"}]},
+    ]}
+    blocks = {"blocks/steel_block.json": _block("examplemod:steel_block")}
+    result = loot.convert(build(tmp_path, {"steel_block": table}), blocks=blocks)
+    assert result.files == {}
+    reason = result.unhandled[0].reason
+    assert "set_count" in reason and "random_chance" in reason
+
+
 def test_a_conditional_explosion_decay_is_not_applied_unconditionally(tmp_path):
     table = {"pools": [
         {"rolls": 1, "entries": [{"type": "minecraft:item", "name": "examplemod:stick"}],
